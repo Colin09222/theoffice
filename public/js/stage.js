@@ -54,3 +54,4 @@ class Stage {
   }
 }
 export const stage = new Stage();
+window.__stage = stage;  // read by the browser e2e tests

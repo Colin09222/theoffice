@@ -46,7 +46,7 @@ test('50 floors through repeated rounds with no errors or leaks', { timeout: 300
     assert.equal(s.floor.slug, f.slug);
   }
   const growth = heap.at(-1) - heap[0];
-  console.log(`soak: ${done} tasks, ${ticks} polling ticks, heap ${heap.map((h) => Math.round(h / 1e6)).join(' -> ')} MB, peak LLM ${e.limiter.peak}`);
+  console.log(`soak: ${done} tasks, ${ticks} polling ticks, heap ${heap.map((h) => Math.round(h / 1e6)).join(' -> ')} MB, rss ${Math.round(process.memoryUsage().rss / 1e6)} MB, peak LLM ${e.limiter.peak}`);
   assert.ok(growth < 60e6, `heap grew ${Math.round(growth / 1e6)} MB`);
   await t.close();
 });

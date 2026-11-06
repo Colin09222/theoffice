@@ -30,6 +30,7 @@ async function run(label, opts, t, adminCode) {
     const canvasOk = await p.ev('!document.body.classList.contains("no-webgl")');
     if (!canvasOk) throw new Error('WebGL failed');
     await shot('01-lobby');
+    console.log(`  ${label} lobby draw calls ${await p.ev('__stage.renderer.info.render.calls')}, triangles ${await p.ev('__stage.renderer.info.render.triangles')}`);
   });
   await step(tag('search filters the directory'), async () => {
     if (phone) { await p.click('.sheet-grip'); await sleep(450); }
@@ -43,10 +44,11 @@ async function run(label, opts, t, adminCode) {
     if (phone) { await shot('02-directory'); await p.click('.sheet-grip'); await sleep(450); }
   });
   await step(tag('dragging turns and scrolling rides the tower'), async () => {
-    await p.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 150, y: 700, button: 'left', clickCount: 1 });
-    await p.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 110, y: 690, button: 'left' });
-    await p.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 110, y: 690, button: 'left', clickCount: 1 });
-    await p.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 150, y: 700, deltaX: 0, deltaY: -200 });
+    if (phone) await p.drag(70, 420, 310, 480, true);
+    else {
+      await p.drag(150, 700, 60, 690, false);
+      await p.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 150, y: 700, deltaX: 0, deltaY: -200 });
+    }
     await sleep(700);
     const moved = await p.ev('(() => { const c = window.__lobbyDebug; return c ? { t: Math.abs(c.targetTheta - c.startTheta), r: c.targetRide } : null; })()');
     if (!moved || moved.t < 0.1) throw new Error('drag did not turn the tower');
@@ -133,6 +135,7 @@ async function run(label, opts, t, adminCode) {
     await p.until('document.querySelectorAll(".feed li").length >= 3', 'work feed');
     await sleep(1500);
     await shot('08-working');
+    console.log(`  ${label} office draw calls ${await p.ev('__stage.renderer.info.render.calls')}, triangles ${await p.ev('__stage.renderer.info.render.triangles')}, dpr ${await p.ev('__stage.renderer.getPixelRatio()')}`);
     await p.click('[data-tab=tasks]');
     await p.until('document.querySelector(".board .card") !== null', 'task board');
     await sleep(600);

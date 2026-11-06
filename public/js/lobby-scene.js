@@ -28,8 +28,9 @@ function makeSky() {
         c = mix(c, mid, smoothstep(0.07, 0.30, y));
         c = mix(c, top, smoothstep(0.26, 0.75, y));
         float s = max(dot(d, normalize(vec3(-0.72, 0.065, -0.68))), 0.0);
-        c = mix(c, vec3(1.0, 0.68, 0.46), pow(s, 7.0) * 0.8);
-        c += vec3(1.0, 0.82, 0.62) * pow(s, 1400.0) * 1.1;
+        c = mix(c, vec3(1.0, 0.68, 0.46), pow(s, 7.0) * 0.75);
+        c = mix(c, vec3(1.0, 0.84, 0.62), pow(s, 90.0) * 0.6);
+        c = mix(c, vec3(1.0, 0.95, 0.82), smoothstep(0.9996, 0.99985, s));
         float bands = sin(d.y * 60.0 + d.x * 5.0) * 0.5 + 0.5;
         c += vec3(0.32, 0.14, 0.10) * smoothstep(0.03, 0.08, y) * smoothstep(0.26, 0.10, y) * bands * bands * 0.32;
         vec2 g = floor(vec2(atan(d.z, d.x) * 90.0, y * 170.0));

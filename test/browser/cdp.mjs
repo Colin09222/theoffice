@@ -59,12 +59,23 @@ async function openPage(port, { mobile = false, width = 1440, height = 900 } = {
     async shot(file) { const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 86 }); writeFileSync(file, Buffer.from(r.result.data, 'base64')); },
     // A real click through the input pipeline, so overlapping elements fail the test as they would fail a person.
     async click(selector) {
-      const box = await page.until(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({ block: 'nearest' }); const r = el.getBoundingClientRect(); if (!r.width || !r.height) return null; return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`, `element ${selector}`);
+      const box = await page.until(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({ block: 'center', inline: 'nearest' }); const r = el.getBoundingClientRect(); if (!r.width || !r.height) return null; return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`, `element ${selector}`);
       const top = await ev(`(() => { const t = document.elementFromPoint(${box.x}, ${box.y}); const el = document.querySelector(${JSON.stringify(selector)}); return !!t && (t === el || el.contains(t) || t.contains(el)); })()`);
-      if (!top) throw new Error(`${selector} is covered by another element`);
+      if (!top) throw new Error(`${selector} is covered by ${await ev(`(() => { const t = document.elementFromPoint(${box.x}, ${box.y}); return t ? t.tagName + '.' + t.className : 'nothing'; })()`)} at ${Math.round(box.x)},${Math.round(box.y)}`);
       await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
       await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', clickCount: 1 });
       await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x, y: box.y, button: 'left', clickCount: 1 });
+    },
+    async drag(x1, y1, x2, y2, touch) {
+      if (touch) {
+        await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x1, y: y1 }] });
+        for (let i = 1; i <= 6; i++) { await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x1 + (x2 - x1) * i / 6, y: y1 + (y2 - y1) * i / 6 }] }); await sleep(30); }
+        await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        return;
+      }
+      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: x1, y: y1, button: 'left', clickCount: 1 });
+      for (let i = 1; i <= 6; i++) { await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x1 + (x2 - x1) * i / 6, y: y1 + (y2 - y1) * i / 6, button: 'left', buttons: 1 }); await sleep(20); }
+      await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x2, y: y2, button: 'left', clickCount: 1 });
     },
     async type(selector, text) {
       await page.click(selector);

@@ -94,7 +94,7 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; }
 .dir-vacant b { color: var(--brand-2); font-weight: 560; }
 .dir-vacant:hover { background: rgba(255, 255, 255, .09); }
 .dir-hint { margin: 0; padding: 10px 18px 12px; font: 10.5px var(--mono); letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); border-top: 1px solid var(--glass-line); }
-.open-pill { position: absolute; left: 55%; bottom: 28px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 7px 7px 7px 8px; border-radius: 999px; background: rgba(27, 25, 42, .78); border: 1px solid var(--glass-line); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: 0 14px 40px rgba(8, 7, 25, .5); transition: transform .18s; white-space: nowrap; }
+.open-pill { transition: opacity .2s; position: absolute; left: 55%; bottom: 28px; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; padding: 7px 7px 7px 8px; border-radius: 999px; background: rgba(27, 25, 42, .78); border: 1px solid var(--glass-line); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: 0 14px 40px rgba(8, 7, 25, .5); transition: transform .18s; white-space: nowrap; }
 .open-pill:hover { transform: translateX(-50%) translateY(-2px); }
 .pill-status { display: flex; align-items: center; gap: 9px; padding: 9px 14px; border-radius: 999px; background: rgba(255, 255, 255, .08); font: 11.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
 .pill-go { font-family: var(--serif); font-size: 20px; }
@@ -190,6 +190,7 @@ body[data-page="lobby"] #ui::before { content: ''; position: absolute; inset: 0;
 .chat-list, .feed, .board, .gallery, .requests { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; min-height: 0; }
 .chat-list { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .msg { max-width: 88%; display: flex; flex-direction: column; gap: 3px; }
+.msg[hidden] { display: none; }
 .msg-who { font-size: 11px; color: var(--ink-3); padding: 0 3px; }
 .msg-body { padding: 9px 13px; border-radius: 15px; background: rgba(255, 255, 255, .09); line-height: 1.45; overflow-wrap: anywhere; }
 .msg-body p { margin: 0 0 .5em; } .msg-body p:last-child { margin: 0; } .msg-body :is(ul, ol) { margin: .3em 0 .5em; padding-left: 1.3em; }
@@ -287,7 +288,8 @@ body[data-page="lobby"] #ui::before { content: ''; position: absolute; inset: 0;
   .pill-status { font-size: 10px; padding: 7px 10px; }
   .pill-go { font-size: 17px; }
   .pill-arrow { width: 36px; height: 36px; }
-  .hints { display: none; }
+  .hints, .floor-tip { display: none; }
+  .directory.open ~ .open-pill { opacity: 0; pointer-events: none; }
   .modal-back { padding: 0; place-items: end stretch; }
   .modal, .modal.wide { width: 100%; max-height: 92dvh; border-radius: 22px 22px 0 0; border-width: 1px 0 0; }
   .modal-body { padding: 6px 16px calc(20px + env(safe-area-inset-bottom)); }
@@ -311,10 +313,11 @@ body[data-page="lobby"] #ui::before { content: ''; position: absolute; inset: 0;
   .controls .btn { min-height: 31px; padding: 4px 11px; font-size: 12.5px; }
   .visitor-note { font-size: 12px; padding: 6px 10px; white-space: nowrap; }
   .char-name { font-size: 9px; padding: 0 5px; }
-  .char-bubble { font-size: 9.5px; padding: 2px 6px; gap: 3px; max-width: 76px; }
+  .char-bubble { font-size: 9.5px; padding: 2px 6px; gap: 3px; max-width: 104px; }
   .dots b { width: 3px; height: 3px; }
   .tab { padding: 8px 9px; font-size: 13px; }
-  #toasts { bottom: 58%; }
+  #toasts { bottom: auto; top: 66px; }
+  .toast { font-size: 12.5px; padding: 6px 12px; }
   .admin { padding: 18px 14px 40px; }
   .admin-head h1 { font-size: 28px; }
 }
