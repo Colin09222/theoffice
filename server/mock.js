@@ -88,13 +88,15 @@ export function createMockClient(cfg) {
   const failed = new Set();
   return {
     failed,
-    async chat({ messages, onToken, signal, pricing, meta }) {
+    async chat({ messages, onToken, onToolCall, signal, pricing, meta }) {
       const boss = meta.lastBoss || meta.task?.brief || '';
       const delay = /\[slow\]/.test(boss) || /\[slow\]/.test(meta.allBoss || '') ? Math.max(cfg.mockDelayMs, 120) * 4 : cfg.mockDelayMs;
-      await sleep(delay, signal);
+      await sleep(delay / 2, signal);
       if (/\[fail\]/.test(meta.allBoss || '') && !failed.has(meta.floorId)) { failed.add(meta.floorId); throw new ProviderError('Model provider said 503: mock outage', { status: 503, retryable: true }); }
       const r = meta.kind === 'manager' ? managerStep(meta) : staffStep(meta);
       const content = r.content || '';
+      if (r.toolCalls?.length) onToolCall?.(r.toolCalls[0].name);
+      await sleep(delay / 2, signal);
       if (content && onToken) {
         const words = content.split(/(?<=\s)/);
         for (const w of words) { if (cfg.mockDelayMs > 0) await sleep(Math.min(18, cfg.mockDelayMs / 8), signal); onToken(w); }

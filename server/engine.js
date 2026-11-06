@@ -12,6 +12,12 @@ const MAX_STAFF_STEPS = 14, MAX_MANAGER_STEPS = 8, MAX_OPEN_TASKS = 14, MAX_TASK
 const STAFF_NAMES = ['Margot', 'Wren', 'Otis', 'Juno', 'Felix', 'Ines', 'Hugo', 'Tess', 'Nico', 'Bea', 'Arlo', 'Mina'];
 const BACKOFF = [1, 3, 8];
 const PRIVATE_TEXT = 'Working on something private';
+// As soon as a model starts writing a tool call, the character starts acting it out. For a big file that's most of the wait.
+const TOOL_LOOK = {
+  write_file: ['typing', 'Writing'], publish_project: ['typing', 'Getting it ready to publish'], fetch_url: ['browsing', 'Looking something up'], web_search: ['browsing', 'Searching the web'],
+  read_file: ['reading', 'Reading'], list_files: ['reading', 'Checking the shared drive'], ask_boss: ['thinking', 'Writing a question for the boss'], file_purchase_request: ['typing', 'Filling in a request'],
+  assign_task: ['typing', 'Writing up the plan'], review_task: ['reading', 'Reviewing the work'], hire_staff: ['typing', 'Writing a job offer'], cancel_task: ['typing', 'Crossing something off'],
+};
 
 export class Halt extends Error { constructor(why) { super(why); this.name = 'Halt'; this.why = why; } }
 
@@ -132,7 +138,7 @@ export class Engine {
   }
 
   // ---- one LLM call: budget check, concurrency slot, retries, ledger ----
-  async callLLM(ctx, { messages, tools, onToken, onReset, meta }) {
+  async callLLM(ctx, { messages, tools, onToken, onToolCall, onReset, meta }) {
     const { floorId, agent, signal } = ctx;
     const role = this.models.all[agent.role] || this.models.all.researcher;
     const pricing = { prompt: role.pricing?.prompt || 0, completion: role.pricing?.completion || 0 };
@@ -151,6 +157,11 @@ export class Engine {
         const res = await this.llm.chat({
           model: role.model, messages, tools, maxTokens: role.maxTokens || 2000, signal, pricing, meta,
           onToken: (t) => { chars.n += t.length; onToken?.(t); },
+          onToolCall: (name) => {
+            const show = TOOL_LOOK[name];
+            if (show) this.setAgent(agent.id, { state: show[0], activity: show[1] });
+            onToolCall?.(name);
+          },
         }).catch((e) => {
           // An aborted or broken stream still cost something. Charge an estimate so the ledger cannot be dodged.
           const sent = Math.max(chars.n, e?.streamedChars || 0);

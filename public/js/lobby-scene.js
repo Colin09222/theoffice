@@ -6,9 +6,9 @@ const SUN = new THREE.Vector3(-0.72, 0.13, -0.68).normalize();
 const FOG_GLSL = `
   vec3 applyFog(vec3 c, vec3 world) {
     float d = length(world - cameraPosition);
-    float f = 1.0 - exp(-pow(d * 0.0052, 2.0));
+    float f = 1.0 - exp(-pow(d * 0.0026, 2.0));
     vec3 viewDir = normalize(world - cameraPosition);
-    float toSun = pow(max(dot(viewDir, normalize(vec3(-0.72, 0.13, -0.68))), 0.0), 3.0);
+    float toSun = pow(max(dot(viewDir, normalize(vec3(-0.72, 0.065, -0.68))), 0.0), 3.0);
     vec3 fogCol = mix(vec3(0.62, 0.50, 0.60), vec3(1.0, 0.70, 0.52), toSun);
     return mix(c, fogCol, clamp(f, 0.0, 1.0));
   }`;
@@ -27,8 +27,9 @@ function makeSky() {
         vec3 c = mix(horizon, low, smoothstep(0.0, 0.09, y));
         c = mix(c, mid, smoothstep(0.07, 0.30, y));
         c = mix(c, top, smoothstep(0.26, 0.75, y));
-        float s = max(dot(d, normalize(vec3(-0.72, 0.13, -0.68))), 0.0);
-        c += vec3(1.0, 0.62, 0.34) * pow(s, 18.0) * 0.55 + vec3(1.0, 0.9, 0.72) * pow(s, 500.0) * 1.3;
+        float s = max(dot(d, normalize(vec3(-0.72, 0.065, -0.68))), 0.0);
+        c = mix(c, vec3(1.0, 0.68, 0.46), pow(s, 7.0) * 0.8);
+        c += vec3(1.0, 0.82, 0.62) * pow(s, 1400.0) * 1.1;
         float bands = sin(d.y * 60.0 + d.x * 5.0) * 0.5 + 0.5;
         c += vec3(0.32, 0.14, 0.10) * smoothstep(0.03, 0.08, y) * smoothstep(0.26, 0.10, y) * bands * bands * 0.32;
         vec2 g = floor(vec2(atan(d.z, d.x) * 90.0, y * 170.0));
@@ -50,13 +51,14 @@ function makeWater() {
       float wave(vec2 p){ return sin(p.x*0.7+uTime*0.7)+sin(p.y*0.9-uTime*0.5)+sin((p.x+p.y)*1.7+uTime*1.1)*0.5+sin((p.x-p.y)*3.1-uTime*1.6)*0.25; }
       void main(){
         vec2 p = vW.xz; float e = 0.25;
-        vec3 n = normalize(vec3(wave(p+vec2(e,0.))-wave(p), 8.0, wave(p+vec2(0.,e))-wave(p)));
+        float far = smoothstep(90.0, 300.0, length(vW - cameraPosition));
+        vec3 n = normalize(mix(vec3(wave(p+vec2(e,0.))-wave(p), 8.0, wave(p+vec2(0.,e))-wave(p)), vec3(0.0, 8.0, 0.0), far));
         vec3 v = normalize(cameraPosition - vW);
         vec3 r = reflect(-v, n);
-        float s = pow(max(dot(r, normalize(vec3(-0.72, 0.13, -0.68))), 0.0), 90.0);
+        float s = pow(max(dot(r, normalize(vec3(-0.72, 0.065, -0.68))), 0.0), 90.0);
         float fres = pow(1.0 - max(dot(v, n), 0.0), 3.0);
-        vec3 deep = vec3(0.13, 0.20, 0.36), sky = vec3(0.92, 0.60, 0.56);
-        vec3 c = mix(deep, sky, fres * 0.8) + vec3(1.0, 0.72, 0.46) * s * 1.6;
+        vec3 deep = vec3(0.14, 0.24, 0.42), sky = vec3(0.90, 0.58, 0.58);
+        vec3 c = mix(deep, sky, fres * 0.42) + vec3(1.0, 0.72, 0.46) * s * 1.6;
         gl_FragColor = vec4(applyFog(c, vW), 1.0);
       }`,
   });
@@ -65,12 +67,12 @@ function makeWater() {
   return m;
 }
 
-const coast = (a) => 118 + Math.sin(a * 3 + 1) * 13 + Math.sin(a * 7) * 6 + Math.sin(a * 13 + 2) * 2.5 - Math.max(0, Math.cos(a - 3.9)) * 46;
+const coast = (a) => 112 + Math.sin(a * 3 + 1) * 11 + Math.sin(a * 7) * 6 + Math.sin(a * 13 + 2) * 2.5 - Math.max(0, Math.cos(a - 3.9)) * 58;
 
 function makeLand() {
   const shape = new THREE.Shape();
   const n = 140;
-  for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI * 2; const r = coast(a); const x = Math.cos(a) * r, y = Math.sin(a) * r; if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y); }
+  for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI * 2; const r = coast(a); const x = Math.cos(a) * r, y = -Math.sin(a) * r; if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y); }
   const geo = new THREE.ShapeGeometry(shape, 1);
   const mat = new THREE.ShaderMaterial({
     vertexShader: 'varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
@@ -108,12 +110,12 @@ function cityMaterial() {
       void main(){
         vec3 n = normalize(vN); vec3 sun = normalize(vec3(-0.72, 0.30, -0.68));
         float lit = max(dot(n, sun), 0.0);
-        vec3 c = vC * (0.42 + lit * vec3(1.05, 0.78, 0.58) * 1.05 + max(n.y, 0.0) * vec3(0.26, 0.24, 0.34));
+        vec3 c = vC * (0.58 + lit * vec3(1.05, 0.78, 0.58) * 0.9 + max(n.y, 0.0) * vec3(0.30, 0.27, 0.36));
         if (abs(n.y) < 0.5) {
           float u = abs(n.x) > 0.5 ? vW.z : vW.x;
           vec2 size = vec2(1.15, 1.25);
           vec2 p = vec2(u, vW.y) / size;
-          vec2 id = floor(p) + vS * 91.0;
+          vec2 id = floor(p) + floor(vS * 97.0 + 0.5) * 7.0;
           vec2 f = fract(p);
           float fw = fwidth(p.x) + fwidth(p.y);
           float w = smoothstep(0.17, 0.2, f.x) * smoothstep(0.83, 0.8, f.x) * smoothstep(0.24, 0.27, f.y) * smoothstep(0.82, 0.79, f.y);
@@ -151,9 +153,9 @@ function makeCity() {
     for (let i = 0; i < sub; i++) for (let j = 0; j < sub; j++) {
       const x = cx - 3.2 + cell * (i + 0.5) + 0.65 - 0.65, z = cz - 3.2 + cell * (j + 0.5);
       if (sub === 3 && r() < 0.14) continue;
-      const near = Math.max(0, 1 - dist / 95);
-      let height = 1.6 + r() * 3 + Math.pow(r(), 3) * 26 * near + near * near * 15 * r();
-      if (sub === 1) height += r() * 7 * (0.3 + near);
+      // A low town around the tower, so nothing on the camera's orbit ever stands between you and it.
+      let height = 1.5 + r() * 2.6 + Math.pow(r(), 4) * 9;
+      if (sub === 1) height += r() * 3.5;
       spots.push({ x, z, w: cell * (0.76 + r() * 0.16), d: cell * (0.76 + r() * 0.16), height });
     }
   }
@@ -180,7 +182,7 @@ function makeCity() {
   low.forEach((b, i) => { m.makeScale(b.w * 1.02, 1 + b.w * 0.25, b.d * 1.02); m.setPosition(b.x, b.height, b.z); roofs.setMatrixAt(i, m); roofs.setColorAt(i, col.set(roofCols[i % 4])); });
   roofs.frustumCulled = false;
 
-  const tall = blocks.filter((b) => b.height > 9);
+  const tall = blocks.filter((b) => b.height > 6);
   const tankGeo = new THREE.BoxGeometry(1, 1, 1);
   const tanks = new THREE.InstancedMesh(tankGeo, new THREE.MeshLambertMaterial({ color: '#59555f' }), tall.length);
   tall.forEach((b, i) => { m.makeScale(b.w * 0.42, 0.9, b.d * 0.42); m.setPosition(b.x + b.w * 0.1, b.height + 0.45, b.z - b.d * 0.08); tanks.setMatrixAt(i, m); });
@@ -284,7 +286,7 @@ function neonSignTexture() {
 function makeTower(floorCount) {
   const group = new THREE.Group();
   const H = GROUND + floorCount * FLOOR_H;
-  const stone = new THREE.MeshLambertMaterial({ color: '#d5c6ae' });
+  const stone = new THREE.MeshLambertMaterial({ color: '#efe2cc' });
   const dark = new THREE.MeshLambertMaterial({ color: '#3b3640' });
   const gold = new THREE.MeshLambertMaterial({ color: '#d8ae6c' });
   const box = new THREE.BoxGeometry(1, 1, 1);
@@ -372,7 +374,7 @@ export class LobbyView {
     Object.assign(this, { floorCount, onHover, onPick });
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(36, 1, 0.5, 1200);
-    this.scene.add(new THREE.HemisphereLight('#ffe6d4', '#39304f', 1.65));
+    this.scene.add(new THREE.HemisphereLight('#fff0e0', '#6a5a78', 2.5));
     const sun = new THREE.DirectionalLight('#ffb98a', 2.4); sun.position.copy(SUN).multiplyScalar(100).setY(38); this.scene.add(sun);
     this.sky = makeSky(); this.scene.add(this.sky);
     this.water = makeWater(); this.scene.add(this.water);
@@ -381,8 +383,8 @@ export class LobbyView {
     this.traffic = makeTraffic(); this.scene.add(this.traffic);
     this.tower = makeTower(floorCount); this.scene.add(this.tower.group);
     this.boats = makeBoats(); this.scene.add(this.boats.group);
-    this.theta = 0.72; this.targetTheta = 0.72; this.rideY = 19; this.targetRide = 19;
-    this.dist = 62; this.targetDist = 62; this.time = 0; this.spin = 0.018; this.hover = -1; this.flying = null; this.shiftX = 0;
+    this.startTheta = 0.72; this.theta = 0.72; this.targetTheta = 0.72; this.rideY = 26; this.targetRide = 26;
+    this.dist = 94; this.targetDist = 94; this.time = 0; this.spin = 0.018; this.hover = -1; this.flying = null; this.shiftX = 0;
     this.ray = new THREE.Raycaster(); this.ptr = new THREE.Vector2();
     this.floorData = new Map();
     this.bind();
@@ -438,9 +440,9 @@ export class LobbyView {
     this.camera.aspect = w / h;
     const phone = w <= 760;
     // Frame the tower in the clear area: left of the desktop panel, above the phone's sheet.
-    this.shiftX = phone ? 0 : Math.min(190, w * 0.13);
-    this.shiftY = phone ? h * 0.05 : 0;
-    this.targetDist = phone ? 88 : 62;
+    this.shiftX = phone ? 0 : -w * 0.055;
+    this.shiftY = phone ? h * 0.07 : 0;
+    this.targetDist = phone ? 128 : 94;
     this.camera.setViewOffset(w, h, this.shiftX, this.shiftY, w, h);
     this.camera.updateProjectionMatrix();
   }
@@ -509,7 +511,7 @@ export class LobbyView {
     this.rideY += (this.targetRide - this.rideY) * k;
     this.dist += (this.targetDist - this.dist) * k;
     const lookY = this.rideY;
-    const camY = lookY + 2 + (this.floorCount - lookY) * 0.05;
+    const camY = lookY + 17 + (this.floorCount - lookY) * 0.1;
     this.camera.position.set(Math.sin(this.theta) * this.dist, camY, Math.cos(this.theta) * this.dist);
     this.camera.lookAt(0, lookY, 0);
   }

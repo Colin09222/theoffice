@@ -1,6 +1,6 @@
 // The lobby overlay: headline, floor directory with search, and the way in.
 import { stage } from './stage.js';
-import { h, api, $, session, isPhone, toast, clear } from './dom.js';
+import { h, api, session, isPhone, toast, clear, put } from './dom.js';
 import { LobbyView } from './lobby-scene.js';
 import { openClaim, openLogin } from './claim.js';
 
@@ -41,6 +41,7 @@ export async function showLobby(root) {
     });
     view.setFloors(data.floors);
     stage.setView(view);
+    window.__lobbyDebug = view;  // read by the browser e2e tests
   }
 
   const search = h('input', { type: 'search', placeholder: 'Find a company or what it does', 'aria-label': 'Search the directory', oninput: () => renderList() });
@@ -55,9 +56,18 @@ export async function showLobby(root) {
     if (q && !shown.length) list.append(h('p.dir-empty', {}, 'Nobody by that name in the building.'));
     if (!q) {
       if (!keepFloors.length) list.append(h('p.dir-empty', {}, 'The building is brand new, and every floor is empty. Someone has to go first.'));
-      const vacant = data.towerFloors - keepFloors.length;
-      if (vacant > 0) list.append(h('button.dir-vacant', { type: 'button', onclick: () => openClaim() }, h('span', {}, `${vacant} empty ${vacant === 1 ? 'floor' : 'floors'} left`), h('b', {}, 'Open one')));
+      list.append(elevatorPanel());
     }
+  };
+  // The lift buttons: every floor in the building. Lit ones have someone in, and dark ones are for the taking.
+  const elevatorPanel = () => {
+    const grid = h('div.lift', { role: 'group', 'aria-label': 'Lift buttons' });
+    for (let n = data.towerFloors; n >= 1; n--) {
+      const card = keepFloors.find((f) => f.number === n);
+      grid.append(h(`button.lift-btn${card ? '.lit' : ''}`, { type: 'button', 'data-lift': n, css: card ? { '--brand': card.colors.primary } : {}, 'aria-label': card ? `Floor ${n}, ${card.name}` : `Floor ${n}, empty`, onpointerenter: () => { view?.setHover(n); view?.rideTo(n); }, onclick: () => { if (card) enterFloor(card); else openClaim(); } }, String(n)));
+    }
+    const vacant = data.towerFloors - keepFloors.length;
+    return h('section.lift-wrap', {}, h('h3', {}, 'Lift', h('small', {}, `${vacant} empty ${vacant === 1 ? 'floor' : 'floors'}`)), grid);
   };
   renderList();
 
@@ -72,7 +82,7 @@ export async function showLobby(root) {
     ? h('button.btn.chrome', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, 'My floor')
     : h('button.btn.chrome', { type: 'button', onclick: () => openLogin() }, 'Sign in');
 
-  root.append(
+  put(root,
     h('header.topbar', {}, h('span.wordmark', {}, 'The Office'), account),
     h('section.hero', {},
       h('h1', {}, 'Clock in. ', h('em', {}, 'Someone else'), ' does the work.'),
@@ -106,5 +116,4 @@ function showTip(n, x, y) {
 
 export function hideLobby() {
   clearInterval(poll); poll = null; tip = null;
-  void $;
 }

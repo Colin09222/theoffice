@@ -1,6 +1,6 @@
 // The floor page. One SSE stream feeds the 3D characters and the panels: chat, work feed, task board, projects, requests.
 import { stage } from './stage.js';
-import { h, api, BASE, $, clear, modal, toast, money, timeAgo, session, ApiError, refreshMe } from './dom.js';
+import { h, api, BASE, $, clear, put, modal, toast, money, timeAgo, session, ApiError, refreshMe } from './dom.js';
 import { OfficeView } from './office-scene.js';
 import { renderMarkdown } from './markdown.js';
 import { characterBuilder, swatches, chips } from './builder.js';
@@ -98,7 +98,7 @@ class FloorPage {
         h('button.btn.chrome', { type: 'button', onclick: () => this.openRedirect() }, 'Redirect'),
         h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, 'Customise'));
     } else {
-      this.controlsEl.append(
+      put(this.controlsEl,
         h('span.visitor-note', {}, 'You\'re visiting. Watch all you like.'),
         session.floor ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'));
     }
@@ -347,13 +347,14 @@ class FloorPage {
             h('label.field', {}, h('span', {}, 'Accent colour'), h('input', { type: 'color', value: draft.colors.accent, oninput: (e) => { draft.colors.accent = e.target.value; } })),
             h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.publicChat, onchange: (e) => { draft.publicChat = e.target.checked; } }), h('span', {}, 'Visitors can read my chat with the manager')),
             h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.defaultPrivate, onchange: (e) => { draft.defaultPrivate = e.target.checked; } }), h('span', {}, 'New projects start private')),
-            h('button.btn.primary.wide', { type: 'submit' }, 'Save')));
+            h('button.btn.primary.wide', { type: 'submit' }, 'Save'),
+            h('button.btn.ghost.wide', { type: 'button', onclick: async () => { try { await api('/logout', { method: 'POST' }); await refreshMe(); close(); window.officeGo('/'); } catch (e) { toast(e.message, 'bad'); } } }, 'Sign out of this floor')));
         }
         if (id === 'boss') {
           const holder = h('div');
           pane.append(h('form.stack', { onsubmit: (e) => { e.preventDefault(); draft.boss.look = builder.look; save(); } },
             h('label.field', {}, h('span', {}, 'Your name'), h('input', { value: draft.boss.name, maxlength: 30, oninput: (e) => { draft.boss.name = e.target.value; } })), holder,
-            h('button.btn.primary.wide', { type: 'submit' }, 'Save')));
+            h('div.sticky-foot', {}, h('button.btn.primary.wide', { type: 'submit' }, 'Save'))));
           const builder = characterBuilder(holder, draft.boss.look, draft.colors.accent);
           draft.boss.look = builder.look;
           cleanup = () => builder.dispose();
@@ -369,7 +370,7 @@ class FloorPage {
             clear(editor).append(h('form.stack', { onsubmit: async (e) => {
               e.preventDefault();
               try { await api(`/floors/${this.slug}/staff/${a.id}`, { method: 'POST', body: { name: name.value, look: b.look } }); toast(`${name.value.trim() || a.name} looks great`); close(); } catch (x) { toast(x.message, 'bad'); }
-            } }, h('label.field', {}, h('span', {}, `${a.title}'s name`), name), holder, h('button.btn.primary.wide', { type: 'submit' }, 'Save'))));
+            } }, h('label.field', {}, h('span', {}, `${a.title}'s name`), name), holder, h('div.sticky-foot', {}, h('button.btn.primary.wide', { type: 'submit' }, 'Save'))));
             const b = characterBuilder(holder, a.look, draft.colors.accent);
             cleanup = () => b.dispose();
           };
@@ -392,7 +393,6 @@ class FloorPage {
       };
       body.append(tabs, pane);
       show(tab, agentId);
-      body.append(h('button.btn.ghost.wide.signout', { type: 'button', onclick: async () => { try { await api('/logout', { method: 'POST' }); await refreshMe(); close(); window.officeGo('/'); } catch (e) { toast(e.message, 'bad'); } } }, 'Sign out of this floor'));
     }, { wide: true, onClose: () => cleanup() });
   }
 

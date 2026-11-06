@@ -14,7 +14,7 @@ export const scrub = (s, cfg) => {
 
 export function createOpenRouterClient(cfg) {
   return {
-    async chat({ model, messages, tools, maxTokens, onToken, signal, pricing }) {
+    async chat({ model, messages, tools, maxTokens, onToken, onToolCall, signal, pricing }) {
       if (!cfg.openrouterKey) throw new ProviderError('No OpenRouter key is configured on the server.', { status: 401 });
       const ctl = new AbortController();
       const onAbort = () => ctl.abort(signal.reason);
@@ -53,7 +53,7 @@ export function createOpenRouterClient(cfg) {
           for (const tc of d.tool_calls || []) {
             const c = (calls[tc.index ?? 0] ||= { id: '', name: '', args: '' });
             if (tc.id) c.id = tc.id;
-            if (tc.function?.name) c.name += tc.function.name;
+            if (tc.function?.name) { c.name += tc.function.name; onToolCall?.(c.name); }
             if (tc.function?.arguments) { c.args += tc.function.arguments; streamed += tc.function.arguments.length; }
           }
         };

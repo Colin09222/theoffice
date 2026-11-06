@@ -24,6 +24,8 @@ function add(el, kids) {
     else el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
   }
 }
+/** Like el.append, but null and false mean nothing, as they do in h(). */
+export const put = (el, ...kids) => { add(el, kids); return el; };
 export const clear = (el) => { el.replaceChildren(); return el; };
 export const $ = (s, root = document) => root.querySelector(s);
 

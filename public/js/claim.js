@@ -55,7 +55,7 @@ export function openClaim({ code = '' } = {}) {
       } },
       h('p.step-kicker', {}, 'Step 2 of 2. Make yourself the boss'),
       h('label.field', {}, h('span', {}, 'Your name'), name), holder, e,
-      h('div.row', {}, h('button.btn.ghost', { type: 'button', onclick: () => { builder.dispose(); stepCompany(); } }, 'Back'), h('button.btn.primary.grow', { type: 'submit' }, 'Move in')));
+      h('div.row.sticky-foot', {}, h('button.btn.ghost', { type: 'button', onclick: () => { builder.dispose(); stepCompany(); } }, 'Back'), h('button.btn.primary.grow', { type: 'submit' }, 'Move in')));
       body.replaceChildren(form);
       builder = characterBuilder(holder, state.look, state.colors.accent);
       state.look = builder.look;
@@ -69,7 +69,6 @@ export function openClaim({ code = '' } = {}) {
         h('button.btn.primary.wide', { type: 'button', onclick: () => { close(); window.officeGo(`/floor/${r.slug}`); } }, 'Walk in')));
     };
     stepCode();
-    void close;
   }, { wide: true });
 }
 

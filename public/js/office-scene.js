@@ -3,11 +3,11 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import { Character } from './character.js';
 import { stage } from './stage.js';
 
-const ROOM_W = 22, ROOM_D = 15, WALL_H = 4.6;
-const DESKS = [[-6.6, 0.4], [-2.2, 0.4], [2.2, 0.4], [6.6, 0.4], [-6.6, 4.5], [-2.2, 4.5], [2.2, 4.5], [6.6, 4.5]];
-const MANAGER_DESK = [-6.6, -4.5], BOSS_DESK = [6.8, -4.6];
-const BOARD = [-0.4, -6.9];
-const SHELF = [-10.2, 2.2], COFFEE = [10.1, 2.4], ARCADE = [10.1, -1.4];
+const ROOM_W = 22, ROOM_D = 13.6, WALL_H = 4.6;
+const DESKS = [[-6.6, 0.5], [-2.2, 0.5], [2.2, 0.5], [6.6, 0.5], [-6.6, 4.4], [-2.2, 4.4], [2.2, 4.4], [6.6, 4.4]];
+const MANAGER_DESK = [-6.6, -3.9], BOSS_DESK = [6.8, -3.9];
+const BOARD = [-0.4, -6.25];
+const SHELF = [-10.2, 2.4], COFFEE = [10.1, 2.4], ARCADE = [10.1, -1.4], SOFA = [6.9, 5.1];
 const CELL = 0.5;
 
 const box = new THREE.BoxGeometry(1, 1, 1);
@@ -192,7 +192,7 @@ function buildPet(kind) {
 export class Actor {
   constructor(view, info, seat, { isBoss = false } = {}) {
     this.view = view; this.id = info.id; this.info = info; this.seat = seat; this.isBoss = isBoss;
-    this.char = new Character(info.look, { accent: view.colors.accent });
+    this.char = new Character(info.look, { accent: view.colors.accent, scale: 1.3 });
     this.pos = new THREE.Vector3(seat.at[0], 0, seat.at[1]);
     this.group = this.char.group;
     this.group.position.copy(this.pos);
@@ -208,7 +208,7 @@ export class Actor {
   destroy() { this.char.dispose(); this.tag.remove(); }
   sitDown() {
     this.seated = true;
-    this.group.position.set(this.seat.at[0], 0.34, this.seat.at[1] - 0.08);
+    this.group.position.set(this.seat.at[0], 0.15, this.seat.at[1] - 0.05);
     this.heading = Math.PI; this.group.rotation.y = this.heading;
     this.applyStatePose();
   }
@@ -249,7 +249,15 @@ export class Actor {
     if (!this.seated) return;
     this.char.setAnim(s === 'typing' || s === 'browsing' ? 'type' : s === 'thinking' || s === 'queued' ? 'think' : s === 'talking' ? 'talk' : s === 'reading' ? 'type' : 'sit');
   }
+  // Real events can flip faster than the eye. Each visible state gets a moment on stage; the newest one waits its turn.
   setState(state, activity) {
+    const now = this.view.time;
+    if (this.stateSince !== undefined && now - this.stateSince < 1.1 && state !== this.state) { this.pending = [state, activity]; return; }
+    this.pending = null;
+    this.stateSince = now;
+    this.applyState(state, activity);
+  }
+  applyState(state, activity) {
     const was = this.state;
     this.state = state; this.activity = activity;
     this.renderBubble();
@@ -276,6 +284,7 @@ export class Actor {
   }
   update(dt) {
     const g = this.group, time = this.view.time;
+    if (this.pending && time - this.stateSince >= 1.1) { const [st, ac] = this.pending; this.pending = null; this.stateSince = time; this.applyState(st, ac); }
     let moving = 0;
     if (this.path.length) {
       const [tx, tz] = this.path[0];
@@ -316,10 +325,11 @@ export class OfficeView {
   constructor({ state, labels, onSelect }) {
     this.labels = labels; this.onSelect = onSelect;
     this.colors = state.floor.colors; this.decor = state.floor.decor;
+    this.staffCount = state.agents.filter((a) => a.role !== 'manager').length;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#16172a');
     this.camera = new THREE.PerspectiveCamera(24, 1, 1, 200);
-    this.time = 0; this.yaw = 0.62; this.targetYaw = 0.62; this.pitch = 0.82; this.zoom = 1; this.targetZoom = 1; this.intro = 0;
+    this.time = 0; this.yaw = 0.5; this.targetYaw = 0.5; this.pitch = 0.86; this.zoom = 1; this.targetZoom = 1; this.intro = 0;
     this.actors = new Map(); this.nav = makeNav(); this.deskSlots = [];
     this.tv = new THREE.Vector3();
     this.codeTex = screenTexture('code', this.colors.primary);
@@ -330,8 +340,8 @@ export class OfficeView {
   }
   buildRoom() {
     const s = this.scene; const { primary, accent } = this.colors; const d = this.decor;
-    s.add(new THREE.HemisphereLight('#fff1dd', '#57506a', 1.75));
-    const sun = new THREE.DirectionalLight('#ffd9b0', 2.1);
+    s.add(new THREE.HemisphereLight('#fff4e4', '#7a7088', 1.95));
+    const sun = new THREE.DirectionalLight('#ffd9b0', 1.75);
     sun.position.set(10, 20, 11); sun.target.position.set(0, 0, 0);
     sun.castShadow = true;
     const size = stage.lowEnd ? 1024 : 2048;
@@ -339,6 +349,7 @@ export class OfficeView {
     Object.assign(sun.shadow.camera, { left: -18, right: 18, top: 16, bottom: -16, near: 1, far: 60 });
     sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.02;
     s.add(sun, sun.target);
+    const fill = new THREE.DirectionalLight('#ffe9d2', 0.55); fill.position.set(-8, 8, 14); s.add(fill);
     const room = new THREE.Group(); s.add(room); this.room = room;
 
     // Slab, floor, skirting: a slice cut out of the tower.
@@ -367,7 +378,7 @@ export class OfficeView {
     piece(room, primary, 0.05, 0.2, ROOM_D, wallX + 0.03, 0, 0, { cast: false });
 
     // Whiteboard, where plans get made.
-    const boardMat = new THREE.MeshLambertMaterial({ map: this.boardTexture(['']) });
+    const boardMat = new THREE.MeshBasicMaterial({ map: this.boardTexture(['']) });
     this.boardMat = boardMat;
     piece(room, '#b9b4a8', 4.5, 2.2, 0.1, BOARD[0], 1.25, wallZ + 0.07);
     const boardFace = new THREE.Mesh(new THREE.PlaneGeometry(4.3, 2.02), boardMat); boardFace.position.set(BOARD[0], 2.35, wallZ + 0.13); room.add(boardFace);
@@ -378,13 +389,11 @@ export class OfficeView {
     if (d.neon) {
       const sign = canvasTex(1024, 180, (x, w, h) => {
         x.clearRect(0, 0, w, h);
-        x.font = '600 92px Fraunces, Georgia, serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-        x.shadowColor = accent; x.shadowBlur = 30; x.fillStyle = '#fff8e8';
-        const name = this.floorName || ''; x.fillText(name, w / 2, h / 2 + 4); x.fillText(name, w / 2, h / 2 + 4);
       });
       this.signTex = sign;
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 0.98), new THREE.MeshBasicMaterial({ map: sign, transparent: true, depthWrite: false }));
-      m.position.set(wallX + 0.05, 3.4, -1.8); m.rotation.y = Math.PI / 2;
+      piece(room, '#23212f', 0.06, 1.2, 7, wallX + 0.03, 2.75, -2.3, { cast: false });
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(6.8, 1.19), new THREE.MeshBasicMaterial({ map: sign, transparent: true, depthWrite: false }));
+      m.position.set(wallX + 0.08, 3.35, -2.3); m.rotation.y = Math.PI / 2;
       room.add(m); this.signMesh = m;
     }
     // Art on the side wall.
@@ -430,20 +439,28 @@ export class OfficeView {
       this.nav.block(ARCADE[0], ARCADE[1], 1.1, 1.2);
     }
     if (d.rug) {
-      const rug = (x, z, w, dd, c) => { const m = piece(room, c, w, 0.03, dd, x, 0, z, { cast: false }); return m; };
+      const rug = (x, z, w, dd, c) => piece(room, c, w, 0.03, dd, x, 0, z, { cast: false });
       rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 5, 3.6, primary);
-      rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 4.5, 3.1, accent);
-      rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 4.2, 2.8, primary);
-      rug(0, 2.5, 7, 1.1, primary);
+      rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 4.6, 3.2, accent);
+      rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 4.3, 2.9, primary);
     }
-    // Manager's glass nook.
-    const glassMat = new THREE.MeshLambertMaterial({ color: '#cfe6ee', transparent: true, opacity: 0.2, depthWrite: false });
-    const glass = (w, dd, x, z) => { const m = new THREE.Mesh(box, glassMat); m.scale.set(w, 2.5, dd); m.position.set(x, 1.25, z); m.renderOrder = 2; room.add(m); piece(room, '#34323a', w + 0.04, 0.07, dd + 0.04, x, 2.5, z, { cast: false }); };
-    glass(0.05, 2.6, -3.4, -6.1);
-    this.nav.block(-3.4, -6.1, 0.3, 2.6);
-
+    // A lounge in the front corner, until a full staff needs that desk.
+    if (this.staffCount < 8) {
+      const l = new THREE.Group(); l.position.set(SOFA[0], 0, SOFA[1]); room.add(l);
+      if (d.rug) piece(l, accent, 5.6, 0.03, 3.1, 0, 0, -0.2, { cast: false });
+      piece(l, primary, 3.8, 0.55, 1.1, 0, 0.12, 0.9); piece(l, primary, 3.8, 1.05, 0.34, 0, 0.12, 1.34);
+      piece(l, primary, 0.34, 0.8, 1.1, -1.9, 0.12, 0.9); piece(l, primary, 0.34, 0.8, 1.1, 1.9, 0.12, 0.9);
+      piece(l, accent, 0.76, 0.42, 0.22, -0.9, 0.67, 1.08); piece(l, '#f3ead8', 0.76, 0.42, 0.22, 0.9, 0.67, 1.08);
+      piece(l, '#6e4a33', 1.8, 0.08, 0.9, 0, 0.42, -0.5); for (const [x, z] of [[-0.8, -0.85], [0.8, -0.85], [-0.8, -0.15], [0.8, -0.15]]) piece(l, '#3d3b44', 0.07, 0.42, 0.07, x, 0, z);
+      piece(l, '#f3ead8', 0.5, 0.05, 0.36, -0.3, 0.5, -0.5); piece(l, accent, 0.17, 0.17, 0.17, 0.42, 0.5, -0.5, { geo: cyl });
+      this.nav.block(SOFA[0], SOFA[1] + 0.2, 4.4, 2.5);
+    }
+    // Printer and lamp fill the back corners of the room with something to look at.
+    const pr = new THREE.Group(); pr.position.set(-9.9, 0, 5.6); room.add(pr);
+    piece(pr, '#5e5a64', 1, 0.8, 1, 0, 0, 0); piece(pr, '#e8e4da', 0.92, 0.3, 0.92, 0, 0.8, 0); piece(pr, '#fbf7ea', 0.5, 0.05, 0.6, 0, 1.1, 0);
+    this.nav.block(-9.9, 5.6, 1.2, 1.2);
     // Plants, in a stable order so more means more.
-    const spots = [[-10.1, -6.6], [10.2, -6.5], [-10.2, 6.6], [10.2, 6.5], [-3.9, -3.6], [0.2, -3.6], [10.3, 4.9], [-4.4, 6.9]];
+    const spots = [[-10.1, -6.0], [10.2, -5.9], [-3.9, -5.9], [3.1, -5.9], [10.3, 5.9], [-4.4, 6.2], [-0.2, 6.2], [-10.2, -0.4]];
     for (let i = 0; i < d.plants; i++) { makePlant(room, spots[i][0], spots[i][1], i < 2 ? 1.3 : 1); this.nav.block(spots[i][0], spots[i][1], 0.8, 0.8); }
 
     // Desks.
@@ -460,19 +477,19 @@ export class OfficeView {
     // Pet.
     if (d.pet !== 'none') {
       this.pet = buildPet(d.pet);
-      this.pet.group.position.set(2, 0, -2.8);
-      room.add(this.pet.group); this.petTarget = [2, -2.8]; this.petWait = 3;
+      this.pet.group.position.set(2, 0, -1.8);
+      room.add(this.pet.group); this.petTarget = [2, -1.8]; this.petWait = 3;
     }
   }
   boardTexture(lines) {
     return canvasTex(640, 300, (x, w, h) => {
       x.fillStyle = '#fdfcf7'; x.fillRect(0, 0, w, h);
-      x.font = '600 30px Fraunces, Georgia, serif'; x.fillStyle = this.colors.primary;
-      x.fillText(lines[0] || 'Whiteboard', 26, 46);
-      x.font = '22px ui-sans-serif, system-ui, sans-serif';
+      x.font = '600 38px Fraunces, Georgia, serif'; x.fillStyle = this.colors.primary;
+      x.fillText(lines[0] || 'Big ideas', 26, 50);
+      x.font = '600 25px ui-sans-serif, system-ui, sans-serif';
       lines.slice(1, 7).forEach((l, i) => {
-        x.fillStyle = '#343842'; x.fillText(`${l.slice(0, 44)}`, 54, 88 + i * 34);
-        x.strokeStyle = this.colors.primary; x.lineWidth = 3; x.strokeRect(26, 70 + i * 34, 16, 16);
+        x.fillStyle = '#343842'; x.fillText(`${l.slice(0, 38)}`, 58, 98 + i * 38);
+        x.strokeStyle = this.colors.primary; x.lineWidth = 3; x.strokeRect(26, 78 + i * 38, 20, 20);
       });
       if (lines.length < 2) {
         x.strokeStyle = '#c7c2b6'; x.lineWidth = 3;
@@ -614,13 +631,36 @@ export class OfficeView {
     // Keep the room inside the area the panel leaves free.
     const panel = phone ? 0 : Math.min(430, w * 0.34);
     const sheet = phone ? h * 0.54 : 0;
-    const vw = w - panel, vh = h - sheet;
-    this.visAspect = vw / vh;
+    const top = phone ? 58 : 76, bottom = phone ? 44 : 60; // room for the title above and the controls below
+    const vw = w - panel, vh = h - sheet - top - bottom;
+    this.visW = vw; this.visH = vh;
     this.camera.aspect = w / h;
-    this.camera.setViewOffset(w, h, panel / 2, sheet / 2, w, h);
+    this.camera.setViewOffset(w, h, panel / 2, (sheet + bottom - top) / 2, w, h);
     this.camera.updateProjectionMatrix();
-    this.visHeightFrac = vh / h;
-    this.topInset = phone ? 74 : 70;
+  }
+  placeCamera(dist) {
+    const y = Math.sin(this.pitch) * dist, r = Math.cos(this.pitch) * dist;
+    this.camera.position.set(Math.sin(this.yaw) * r, y, Math.cos(this.yaw) * r);
+    this.camera.lookAt(0, 0.8, 0.3);
+  }
+  /** The closest camera distance at which every corner of the room lands inside the free area. Cached per angle. */
+  fitDistance() {
+    const key = `${this.yaw.toFixed(3)}|${this.visW}|${this.visH}`;
+    if (key === this.fitKey) return this.fitValue;
+    const cam = this.camera; const tan = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
+    const fx = tan * cam.aspect * (this.visW / this.w), fy = tan * (this.visH / this.h);
+    const corners = [];
+    const hx = ROOM_W / 2 + 0.6, hz = ROOM_D / 2 + 0.6;
+    for (const x of [-hx, hx]) for (const z of [-hz, hz]) for (const y of [-1, WALL_H + 0.2]) corners.push(new THREE.Vector3(x, y, z));
+    const v = new THREE.Vector3();
+    const fits = (d) => {
+      this.placeCamera(d); cam.updateMatrixWorld(); cam.matrixWorldInverse.copy(cam.matrixWorld).invert();
+      return corners.every((c) => { v.copy(c).applyMatrix4(cam.matrixWorldInverse); const z = -v.z; return z > 0.5 && Math.abs(v.x) <= fx * z && Math.abs(v.y) <= fy * z; });
+    };
+    let lo = 10, hi = 240;
+    for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2; if (fits(mid)) hi = mid; else lo = mid; }
+    this.fitKey = key; this.fitValue = hi;
+    return hi;
   }
   update(dt) {
     this.time += dt; this.intro = Math.min(1, this.intro + dt / 1.35);
@@ -628,16 +668,9 @@ export class OfficeView {
     const k = 1 - Math.exp(-dt * 6);
     this.yaw += (this.targetYaw - this.yaw) * k;
     this.zoom += (this.targetZoom - this.zoom) * k;
-    // Fit the room to the free area, whatever the aspect ratio, and let the intro pull back from close up.
-    const fov = THREE.MathUtils.degToRad(this.camera.fov);
-    const visAspect = this.visAspect || 1;
-    const needW = ROOM_W * Math.cos(this.yaw * 0.72) + ROOM_D * Math.sin(Math.abs(this.yaw) * 0.72) + 2.5, needH = (ROOM_D * 0.95 + WALL_H * 1.25 + 3.2) * 0.86;
-    const fitH = (needH / 2) / Math.tan(fov / 2) / (this.visHeightFrac || 1) * (this.visHeightFrac || 1);
-    const fitW = (needW / 2) / (Math.tan(fov / 2) * visAspect);
-    const dist = (Math.max(fitH, fitW) / this.zoom) * (1.5 - 0.5 * e) * (1 / (this.visHeightFrac || 1));
-    const y = Math.sin(this.pitch) * dist, r = Math.cos(this.pitch) * dist;
-    this.camera.position.set(Math.sin(this.yaw) * r, y, Math.cos(this.yaw) * r);
-    this.camera.lookAt(0, 0.8, 0.3);
+    // Fit the room to the free area at any aspect ratio, and let the intro pull back from close up.
+    const dist = (this.fitDistance() / this.zoom) * (1.5 - 0.5 * e);
+    this.placeCamera(dist);
     // Scrolling screens read as real work.
     this.codeTex.offset.y = (this.time * 0.25) % 1;
     this.pageTex.offset.y = (this.time * 0.05) % 1;
@@ -646,7 +679,7 @@ export class OfficeView {
     this.updatePet(dt);
   }
   placeTag(a) {
-    const p = this.tv.copy(a.group.position); p.y += a.seated ? 1.75 : 2.05;
+    const p = this.tv.copy(a.group.position); p.y += a.seated ? 2.15 : 2.5;
     p.project(this.camera);
     const x = (p.x * 0.5 + 0.5) * this.w, y = (-p.y * 0.5 + 0.5) * this.h;
     a.tag.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
@@ -660,7 +693,7 @@ export class OfficeView {
       if (this.petWait <= 0) {
         this.petWait = 2 + Math.random() * 6;
         // Only straight, open lanes: the aisles between the desk rows.
-        const lanes = [[(Math.random() - 0.5) * 16, -2.2], [(Math.random() - 0.5) * 16, 2.9], [(Math.random() - 0.5) * 12, 6.8]];
+        const lanes = [[(Math.random() - 0.5) * 16, -1.8], [(Math.random() - 0.5) * 16, 2.6]];
         this.petTarget = lanes[Math.floor(Math.random() * lanes.length)];
         if (Math.abs(this.petTarget[1] - g.position.z) > 0.6) { this.petTarget = [g.position.x > 0 ? 9 : -9, this.petTarget[1]]; }
       }
