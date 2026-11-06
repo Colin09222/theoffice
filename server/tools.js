@@ -1,7 +1,7 @@
 // The complete set of things an agent can do. There is no shell, no code execution and no real filesystem here.
-import { writeFile, readFile, listFiles, publishSnapshot, WorkspaceError, slugify, slugPattern, floorBytes } from './workspace.js';
+import { writeFile, readFile, listFiles, publishSnapshot, WorkspaceError, slugify, slugPattern } from './workspace.js';
 import { safeFetch, FetchBlocked } from './safefetch.js';
-import { get, all, run } from './db.js';
+import { get } from './db.js';
 
 const str = (o, k, max, req = true) => {
   const v = o?.[k];
@@ -35,6 +35,7 @@ const DEFS = {
     to: S('Staff role or name, e.g. researcher'), title: S('Short task title'), brief: S('What to do and what done looks like'), plan: S('Name of the plan this belongs to'),
     project: S('Project slug this task works on'), private: { type: 'boolean', description: 'True to keep this project hidden from visitors' },
     depends_on: { type: 'array', items: { type: 'integer' }, description: 'Task ids that must finish first' },
+    after_previous: { type: 'boolean', description: 'True to start only after the task you assigned just before this one finishes' },
   }, ['to', 'title', 'brief']),
   review_task: fn('review_task', 'Approve finished work or send it back once with notes.', { task_id: { type: 'integer', description: 'Task id' }, verdict: { type: 'string', enum: ['approve', 'revise'] }, notes: S('Feedback for the staff member') }, ['task_id', 'verdict']),
   cancel_task: fn('cancel_task', 'Cancel a task that is no longer needed.', { task_id: { type: 'integer', description: 'Task id' } }),
@@ -55,17 +56,23 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     return d;
   };
 
+  // Which project a file action belongs to, for visitor redaction. A private project named in the path always wins.
+  const tagFor = (c, path) => {
+    const slug = path.match(/^projects\/([^/]+)\//)?.[1];
+    if (slug && get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', c.floor.id, slug)?.private) return slug;
+    return c.project || slug || '';
+  };
   const handlers = {
     write_file(c, a) {
       const content = typeof a.content === 'string' ? a.content : '';
       const r = writeFile(db, c.floor.id, str(a, 'path', 300), content, c.agent.id, cfg.quotaBytes);
-      c.say('typing', `Writing ${r.path}`, `wrote ${r.path} (${Math.ceil(r.size / 1024)} KB)`);
+      c.say('typing', `Writing ${r.path}`, `wrote ${r.path} (${Math.ceil(r.size / 1024)} KB)`, { project: tagFor(c, r.path) });
       return `Saved ${r.path} (${r.size} bytes).`;
     },
     read_file(c, a) {
       const f = readFile(db, c.floor.id, str(a, 'path', 300));
       if (!f) throw new WorkspaceError('no such file');
-      c.say('reading', `Reading ${f.path}`, `read ${f.path}`);
+      c.say('reading', `Reading ${f.path}`, `read ${f.path}`, { project: tagFor(c, f.path) });
       return wrapUntrusted(`workspace:${f.path}`, f.content.slice(0, 40000));
     },
     list_files(c, a) {
@@ -85,8 +92,9 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
         .map((s) => ({ title: String(s?.title ?? '').slice(0, 200), url: String(s?.url ?? '').slice(0, 1000) }))
         .filter((s) => /^https?:\/\//i.test(s.url));
       const n = publishSnapshot(db, c.floor.id, slug, cfg.quotaBytes);
-      engine.upsertProject(c.floor, slug, { title: str(a, 'title', 120), description: str(a, 'description', 300, false), kind, sources, published: true });
-      c.project = slug;
+      // Work done under a private task stays private, whatever slug it ends up published as.
+      const inherited = !!(c.project && get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', c.floor.id, c.project)?.private);
+      engine.upsertProject(c.floor, slug, { title: str(a, 'title', 120), description: str(a, 'description', 300, false), kind, sources, published: true, makePrivate: inherited });
       c.say('typing', `Publishing ${slug}`, `published ${slug}`, { project: slug });
       engine.emitProject(c.floor.id, slug);
       return `Published ${n} files at ${publicUrl(c.floor.slug, slug)}. Note: the site runs in a sandbox, so it cannot use cookies or localStorage without catching the error.`;
@@ -136,7 +144,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       return 'Filed as pending. Nothing has been bought and you have no way to pay; the boss decides.';
     },
     assign_task(c, a) {
-      const t = engine.assignTask(c.floor, c.agent, { to: str(a, 'to', 60), title: str(a, 'title', 160), brief: str(a, 'brief', 6000), plan: str(a, 'plan', 120, false), project: slugify(str(a, 'project', 60, false), ''), private: a.private === true, dependsOn: Array.isArray(a.depends_on) ? a.depends_on : [] });
+      const t = engine.assignTask(c.floor, c.agent, { to: str(a, 'to', 60), title: str(a, 'title', 160), brief: str(a, 'brief', 6000), plan: str(a, 'plan', 120, false), project: slugify(str(a, 'project', 60, false), ''), private: a.private === true, dependsOn: Array.isArray(a.depends_on) ? a.depends_on : [], afterPrevious: a.after_previous === true });
+      c.assigned.push(t.agentId);
       return `Task #${t.id} assigned to ${t.assignee}.`;
     },
     review_task(c, a) { return engine.reviewTask(c.floor, c.agent, Number(a.task_id), a.verdict === 'revise' ? 'revise' : 'approve', str(a, 'notes', 2000, false)); },
@@ -162,4 +171,3 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
   };
 }
 
-export { floorBytes, all, run };

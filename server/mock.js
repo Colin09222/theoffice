@@ -1,0 +1,109 @@
+// AI_MODE=mock: deterministic scripted model. It speaks the same interface as the real client and returns real tool calls,
+// so every test drives the actual tool loop, ledger, limiter and SSE paths with no key and no spend.
+// Keywords in the boss's message pick scenarios: [ask] [mgrask] [buy] [hire] [fail] [private] [spendy] [slow] [ssrf] [traverse] [inject] [revise] [web].
+import { ProviderError } from './llm.js';
+
+const sleep = (ms, signal) => new Promise((res, rej) => {
+  if (signal?.aborted) return rej(signal.reason);
+  const t = setTimeout(() => { signal?.removeEventListener?.('abort', onAbort); res(); }, ms);
+  const onAbort = () => { clearTimeout(t); rej(signal.reason); };
+  signal?.addEventListener?.('abort', onAbort, { once: true });
+});
+const call = (name, args, i = 0) => ({ id: `mock_${name}_${i}`, name, args: JSON.stringify(args) });
+const ACT = /\b(go|build|make|do it|start|create|launch|ship|act)\b/i;
+
+const SITE = (name, brief) => `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${name}</title><link rel="stylesheet" href="style.css"></head>
+<body><main><p class="kicker">Made on this floor</p><h1>${name}</h1><p>${brief}</p>
+<button id="b">Clap for the staff</button> <output id="o">0 claps</output></main><script src="app.js"></script></body></html>`;
+const CSS = `:root{--ink:#1d2433;--paper:#f7f1e3;--hot:#d9774a}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--paper);color:var(--ink);font:18px/1.5 Georgia,serif;padding:24px}main{max-width:34em}h1{font-size:3rem;line-height:1.05;margin:.2em 0}.kicker{letter-spacing:.14em;text-transform:uppercase;font:12px ui-monospace,monospace;color:var(--hot)}button{font:inherit;padding:.5em 1em;border:0;border-radius:99px;background:var(--hot);color:#fff;cursor:pointer}`;
+const JS = `let n=0;const o=document.getElementById('o');document.getElementById('b').addEventListener('click',()=>{n++;o.textContent=n+(n===1?' clap':' claps')});`;
+const EVIL = `<!doctype html><title>probe</title><h1 id="r">probe</h1><script>let c='none';try{c=document.cookie}catch(e){c='blocked:'+e.name}document.getElementById('r').textContent=c</script>`;
+
+function managerStep(meta) {
+  const boss = meta.lastBoss || '';
+  const slug = meta.slugFor(boss);
+  if (meta.toReview.length) {
+    const sendBack = (t) => /\[revise\]/.test(t.brief) && t.revisions === 0;
+    if (meta.step === 0) return { toolCalls: meta.toReview.map((t, i) => call('review_task', { task_id: t.id, verdict: sendBack(t) ? 'revise' : 'approve', notes: 'Looks good.' }, i)) };
+    if (meta.openCount || meta.toReview.some(sendBack)) return { content: 'Sent one thing back for another pass. I will report when it returns.' };
+    const links = meta.published.map((p) => `[${p.title}](${p.url})`).join(', ');
+    return { content: `All done, boss. ${links ? `Published: ${links}.` : 'Nothing needed publishing.'} Want another round?` };
+  }
+  if (meta.answered) return { content: 'Thanks boss, that settles it.' };
+  if (!meta.isFreshBoss) return { content: 'The team has wrapped up what they could, boss. What next?' };
+  if (/\[mgrask\]/.test(boss) && meta.step === 0) return { toolCalls: [call('ask_boss', { question: 'Is the budget for this real or imaginary?' })] };
+  if (ACT.test(boss)) {
+    if (meta.step === 0 && meta.openCount === 0) {
+      const p = { plan: `Launch ${slug}`, project: slug, ...(/\[private\]/.test(boss) ? { private: true } : {}) };
+      const flag = (re, s) => (re.test(boss) ? ` ${s}` : '');
+      const calls = [];
+      if (/\[hire\]/.test(boss)) calls.push(call('hire_staff', { role: 'analyst', name: 'Quill' }, 90));
+      calls.push(call('assign_task', { ...p, to: 'researcher', title: 'Find out who this is for', brief: `Research the idea: ${boss}${flag(/\[buy\]/, '[buy]')}${flag(/\[ssrf\]/, '[ssrf]')}${flag(/\[web\]/, '[web]')}` }, 0));
+      calls.push(call('assign_task', { ...p, to: 'writer', title: 'Write the launch brief', brief: `Write the brief.${flag(/\[ask\]/, '[ask]')}${flag(/\[revise\]/, '[revise]')}` }, 1));
+      calls.push(call('assign_task', { ...p, to: 'designer', title: 'Pick the look', brief: 'Write style.css.' }, 2));
+      calls.push(call('assign_task', { ...p, to: 'builder', title: 'Build the mini-site', after_previous: true, brief: `Build and publish the site.${flag(/\[traverse\]/, '[traverse]')}${flag(/\[inject\]/, '[inject]')}` }, 3));
+      if (/\[hire\]/.test(boss)) calls.push(call('assign_task', { ...p, to: 'analyst', title: 'Size it up', brief: 'Write a note on the numbers.' }, 4));
+      return { toolCalls: calls };
+    }
+    return { content: `Right away. The team has a plan for **${slug}**: research, a brief, a look, then a working site. Pull up a chair and watch.` };
+  }
+  return { content: `Love it. Three angles, boss:\n\n1. **The small version:** one page, one promise, live today.\n2. **The silly version:** the same idea, but with a mascot.\n3. **The serious version:** research first, then a proper brief.\n\nTell me to **go** when you want the staff on it.` };
+}
+
+function staffStep(meta) {
+  const { role, task, step, floorSlug } = meta;
+  const p = task.project || 'project';
+  const dir = `projects/${p}`;
+  const b = task.brief;
+  const list = [];
+  if (role === 'researcher') {
+    list.push(call('list_files', {}));
+    if (/\[ssrf\]/.test(b)) list.push(call('fetch_url', { url: 'http://169.254.169.254/latest/meta-data/' }));
+    if (/\[web\]/.test(b)) list.push(call('web_search', { query: 'tiny companies' }));
+    if (/\[buy\]/.test(b)) list.push(call('file_purchase_request', { item: 'A domain name', price: 12, why: 'So the launch has its own address.', link: 'https://example.com/domain' }));
+    list.push(call('write_file', { path: `${dir}-research/index.md`.replace(/^projects\//, 'projects/'), content: `# Research notes\n\nPeople like small things that work.\n\n## Findings\n\n- Keep it to one page.\n- Say what it does in a line.\n` }));
+    list.push(call('publish_project', { project: `${p}-research`, title: `${p}: research`, description: 'Who it is for and what they want.', kind: 'research', sources: [{ title: 'Example', url: 'https://example.com/' }] }));
+  } else if (role === 'writer') {
+    if (/\[ask\]/.test(b)) list.push(call('ask_boss', { question: 'Should the tone be silly or serious?' }));
+    list.push(call('write_file', { path: `${dir}-brief/index.md`, content: `# The launch brief\n\nFor **${floorSlug}**.${meta.answers.length ? `\n\nThe boss says: ${meta.answers[0]}` : ''}\n\n1. Make the thing.\n2. Show the thing.\n3. Enjoy the thing.\n` }));
+    list.push(call('publish_project', { project: `${p}-brief`, title: `${p}: launch brief`, description: 'The plan, in one page.', kind: 'doc' }));
+  } else if (role === 'designer') {
+    list.push(call('write_file', { path: `${dir}/style.css`, content: CSS }));
+  } else if (role === 'builder') {
+    if (/\[traverse\]/.test(b)) list.push(call('write_file', { path: '../../../etc/passwd', content: 'nope' }));
+    list.push(call('read_file', { path: `${dir}/style.css` }));
+    list.push(call('write_file', { path: `${dir}/index.html`, content: /\[inject\]/.test(b) ? EVIL : SITE(p, 'A real page, written by a tiny staff while you watched.') }));
+    list.push(call('write_file', { path: `${dir}/app.js`, content: JS }));
+    list.push(call('publish_project', { project: p, title: p, description: 'A working little site.', kind: 'site' }));
+  } else {
+    list.push(call('write_file', { path: `${dir}-notes/${role}.md`, content: `# ${role} notes\n\nDone.\n` }));
+  }
+  if (step < list.length) return { toolCalls: [list[step]] };
+  return { content: `Finished "${task.title}".` };
+}
+
+export function createMockClient(cfg) {
+  const failed = new Set();
+  return {
+    failed,
+    async chat({ messages, onToken, signal, pricing, meta }) {
+      const boss = meta.lastBoss || meta.task?.brief || '';
+      const delay = /\[slow\]/.test(boss) || /\[slow\]/.test(meta.allBoss || '') ? Math.max(cfg.mockDelayMs, 120) * 4 : cfg.mockDelayMs;
+      await sleep(delay, signal);
+      if (/\[fail\]/.test(meta.allBoss || '') && !failed.has(meta.floorId)) { failed.add(meta.floorId); throw new ProviderError('Model provider said 503: mock outage', { status: 503, retryable: true }); }
+      const r = meta.kind === 'manager' ? managerStep(meta) : staffStep(meta);
+      const content = r.content || '';
+      if (content && onToken) {
+        const words = content.split(/(?<=\s)/);
+        for (const w of words) { if (cfg.mockDelayMs > 0) await sleep(Math.min(18, cfg.mockDelayMs / 8), signal); onToken(w); }
+      }
+      const prompt = Math.ceil(JSON.stringify(messages).length / 4);
+      const completion = Math.ceil((content.length + JSON.stringify(r.toolCalls || []).length) / 4);
+      const spendy = /\[spendy\]/.test(meta.allBoss || '');
+      const cost = spendy ? 0.5 : (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6;
+      return { content, toolCalls: r.toolCalls || [], finish: 'stop', usage: { prompt, completion, cost, real: false } };
+    },
+  };
+}

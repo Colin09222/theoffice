@@ -53,7 +53,7 @@ export function isBlockedIp(ip) {
   if (fam === 6) {
     const bare = ip.split('%')[0];
     const inner = embeddedV4(bare);
-    if (inner) return v4.check(inner, 'ipv4') || (bare.toLowerCase().startsWith('64:ff9b') ? false : false);
+    if (inner) return v4.check(inner, 'ipv4');
     return v6.check(bare, 'ipv6');
   }
   return true; // not an IP at all: refuse
@@ -103,14 +103,13 @@ export function htmlToText(html) {
     .replace(/[ \t\r\f]+/g, ' ').replace(/\n\s*\n\s*/g, '\n\n').trim();
 }
 
-function once(url, target, opts) {
+function once(url, opts) {
   return new Promise((resolve, reject) => {
     const mod = url.protocol === 'https:' ? https : http;
     let settled = false;
     const finish = (fn, v) => { if (!settled) { settled = true; clearTimeout(timer); fn(v); } };
     const req = mod.request(url, {
       method: 'GET', lookup: guardedLookup(opts.isBlocked, opts.resolver), agent: false,
-      ...(target.overridePort ? { port: target.overridePort } : {}),
       headers: { 'user-agent': 'TheOfficeBot/1.0', accept: 'text/html,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1', 'accept-encoding': 'identity' },
     }, (res) => {
       const remote = res.socket?.remoteAddress;
@@ -148,7 +147,7 @@ export async function safeFetch(raw, { maxBytes = 512 * 1024, timeoutMs = 12000,
     else u = checkUrl(current, { denyHosts }).url;
     const remainingMs = () => Math.max(1, deadline - Date.now());
     if (remainingMs() <= 1) throw new FetchBlocked('timed out');
-    const r = await once(u, {}, { maxBytes, isBlocked, resolver, remainingMs });
+    const r = await once(u, { maxBytes, isBlocked, resolver, remainingMs });
     if (r.redirect) { current = new URL(r.redirect, u).href; continue; }
     const text = /html/i.test(r.type) ? htmlToText(r.body) : r.body;
     return { url: u.href, status: r.status, type: r.type, text, truncated: r.truncated };
