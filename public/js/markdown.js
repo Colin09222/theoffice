@@ -13,7 +13,7 @@ export function safeUrl(raw) {
 }
 
 function inline(text) {
-  const codes = [];
+  const codes = []; const links = [];
   let s = String(text).replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0001${codes.length - 1}\u0001`; });
   s = esc(s);
   // [label](url): the url arrives entity-escaped, which also keeps quotes out of the attribute.
@@ -21,15 +21,17 @@ function inline(text) {
     const un = href.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
     const u = safeUrl(un);
     if (!u) return label;
-    return `<a href="${esc(u)}" rel="noopener noreferrer nofollow" target="_blank">${label}</a>`;
+    links.push(`<a href="${esc(u)}" rel="noopener noreferrer nofollow" target="_blank">${label}</a>`); // parked so emphasis rules never touch the href
+    return `\u0002${links.length - 1}\u0002`;
   });
   s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>').replace(/(^|[\s(])_([^_\n]+)_/g, '$1<em>$2</em>');
+  s = s.replace(/\u0002(\d+)\u0002/g, (_, i) => links[Number(i)] ?? '');
   s = s.replace(/\u0001(\d+)\u0001/g, (_, i) => `<code>${esc(codes[Number(i)] ?? '')}</code>`);
   return s;
 }
 
 export function renderMarkdown(src) {
-  const lines = String(src ?? '').replace(/\r\n?/g, '\n').replace(/\u0001/g, '').split('\n');
+  const lines = String(src ?? '').replace(/\r\n?/g, '\n').replace(/[\u0001\u0002]/g, '').split('\n');
   const out = []; let i = 0;
   while (i < lines.length) {
     const l = lines[i];
