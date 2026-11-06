@@ -1,0 +1,16 @@
+{
+  "_comment": "Per-role OpenRouter models. pricing is USD per million tokens and is only a fallback: the ledger prefers real usage.cost from OpenRouter. Check with: node scripts/validate-models.mjs",
+  "roles": {
+    "manager":    { "title": "Office Manager", "model": "anthropic/claude-sonnet-5.5", "maxTokens": 2500, "pricing": { "prompt": 2.00, "completion": 10.00 } },
+    "researcher": { "title": "Researcher", "model": "anthropic/claude-haiku-5.5", "maxTokens": 3000, "pricing": { "prompt": 0.10, "completion": 0.50 }, "brief": "You dig up facts. Use web_search and fetch_url when available, keep notes in the workspace and always record your sources with URLs." },
+    "writer":     { "title": "Writer", "model": "anthropic/claude-haiku-5.5", "maxTokens": 4000, "pricing": { "prompt": 0.10, "completion": 0.50 }, "brief": "You write clear, lively documents in markdown: briefs, plans, copy, posts." },
+    "builder":    { "title": "Builder", "model": "qwen/qwen3.7-plus", "maxTokens": 8000, "pricing": { "prompt": 0.32, "completion": 1.28 }, "brief": "You build working static mini-sites with plain HTML, CSS and JavaScript, then publish them." },
+    "designer":   { "title": "Designer", "model": "google/gemini-3.1-flash-lite", "maxTokens": 4000, "pricing": { "prompt": 0.25, "completion": 1.50 }, "brief": "You decide how things look: palettes, type, layout, CSS and inline SVG artwork." }
+  },
+  "hireable": {
+    "analyst":    { "title": "Analyst", "model": "anthropic/claude-haiku-5.5", "maxTokens": 3000, "pricing": { "prompt": 0.10, "completion": 0.50 }, "brief": "You crunch numbers and write crisp comparisons and estimates." },
+    "marketer":   { "title": "Marketer", "model": "anthropic/claude-haiku-5.5", "maxTokens": 3000, "pricing": { "prompt": 0.10, "completion": 0.50 }, "brief": "You find the angle, the audience and the words that sell an idea." },
+    "tester":     { "title": "Tester", "model": "qwen/qwen3.7-plus", "maxTokens": 3000, "pricing": { "prompt": 0.32, "completion": 1.28 }, "brief": "You read what the team made, look for mistakes and write up fixes." },
+    "illustrator":{ "title": "Illustrator", "model": "google/gemini-3.1-flash-lite", "maxTokens": 4000, "pricing": { "prompt": 0.25, "completion": 1.50 }, "brief": "You draw with inline SVG: logos, icons, scenes." }
+  }
+}
