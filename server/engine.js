@@ -120,7 +120,7 @@ export class Engine {
     const f = get(this.db, 'SELECT budget_notice_day d FROM floors WHERE id=?', floor.id);
     if (f.d === day) return;
     run(this.db, 'UPDATE floors SET budget_notice_day=? WHERE id=?', day, floor.id);
-    this.managerSays(floor.id, 'That\'s the budget for today, boss. The staff have downed tools and everything is saved. We\'ll pick it back up tomorrow.');
+    this.officeNotice(floor.id, 'That\'s the budget for today, boss. The staff have downed tools and everything is saved. We\'ll pick it back up tomorrow.');
     this.feed(floor.id, null, 'Budget reached for today. Back tomorrow.', '');
     this.emitFloor(floor.id);
   }
@@ -200,7 +200,8 @@ export class Engine {
       `Recently finished: ${recent.length ? recent.map((t) => `#${t.id} [${t.status}] "${t.title}": ${t.result.slice(0, 200)}`).join(' | ') : 'none'}`,
       `Published: ${published.length ? published.map((p) => `${p.title} (${p.kind}${p.private ? ', private' : ''}) ${p.url}`).join(' | ') : 'nothing yet'}`,
     ].join('\n');
-    const msgs = all(this.db, 'SELECT id,role,text FROM messages WHERE floor_id=? ORDER BY id DESC LIMIT 30', floor.id).reverse();
+    // 'office' notices (budget, outage, stop) are for the boss only. If they reached the model it would lose the thread.
+    const msgs = all(this.db, "SELECT id,role,text FROM messages WHERE floor_id=? AND role!='office' ORDER BY id DESC LIMIT 30", floor.id).reverse();
     const roster = { manager: mgr.name };
     const out = [{ role: 'system', content: managerPrompt(floor, boss, roster) }];
     for (const m of msgs) {
@@ -364,7 +365,7 @@ export class Engine {
       requeue();
       if (get(this.db, 'SELECT paused FROM floors WHERE id=?', floorId)?.paused) return;  // a sibling run already reported it
       this.pauseFloor(floorId, `The model provider is having trouble: ${scrub(e.message, this.cfg)}`);
-      this.managerSays(floorId, 'Boss, the model provider is failing, so I\'ve paused the floor rather than burn money retrying. Nothing is lost. Press **Resume** when you want us to try again.');
+      this.officeNotice(floorId, 'Boss, the model provider is failing, so I\'ve paused the floor rather than burn money retrying. Nothing is lost. Press **Resume** when you want us to try again.');
       return;
     }
     requeue();
@@ -494,7 +495,7 @@ export class Engine {
   bossMessage(floor, text) {
     this.addMessage(floor.id, 'boss', null, text);
     run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
-    if (this.floorState(floor.id).budgetStopped) this.managerSays(floor.id, 'Noted, boss. Today\'s budget is used up, so I\'ll pick this up first thing tomorrow.');
+    if (this.floorState(floor.id).budgetStopped) this.officeNotice(floor.id, 'Noted, boss. Today\'s budget is used up, so I\'ll pick this up first thing tomorrow.');
     this.kick();
   }
   pauseFloor(floorId, reason = 'Paused by the boss') {
@@ -522,7 +523,7 @@ export class Engine {
   }
   stopFloor(floorId) {
     this.cancelOpen(floorId);
-    this.managerSays(floorId, 'Everyone has stopped, boss. All open tasks are cancelled and finished files are still on the drive.');
+    this.officeNotice(floorId, 'Everyone has stopped, boss. All open tasks are cancelled and finished files are still on the drive.');
   }
   redirectFloor(floor, text) {
     this.cancelOpen(floor.id);
@@ -540,6 +541,10 @@ export class Engine {
   managerSays(floorId, text) {
     const mgr = get(this.db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", floorId);
     this.addMessage(floorId, 'manager', mgr?.id ?? null, text);
+  }
+  officeNotice(floorId, text) {
+    const mgr = get(this.db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", floorId);
+    this.addMessage(floorId, 'office', mgr?.id ?? null, text);
   }
   feed(floorId, agent, text, project) { this.emit(floorId, 'feed', { agent: agent?.id ?? null, name: agent?.name ?? 'Office', text, ts: this.now() }, { project }); }
   emit(floorId, type, data, { persist = true, project = '', chat = false, ownerOnly = false } = {}) {
