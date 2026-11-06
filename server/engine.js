@@ -259,14 +259,18 @@ export class Engine {
         }
         if (ctx.suspend) break;
       }
-      this.settleReviews(floorId);
+      this.settleReviews(floorId, meta.toReview);
     } catch (e) { this.handleRunError(floorId, mgr, null, e, () => { run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floorId); }); }
   }
-  settleReviews(floorId) {
+  // Work the manager was shown but neither approved nor sent back is accepted, so nothing sits in review forever.
+  // A revision that came back mid-turn has a new revision count, and is left for the next wake.
+  settleReviews(floorId, seen) {
     const open = get(this.db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked')", floorId).n;
     if (open) return;
-    const left = all(this.db, "SELECT id FROM tasks WHERE floor_id=? AND status='review'", floorId);
-    for (const t of left) { run(this.db, "UPDATE tasks SET status='done', updated_at=? WHERE id=?", this.now(), t.id); this.emitTask(t.id); }
+    for (const t of seen) {
+      const r = run(this.db, "UPDATE tasks SET status='done', updated_at=? WHERE id=? AND status='review' AND revisions=?", this.now(), t.id, t.revisions);
+      if (r.changes) this.emitTask(t.id);
+    }
   }
 
   // ---- staff ----
@@ -446,9 +450,9 @@ export class Engine {
   hireStaff(floor, role, name) {
     const cfg = this.models.hireable[role] || this.models.roles[role];
     if (!cfg || role === 'manager') throw new ToolError(`can't hire "${role.slice(0, 30)}". Hireable: ${Object.keys(this.models.hireable).join(', ')}`);
+    if (get(this.db, 'SELECT 1 x FROM agents WHERE floor_id=? AND role=?', floor.id, role)) return `You already have a ${cfg.title}.`;
     const n = get(this.db, "SELECT COUNT(*) n FROM agents WHERE floor_id=? AND role!='manager'", floor.id).n;
     if (n >= this.cfg.maxStaff) throw new ToolError(`this floor is at its staff limit of ${this.cfg.maxStaff}`);
-    if (get(this.db, 'SELECT 1 x FROM agents WHERE floor_id=? AND role=?', floor.id, role)) return `You already have a ${cfg.title}.`;
     const nm = cleanName(name) || STAFF_NAMES[(floor.id * 3 + n) % STAFF_NAMES.length];
     const r = run(this.db, 'INSERT INTO agents (floor_id,role,title,name,look,hired,created_at) VALUES (?,?,?,?,?,1,?)', floor.id, role, cfg.title, nm, JSON.stringify(seededLook(floor.id * 17 + n * 5 + 3)), this.now());
     const a = get(this.db, 'SELECT * FROM agents WHERE id=?', Number(r.lastInsertRowid));
@@ -522,8 +526,8 @@ export class Engine {
   }
   redirectFloor(floor, text) {
     this.cancelOpen(floor.id);
+    this.addMessage(floor.id, 'note', null, 'The boss has redirected the team: all earlier open tasks were cancelled. Follow the next instruction.');
     this.addMessage(floor.id, 'boss', null, text);
-    this.addMessage(floor.id, 'note', null, 'The boss has redirected the team: earlier open tasks were cancelled. Follow the new instruction above.');
     run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
     this.kick();
   }

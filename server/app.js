@@ -71,7 +71,6 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const statics = buildStatic();
   const secret = A.serverSecret(db);
   const adminHash = cfg.adminPassword ? A.hashSecret(cfg.adminPassword) : '';
-  const adminFails = { n: 0 };
 
   // ---- request helpers ----
   const ipOf = (req) => {
@@ -103,7 +102,6 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     }
     try { const v = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); if (!v || typeof v !== 'object' || Array.isArray(v)) throw 0; return v; } catch { throw new HttpError(400, 'bad_json'); }
   }
-  const expectedOrigin = (req) => cfg.publicOrigin || `${req.headers['x-forwarded-proto'] && cfg.trustProxy ? String(req.headers['x-forwarded-proto']).split(',')[0] : 'http'}://${req.headers.host}`;
   function checkOrigin(req) {
     const origin = req.headers.origin;
     if (!origin || origin === 'null') throw new HttpError(403, 'bad_origin', 'Cross-site request refused.');
@@ -114,7 +112,6 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const site = req.headers['sec-fetch-site'];
     if (site && site !== 'same-origin') throw new HttpError(403, 'bad_origin', 'Cross-site request refused.');
   }
-  void expectedOrigin;
   const sessionOf = (req) => A.loadSession(db, A.parseCookies(req.headers.cookie)[A.COOKIE], 'owner', now());
   const adminOf = (req) => A.loadSession(db, A.parseCookies(req.headers.cookie)[A.ADMIN_COOKIE], 'admin', now());
   const floorBySlug = (slug) => {
@@ -371,9 +368,9 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const exp = Math.floor(now() / 1000) + 3600;
     return `${BASE}/f/${f.slug}/${slug}/~p${exp}.${A.signPreview(secret, f.id, slug, exp)}/`;
   };
-  GET('/api/floors/:slug/files/:b64', async ({ req, res, p }) => {
+  GET('/api/floors/:slug/files/:encoded', async ({ req, res, p }) => {
     const f = requireOwner(req, p.slug);
-    let path; try { path = cleanPath(Buffer.from(p.b64, 'base64url').toString('utf8')); } catch { throw new HttpError(400, 'bad_path'); }
+    let path; try { path = cleanPath(Buffer.from(p.encoded, 'base64url').toString('utf8')); } catch { throw new HttpError(400, 'bad_path'); }
     const file = readFile(db, f.id, path);
     if (!file) throw new HttpError(404, 'not_found');
     // Never served as a page: the app shows this as text, or as sanitised markdown.
@@ -405,7 +402,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     limit('admin', ip);
     limit('admin', 'all');
     const b = await readJson(req, 2048);
-    if (!adminHash || !A.verifySecret(String(b.password ?? '').slice(0, 300), adminHash)) { adminFails.n++; throw new HttpError(401, 'bad_login', 'Wrong password.'); }
+    if (!adminHash || !A.verifySecret(String(b.password ?? '').slice(0, 300), adminHash)) throw new HttpError(401, 'bad_login', 'Wrong password.');
     const s = A.createSession(db, 'admin', null, A.ADMIN_MAX_AGE, now());
     json(res, 200, { csrf: s.csrf }, { 'set-cookie': A.cookieHeader(A.ADMIN_COOKIE, s.token, A.ADMIN_MAX_AGE) });
   });
@@ -478,7 +475,6 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     const pr = get(db, 'SELECT * FROM projects WHERE floor_id=? AND slug=? AND published_at IS NOT NULL', f.id, pslug);
     if (!pr) return miss();
     // Private projects answer exactly like missing ones, unless a valid owner session or signed link is present.
-    let prefix = '';
     let tail = rest;
     let signed = false;
     if (rest[0]?.startsWith('~p')) {
@@ -486,7 +482,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (!m) return miss();
       const exp = Number(m[1]);
       if (exp * 1000 < now() || !A.safeEqual(m[2], A.signPreview(secret, f.id, pr.slug, exp))) return miss();
-      signed = true; prefix = `/${rest[0]}`; tail = rest.slice(1);
+      signed = true; tail = rest.slice(1);
     }
     if (pr.private && !signed) {
       const s = sessionOf(req);
@@ -499,7 +495,6 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       res.writeHead(301, { ...SITE, location: `${BASE}/f/${f.slug}/${pr.slug}/` });
       return res.end();
     }
-    void prefix;
     let path = tail.filter((s, i) => !(s === '' && i === tail.length - 1)).join('/');
     if (path === '' || req.url.split('?')[0].endsWith('/')) path = path ? `${path}/index.html` : 'index.html';
     let safe;
