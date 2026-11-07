@@ -5,7 +5,8 @@ import { get, all } from '../server/db.js';
 import { createMockSessions } from '../server/mock-sessions.js';
 import { unpackTgz } from '../server/tarball.js';
 import { toAnthropic } from '../server/anthropic.js';
-import { withFiles, MAX_FILE_BLOCKS } from '../server/attachments.js';
+import http from 'node:http';
+import { withFiles, imageSize, imageCheck, MAX_FILE_BLOCKS } from '../server/attachments.js';
 import { sniff, uploadName, applySync, baselineOf, projectFiles, writeBinaryFile, MAX_SYNC_FILE_BYTES } from '../server/workspace.js';
 import { boot, claim, until, waitDone, Client } from './helpers.js';
 
@@ -13,8 +14,10 @@ const open = [];
 after(async () => { for (const t of open) await t.close(); });
 const start = async (over = {}, deps = {}) => { const t = await boot({ peopleTalk: false, ...over }, deps); open.push(t); return t; };
 
-// Real headers for each kind, with a little body after them.
-const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('IHDR-and-the-rest-of-a-tiny-png')]);
+// Real headers for each kind, with a little body after them. A PNG's header says how big it is, as the server reads it.
+const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
+const png = (width = 1, height = 1, body = Buffer.from('the-rest-of-a-tiny-png')) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), u32(13), Buffer.from('IHDR'), u32(width), u32(height), Buffer.from([8, 6, 0, 0, 0]), u32(0), body]);
+const PNG = png();
 const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('JFIF body')]);
 const GIF = Buffer.from('GIF89a tiny gif');
 const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([4, 0, 0, 0]), Buffer.from('WEBPVP8 body')]);
@@ -99,6 +102,21 @@ describe('uploading', () => {
     const q = await upload(c, 'fill.png', fill);
     assert.equal(q.status, 507); assert.match(q.data.message || JSON.stringify(q.data), /quota/i);
     assert.equal(get(t.db, 'SELECT COUNT(*) n FROM attachments').n, 0);
+  });
+
+  test('an upload has longer to arrive than any other request', async () => {
+    const t = await start({ requestTimeoutMs: 300, uploadTimeoutMs: 5000 }); const c = await claim(t);
+    // Half the body, a pause, then the rest. Gives the status, or 0 when the line was cut first.
+    const slow = (path, body, headers, pauseMs) => new Promise((resolve) => {
+      const req = http.request({ host: '127.0.0.1', port: t.port, method: 'POST', path: `/theoffice${path}`, headers: { cookie: c.cookieHeader(), origin: c.origin, 'x-office-csrf': c.csrf, 'content-length': body.length, ...headers } });
+      req.on('response', (res) => { res.resume(); resolve(res.statusCode); });
+      req.on('error', () => resolve(0));
+      req.write(body.subarray(0, body.length >> 1));
+      setTimeout(() => req.end(body.subarray(body.length >> 1)), pauseMs);
+    });
+    assert.equal(await slow(`/api/floors/${c.slug}/attachments`, PNG, { 'content-type': 'image/png', 'x-filename': 'slow.png' }, 900), 201);
+    const cut = await slow(`/api/floors/${c.slug}/chat`, Buffer.from(JSON.stringify({ text: 'hello there, take your time' })), { 'content-type': 'application/json' }, 900);
+    assert.ok(cut === 408 || cut === 0, `a slow chat message is cut off, got ${cut}`);
   });
 
   test('only the floor\'s own boss, with the CSRF token, can upload', async () => {
@@ -258,6 +276,53 @@ describe('what the model sees', () => {
     // Only the newest few go along.
     const many = Array.from({ length: MAX_FILE_BLOCKS + 3 }, () => ({ role: 'user', content: 'x', files: [p1] }));
     assert.equal(withFiles(t.db, f.id, many, 'anthropic').filter((m) => m.office_blocks).length, 1, 'one path counts once');
+  });
+
+  test('view_file sends a note, never a picture Claude would refuse, so the turn carries on', async () => {
+    const t = await start(); const c = await claim(t);
+    const f = floorOf(t, c);
+    const ctx = t.app.engine.toolCtx(f, get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='builder'", f.id), null, ['view_file', 'copy_file']);
+    const view = (path) => t.app.engine.tools.exec(ctx, 'view_file', JSON.stringify({ path }));
+    const put = async (name, body) => get(t.db, 'SELECT path FROM attachments WHERE id=?', (await upload(c, name, body)).data.id).path;
+    // Claude's 5 MB counts the base64, a third bigger than the file, and the cut is 4.5 MB of it: 3,538,944 bytes of file.
+    const head = png(1, 1, Buffer.alloc(0)).length;
+    const fits = await put('fits.png', png(1200, 800, Buffer.alloc(3538944 - head)));
+    const heavy = await put('heavy.png', png(1200, 800, Buffer.alloc(3538945 - head)));
+    const wide = await put('wide.png', png(8001, 10));
+    const tall = await put('tall.png', png(10, 8001));
+    const edge = await put('edge.png', png(8000, 8000));
+    const zip = await put('pack.zip', ZIP);
+    const broken = await put('broken.jpg', JPG);
+    for (const p of [fits, edge]) assert.deepEqual((await view(p)).files, [p], `${p} is shown`);
+    for (const [p, why] of [[heavy, /3\.4 MB, too big/], [wide, /8001x10 px, over 8000 px/], [tall, /10x8001 px/], [zip, /isn't a png, jpeg, gif or webp/], [broken, /header can't be read/]]) {
+      const note = await view(p);
+      assert.equal(typeof note, 'string', `${p} gets a note, not the file`);
+      assert.match(note, why);
+      assert.match(note, /is saved, but it can't be shown to you .* It can still be copied into a project with copy_file\.$/);
+    }
+    // The same rule holds wherever a file would go along, so a picture the boss attached can't fail the call either.
+    const sent = toAnthropic(withFiles(t.db, f.id, [{ role: 'user', content: 'look', files: [heavy, wide, broken, fits] }], 'anthropic'), []).messages[0].content;
+    assert.equal(sent.filter((b) => b.type === 'image').length, 1);
+    assert.deepEqual(sent.filter((b) => b.type === 'text' && b.text.startsWith('<untrusted_data')).map((b) => b.text), [`<untrusted_data source="file:${fits}">`]);
+    // A picture goes as what its bytes are, whatever its name says.
+    const jpegInPng = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08]), Buffer.from([0x01, 0x00, 0x02, 0x00]), Buffer.alloc(12)]);
+    writeBinaryFile(t.db, f.id, 'projects/x/odd.png', jpegInPng, null, t.cfg.quotaBytes);
+    const odd = toAnthropic(withFiles(t.db, f.id, [{ role: 'user', content: 'look', files: ['projects/x/odd.png'] }], 'anthropic'), []).messages[0].content;
+    assert.equal(odd.find((b) => b.type === 'image').source.media_type, 'image/jpeg');
+  });
+
+  test('a picture\'s size is read from its header', () => {
+    assert.deepEqual(imageSize(png(640, 480)), { width: 640, height: 480 });
+    assert.deepEqual(imageSize(Buffer.from('GIF89a\x20\x03\x58\x02rest', 'latin1')), { width: 800, height: 600 });
+    // A JPEG with an APP0 segment ahead of its frame header.
+    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x4a, 0x46]), Buffer.from([0xff, 0xc2, 0x00, 0x11, 0x08, 0x0b, 0xb8, 0x0f, 0xa0]), Buffer.alloc(12)]);
+    assert.deepEqual(imageSize(jpeg), { width: 4000, height: 3000 });
+    const riff = (chunk, body) => Buffer.concat([Buffer.from('RIFF'), u32(0), Buffer.from('WEBP'), Buffer.from(chunk), u32(0), body]);
+    assert.deepEqual(imageSize(riff('VP8 ', Buffer.from([0, 0, 0, 0x9d, 0x01, 0x2a, 0x80, 0x02, 0xe0, 0x01]))), { width: 640, height: 480 });
+    assert.deepEqual(imageSize(riff('VP8L', Buffer.from([0x2f, 0x7f, 0xc2, 0x77, 0x00]))), { width: 640, height: 480 });
+    assert.deepEqual(imageSize(riff('VP8X', Buffer.from([0, 0, 0, 0, 0x7f, 0x02, 0x00, 0xdf, 0x01, 0x00]))), { width: 640, height: 480 });
+    assert.equal(imageSize(JPG), null); assert.equal(imageSize(Buffer.from([0x89, 0x50, 0x4e, 0x47])), null);
+    assert.deepEqual(imageCheck(png(8000, 8000)), { type: 'image/png' });
   });
 
   test('the bytes decide the kind', () => {

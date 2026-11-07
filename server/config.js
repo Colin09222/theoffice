@@ -63,6 +63,9 @@ export function loadConfig(env = process.env, overrides = {}) {
     mockDelayMs: num(env.MOCK_DELAY_MS, 400),
     retryBaseMs: num(env.RETRY_BASE_MS, 1000),
     rateScale: 1, // only tests raise this, through overrides; there is deliberately no env switch
+    // How long a request may take to arrive in full; the boss's upload gets longer, for a big photo on a slow phone line. Tests shorten these through overrides.
+    requestTimeoutMs: 30000,
+    uploadTimeoutMs: 120000,
     fetchDenyHosts: (env.FETCH_DENY_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
     // A real computer for the Builder and Tester: Claude Managed Agents, one Anthropic-hosted container per task. Off until the deploy turns it on.
     computerEnabled: env.COMPUTER_ENABLED === '1',
