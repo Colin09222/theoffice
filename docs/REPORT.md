@@ -378,13 +378,25 @@ Two test changes follow from the no-dollars rule: the spend label is gone, and a
 | Website job, typed the way people type, one line | Writer, Designer and Builder on a real computer, published, 5.6 minutes. No figure reached the boss or a visitor | $1.04 |
 | Silly tone against serious tone, same request | Clearly different. Silly: "Not a submarine, not a spaceship, not a very small bank." Serious: "The menu is short by intention." | $0.34 |
 | `ask_buddehbot` round trip through the real CLI in its own process | Asked, fenced in the listing, answered, the manager told the boss. The answer text was made up for the check and isn't a fact about the building | $0.09 |
-| A low `BUDGET_ANTHROPIC_USD` | 13 of 13: no Claude call, the boss told once with no digits, no figure in the owner's or a visitor's page in real Chrome, the admin CLI shows 100%, an OpenRouter role carried on, a restart stayed stopped, raising it resumed by itself | $0.10 |
+| A low `BUDGET_ANTHROPIC_USD` | 13 of 13: no Claude call, the boss told once with no digits, no figure in the owner's or a visitor's page in real Chrome, the admin CLI shows 100%, an OpenRouter role carried on, a restart stayed stopped, raising it resumed by itself | $0.11 |
 | A real computer session at a 20-cent limit | 11 of 11: capped to 20 cents, stopped at 20.25, the task waited, raising the limit carried on in the same session and published | $0.30 |
 
-The `$0.10` line includes the first try of that check, where my script crashed after its Claude-free part, and the manager replying once the limit went up.
+The `$0.11` line includes the first try of that check, where my script crashed after its Claude-free part, and the manager replying once the limit went up.
 
 ### Tests on the merged code
-TESTS_PLACEHOLDER
+Node 22, mock mode, on the final code, one browser suite at a time. Another worker's browser suites were running on the same machine throughout (load average about 8 to 30).
+
+| Suite | Result |
+|---|---|
+| `npm test` | 642 of 642 |
+| `npm run e2e` | 66 of 66 |
+| `npm run e2e:apps` | 26 of 26 |
+| `npm run e2e:launch` | 18 of 18 |
+| `node test/browser/floors.mjs` | 14 of 14 |
+| `node test/browser/custom.mjs` | 41 of 41 |
+| `npm run e2e:resilience` | 16 of 16 |
+
+Earlier runs on the way there failed, and each cause is listed above. Runs that died because another worker's cleanup (`pkill -f "officecdp-"`) killed the browser were thrown away and rerun. `CDP_PROFILE_PREFIX` now keeps one worker's browsers out of the way of another's cleanup, and any worker that shares the machine should set its own. No test was weakened: where an expectation changed, it follows a decision recorded here, and the new leak and launch checks are stricter than the ones they replaced.
 
 ### Not proven
 - Nothing here has been deployed, or run on hz, in Docker, on a real phone, or in Safari or Firefox.
