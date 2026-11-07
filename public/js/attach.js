@@ -29,7 +29,7 @@ function upload(slug, file, onProgress) {
     x.onload = () => {
       let data = null; try { data = JSON.parse(x.responseText); } catch { /* plain body */ }
       if (x.status >= 200 && x.status < 300 && data?.id) resolve(data);
-      else reject(new Error(data?.message || (x.status === 413 ? 'That file is over 15 MB.' : x.status === 415 ? 'That kind of file can\'t be sent.' : 'The upload didn\'t go through.')));
+      else reject(new Error((/\s/.test(data?.message || '') && data.message) || (x.status === 413 ? 'That file is over 15 MB.' : x.status === 415 ? 'That kind of file can\'t be sent.' : 'The upload didn\'t go through.')));
     };
     x.onerror = () => reject(new Error('The upload didn\'t go through. Check your connection.'));
     x.send(file);
