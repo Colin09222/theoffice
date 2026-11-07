@@ -188,7 +188,7 @@ describe('nothing typed here can get out of its box', () => {
     assert.equal(id.about.length, BRIEF_LIMITS.about); assert.doesNotMatch(id.about, /</); assert.doesNotMatch(id.rules, /[<>]/);
     assert.equal(id.avoid.length, BRIEF_LIMITS.avoid); assert.equal(id.tone, undefined); assert.equal(id.secret, undefined); assert.deepEqual(id.routing, {});
     assert.equal(t.cfg.floorDailyUsd, cap, 'the cap does not move'); assert.equal((await floorState(a)).spend, undefined, 'and a boss is not shown it');
-    assert.equal(t.cfg.maxStaff, 8);
+    assert.equal(t.cfg.maxStaff, Infinity, 'nor does the one on staff');
   });
 
   test('an order to spend, typed as a house rule, buys nothing: a purchase is still only a request', async () => {
@@ -301,7 +301,7 @@ describe('staff: names, titles, hiring and letting go', () => {
     assert.equal((await c.post(`/api/floors/${c.slug}/hire`, { role: 'writer' })).status, 409, 'already there');
     const s0 = await floorState(c);
     assert.deepEqual(s0.hiring.roles.filter((r) => !r.hired).map((r) => r.role).sort(), ['analyst', 'illustrator', 'marketer', 'tester']);
-    assert.equal(s0.hiring.cap, 8);
+    assert.equal(s0.hiring.cap, null, 'no cap unless one is set, and JSON has no way to say Infinity');
     assert.doesNotMatch(JSON.stringify(s0.hiring), /\$|price|cost|model/i, 'nothing about money or models in the hiring list');
     for (const role of ['analyst', 'marketer', 'tester', 'illustrator']) assert.equal((await c.post(`/api/floors/${c.slug}/hire`, { role, name: `<i>${role}` })).status, 201);
     const s1 = await floorState(c);

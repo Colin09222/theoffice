@@ -10,6 +10,11 @@ const num = (v, d) => { const n = Number(v); return v !== undefined && v !== '' 
 const cap = (v, d) => (v === 'off' ? Infinity : num(v, d));
 // A lifetime limit can't go below nothing, and a typo falls back to the default rather than to no limit at all.
 const lifetime = (v, d) => Math.max(0, cap(v, d));
+// A cap on how much work gets done is off unless someone sets one, and only a positive number sets one. It stays Infinity in here, which every comparison copes with.
+// Anything that leaves this process has to go through capOrNull first. See "Work caps" in docs/DEPLOY-NEXT.md.
+const workCap = (v) => { const n = Number(v); return v !== undefined && v !== '' && Number.isFinite(n) && n > 0 ? n : Infinity; };
+/** How a work cap looks in JSON, where Infinity would silently turn into null anyway. Code that reads this has to treat null as "no cap", and `n >= null` is true, so check first. */
+export const capOrNull = (n) => (Number.isFinite(n) ? n : null);
 
 // May carry a port for local testing (apps.localhost:8083). A domain that contains the main site would hand it to published code, so it is refused.
 function appsBase(v, publicOrigin) {
@@ -38,15 +43,21 @@ export function loadConfig(env = process.env, overrides = {}) {
     adminPassword: env.ADMIN_PASSWORD || '',
     publicOrigin,
     trustProxy: env.TRUST_PROXY === '1',
-    floorDailyUsd: cap(env.FLOOR_DAILY_USD, 10),
-    globalDailyUsd: cap(env.GLOBAL_DAILY_USD, 25),
-    taskMaxUsd: cap(env.TASK_MAX_USD, 3),
+    // Off unless set: what stops the money is the building's lifetime limit below. Each of these would stop a job long before that.
+    floorDailyUsd: cap(env.FLOOR_DAILY_USD, Infinity),
+    globalDailyUsd: cap(env.GLOBAL_DAILY_USD, Infinity),
+    taskMaxUsd: cap(env.TASK_MAX_USD, Infinity),
     // What the whole building may ever spend with each provider. Counted over the whole ledger, for the admin's eyes only. Raising one and restarting starts the work again.
     budgetAnthropicUsd: lifetime(env.BUDGET_ANTHROPIC_USD, 120),
     budgetOpenrouterUsd: lifetime(env.BUDGET_OPENROUTER_USD, 120),
     maxCallsFloor: num(env.MAX_CALLS_FLOOR, 3),
     maxCallsGlobal: num(env.MAX_CALLS_GLOBAL, 6),
-    maxStaff: num(env.MAX_STAFF, 8),
+    maxStaff: workCap(env.MAX_STAFF),
+    maxStaffSteps: workCap(env.MAX_STAFF_STEPS),
+    maxManagerSteps: workCap(env.MAX_MANAGER_STEPS),
+    maxOpenTasks: workCap(env.MAX_OPEN_TASKS),
+    maxTasksPerDay: workCap(env.MAX_TASKS_PER_DAY),
+    maxRevisions: workCap(env.MAX_REVISIONS),
     towerFloors: num(env.TOWER_FLOORS, 40),
     quotaBytes: num(env.FLOOR_QUOTA_MB, 100) * 1024 * 1024,
     mockDelayMs: num(env.MOCK_DELAY_MS, 400),
@@ -55,11 +66,15 @@ export function loadConfig(env = process.env, overrides = {}) {
     fetchDenyHosts: (env.FETCH_DENY_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
     // A real computer for the Builder and Tester: Claude Managed Agents, one Anthropic-hosted container per task. Off until the deploy turns it on.
     computerEnabled: env.COMPUTER_ENABLED === '1',
-    sessionMaxUsd: num(env.SESSION_MAX_USD, 5),         // hard platform budget per session, whatever the daily caps say
-    sessionMaxSteps: num(env.SESSION_MAX_STEPS, 40),    // model requests per session: the computer's version of the 14-step limit
-    sessionMaxMinutes: num(env.SESSION_MAX_MINUTES, 30),
-    maxSessionsFloor: num(env.MAX_SESSIONS_FLOOR, 2),
-    maxSessionsGlobal: num(env.MAX_SESSIONS_GLOBAL, 4),
+    sessionMaxUsd: cap(env.SESSION_MAX_USD, Infinity),  // platform budget per session when set; otherwise a session is promised a slice at a time, as below
+    // Not a cap: how much of the building's money one session is promised at a time. It always gets the next slice while there is money, but no session can hold everything that is left and keep the rest of the building waiting.
+    sessionSliceUsd: num(env.SESSION_SLICE_USD, 2) > 0.1 ? num(env.SESSION_SLICE_USD, 2) : 2,
+    sessionMaxSteps: workCap(env.SESSION_MAX_STEPS),    // model requests per session
+    sessionMaxMinutes: workCap(env.SESSION_MAX_MINUTES),
+    sessionWrapUp: env.SESSION_WRAP_UP === '1',         // tells a lane job to stop polishing at the step count it ought to take
+    maxFixTurns: workCap(env.MAX_FIX_TURNS),            // times a computer is told its save or publish didn't go through before the task fails
+    maxSessionsFloor: workCap(env.MAX_SESSIONS_FLOOR),
+    maxSessionsGlobal: workCap(env.MAX_SESSIONS_GLOBAL),
     outputLagMs: num(env.OUTPUT_LAG_MS, 3000),
     // App-grade publishing: each project on its own origin under this domain. Empty means today's sandbox mode.
     appsBaseDomain: appsBase(env.APPS_BASE_DOMAIN, publicOrigin),
@@ -77,18 +92,18 @@ export function loadConfig(env = process.env, overrides = {}) {
     serverIp: /^\d{1,3}(\.\d{1,3}){3}$/.test(env.SERVER_IP || '') ? env.SERVER_IP : '',
     serverIp6: env.SERVER_IP6 || '',
     // OpenRouter tools: images, and a second lab's eye on the design. The key never goes near a container.
-    imagesPerFloorDay: num(env.IMAGES_PER_FLOOR_DAY, 12),
-    imagesPerTask: num(env.IMAGES_PER_TASK, 6),
-    reviewsPerFloorDay: num(env.REVIEWS_PER_FLOOR_DAY, 20),
-    searchesPerFloorDay: num(env.SEARCHES_PER_FLOOR_DAY, 60),
+    imagesPerFloorDay: workCap(env.IMAGES_PER_FLOOR_DAY),
+    imagesPerTask: workCap(env.IMAGES_PER_TASK),
+    reviewsPerFloorDay: workCap(env.REVIEWS_PER_FLOOR_DAY),
+    searchesPerFloorDay: workCap(env.SEARCHES_PER_FLOOR_DAY),
     // The iOS foundation is off until the owner's Apple and Expo accounts exist. The token itself lives in a Managed Agents vault, never here.
     iosEnabled: env.IOS_ENABLED === '1',
     iosVaultId: env.IOS_VAULT_ID || '',
     // Standing orders (floors-plus): recurring jobs the boss sets. They run through the ordinary engine and its caps; these only shape the schedule.
-    ordersPerFloor: num(env.ORDERS_PER_FLOOR, 3),
+    ordersPerFloor: workCap(env.ORDERS_PER_FLOOR),
     ordersMinHours: num(env.ORDERS_MIN_HOURS, 24),
     ordersIdleDays: num(env.ORDERS_IDLE_DAYS, 14),
-    ordersMaxFails: num(env.ORDERS_MAX_FAILS, 3),
+    ordersMaxFails: workCap(env.ORDERS_MAX_FAILS),
     ordersRunTimeoutMin: num(env.ORDERS_RUN_TIMEOUT_MIN, 180),
     ordersTickMs: num(env.ORDERS_TICK_MS, 30000),
     ordersEstimateUsd: num(env.ORDERS_ESTIMATE_USD, 0.6),

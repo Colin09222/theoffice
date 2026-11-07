@@ -28,7 +28,7 @@ export async function defaultTurn(api, text) {
   await api.message(`Built it, ran the build and checked it in a browser. Tests pass.`);
 }
 
-export function createMockSessions(cfg, { onTurn = defaultTurn, usage = { input_tokens: 100, cache_read_input_tokens: 2000, cache_creation_input_tokens: 500, output_tokens: 300 }, stepUsd = 0.02 } = {}) {
+export function createMockSessions(cfg, { onTurn = defaultTurn, usage = { input_tokens: 100, cache_read_input_tokens: 2000, cache_creation_input_tokens: 500, output_tokens: 300 }, stepUsd = 0.02, ignoreListFrom = false } = {}) {
   const sessions = new Map(); const files = new Map(); const agentRoles = new Map();
   const calls = { environments: [], agents: [], agentUpdates: [], uploads: [], deleted: [], sessions: [], sends: [], updates: [], streams: 0 };
   let n = 0;
@@ -167,7 +167,7 @@ export function createMockSessions(cfg, { onTurn = defaultTurn, usage = { input_
         } finally { s.subs.delete(q); }
       })();
     },
-    async *listEvents(sid) { for (const ev of [...sessions.get(sid).events]) yield ev; },
+    async *listEvents(sid, fromMs) { calls.lists = calls.lists || []; calls.lists.push(fromMs); for (const ev of [...sessions.get(sid).events]) if (!fromMs || ignoreListFrom || Date.parse(ev.processed_at) >= fromMs) yield ev; },
     async listOutputs(sid) { return sessions.get(sid).outputs.map(({ id: fid, filename, size, createdAt }) => ({ id: fid, filename, size, createdAt })); },
     async download(fid) { for (const s of sessions.values()) { const f = s.outputs.find((o) => o.id === fid); if (f) return f.data; } throw new Error('no such file'); },
   };

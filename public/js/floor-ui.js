@@ -459,11 +459,11 @@ class FloorPage {
   renderOrders() {
     const orders = this.state.orders || []; const lim = this.state.orderLimits || {};
     const wrap = h('div.orders', { 'data-orders': String(orders.length) });
-    wrap.append(h('p.lede', {}, `Standing orders run on their own while you're away, through the same manager and staff as anything you ask for in chat. Up to ${lim.perFloor ?? 3} per floor, at most once a day.`));
+    wrap.append(h('p.lede', {}, `Standing orders run on their own while you're away, through the same manager and staff as anything you ask for in chat. ${lim.perFloor ? `Up to ${lim.perFloor} per floor, at` : 'At'} most once a day.`));
     if (!orders.length) wrap.append(h('p.empty', {}, 'No standing orders yet. Set one below, or ask your manager for something "every morning".'));
     for (const o of orders) wrap.append(this.orderCard(o));
-    if (orders.length < (lim.perFloor ?? 3)) wrap.append(this.orderForm());
-    wrap.append(h('p.fineprint', {}, `An order waits while the floor is busy, paused or out of budget. It pauses itself after ${lim.maxFails ?? 3} failed runs in a row, or if you haven't opened the floor in ${lim.idleDays ?? 14} days; opening it switches those back on.`));
+    if (!lim.perFloor || orders.length < lim.perFloor) wrap.append(this.orderForm());
+    wrap.append(h('p.fineprint', {}, `An order waits while the floor is busy, paused or out of budget. It pauses itself ${lim.maxFails ? `after ${lim.maxFails} failed runs in a row, or ` : ''}if you haven't opened the floor in ${lim.idleDays ?? 14} days; opening it switches ${lim.maxFails ? 'those' : 'it'} back on.`));
     this.bodyEl.append(wrap);
   }
   orderCard(o) {

@@ -150,8 +150,8 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
       const staffN = draft.staff.filter((a) => a.role !== 'manager').length;
       const free = hiring ? hiring.roles.filter((r) => !draft.staff.some((a) => a.role === r.role)) : [];
       const hire = hiring ? h('section.hire-box', { 'data-hire': '' },
-        h('h3', {}, 'Hire', h('small', {}, `${staffN} of ${hiring.cap} desks taken`)),
-        staffN >= hiring.cap ? h('small.field-hint', {}, 'Every desk is taken. Let someone go to hire someone new.') : free.length ? h('div.chips', {}, ...free.map((r) => h('button.chip', { type: 'button', 'data-hire-role': r.role, onclick: async (e) => {
+        h('h3', {}, 'Hire', h('small', {}, hiring.cap === null ? `${staffN} desks taken` : `${staffN} of ${hiring.cap} desks taken`)),
+        hiring.cap !== null && staffN >= hiring.cap ? h('small.field-hint', {}, 'Every desk is taken. Let someone go to hire someone new.') : free.length ? h('div.chips', {}, ...free.map((r) => h('button.chip', { type: 'button', 'data-hire-role': r.role, onclick: async (e) => {
           e.target.disabled = true;
           try { await api(`/floors/${page.slug}/hire`, { method: 'POST', body: { role: r.role } }); toast(`A new ${r.title} is on the way up`); await page.reloadSettled(); syncStaff(); currentAgent = page.state.agents.find((x) => x.role === r.role)?.id; render('staff'); } catch (x) { toast(x.message, 'bad'); e.target.disabled = false; }
         } }, r.title))) : h('small.field-hint', {}, 'You have one of everyone.')) : null;

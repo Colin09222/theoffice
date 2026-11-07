@@ -41,6 +41,8 @@ const BASE_HEADERS = {
 };
 const LIMITS = { form: [8, 60000], buy: [10, 60000], dataRead: [600, 60000], dataWrite: [90, 60000], dataIp: [300, 60000], dataProject: [1500, 60000], code: [8, 60000], login: [6, 60000], admin: [5, 60000], adminAll: [60, 60000], chat: [20, 60000], mutate: [90, 60000], read: [900, 60000], publicSite: [600, 60000], sse: [40, 60000] };
 const MAX_CHAT = 4000;
+// Unsent bytes one live view may build up. A long job never goes quiet, and a phone that fell asleep shouldn't be able to pile that up here. It reconnects and catches up from its last event.
+const STREAM_BACKLOG = 256 * 1024;
 const RESERVED = new Set(['api', 'admin', 'f', 'floor', 'js', 'css', 'vendor', 'robots', 'www', 'static', 'assets']);
 
 class HttpError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
@@ -310,6 +312,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     res.writeHead(200, { ...BASE_HEADERS, 'content-security-policy': mainCsp, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     res.socket?.setNoDelay?.(true);
     const write = (ev) => {
+      if (res.writableLength > STREAM_BACKLOG) { res.destroy(); return; }
       // A revoked or expired session stops being the owner at once. The browser reconnects as a visitor.
       if (viewer.owner) {
         const live = get(db, 'SELECT expires_at e FROM sessions WHERE hash=?', viewer.sessionHash);

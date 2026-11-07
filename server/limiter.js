@@ -1,4 +1,13 @@
 // FIFO limiter on concurrent LLM calls: per floor and global. Queued work waits; nothing is dropped.
+/** Waits, or rejects as soon as the signal aborts. It leaves nothing behind on the signal, which can see thousands of these in one long run. */
+export function pause(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const onAbort = () => { clearTimeout(t); reject(signal.reason); };
+    const t = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
 export class Limiter {
   constructor(perFloor, global) { this.perFloor = perFloor; this.global = global; this.active = 0; this.floorActive = new Map(); this.queue = []; this.peak = 0; this.peakFloor = 0; }
   acquire(floorId, signal) {

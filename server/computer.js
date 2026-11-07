@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { get, all, run } from './db.js';
 import { ROOT } from './config.js';
-import { Limiter } from './limiter.js';
+import { Limiter, pause } from './limiter.js';
 import { ProviderError, scrub } from './llm.js';
 import { MIN_ROOM_USD } from './budget.js';
 import { costOf } from './anthropic.js';
@@ -21,13 +21,21 @@ const PACKAGE_HOSTS = ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org
 const OUTPUT_WAIT_MS = 30000;
 const STALL_MS = 90_000;
 const STOP_GRACE_MS = 120_000;
-const MAX_FIX_TURNS = 2, MAX_LOST = 2, MAX_STREAM_FAILURES = 5;
+const MAX_LOST = 2, MAX_STREAM_FAILURES = 5;
 const WARN_STEPS_LEFT = 5, SPEND_WARN = 0.8;
-// A small job told to aim for 15 steps will still polish for 40 if nothing says stop. The hard limits stay for the jobs that really need them.
+// A small job told to aim for 15 steps will still polish for 40 if nothing says stop. Only with SESSION_WRAP_UP=1.
 const WRAP_UP = { change: 12, tester: 16, default: 22 };
+// A session asks for the next slice of money once this share of the last one is left.
+const TOP_UP_AT = 0.5;
+// A computer lost after this many steps had been getting somewhere, so it doesn't count towards giving up. A job that runs for days can lose a few along the way.
+const LOST_NEEDS_STEPS = 10;
+// How long an event id is remembered: the platform won't be asked for anything older again. A long session has no end of events, and this keeps the memory for them flat.
+const SEEN_WINDOW_MS = 15 * 60000, SEEN_PRUNE_AT = 2000;
 const MAX_ARCHIVE_BYTES = 40 * 1024 * 1024, MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hash = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16);
+// The platform takes whole cents as a plain integer string. BigInt refuses Infinity and NaN outright, and writes a huge number out in full.
+const budgetOf = (cents) => ({ type: 'limit', max_list_cost: { amount: BigInt(Math.floor(cents)).toString(), currency: 'USD' } });
 
 const SAVE_SH = `#!/bin/sh
 # Packs /workspace/project for The Office. Outputs are collected when your turn ends, so run this last, and after any milestone worth keeping.
@@ -120,14 +128,43 @@ export class Computer {
   }
 
   // ---- money ----
-  /** The most this session may spend right now: the smallest of its own limit, every cap that is set, and what is left of the building's Anthropic total. */
-  room(floorId, task) {
+  /**
+   * The most this session may be promised right now: the smallest of its own limit, every cap that is set, and what is left of the building's Anthropic total. A session
+   * that already holds some is counted as not holding it, since that isn't being taken from anyone. With no limit of its own it is promised a slice at a time (see topUp):
+   * otherwise the first session would hold everything that is left and the rest of the building would wait for it, and the platform has to be given a number either way.
+   */
+  room(floorId, task, st = null) {
     const { cfg } = this.engine; const e = this.engine;
+    const mine = st?.hold || 0;
     const perTask = cfg.taskMaxUsd - task.cost_usd;
-    const perDay = Math.min(cfg.floorDailyUsd - e.spentToday(floorId) - (e.reserved.get(floorId) || 0), cfg.globalDailyUsd - e.spentGlobal() - e.reservedTotal);
+    const perDay = Math.min(cfg.floorDailyUsd - e.spentToday(floorId) - (e.reserved.get(floorId) || 0), cfg.globalDailyUsd - e.spentGlobal() - e.reservedTotal) + mine;
     const own = Math.min(cfg.sessionMaxUsd, perTask);
-    const perBuilding = e.budget.room('anthropic');
-    return { usd: Math.min(own, perDay, perBuilding), daily: perDay < own, building: perBuilding < Math.min(own, perDay) };
+    const perBuilding = e.budget.room('anthropic') + mine;
+    const most = Math.min(own, perDay, perBuilding);
+    const slices = own === Infinity;
+    return { usd: slices ? Math.min(most, cfg.sessionSliceUsd) : most, daily: perDay < own, building: perBuilding < Math.min(own, perDay), slices, slice: slices && cfg.sessionSliceUsd < most };
+  }
+  /**
+   * Near the end of its slice a session gets the next one, for as long as there is money and nothing else says stop. Should it get there first, it pauses at its cap,
+   * goes back in line and carries on when its turn comes round, so this is a smoother way of doing what that does anyway.
+   */
+  async topUp(st) {
+    const e = this.engine;
+    if (!st.room?.slices || st.limit || st.hold > e.cfg.sessionSliceUsd * TOP_UP_AT) return;
+    // Running time isn't on the model usage, so this is also what keeps the ledger honest during a very long session.
+    const cents = await this.reconcile(st);
+    if (cents === null) return;
+    const room = this.room(st.floorId, get(e.db, 'SELECT cost_usd FROM tasks WHERE id=?', st.taskId), st);
+    st.room = room;
+    const more = room.usd - st.hold;
+    if (more < 0.01) return;
+    // Held first, so nothing else in the building can be promised the same dollars while this goes out.
+    e.reserve(st.floorId, more); st.hold += more; e.budget.setHold(st.holdId, st.hold);
+    try { await this.client.updateSession(st.id, { budget: budgetOf(cents + st.hold * 100) }); } catch (err) {
+      const back = Math.min(more, st.hold);
+      e.unreserve(st.floorId, back); st.hold -= back; e.budget.setHold(st.holdId, st.hold);
+      e.log('warn', 'could not raise a session budget', { err: scrub(err?.message, e.cfg) });
+    }
   }
   charge(st, model, prompt, completion, cost) {
     this.engine.charge(st.floorId, st.agent, model, prompt, completion, cost, { taskId: st.taskId, provider: 'anthropic' });
@@ -144,10 +181,11 @@ export class Computer {
     try {
       const s = await this.client.retrieve(st.id);
       const cents = Number(s.usage?.list_cost?.amount);
-      if (!Number.isFinite(cents)) return;
+      if (!Number.isFinite(cents)) return null;
       const delta = cents / 100 - st.charged;
       if (delta > 0.005) this.charge(st, 'managed-session', 0, 0, delta);
-    } catch (e) { this.engine.log('warn', 'could not read session cost', { err: scrub(e?.message, this.engine.cfg) }); }
+      return cents;
+    } catch (e) { this.engine.log('warn', 'could not read session cost', { err: scrub(e?.message, this.engine.cfg) }); return null; }
   }
 
   // ---- one task ----
@@ -177,7 +215,8 @@ export class Computer {
     } catch (err) {
       const why = err?.why ?? signal.reason?.why;
       // Only a shutdown leaves a session running, because the next boot picks it up. On any other way out it must not carry on spending unwatched.
-      if (st?.id && why !== 'shutdown') await this.client.send(st.id, [{ type: 'user.interrupt' }]).catch(() => {});
+      // A session waiting for more room is already stopped at its cap. An interrupt would end its turn for good, and it would come back looking finished.
+      if (st?.id && why !== 'shutdown' && why !== 'wait') await this.client.send(st.id, [{ type: 'user.interrupt' }]).catch(() => {});
       // A paused session stopped mid-thought, so it needs telling to carry on. A shutdown leaves it running, and the next boot simply reattaches.
       if (st?.id && why === 'pause') this.pushMessage(taskId, 'You were paused for a while. Carry on where you left off.');
       e.handleRunError(floorId, agent, task, err, () => {
@@ -205,7 +244,7 @@ export class Computer {
     return {
       id: task.session_id || '', floorId: floor.id, floor, agent, taskId: task.id, project: task.project, signal, room: null,
       // History counts towards the steps, so a restart can't reset them. A round of fixes the manager asked for gets its own, or the fix never fits; the dollar caps still hold.
-      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), wrapUpAt: task.lane || e.isLive(floor.id, task.project) ? (e.isLive(floor.id, task.project) && agent.role !== 'tester' ? WRAP_UP.change : WRAP_UP[agent.role] || WRAP_UP.default) * (1 + (task.revisions || 0)) : 0, warned: false, limit: '', lastText: '', lastFeed: '',
+      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Map(), newestEvent: 0, listFrom: 0, steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), wrapUpAt: e.cfg.sessionWrapUp && (task.lane || e.isLive(floor.id, task.project)) ? (e.isLive(floor.id, task.project) && agent.role !== 'tester' ? WRAP_UP.change : WRAP_UP[agent.role] || WRAP_UP.default) * (1 + (task.revisions || 0)) : 0, warned: false, limit: '', lastText: '', lastFeed: '',
       pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
       publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
       ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design')]), signal },
@@ -244,7 +283,7 @@ export class Computer {
     // Short of room only because other sessions hold it: they give back what they don't spend, so wait for them.
     while (heldUp(room)) {
       e.setAgent(agent.id, { state: 'queued', activity: 'Waiting for a turn' });
-      await new Promise((res, rej) => { const t = setTimeout(res, 2000); signal.addEventListener('abort', () => { clearTimeout(t); rej(signal.reason); }, { once: true }); });
+      await pause(2000, signal);
       e.checkpoint(floor.id, signal);
       room = this.room(floor.id, task);
     }
@@ -265,7 +304,7 @@ export class Computer {
         this.equip(st);
         // The budget is fixed at creation, so a reattached session is re-capped to what may be spent from now on.
         const spent = Number(live.usage?.list_cost?.amount) || 0;
-        await this.client.updateSession(st.id, { budget: { type: 'limit', max_list_cost: { amount: String(spent + Math.floor(room.usd * 100)), currency: 'USD' } } });
+        await this.client.updateSession(st.id, { budget: budgetOf(spent + Math.floor(room.usd * 100)) });
         st.budgetRaised = true; st.resumed = true;
         e.feed(floor.id, agent, `went back to the computer for "${task.title}"`, task.project);
         return;
@@ -293,21 +332,51 @@ export class Computer {
     ]);
     e.checkpoint(floor.id, signal);
     const upload = await this.client.upload(box, 'bundle.tgz');
-    const session = await this.client.createSession({
-      agent: agentRef, environment_id: environment, title: `Floor ${floor.number}, task ${task.id}`,
-      resources: [{ type: 'file', file_id: upload, mount_path: '/office/bundle.tgz' }],
-      budget: { type: 'limit', max_list_cost: { amount: String(Math.floor(room.usd * 100)), currency: 'USD' } },
-      metadata: { app: 'theoffice', floor: String(floor.id), task: String(task.id) },
-      // Only a task made by the boss's click ever holds this. The container still only sees a placeholder.
-      ...(vaulted ? { vault_ids: [e.cfg.iosVaultId] } : {}),
-    });
-    // The session holds its own copy of the box, so ours has no reason to outlive this call.
-    await this.client.deleteFile(upload).catch(() => {});
+    let session;
+    try {
+      session = await this.whenAllowed(st, () => this.client.createSession({
+        agent: agentRef, environment_id: environment, title: `Floor ${floor.number}, task ${task.id}`,
+        resources: [{ type: 'file', file_id: upload, mount_path: '/office/bundle.tgz' }],
+        budget: budgetOf(room.usd * 100),
+        metadata: { app: 'theoffice', floor: String(floor.id), task: String(task.id) },
+        // Only a task made by the boss's click ever holds this. The container still only sees a placeholder.
+        ...(vaulted ? { vault_ids: [e.cfg.iosVaultId] } : {}),
+      }));
+    } finally {
+      // The session holds its own copy of the box, so ours has no reason to outlive this call.
+      await this.client.deleteFile(upload).catch(() => {});
+    }
     st.id = session.id;
     this.equip(st);
     run(e.db, 'UPDATE tasks SET session_id=?, session_baseline=?, session_sent=0, session_charged=0 WHERE id=?', session.id, JSON.stringify(baselineOf(files)), task.id);
     e.feed(floor.id, agent, `started a computer for "${task.title}"`, task.project);
     e.setAgent(agent.id, { state: 'thinking', activity: 'Starting up the computer', project: task.project, task_id: task.id });
+  }
+
+  /** With no limit of ours on sessions, the platform's own limit on starting them can be the first one anybody meets. That is a queue to wait in, not an outage to pause the floor for. */
+  async whenAllowed(st, fn) {
+    for (let wait = this.rateLimitWaitMs ?? 5000; ; wait = Math.min(wait * 2, 60000)) {
+      try { return await fn(); } catch (err) {
+        if (err?.status !== 429 || st.signal.aborted) throw err;
+        this.engine.setAgent(st.agent.id, { state: 'queued', activity: 'Waiting for a turn' });
+        await pause(wait, st.signal);
+        this.engine.checkpoint(st.floorId, st.signal);
+      }
+    }
+  }
+  /** Whether this event has been dealt with. Ids are let go once they are too old to come round again, and the listing stops asking for anything that old. */
+  seenBefore(st, ev) {
+    if (!ev.id) return false;
+    if (st.seen.has(ev.id)) return true;
+    const at = Date.parse(ev.processed_at) || st.newestEvent;
+    if (at > st.newestEvent) st.newestEvent = at;
+    st.seen.set(ev.id, at);
+    if (st.seen.size >= SEEN_PRUNE_AT) {
+      const before = st.newestEvent - (this.seenWindowMs ?? SEEN_WINDOW_MS);
+      for (const [id, when] of st.seen) { if (when >= before) break; st.seen.delete(id); }
+      st.listFrom = before;
+    }
+    return false;
   }
 
   /** Follow a session until its turn ends, surviving dropped streams without missing or repeating anything. Returns how the turn ended. */
@@ -327,9 +396,10 @@ export class Computer {
         // Stream first, then history: anything between the two shows up in both and is deduplicated by id.
         const stream = await this.client.stream(st.id, conn.signal);
         let outcome = null;
-        for await (const ev of this.client.listEvents(st.id)) {
-          if (st.seen.has(ev.id)) continue;
-          st.seen.add(ev.id);
+        for await (const ev of this.client.listEvents(st.id, st.listFrom)) {
+          // Checked here as well as asked for, because a repeat of something already forgotten would count as new.
+          if (st.listFrom && Date.parse(ev.processed_at) < st.listFrom) continue;
+          if (this.seenBefore(st, ev)) continue;
           const o = await this.onEvent(st, ev, false);
           if (o === 'running') outcome = null; else if (o) outcome = o;
         }
@@ -351,8 +421,7 @@ export class Computer {
         this.checkClock(st);
         for await (const ev of stream) {
           bump(); failures = 0;
-          if (ev.id && st.seen.has(ev.id)) continue;
-          if (ev.id) st.seen.add(ev.id);
+          if (this.seenBefore(st, ev)) continue;
           this.checkClock(st);
           if (this.pastGrace(st)) return 'done';
           const o = await this.onEvent(st, ev, true);
@@ -416,8 +485,10 @@ export class Computer {
         if (live && ev.model_usage) {
           const u = costOf(ev.model_usage, st.pricing);
           this.charge(st, st.model, u.prompt, u.completion, u.cost);
+          await this.topUp(st);
           // A session stopped by its budget keeps only what was saved, and the platform gives no warning. It isn't told why, because a bot has no business knowing there is a limit.
-          if (!st.warnedSpend && st.room && st.charged >= st.room.usd * SPEND_WARN) {
+          // While more slices are coming there is nothing to warn about, and that is nearly always.
+          if (!st.warnedSpend && st.room && !st.room.slice && st.hold <= (st.room.slices ? e.cfg.sessionSliceUsd : st.room.usd) * (1 - SPEND_WARN)) {
             st.warnedSpend = true;
             this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: 'Your time on this computer is nearly up. Save your work now with .office/save.sh, publish if you are going to, and reply with your summary.' }] }] ).catch(() => {});
           }
@@ -526,6 +597,8 @@ export class Computer {
   // ---- when a turn ends ----
   async finish(st, outcome) {
     const e = this.engine; const { floor, agent, taskId } = st;
+    // Only its slice ran out, before the next could reach it. Nothing is finished, so nothing is collected: it goes back in line, and the next slice wakes it.
+    if (outcome === 'budget' && st.room?.slice) throw new e.Halt('wait');
     if (outcome === 'retries') throw new ProviderError('The computer failed repeatedly.', { retryable: false });
     if (outcome === 'terminated') { await this.collect(st).catch(() => {}); return this.lost(st); }
     if (outcome === 'refused') { await this.reconcile(st); return e.finishTask(floor, agent, taskId, 'failed', 'The model declined this one.'); }
@@ -543,7 +616,7 @@ export class Computer {
     let result = { ok: false, problem: '' };
     for (let turn = 0; ; turn++) {
       result = await this.collect(st);
-      if (result.ok || outcome !== 'done' || st.limit || turn >= MAX_FIX_TURNS) break;
+      if (result.ok || outcome !== 'done' || st.limit || turn >= e.cfg.maxFixTurns) break;
       this.pushMessage(taskId, `That did not go through: ${result.problem} Fix it, run .office/save.sh again, then end your turn.`);
       e.feed(floor.id, agent, 'had to fix something before it could be saved', st.project);
       outcome = await this.drive(st);
@@ -567,6 +640,7 @@ export class Computer {
   }
   lost(st) {
     const e = this.engine;
+    if (st.steps >= LOST_NEEDS_STEPS) run(e.db, 'UPDATE tasks SET session_tries=0 WHERE id=?', st.taskId);
     run(e.db, "UPDATE tasks SET status='todo', updated_at=? WHERE id=? AND status='doing'", e.now(), st.taskId);
     e.emitTask(st.taskId);
     return undefined;

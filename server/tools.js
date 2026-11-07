@@ -72,6 +72,8 @@ const DEFS = {
   ask_buddehbot: fn('ask_buddehbot', 'Ask buddehbot, the building owner\'s assistant, for guidance when you or your staff are truly blocked and the boss can\'t settle it. Don\'t wait for the answer: carry on with anything else you can do. Your own words only: no pasted pages, files or private details.', { question: S(`What you need to know, up to ${HELP_LIMITS.question} characters`), what_was_tried: S(`What you already tried, up to ${HELP_LIMITS.tried} characters`) }),
 };
 
+// A refusal quotes the link, and reading a draft back shows it again. Neither means anyone has seen the page.
+export const NOT_SEEN_AS_LINK = /^Error:|^<untrusted_data source="workspace:/;
 export const STAFF_TOOLS = ['write_file', 'read_file', 'list_files', 'publish_project', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request'];
 // The manager has no web tools. It reads every staff result and knows private titles, so it must have no way to send anything out.
 export const MANAGER_TOOLS = ['write_file', 'read_file', 'list_files', 'publish_project', 'ask_boss', 'file_purchase_request', 'assign_task', 'review_task', 'cancel_task', 'hire_staff'];
@@ -185,23 +187,35 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
   };
   const brokerError = (e) => { if (e instanceof ProviderError) { engine.log('warn', 'tool provider failed', { status: e.status, err: scrub(e.message, cfg) }); return new WorkspaceError(`that did not work: ${plainProviderText(e)}`); } return e; };
   // A link nobody here ever opened is what an invented source looks like from outside. Publishing a doc checks each one against what searches returned and pages opened on this floor, against what teammates handed over, and against what the boss said.
-  const seenOnFloor = (floorId, exceptPrefix) => {
-    const parts = [bossText(db, floorId)];
-    for (const t of all(db, "SELECT transcript FROM tasks WHERE floor_id=? AND transcript!=''", floorId)) {
-      let msgs; try { msgs = JSON.parse(t.transcript); } catch { continue; }
-      // A refusal quotes the link, and reading a draft back shows it again. Neither means anyone has seen the page.
-      for (const m of msgs) if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string' && !/^Error:|^<untrusted_data source="workspace:/.test(m.content)) parts.push(m.content);
+  // One task at a time, stopping once every link has turned up: a floor can have any number of tasks behind it, and this process has a fixed amount of memory.
+  const stillUnseen = (floorId, exceptPrefix, keys) => {
+    const left = new Set(keys);
+    const look = (text) => { const low = String(text).toLowerCase().replaceAll('://www.', '://'); for (const k of left) if (low.includes(k)) left.delete(k); };
+    look(bossText(db, floorId));
+    for (let after = 0, rows = []; left.size; after = rows.at(-1).id) {
+      rows = all(db, "SELECT id,transcript,seen_links FROM tasks WHERE floor_id=? AND id>? AND (transcript!='' OR seen_links!='') ORDER BY id LIMIT 25", floorId, after);
+      if (!rows.length) break;
+      for (const t of rows) {
+        look(t.seen_links);
+        let msgs; try { msgs = JSON.parse(t.transcript); } catch { continue; }
+        for (const m of msgs) if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string' && !NOT_SEEN_AS_LINK.test(m.content)) look(m.content);
+      }
     }
-    for (const f of all(db, "SELECT path,content FROM files WHERE floor_id=? AND path LIKE 'projects/%.md'", floorId)) if (!f.path.startsWith(exceptPrefix) && typeof f.content === 'string') parts.push(f.content);
-    return parts.join('\n').toLowerCase().replaceAll('://www.', '://');
+    for (let after = 0, rows = []; left.size; after = rows.at(-1).rowid) {
+      rows = all(db, "SELECT rowid,path,content FROM files WHERE floor_id=? AND rowid>? AND path LIKE 'projects/%.md' ORDER BY rowid LIMIT 25", floorId, after);
+      if (!rows.length) break;
+      for (const f of rows) if (!f.path.startsWith(exceptPrefix) && typeof f.content === 'string') look(f.content);
+    }
+    return left;
   };
   const unseenLinks = (c, prefix, sources) => {
     const doc = get(db, 'SELECT content FROM files WHERE floor_id=? AND path=?', c.floor.id, `${prefix}index.md`)?.content;
     const urls = new Set([...sources.map((s) => s.url), ...(typeof doc === 'string' ? [...doc.matchAll(/https?:\/\/[^\s)\]>"'`]+/gi)].map((m) => m[0].replace(/[.,;:!?*_]+$/, '')) : [])]);
     if (!urls.size) return [];
-    const seen = seenOnFloor(c.floor.id, prefix);
     const key = (u) => u.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
-    return [...urls].filter((u) => !/^https?:\/\/([a-z0-9-]+\.)?(example\.(com|org|net)|localhost)([/:]|$)/i.test(u) && !seen.includes(key(u))).slice(0, 12)
+    const wanted = [...urls].filter((u) => !/^https?:\/\/([a-z0-9-]+\.)?(example\.(com|org|net)|localhost)([/:]|$)/i.test(u));
+    const left = stillUnseen(c.floor.id, prefix, wanted.map(key));
+    return wanted.filter((u) => left.has(key(u))).slice(0, 12)
       .map((u) => `a link nobody here opened or found in a search (open it with fetch_url, or take it out along with whatever rests on it): "${u}"`);
   };
   const handlers = {

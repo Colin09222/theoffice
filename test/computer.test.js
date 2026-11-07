@@ -254,7 +254,7 @@ describe('what comes back from a container is hostile', () => {
   });
   test('giving up after the fix turns fails the task visibly instead of looping', async () => {
     let turns = 0;
-    const h = await start({ async onTurn(api) { turns++; await api.step(); api.saveRaw(Buffer.from('junk')); await api.message('tried'); } });
+    const h = await start({ async onTurn(api) { turns++; await api.step(); api.saveRaw(Buffer.from('junk')); await api.message('tried'); } }, { maxFixTurns: 2 });
     const row = await h.settle((await go(h)).id);
     assert.equal(row.status, 'failed');
     assert.match(row.result, /could not be saved/);
@@ -362,7 +362,7 @@ describe('limits and caps', () => {
     assert.equal(peak, 1);
   });
   test('the per-floor task limit still applies to computer tasks', async () => {
-    const h = await start();
+    const h = await start({}, { maxTasksPerDay: 60 });
     const now = Date.now();
     for (let i = 0; i < 60; i++) run(h.t.db, "INSERT INTO tasks (floor_id,title,status,created_at,updated_at) VALUES (?,?,'done',?,?)", h.floor.id, `t${i}`, now, now);
     assert.throws(() => h.assign(), /task limit/);

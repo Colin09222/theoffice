@@ -122,7 +122,8 @@ test('a spending cap of off means no cap', async () => {
   const { loadConfig } = await import('../server/config.js');
   const c = loadConfig({ FLOOR_DAILY_USD: 'off', GLOBAL_DAILY_USD: 'off', TASK_MAX_USD: 'off' });
   assert.equal(c.floorDailyUsd, Infinity); assert.equal(c.taskMaxUsd, Infinity);
-  assert.equal(loadConfig({}).floorDailyUsd, 10);
+  assert.equal(loadConfig({}).floorDailyUsd, Infinity);
+  assert.equal(loadConfig({ FLOOR_DAILY_USD: '10' }).floorDailyUsd, 10);
 });
 test('validLook keeps only allowed values', () => {
   const l = validLook({ hair: 'bun', hat: '<script>', skin: 'javascript:', extra: 1 });
