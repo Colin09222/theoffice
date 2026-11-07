@@ -1123,6 +1123,15 @@ export class OfficeView {
         x.fillStyle = tone[r.kind] || 'rgba(255,255,255,.05)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0));
         if (r.kind === 'kitchen') { x.strokeStyle = 'rgba(60,70,80,.1)'; x.lineWidth = 1; x.beginPath(); for (let cx = Math.ceil(x0); cx < x1; cx++) { x.moveTo(px(cx), pz(z0)); x.lineTo(px(cx), pz(z1)); } for (let cz = Math.ceil(z0); cz < z1; cz++) { x.moveTo(px(x0), pz(cz)); x.lineTo(px(x1), pz(cz)); } x.stroke(); }
       }
+      // Each room's name, painted small on its floor by the way in, like the lettering in an old office block.
+      x.save(); x.font = '600 15px ui-sans-serif, system-ui, sans-serif'; x.textBaseline = 'bottom';
+      for (const r of this.plan.rooms || []) {
+        if (r.kind === 'pod') continue;
+        const [x0, , , z1] = r.rect;
+        x.fillStyle = 'rgba(255,255,255,.34)'; x.fillText(r.label.toUpperCase(), px(x0) + 12, pz(z1) - 7);
+        x.fillStyle = 'rgba(20,16,12,.42)'; x.fillText(r.label.toUpperCase(), px(x0) + 11, pz(z1) - 8);
+      }
+      x.restore();
       // A soft dark line under every wall, so the rooms read from above even with no glass glint.
       x.strokeStyle = 'rgba(20,16,12,.3)'; x.lineWidth = 3; x.beginPath(); for (const w of wallLines(this.plan)) { x.moveTo(px(w.x0), pz(w.z0)); x.lineTo(px(w.x1), pz(w.z1)); } x.stroke();
       // Ambient occlusion along the walls and a faint rim on the open sides.

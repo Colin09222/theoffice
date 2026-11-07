@@ -753,14 +753,19 @@ class FloorPage {
       const next = await api(`/floors/${this.slug}`);
       if (this.dead) return;
       const sceneKey = (s) => JSON.stringify([s.floor.name, s.floor.logoUrl, s.floor.decor, s.floor.colors, s.floor.boss, s.agents.map((a) => [a.id, a.name, a.look])]);
-      const rebuild = sceneKey(next) !== sceneKey(this.state);
+      const roomKey = (s) => JSON.stringify([s.floor.name, s.floor.logoUrl, s.floor.decor, s.floor.colors, s.floor.boss]);
+      const crewKey = (s) => s.agents.map((a) => JSON.stringify([a.id, a.name, a.look]));
+      const was = crewKey(this.state), now = crewKey(next);
+      // Someone new starting gets a desk where they are. Everyone else carries on walking: only a change to the room itself rebuilds it.
+      const hired = now.length > was.length && was.every((k, i) => k === now[i]) && roomKey(next) === roomKey(this.state);
+      const rebuild = !hired && sceneKey(next) !== sceneKey(this.state);
       const scroll = this.bodyEl.firstChild?.scrollTop;
       const typing = this.bodyEl.querySelector('textarea, input');
       const draft = typing?.value; const focused = document.activeElement === typing;
       this.state = next;
       this.applyBrand();
       if (rebuild && stage.ok) this.rebuildScene();
-      else for (const a of next.agents) this.view?.agentEvent(a);
+      else { if (hired) this.view?.syncAgents(this.viewState()); for (const a of next.agents) this.view?.agentEvent(a); }
       this.view?.updateBoard(next.tasks);
       this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody(); renderCard(this);
       const again = this.bodyEl.querySelector('textarea, input');

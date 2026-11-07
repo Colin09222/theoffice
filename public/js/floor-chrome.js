@@ -62,8 +62,9 @@ export function buildScrubber(page) {
   const up = h('button.scrub-btn', { type: 'button', 'aria-label': 'Floor above', 'data-scrub': 'up' }, icon('up'));
   const down = h('button.scrub-btn', { type: 'button', 'aria-label': 'Floor below', 'data-scrub': 'down' }, icon('down'));
   const track = h('div.scrub-track', { role: 'list' });
-  const name = h('span.scrub-name', {}, `Floor ${here}`);
-  const el = h('nav.floor-scrubber.glass', { 'aria-label': 'Other floors' }, up, track, down, name);
+  const name = h('span.scrub-name', {}, `Floor ${here} · ${page.state.floor.name}`);
+  track.append(name);
+  const el = h('nav.floor-scrubber.glass', { 'aria-label': 'Other floors' }, up, track, down);
   const load = async () => {
     const d = await api('/floors').catch(() => null);
     if (!d || page.dead) return;
@@ -72,10 +73,12 @@ export function buildScrubber(page) {
     const above = [...list].reverse().find((f) => f.number > here), below = list.find((f) => f.number < here);
     const wire = (btn, f, word) => { btn.disabled = !f; btn.title = f ? `${word}: floor ${f.number}, ${f.name}` : `No open floor ${word.toLowerCase()}`; btn.onclick = () => go(f); };
     wire(up, above, 'Up'); wire(down, below, 'Down');
-    clear(track);
+    clear(track); track.append(name);
     const top = Math.max(d.towerFloors || 40, here), span = Math.max(1, top - 1);
+    const at = (n) => `${(1 - (n - 1) / span) * 100}%`;
+    name.style.setProperty('--at', at(here));
     for (const f of list) {
-      track.append(h(`button.scrub-tick${f.number === here ? '.on' : ''}`, { type: 'button', role: 'listitem', 'aria-label': `Floor ${f.number}, ${f.name}`, title: `Floor ${f.number}, ${f.name}`, css: { top: `${(1 - (f.number - 1) / span) * 100}%` }, onclick: () => { if (f.number !== here) go(f); } }));
+      track.append(h(`button.scrub-tick${f.number === here ? '.on' : ''}`, { type: 'button', role: 'listitem', 'aria-label': `Floor ${f.number}, ${f.name}`, title: `Floor ${f.number}, ${f.name}`, css: { top: at(f.number) }, onclick: () => { if (f.number !== here) go(f); } }));
     }
     page.floorList = list;
   };

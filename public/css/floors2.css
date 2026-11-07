@@ -85,8 +85,8 @@
   .scrub-tick::after { content: ''; position: absolute; left: 4px; top: 4px; width: 10px; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .65); }
   .scrub-tick:hover::after { background: var(--brand-2); }
   .scrub-tick.on::after { left: 1px; top: 3px; width: 16px; height: 5px; background: var(--brand-2); }
-  .scrub-name { position: absolute; right: 54px; top: 50%; transform: translateY(-50%); padding: 3px 10px; border-radius: 99px; background: rgba(22, 26, 40, .78); font: 11px var(--mono); white-space: nowrap; opacity: 0; transition: opacity .15s; pointer-events: none; }
-  .floor-scrubber:hover .scrub-name { opacity: 1; }
+  .scrub-name { position: absolute; right: 30px; top: var(--at, 50%); transform: translateY(-50%); padding: 3px 10px; border-radius: 99px; background: rgba(22, 26, 40, .82); color: var(--ink); font: 11px var(--mono); white-space: nowrap; opacity: 0; transition: opacity .15s; pointer-events: none; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+  .floor-scrubber:hover .scrub-name, body[data-sheet="peek"] .scrub-name { opacity: 1; }
 }
 /* A short desktop window: the card keeps the name and drops the extras first. */
 @media (min-width: 761px) and (max-height: 640px) {

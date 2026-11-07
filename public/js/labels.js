@@ -5,7 +5,7 @@
 const hit = (a, b, pad = 1) => a.x0 < b.x1 + pad && a.x1 > b.x0 - pad && a.y0 < b.y1 + pad && a.y1 > b.y0 - pad;
 const NAME_GAP = 2, BUBBLE_GAP = 5, RISE = [0, 18, 36, 54, 72], SLIDE = [0, 28];
 
-export function layoutLabels(items, { width = Infinity, left = 0, top = 0, maxLift = 60 } = {}) {
+export function layoutLabels(items, { width = Infinity, minX = 0, top = 0, maxLift = 60 } = {}) {
   const out = new Map(), boxes = [];
   const near = [...items].sort((a, b) => b.z - a.z);
   for (const it of near) {
@@ -34,7 +34,7 @@ export function layoutLabels(items, { width = Infinity, left = 0, top = 0, maxLi
       const b = t.side === 'right'
         ? { x0: left + it.nameW * 0.58 + t.dx, x1: left + it.nameW * 0.58 + t.dx + it.bubbleW, y0, y1 }
         : { x0: left + it.nameW * 0.42 - t.dx - it.bubbleW, x1: left + it.nameW * 0.42 - t.dx, y0, y1 };
-      if (b.x0 < left + 2 || b.x1 > width - 2 || y0 < top || boxes.some((p) => hit(b, p))) continue;
+      if (b.x0 < minX + 2 || b.x1 > width - 2 || y0 < top || boxes.some((p) => hit(b, p))) continue;
       boxes.push(b); o.bubble = true; o.side = t.side; o.bx = t.side === 'right' ? t.dx : -t.dx; o.by = t.dy;
       break;
     }
@@ -62,7 +62,7 @@ export function tidyLabels(actors, viewWidth) {
     const bw = showing ? a.bubble.offsetWidth || Math.min(150, 26 + a.bubble.textContent.length * 5.6) : 0;
     items.push({ id: a, x: a.tagX, y: a.tagY, nameW: a.nameW, nameH: a.nameH, bubbleW: bw, bubbleH: showing ? a.bubble.offsetHeight || 22 : 0, z: a.tagZ || 0, side: a.tag.dataset.side || 'right', priority: a.speech ? 9 : RANK[a.state] || 1 });
   }
-  const solved = layoutLabels(items, { width, left });
+  const solved = layoutLabels(items, { width, minX: left });
   for (const [a, o] of solved) {
     a.lift = o.lift;
     if (o.side !== a.tag.dataset.side) a.tag.dataset.side = o.side;
