@@ -270,6 +270,24 @@ if (args[0] === 'spend') {
   process.exit(0);
 }
 log('spent before this', JSON.stringify(spentEverywhere()));
+if (args[0] === 'unpark') {
+  // Pick up a plan run for real: whoever was parked gets to work.
+  const { db, app } = await makeApp({ dry: false });
+  const floor = get(db, 'SELECT * FROM floors WHERE slug=?', args[1]);
+  const boss = new Boss(); const own = createSession(db, 'owner', floor.id, OWNER_MAX_AGE, Date.now()); boss.cookies[COOKIE] = own.token; boss.csrf = own.csrf; boss.slug = floor.slug;
+  app.bus.subscribe(floor.id, { ip: 'proof', send: (ev) => {
+    if (ev.type === 'feed') log(`[${floor.slug}]`, ev.data.name, ev.data.text);
+    if (ev.type === 'message' && ev.data.role !== 'boss') log(`[${floor.slug}] SAYS`, `[${ev.data.role}] (${words(ev.data.text)}w)`, String(ev.data.text).slice(0, 1200));
+  }, close() {} });
+  run(db, "UPDATE tasks SET status='todo', result='' WHERE floor_id=? AND status='blocked' AND result LIKE '(dry run%'", floor.id);
+  const c0 = floorCost(db, floor.id);
+  app.engine.kick();
+  await waitQuiet(db, app, boss, floor, 30 * 60000, false);
+  log('COST OF THE REST', (floorCost(db, floor.id) - c0).toFixed(4), 'whole floor', floorCost(db, floor.id));
+  await dump(db, floor, 'unparked');
+  await app.close(); db.close();
+  process.exit(0);
+}
 if (args[0] === 'again') {
   // The boss comes back to a floor that already has something on it.
   const { db, app } = await makeApp({ dry: false });

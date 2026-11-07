@@ -1,0 +1,21 @@
+===== base-plans
+plan-game-vague    cost 0.1204  workTurn 2 words 148+78 tasks builder,tester
+plan-game-named    cost 0.1324  workTurn 2 words 224+96 tasks builder,tester
+plan-web-vague     cost 0.1289  workTurn 2 words 122+107 tasks writer,designer,builder
+plan-web-band      cost 0.1237  workTurn 2 words 133+110 tasks writer,designer,builder
+plan-biz-vague     cost 0.1281  workTurn 2 words 215+107 tasks researcher,writer,builder
+plan-biz-dog       cost 0.1314  workTurn 2 words 151+73 tasks researcher,writer,builder
+plan-hi            cost 0.0385  workTurn never words 94 tasks 
+===== after-plans
+plan-game-vague    cost 0.0792  workTurn 1 words 67 tasks builder,tester
+plan-game-named    cost 0.0785  workTurn 1 words 68 tasks builder,tester
+plan-web-vague     cost 0.0702  workTurn 1 words 59 tasks writer,designer,builder
+plan-web-band      cost 0.075   workTurn 1 words 63 tasks writer,designer,builder
+plan-biz-vague     cost 0.1237  workTurn 2 words 68+90 tasks researcher,writer,builder
+plan-biz-dog       cost 0.0794  workTurn 1 words 93 tasks researcher,writer,builder
+plan-hi            cost 0.0418  workTurn never words 76 tasks 
+===== after-taps
+plan-tap-game      cost 0.1195  workTurn 2 words 82+55 tasks builder,tester
+plan-tap-web       cost 0.1157  workTurn 2 words 41+69 tasks writer,designer,builder
+plan-tap-biz       cost 0.1266  workTurn 2 words 104+55 tasks researcher,writer,builder
+plan-game-kids     cost 0.0789  workTurn 1 words 56 tasks builder,tester

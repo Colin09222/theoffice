@@ -39,3 +39,32 @@ Every number here comes from real runs of the real app on real models: Claude fo
 - Only the search summary changes model: Opus to Sonnet 5.5, because it only reports what pages said. That is the one model change here, and it is one line in `config/models.json` if the owner wants it back.
 - Platform docs go only to people who make pages. The Designer writes exact values rather than a stylesheet the Builder then rewrites.
 - Small computer jobs are told to wrap up at 22 steps (16 for a Tester, 12 for a change), so they don't polish for 40.
+
+## Measured, before and after
+
+All costs are from the office's own ledger. "Before" is `lanes` at d4fd32c; the game and business numbers are from the last real runs on that branch, with a clear boss.
+
+| Job | Before | After | What improved |
+|---|---|---|---|
+| Vague request, until work starts | 2 turns, first reply 122 to 224 words, $0.12 to $0.13 | 1 turn, 59 to 93 words, $0.07 to $0.08 | Every "make me X" starts at once. Only "ideas?" takes two turns, and the buttons on a new floor do too (three ideas or one question, then "u pick" starts). |
+| Game | $3.11, 27 min. Builder $1.97 and it ran out of steps; Tester $0.83 reported bugs instead of fixing | **$0.99, 9 min** (Floppy Ears, final prompts). Builder $0.63, Tester $0.22, manager $0.15. The first run this session, before the wrap-up rule: $1.94, 32 min (Snack Stack) | Real art, sound and feedback where there was a line on a black screen. The Tester played 5 full runs, 2 on a touch-only phone context. |
+| Website | about $2 (an earlier launch run, not the same job) | **$0.91** (Rosa's, final prompts). Builder $0.50, Designer $0.18, manager $0.14, Writer $0.09. First pass: $1.31 | A designed page rather than the cream template. No invented backstory in the words. |
+| Business | $2.00. Researcher $1.00 (searches $0.41) | **$1.62, 10 min** (Good Boy Walks). Researcher $0.60 (searches $0.16), Builder $0.68, Writer $0.18, manager $0.15 | Local competitors with prices from their own pages, a named gap, honest "Unverified" marks. 13 sources, no false refusals from the link check. |
+| Change after publish | not measured; the Builder would have got the game brief, which says not to publish | $0.24 (rename, location, focus on cakes; 1 file; 1.5 min). $0.41 on a game | Edits one file, goes live at the same link. |
+| "u pick" on a finished job | started $0.47 of work nobody asked for (seen during this work, on earlier prompts) | $0.05, asks what's next | |
+| Pause, resume, add-on, redirect, stop on a live computer | | $0.25, 7 of 7 checks pass (`docs/workers-evidence/midjob.txt`) | Spending stops; same computer resumes; redirect makes a new plan. |
+
+Three floors ran at once on one server with no failed tasks and nothing crossing between them. Other runs going at the same time used separate servers.
+
+Screenshots: `media/workers-*.jpg`, with `workers-before-*.jpg` for comparison. Transcripts and documents: `docs/workers-evidence/`.
+
+## Still weak
+
+- **One sample each.** Costs vary from run to run. The final-prompt game is one run, and the final-prompt website is one run with its Builder started later. The business job ran on prompts slightly older than the final ones and was not rerun, so its landing page has an AI photo that the newer picture rule should now prevent.
+- **"10 to 20 minutes"** is what the manager promises. Three first jobs took about 10 minutes and one took 32, before the wrap-up rule. The "few minutes for a small change" wording was added after the last change test, so it has not been seen in a run.
+- **Fun is judged by a Tester and by me playing briefly.** No person has played these, and the Tester's bot isn't a person. Phone checks are emulated touch in Chrome, not a real phone.
+- **The live leaderboard:** the Tester can't reach it from a computer, so the manager tells the boss to try it. It does work: I posted a score through the live page on both games.
+- **Follow-up tasks aren't replayed** unless the change is big, and the manager says so. A follow-up that breaks something reaches the boss first.
+- **A late add-on starts a second computer** after the first finishes, because a running computer can't be handed a new instruction. It works, but costs more than it needs to.
+- **The link check only proves a page was seen,** not that the fact is on it.
+- **Not run for real:** a building with computers off, sandbox mode with no apps domain, and anything on the production server. Those paths are covered by mock tests only.

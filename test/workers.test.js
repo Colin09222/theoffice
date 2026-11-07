@@ -48,6 +48,7 @@ describe('the manager reads a vague boss', () => {
     assert.match(p, /"idk", "u pick", "sure", "whatever" or "just do it" means you choose and start now/);
     assert.doesNotMatch(p, /No work starts until they say go|Do not start work until the boss asks/);
     assert.doesNotMatch(p, /two quick questions/i);
+    assert.match(p, /a bare "sure", "ok", "thanks" or "u pick" isn't a request for more work/);
   });
   test('facts only the boss knows never hold up the work, and are left out rather than made up', () => {
     assert.match(p, /Facts only they know .* never hold up the work: leave them out, and ask for them at the end/);
