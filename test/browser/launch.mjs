@@ -81,8 +81,10 @@ try {
     const real = p.errors.filter((e) => !/favicon\.ico/.test(e));
     check(`${tag}: no page errors`, real.length === 0, real.join(' | ').slice(0, 300));
     await say('send the report [report]');
-    await p.until('window.__office.state.messages.some(m=>/Launch report/.test(m.text))', 'the launch report', 30000);
-    check(`${tag}: the launch report reached the chat with its live link`, await p.ev('window.__office.state.messages.some(m=>/Launch report/.test(m.text) && /tinyteacups\\.com/.test(m.text))'));
+    // The chat gets what the boss needs now, and the whole report sits on the project card.
+    await p.until('window.__office.state.messages.some(m=>m.role==="report" && /is live/.test(m.text))', 'the launch report', 30000);
+    check(`${tag}: the launch report reached the chat with its live link`, await p.ev('window.__office.state.messages.some(m=>m.role==="report" && /is live/.test(m.text) && /tinyteacups\\.com/.test(m.text))'));
+    await p.until('window.__office.state.projects.some(x=>/Launch report/.test(x.launchReport||""))', 'the whole report on the card', 15000);
     await p.ev('window.__office.setTab("chat")');
     await sleep(300);
     await p.shot(join(OUT, `launch-${tag}-report.jpg`));

@@ -77,7 +77,8 @@ export const ATLAS = { cols: 8, rows: 4 };
 /** Mean sRGB colour of every atlas cell, read once from the texture, so a tint can replace a cell's colour and keep its shading. */
 function cellMeans(image) {
   const c = document.createElement('canvas'); c.width = 512; c.height = 512;
-  const x = c.getContext('2d'); x.drawImage(image, 0, 0, 512, 512);
+  // A canvas in software, because reading back a GPU one waits for everything the GPU has queued: on a slow device that froze the page for seconds while the first people loaded.
+  const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(image, 0, 0, 512, 512);
   const d = x.getImageData(0, 0, 512, 512).data;
   const means = [];
   const cw = 512 / ATLAS.cols, ch = 512 / ATLAS.rows;
