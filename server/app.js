@@ -570,7 +570,9 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (lib) { res.writeHead(200, { ...SITE, 'content-type': lib.type, 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' }); return res.end(req.method === 'HEAD' ? undefined : lib.body); }
     const hit = publishedFile(f, pr, tail, req.url.split('?')[0].endsWith('/'));
     if (!hit) return miss();
-    res.writeHead(200, { ...SITE, 'content-type': hit.type });
+    // A sandboxed page has the origin "null", so its own module scripts, fonts and data files load through CORS. Only public files and signed links reach this point, and no credentials are honoured.
+    const cors = /^text\/html/.test(hit.type) ? {} : { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' };
+    res.writeHead(200, { ...SITE, ...cors, 'content-type': hit.type });
     res.end(req.method === 'HEAD' ? undefined : hit.body);
   }
   // Paths the server answers itself on every project: the client library and the vendored Three.js. They win over any published file of that name.

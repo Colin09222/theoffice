@@ -285,6 +285,16 @@ describe('sandbox mode when no apps domain is set', () => {
     const s = await a.get(`/api/floors/${a.slug}`);
     assert.equal(s.data.projects[0].appUrl, null);
   });
+  test('a sandboxed page can load its own module scripts, but its pages stay without CORS', async () => {
+    writeFile(t.db, floor.id, 'projects/m/index.html', '<script type="module" src="a.js"></script>', null, 1e8);
+    writeFile(t.db, floor.id, 'projects/m/a.js', 'console.log(1)', null, 1e8);
+    publishSnapshot(t.db, floor.id, 'm', 1e8);
+    t.app.engine.upsertProject(floor, 'm', { title: 'm', kind: 'site', published: true });
+    const js = await hit(t, `127.0.0.1:${t.port}`, `/theoffice/f/${a.slug}/m/a.js`);
+    assert.equal(js.headers['access-control-allow-origin'], '*');
+    const page = await hit(t, `127.0.0.1:${t.port}`, `/theoffice/f/${a.slug}/m/`);
+    assert.equal(page.headers['access-control-allow-origin'], undefined);
+  });
   test('there is no data API on the main domain, so all sandboxed sites cannot share one opaque origin\'s store', async () => {
     const r = await hit(t, `127.0.0.1:${t.port}`, `/theoffice/f/${a.slug}/s/_data/v1/shared/x`, { method: 'GET' });
     assert.equal(r.status, 404); assert.ok(!r.json);
