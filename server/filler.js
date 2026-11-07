@@ -21,6 +21,7 @@ const look = (seed, over) => {
 export const COMPANIES = [
   {
     key: 'mildly-haunted-candles', name: 'Mildly Haunted Candles', tagline: 'Every wick has a past.',
+    banter: ['It only flickered twice.', 'The kiln said nothing. Unusual.', 'Something sighed, but it was probably the pipes.', 'Wax everywhere, ghosts nowhere.'],
     colors: { primary: '#6a4c93', accent: '#f4c95d' },
     boss: { name: 'Ottoline Grimm', look: look(701, { hair: 'long', hairColor: '#e8e2d6', outfit: 'dress', outfitColor: '#111318', glasses: 'round' }) },
     decor: { ...DEFAULT_DECOR, floor: 'carpet', wall: '#d9cfe8', plants: 1, neon: true, pet: 'cat' },
@@ -36,6 +37,7 @@ export const COMPANIES = [
   },
   {
     key: 'soup-opinions-ltd', name: 'Soup Opinions Ltd', tagline: 'Strong views, served warm.',
+    banter: ['I stand by every word about the leek.', 'It needed salt. They all need salt.', 'The minestrone people will write in.', 'I have tasted worse, and I said so.'],
     colors: { primary: '#c9772b', accent: '#2f6f62' },
     boss: { name: 'Bernadette Ladle', look: look(811, { hair: 'bun', outfit: 'shirt', outfitColor: '#c9772b' }) },
     decor: { ...DEFAULT_DECOR, floor: 'terrazzo', wall: '#f3e3c7', plants: 4, coffee: true, neon: false },
@@ -51,6 +53,7 @@ export const COMPANIES = [
   },
   {
     key: 'slightly-longer-weekends', name: 'The Committee for Slightly Longer Weekends', tagline: 'Working towards Friday-and-a-half.',
+    banter: ['Seconded, with minor amendments.', 'The motion carries, slowly.', 'I move we stop for the day.', 'Noted in the minutes, in small print.'],
     colors: { primary: '#2f7ec7', accent: '#a9c4ff' },
     boss: { name: 'Dorothy Lull', look: look(923, { hair: 'side', hairColor: '#6c7a89', outfit: 'suit', outfitColor: '#27324a', glasses: 'round' }) },
     decor: { ...DEFAULT_DECOR, floor: 'wood', wall: '#e4ecf7', plants: 5, rug: true, arcade: true, neon: false },
@@ -66,6 +69,7 @@ export const COMPANIES = [
   },
   {
     key: 'pigeon-logistics', name: 'Pigeon Logistics', tagline: 'Same-day delivery, weather permitting.',
+    banter: ['Delivered, more or less.', 'The pigeon came back with a different parcel.', 'Weather permitting, it is there.', 'We lost a feather, not the shipment.'],
     colors: { primary: '#3b3f46', accent: '#37b679' },
     boss: { name: 'Marjorie Coo', look: look(1037, { hair: 'short', hairColor: '#1f1a17', outfit: 'labcoat', hat: 'headphones' }) },
     decor: { ...DEFAULT_DECOR, floor: 'concrete', wall: '#dfe6e1', plants: 2, art: false, coffee: true, neon: true, pet: 'dog' },
@@ -90,6 +94,10 @@ const ACTIVITIES = {
   designer: [['typing', 'Laying it out'], ['thinking', 'Choosing a colour'], ['reading', 'Reviewing the mockup'], ['typing', 'Drawing the header']],
   manager: [['thinking', 'Planning the next batch'], ['reading', 'Reviewing the work'], ['talking', 'Briefing the team'], ['typing', 'Writing up the plan']],
 };
+// Filler floors have no real words to quote, so their people read from this script. It's all as fictional as the companies.
+const GIVE = ['Could you take this one?', 'This one has your name on it:', 'You drew the short straw:', 'When you have a minute:', 'Next on the list for you:'];
+const SIGN_OFF = ['Lovely. Filed.', 'Good. On the pile it goes.', 'Approved, and nobody needs to know how long it took.', 'That will do nicely.', 'Fine work. Back to it.'];
+const BANTER = ['Nothing caught fire.', 'It went better than last time.', 'I would not look too closely.', 'Ask me nothing further.'];
 const QUIET = ['Kettle on.', 'A short break. Everyone is at their desks, mostly.', 'The office is quiet for a moment.', 'Someone watered the plants.'];
 
 // ---- tables ----
@@ -236,11 +244,13 @@ export function installFiller(ext) {
       case 'assign': {
         act(mgr, ['typing', 'Writing up the plan']);
         const crew = shuffled(staff).slice(0, 2 + rnd(2));
+        const batch = `Batch of ${new Date(t).toISOString().slice(11, 16)}`;  // its own name, so the pills count this batch and not last week's
         for (const a of crew) {
           const title = nextTitle(s, c);
-          const r = run(db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)', f.id, 'This week', title, '', a.id, '', t, t);
+          const r = run(db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)', f.id, batch, title, '', a.id, '', t, t);
           engine.emitTask(Number(r.lastInsertRowid));
           feed(f, mgr, `gave ${a.name} a task: "${title}"`);
+          engine.talk(f.id, mgr, a, `${pick(GIVE)} ${title}.`, { kind: 'assign' });
         }
         if (Math.random() < 0.5) engine.emit(f.id, 'meeting', { manager: mgr.id, staff: crew.map((a) => a.id) });
         s.phase = 'start'; break;
@@ -253,7 +263,6 @@ export function installFiller(ext) {
           engine.emitTask(task.id);
           act(a, pick(ACTIVITIES[a.role] || ACTIVITIES.writer), task.id);
           feed(f, a, `started "${task.title}"`);
-          engine.emit(f.id, 'handoff', { from: mgr.id, to: a.id, kind: 'paper' });
         }
         s.phase = 'work'; s.step = 0; s.steps = 3 + rnd(4); break;
       }
@@ -276,6 +285,7 @@ export function installFiller(ext) {
           run(db, "UPDATE tasks SET status='done', result=?, updated_at=? WHERE id=?", 'Done, and filed.', t, review.id);
           engine.emitTask(review.id);
           feed(f, mgr, `approved "${review.title}"`);
+          { const who = staff.find((x) => x.id === review.agent_id); if (who) engine.talk(f.id, mgr, who, pick(SIGN_OFF), { kind: 'review' }); }
           idle(mgr);
           break;
         }
@@ -284,7 +294,7 @@ export function installFiller(ext) {
           const a = staff.find((x) => x.id === doing.agent_id);
           run(db, "UPDATE tasks SET status='review', updated_at=? WHERE id=?", t, doing.id);
           engine.emitTask(doing.id);
-          if (a) { idle(a); feed(f, a, `finished "${doing.title}"`); engine.emit(f.id, 'handoff', { from: a.id, to: mgr.id, kind: 'paper' }); }
+          if (a) { idle(a); feed(f, a, `finished "${doing.title}"`); engine.talk(f.id, a, mgr, `${doing.title}: done. ${pick(c.banter || BANTER)}`, { kind: 'handoff' }); engine.emit(f.id, 'handoff', { from: a.id, to: mgr.id, kind: 'paper' }); }
           act(mgr, ['reading', 'Reviewing the work']);
           break;
         }

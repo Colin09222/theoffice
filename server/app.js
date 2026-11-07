@@ -206,9 +206,13 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       const d = JSON.parse(e.data);
       return { id: e.id, ...d, text: hidden.has(e.project) && (d.agent !== null || e.project) ? PRIVATE_TEXT.toLowerCase() : d.text };
     });
+    // The same rules as the stream, so reloading the page can never show more than watching it live did.
+    const talk = all(db, "SELECT * FROM events WHERE floor_id=? AND type='talk' ORDER BY id DESC LIMIT 80", f.id).reverse()
+      .map((e) => engine.publicView({ floorId: f.id, type: 'talk', project: e.project, data: JSON.parse(e.data), id: e.id, ts: e.created_at }, viewer)).filter(Boolean)
+      .map((v) => ({ id: v.id, ...v.data }));
     const out = {
       viewer: { owner: viewer.owner }, floor: { number: f.number, slug: f.slug, name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), boss: JSON.parse(f.boss), decor: JSON.parse(f.decor), publicChat: !!f.public_chat, defaultPrivate: !!f.default_private, ...engine.floorState(f.id) },
-      agents, tasks, projects, feed, spend: { today: engine.spentToday(f.id), cap: cfg.floorDailyUsd }, lastEventId: get(db, 'SELECT COALESCE(MAX(id),0) n FROM events WHERE floor_id=?', f.id).n,
+      agents, tasks, projects, feed, talk, spend: { today: engine.spentToday(f.id), cap: cfg.floorDailyUsd }, lastEventId: get(db, 'SELECT COALESCE(MAX(id),0) n FROM events WHERE floor_id=?', f.id).n,
     };
     if (viewer.owner || viewer.publicChat) out.messages = all(db, "SELECT id,role,agent_id agentId,text,created_at createdAt FROM messages WHERE floor_id=? AND role!='note' ORDER BY id DESC LIMIT 120", f.id).reverse().filter((m) => viewer.owner || (m.role !== 'report' && m.role !== 'help')).map((m) => (viewer.owner ? m : { ...m, text: redactChat(db, f.id, m.text) }));
     if (viewer.owner) {

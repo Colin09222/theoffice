@@ -5,7 +5,10 @@ import { OfficeView } from './office-scene.js';
 import { renderMarkdown } from './markdown.js';
 import { openCustomisePanel } from './customise.js';
 import { openLogin } from './claim.js';
+import { renderCard, buildScrubber, buildPins, wirePins } from './floor-chrome.js';
 
+const isPhone = () => window.innerWidth <= 760;
+const TALK_KIND = { assign: 'Assignment', plan: 'The plan', handoff: 'Handoff', findings: 'Findings', review: 'Review', question: 'Question', answer: 'Answer', small: 'Small talk', private: '' };
 const COLUMNS = [['todo', 'To do'], ['doing', 'Doing'], ['review', 'With manager'], ['done', 'Done']];
 const STATE_LABEL = { idle: 'At desk', thinking: 'Thinking', typing: 'Writing', browsing: 'On the web', reading: 'Reading', talking: 'Talking', queued: 'Waiting for a line' };
 // Three ways in for a new floor. Tapping one is simply the boss's first message, so typing anything else works just as well.
@@ -31,15 +34,22 @@ class FloorPage {
   mount() {
     document.body.dataset.page = 'floor';
     const s = this.state;
-    this.tab = this.canSeeChat ? 'chat' : 'work';
+    this.tab = this.canSeeChat ? 'chat' : 'talk';
+    // The boss arrives at the chat with the manager. A visitor arrives at the room, with the panel a tap away.
+    this.panelOpen = this.owner;
+    this.localTalk = [];
     this.applyBrand();
     this.buildShell();
     if (stage.ok) {
       this.labels = $('#labels'); clear(this.labels);
-      this.view = new OfficeView({ state: this.viewState(), labels: this.labels });
+      this.view = this.makeView();
       stage.setView(this.view);
+      wirePins(this);
     }
     this.renderAll();
+    this.layout();
+    this.onResize = () => this.layout();
+    window.addEventListener('resize', this.onResize);
     this.catchUpBanner();
     this.connect();
   }
@@ -59,20 +69,64 @@ class FloorPage {
     this.tabsEl = h('nav.tabs', { role: 'tablist' });
     this.bodyEl = h('div.tab-body');
     this.bannerEl = h('div.floor-banner', { hidden: true });
-    const panel = h('aside.floor-panel.glass', {}, this.staffEl, this.tabsEl, this.bannerEl, this.bodyEl);
+    this.grip = h('button.panel-grip', { type: 'button', 'aria-label': 'Open or close this panel', onclick: () => this.setPanel(!this.panelOpen) }, h('i'));
+    this.bindGrip();
+    const panel = h('aside.floor-panel.glass', {}, this.grip, h('button.panel-close', { type: 'button', 'aria-label': 'Close this panel', onclick: () => this.setPanel(false) }, '×'), this.staffEl, this.tabsEl, this.bannerEl, this.bodyEl);
     this.panel = panel;
+    this.cardEl = h('div.card-more');
+    this.logoEl = h('span.card-logo', { 'aria-hidden': 'true' });
+    this.pillEl = h('button.talk-pill.glass', { type: 'button', 'data-talk-pill': '', onclick: () => this.setTab(this.canSeeChat ? 'chat' : 'talk') });
+    this.pinsEl = buildPins(this);
+    this.scrubberEl = buildScrubber(this);
     this.root.append(
-      h('header.floor-top', {},
+      this.pinsEl,
+      h('header.floor-top.glass', {},
         h('button.btn.chrome.back', { type: 'button', 'aria-label': 'Back to the lobby', onclick: () => window.officeGo('/') }, '←', h('span', {}, 'Lobby')),
-        h('div.floor-title', {}, h('span.floor-num', {}, `Floor ${s.floor.number}`), this.titleEl, this.tagEl),
-        h('div.floor-meta', {}, this.statusEl, h('div.spend-wrap', {}, this.spendEl, h('span.spend-track', {}, this.spendBar)))),
+        h('div.floor-title', {}, h('span.floor-num', {}, `Floor ${s.floor.number}`), this.logoEl, this.titleEl, this.tagEl),
+        h('div.floor-meta', {}, this.statusEl, h('div.spend-wrap', {}, this.spendEl, h('span.spend-track', {}, this.spendBar))),
+        this.cardEl),
       this.controlsEl,
+      this.pillEl,
+      this.scrubberEl,
       panel,
     );
   }
 
+  makeView() { return new OfficeView({ state: this.viewState(), labels: this.labels, onSmallTalk: (line) => this.addLocalTalk(line) }); }
+  /** A panel is open or it isn't; on a phone closed means just the tabs showing at the bottom. Either way the room is told what's left for it. */
+  setPanel(open) { this.panelOpen = open; this.layout(); }
+  layout() {
+    if (this.dead || !this.panel) return;
+    const phone = isPhone();
+    this.panel.classList.toggle('closed', !this.panelOpen);
+    document.body.dataset.sheet = this.panelOpen ? 'half' : 'peek';
+    this.pillEl.hidden = phone || this.panelOpen;
+    if (!this.pillEl.hidden) this.pillEl.textContent = this.canSeeChat ? (this.owner ? `Talk to ${this.state.agents.find((a) => a.role === 'manager')?.name || 'your manager'}` : 'Read the chat') : 'See what they\'re saying';
+    const w = window.innerWidth, h = window.innerHeight;
+    if (!this.view) return;
+    if (phone) {
+      const sheet = this.panelOpen ? h * 0.54 : this.panel.getBoundingClientRect().height || 104;
+      this.view.setInsets({ left: 0, right: 0, top: 58, bottom: sheet + 44 });
+    } else {
+      const card = this.root.querySelector('.floor-top').getBoundingClientRect();
+      const taken = this.panelOpen ? w - this.panel.getBoundingClientRect().left : w - this.scrubberEl.getBoundingClientRect().left;
+      this.view.setInsets({ left: Math.min(w * 0.3, card.right + 6), right: Math.min(w * 0.42, taken + 6), top: 20, bottom: 56 });
+    }
+  }
+  /** Drag the sheet's handle on a phone: up opens it, down closes it. A plain tap is handled by the click. */
+  bindGrip() {
+    let from = null;
+    this.grip.addEventListener('pointerdown', (e) => { from = e.clientY; this.grip.setPointerCapture?.(e.pointerId); });
+    this.grip.addEventListener('pointerup', (e) => {
+      if (from === null) return;
+      const d = e.clientY - from; from = null;
+      if (Math.abs(d) > 24) { this.gripDragged = true; this.setPanel(d < 0); setTimeout(() => { this.gripDragged = false; }, 0); }
+    });
+    this.grip.addEventListener('click', (e) => { if (this.gripDragged) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+  }
+
   renderAll() {
-    this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody();
+    this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody(); renderCard(this);
   }
   renderHeader() {
     const s = this.state; const f = s.floor;
@@ -155,7 +209,7 @@ class FloorPage {
     const s = this.state;
     const tabs = [];
     if (this.canSeeChat) tabs.push(['chat', this.owner ? 'Manager' : 'Chat']);
-    tabs.push(['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
+    tabs.push(['talk', 'Talk'], ['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
     if (this.owner) {
       const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length;
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
@@ -167,13 +221,21 @@ class FloorPage {
     clear(this.tabsEl);
     for (const [id, label] of this.tabsFor()) {
       this.tabsEl.append(h(`button.tab${this.tab === id ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(this.tab === id), 'data-tab': id, onclick: () => this.setTab(id) }, label));
+      const m = id === 'requests' && label.match(/\d+/);
+      if (id === 'requests' && this.pinEls?.requests) { this.pinEls.requests.badge.hidden = !m; this.pinEls.requests.badge.textContent = m ? m[0] : ''; }
     }
   }
-  setTab(id) { this.tab = id; this.renderTabs(); this.renderBody(); }
+  setTab(id) {
+    if (!this.tabsFor().some(([t]) => t === id)) return;
+    this.tab = id; this.renderTabs(); this.renderBody();
+    if (!this.panelOpen) this.setPanel(true);
+    if (id === 'talk') this.markTalkRead();
+  }
   renderBody() {
     this.renderBanner();
     clear(this.bodyEl);
     if (this.tab === 'chat') this.renderChat();
+    if (this.tab === 'talk') this.renderTalk();
     if (this.tab === 'work') this.renderWork();
     if (this.tab === 'tasks') this.renderTasks();
     if (this.tab === 'projects') this.renderProjects();
@@ -253,6 +315,50 @@ class FloorPage {
   }
   scrollChat() { if (this.chatList) this.chatList.scrollTop = this.chatList.scrollHeight; }
 
+  // ---- talk ----
+  /** Everything people have said to each other, oldest first, with the words the server decided this viewer may read. */
+  talkLines() {
+    const lines = [...(this.state.talk || []), ...this.localTalk];
+    return lines.sort((a, b) => (a.ts || 0) - (b.ts || 0)).slice(-140);
+  }
+  renderTalk() {
+    const list = h('ol.talk-list', { role: 'log', 'aria-live': 'polite' });
+    const lines = this.talkLines();
+    if (!lines.length) list.append(h('li.empty', {}, 'Nobody has said anything yet. When work passes between people, their words show up here.'));
+    for (const l of lines) list.append(this.talkEl(l));
+    this.talkList = list;
+    this.bodyEl.append(list);
+    this.markTalkRead();
+    list.scrollTop = list.scrollHeight;
+  }
+  talkEl(l) {
+    const kind = TALK_KIND[l.kind] ?? '';
+    return h(`li.talk-line.${l.kind || 'line'}`, { 'data-kind': l.kind || '', 'data-talk': l.id || '' },
+      h('div.talk-who', {}, h('b', {}, l.fromName || 'Someone'), l.toName ? h('span.talk-to', {}, ` to ${l.toName}`) : null, kind ? h('span.talk-kind', {}, kind) : null),
+      h('p', {}, l.text),
+      h('time', {}, timeAgo(l.ts)));
+  }
+  addTalkLine(l) {
+    if (this.tab === 'talk' && this.talkList) {
+      const keep = this.talkList.scrollHeight - this.talkList.scrollTop - this.talkList.clientHeight < 60;
+      this.talkList.querySelector('.empty')?.remove();
+      this.talkList.append(this.talkEl(l));
+      if (keep) this.talkList.scrollTop = this.talkList.scrollHeight;
+      if (this.panelOpen) this.markTalkRead();
+    } else if (l.kind !== 'small') {
+      this.talkUnread = (this.talkUnread || 0) + 1;
+      const b = this.pinEls?.talk?.badge;
+      if (b) { b.hidden = false; b.textContent = String(Math.min(this.talkUnread, 99)); }
+    }
+  }
+  markTalkRead() { this.talkUnread = 0; const b = this.pinEls?.talk?.badge; if (b) b.hidden = true; }
+  /** Small talk happens in this browser only. It isn't work, so it's kept here, not on the server, and never many of them. */
+  addLocalTalk(line) {
+    this.localTalk.push(line);
+    if (this.localTalk.length > 12) this.localTalk.shift();
+    this.addTalkLine(line);
+  }
+
   // ---- work feed ----
   renderWork() {
     const list = h('ol.feed', { 'aria-live': 'polite' });
@@ -310,11 +416,7 @@ class FloorPage {
   }
   projectCard(p) {
     const KIND = { site: 'Site', doc: 'Doc', research: 'Research', app: 'App', game: 'Game', simulation: 'Simulation' };
-    const open = async () => {
-      let url = p.appUrl || p.url;
-      if (p.private) { try { url = (await api(`/floors/${this.slug}/projects/${p.slug}/preview`)).url; } catch (e) { toast(e.message, 'bad'); return; } }
-      this.previewProject(p, url);
-    };
+    const open = () => this.openProject(p);
     const priv = this.owner ? h('label.toggle', {}, h('input', { type: 'checkbox', checked: p.private, 'aria-label': `Keep ${p.title} private`, onchange: async (e) => {
       try { await api(`/floors/${this.slug}/projects/${p.slug}`, { method: 'POST', body: { private: e.target.checked } }); p.private = e.target.checked; toast(p.private ? 'Hidden from visitors' : 'Visible to visitors'); } catch (x) { e.target.checked = !e.target.checked; toast(x.message, 'bad'); }
     } }), h('span', {}, 'Private')) : null;
@@ -328,6 +430,11 @@ class FloorPage {
           if (!window.confirm(`Delete every save, leaderboard, shared value and sign-up for ${p.title}? This can't be undone. Download your sign-ups first if you want them.`)) return;
           try { const r = await api(`/floors/${this.slug}/projects/${p.slug}/clear-data`, { method: 'POST', body: {} }); toast(`Cleared ${r.removed} saved ${r.removed === 1 ? 'item' : 'items'}`); } catch (e) { toast(e.message, 'bad'); }
         } }, 'Clear saved data') : null));
+  }
+  async openProject(p) {
+    let url = p.appUrl || p.url;
+    if (p.private) { try { url = (await api(`/floors/${this.slug}/projects/${p.slug}/preview`)).url; } catch (e) { toast(e.message, 'bad'); return; } }
+    this.previewProject(p, url);
   }
   // The product side of a card, for the boss: who came, who signed up, how money comes in, and what the checklist said.
   launchBits(p) {
@@ -563,7 +670,7 @@ class FloorPage {
       const a = this.state.agents.find((x) => x.id === d.id);
       if (a) { a.state = d.state; a.activity = d.activity; a.taskId = d.taskId; }
       this.view?.agentEvent(d);
-      this.renderStaff(); this.renderHeader();
+      this.renderStaff(); this.renderHeader(); this.cardSoon();
     });
     on('feed', (d) => {
       const item = { id: d._id, name: d.name, text: d.text, ts: d.ts };
@@ -573,6 +680,17 @@ class FloorPage {
       this.state.feed.push(item);
       if (this.state.feed.length > 200) this.state.feed.shift();
       if (this.tab === 'work' && this.feedList) { this.feedList.querySelector('.empty')?.remove(); this.feedList.prepend(this.feedEl(item)); }
+      this.cardSoon();
+    });
+    // The words themselves: the same line goes in the Talk tab and over the speaker's head.
+    on('talk', (d) => {
+      const line = { id: d._id, from: d.from, to: d.to, fromName: d.fromName, toName: d.toName, text: d.text, kind: d.kind, ts: d._ts || d.ts };
+      this.state.talk ||= [];
+      if (line.id && this.state.talk.some((l) => l.id === line.id)) return;
+      this.state.talk.push(line);
+      if (this.state.talk.length > 200) this.state.talk.shift();
+      this.addTalkLine(line);
+      if (fresh(d)) this.view?.life?.line(line);
     });
     on('task', (d) => {
       const i = this.state.tasks.findIndex((t) => t.id === d.id);
@@ -651,7 +769,7 @@ class FloorPage {
       if (rebuild && stage.ok) this.rebuildScene();
       else for (const a of next.agents) this.view?.agentEvent(a);
       this.view?.updateBoard(next.tasks);
-      this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody();
+      this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody(); renderCard(this);
       const again = this.bodyEl.querySelector('textarea, input');
       if (again && draft) again.value = draft;
       if (again && focused) again.focus();
@@ -667,9 +785,14 @@ class FloorPage {
   rebuildScene() {
     const { yaw, targetYaw, zoom, targetZoom } = this.view;
     this.view.destroy(); clear(this.labels);
-    this.view = new OfficeView({ state: this.viewState(), labels: this.labels, keep: { yaw, targetYaw, zoom, targetZoom } });
+    const insets = this.view.insets;
+    this.view = new OfficeView({ state: this.viewState(), labels: this.labels, onSmallTalk: (line) => this.addLocalTalk(line), keep: { yaw, targetYaw, zoom, targetZoom } });
+    if (insets) this.view.insets = insets;
     stage.setView(this.view);
+    wirePins(this);
   }
+  /** The card reads the feed and who is busy, which change in bursts. Once a second is plenty. */
+  cardSoon() { if (this.cardTimer) return; this.cardTimer = setTimeout(() => { this.cardTimer = null; if (!this.dead) renderCard(this); }, 1000); }
   catchUpBanner() {
     const key = `office.seen.${this.slug}`;
     let last = 0;
@@ -686,6 +809,9 @@ class FloorPage {
   }
   destroy() {
     this.dead = true;
+    clearTimeout(this.cardTimer);
+    if (this.onResize) window.removeEventListener('resize', this.onResize);
+    delete document.body.dataset.sheet;
     this.markSeen?.();
     this.es?.close();
     this.view?.destroy();

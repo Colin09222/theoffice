@@ -131,9 +131,9 @@ export const PLANS = {
       { m: 'loungeChair', x: -3.2, z: 0.4, ry: Q, s: 1.05, tint: 'accent', b: [1.3, 1.3] }, { m: 'loungeChair', x: 4.5, z: 0.4, ry: -Q, s: 1.05, tint: 'accent', b: [1.3, 1.3] },
       { m: 'tableCoffee', x: 0.7, z: 0.45, s: 1.3, b: [2.2, 1.1] }, { m: 'lampRoundFloor', x: -2.9, z: 2.3, tint: 'lamp', b: [0.6, 0.6] }, { m: 'lampRoundFloor', x: 4.3, z: 2.3, tint: 'lamp', b: [0.6, 0.6] },
       { m: 'pillow', x: -0.5, y: 0.55, z: -1.2, ry: 0.2, s: 1.0, tint: 'accent' }, { m: 'pillowBlue', x: 1.9, y: 0.55, z: -1.2, ry: -0.2, s: 1.0, tint: 'cream' },
-      { m: 'stoolBar', x: 8.9, z: 2.6, tint: 'accent' }, { m: 'stoolBar', x: 8.9, z: 3.6, tint: 'accent' },
+      { m: 'stoolBar', x: 9.45, z: 2.6, tint: 'accent' }, { m: 'stoolBar', x: 9.45, z: 3.6, tint: 'accent' },
     ],
-    bar: [9.9, 3.1],
+    bar: [10.4, 3.1],
   },
   // Team pods on their own carpets, with a corner glass room and two glass offices.
   pods: {

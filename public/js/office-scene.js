@@ -7,9 +7,11 @@ import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
 import { getWorld, makeTower, GROUND, FLOOR_H, TOWER_W } from './lobby-scene.js';
 import { furniture, place } from './models.js';
-import { planFor, makeNav, planBlocks, seatOf, deskRect, hasSofa, ROOM_W, ROOM_D, WALL_H } from './layouts.js';
+import { planFor, makeNav, planBlocks, seatOf, deskRect, hasSofa, wallLines, doorways, roomAt, roomOfKind, roomCentre, ROOM_W, ROOM_D, WALL_H } from './layouts.js';
+import { FloorLife, planProgress } from './life.js';
 
 const FS = 2.5;  // Kenney's furniture kit is about 0.4 of our room units; a desk comes out 0.96 high
+const STAGE = { thinking: 'Thinking', typing: 'Writing', browsing: 'On the web', reading: 'Reading', talking: 'Talking', queued: 'Waiting' };
 const SEAT_LEGACY = 0.65, SEAT_MODEL = 0.5;  // cushion heights of the stand-in chair and the kit's desk chair
 const HOLD = 0.7;  // seconds each character state stays on stage before the next one shows
 const CHAR_SCALE = 1.45;
@@ -390,7 +392,7 @@ export class Actor {
     this.pos = new THREE.Vector3(seat.at[0], 0, seat.at[1]);
     this.group = this.char.group;
     this.group.position.copy(this.pos);
-    this.heading = Math.PI; this.path = []; this.speed = 0; this.queue = []; this.action = null; this.seated = true; this.state = 'idle'; this.lastShelf = -99; this.idleTimer = 6 + Math.random() * 16; this.progress = 0;
+    this.heading = Math.PI; this.path = []; this.speed = 0; this.queue = []; this.action = null; this.seated = true; this.state = 'idle'; this.lastShelf = -99; this.idleTimer = 6 + Math.random() * 16; this.taskId = info.taskId ?? null;
     this.shadow = new THREE.Mesh(view.discGeo, view.discMat); this.shadow.rotation.x = -Math.PI / 2; this.shadow.position.y = 0.02; this.shadow.scale.setScalar(1.6);
     view.scene.add(this.shadow);
     view.scene.add(this.group);
@@ -439,15 +441,45 @@ export class Actor {
     this.char.setAnim('walk');
   }
   /** Do these steps in order, unless a newer real event interrupts them. */
-  perform(steps) { this.queue = [...steps]; this.action = null; this.path = []; this.afterWalk = null; this.next(); }
+  perform(steps, { scene = false, offDuty = false } = {}) {
+    this.queue = [...steps]; this.action = null; this.path = []; this.afterWalk = null; this.scene = scene; this.offDuty = offDuty; this.hush();
+    this.next();
+  }
   next() {
+    this.hush();
     const s = this.queue.shift();
     this.action = s || null;
-    if (!s) { this.settle(); return; }
-    if (s.walk) { const [wx, wz] = this.view.nav.freeNear(s.walk[0], s.walk[1]); this.goTo(wx, wz, () => this.next()); }
-    else { this.char.setAnim(s.anim || 'stand'); this.holdUntil = this.view.time + (s.hold || 1); if (s.face !== undefined) this.faceTo = s.face; if (s.paper !== undefined) this.char.paper.visible = s.paper; }
+    if (!s) { this.scene = false; this.offDuty = false; this.view.life?.release(this); this.settle(); return; }
+    if (s.run) { s.run(this); this.next(); return; }
+    if (s.walk) { const [wx, wz] = this.view.nav.freeNear(s.walk[0], s.walk[1]); this.goTo(wx, wz, () => this.next()); return; }
+    if (s.anim || !this.seated) this.char.setAnim(s.anim || 'stand');
+    this.holdUntil = this.view.time + (s.hold || 1);
+    if (s.face !== undefined) this.faceTo = s.face;
+    if (s.paper !== undefined) this.char.paper.visible = s.paper;
+    if (s.say) this.speak(s.say, s.to, s.small, s.hold);
   }
+  /** Says a line out loud, turned toward whoever it is for. The words sit over this person's head until the step ends. */
+  speak(text, toId, small, hold) {
+    this.speech = { text, small: !!small };
+    const other = toId ? this.view.actors.get(toId) : null;
+    if (other && other !== this) {
+      other.attend(this, hold);
+      if (!this.seated) this.faceTo = Math.atan2(other.group.position.x - this.group.position.x, other.group.position.z - this.group.position.z);
+    }
+    if (!this.seated || this.action?.anim) this.char.setAnim('talk');
+    this.renderBubble();
+    this.placeSide();
+  }
+  hush() { if (this.speech) { this.speech = null; this.renderBubble(); } }
+  /** Someone is talking to this person: they turn toward the speaker and hear them out, then go back to what they were doing. */
+  attend(other, secs) {
+    this.listening = { who: other, until: this.view.time + secs };
+    if (!this.seated && !this.action && !this.path.length) this.char.setAnim('listen');
+  }
+  /** Bubbles open toward the middle of the screen, so a long line never runs off the edge. */
+  placeSide() { const side = (this.tagX ?? 0) > (this.view.w || 0) / 2 ? 'left' : 'right'; if (this.tag.dataset.side !== side) this.tag.dataset.side = side; }
   settle() {
+    this.char.paper.visible = false;
     // Back to the chair unless already there.
     const [sx, sz] = this.seat.at;
     if (this.seated) { this.applyStatePose(); return; }
@@ -466,7 +498,7 @@ export class Actor {
       else { screen.map = v.idleTex; screen.color.set('#ffffff'); }
       screen.needsUpdate = true;
       if (this.seat.glow) { this.seat.glow.material.color.set(s === 'typing' ? '#2a5aa8' : '#8a8060'); this.seat.glow.visible = v.detailOn && on; }
-      if (this.seat.bar) this.seat.bar.visible = s === 'typing' || s === 'browsing';
+      this.showProgress();
     }
     if (!this.seated) return;
     this.char.setAnim(s === 'typing' || s === 'browsing' ? 'type' : s === 'thinking' || s === 'queued' ? 'think' : s === 'talking' ? 'talk' : 'sit');
@@ -496,8 +528,9 @@ export class Actor {
     this.state = state; this.activity = activity;
     this.renderBubble();
     if (state === was) return;
-    if (state === 'idle') this.progress = 0;
     this.applyStatePose();
+    // Called back to work from a break: the coffee can wait.
+    if (state !== 'idle' && this.offDuty) { this.offDuty = false; this.queue = []; this.action = null; this.path = []; this.afterWalk = null; this.settle(); }
     // Reading sometimes means a trip to the bookshelf.
     if (state === 'reading' && this.view.time - this.lastShelf > 25 && this.seated && !this.action && !this.isManager) {
       this.lastShelf = this.view.time;
@@ -506,32 +539,46 @@ export class Actor {
     }
   }
   renderBubble() {
-    const busy = this.state !== 'idle';
-    const text = this.activity ? this.activity.slice(0, 40) : '';
-    this.bubble.hidden = !busy;
-    if (busy) {
-      if (this.bubble.dataset.text !== text || this.bubble.dataset.state !== this.state) {
-        this.bubble.dataset.text = text; this.bubble.dataset.state = this.state;
-        const dots = document.createElement('i'); dots.className = 'dots'; dots.append(document.createElement('b'), document.createElement('b'), document.createElement('b'));
-        const label = document.createElement('span'); label.textContent = this.state === 'queued' ? 'Waiting for a line' : text || 'Thinking';
-        this.bubble.replaceChildren(dots, label);
+    if (this.speech) {
+      const key = `say|${this.speech.text}`;
+      this.bubble.hidden = false;
+      if (this.bubble.dataset.key !== key) {
+        this.bubble.dataset.key = key; delete this.bubble.dataset.state;
+        const line = document.createElement('span'); line.textContent = this.speech.text;
+        this.bubble.className = `char-bubble speech${this.speech.small ? ' small-talk' : ''}`;
+        this.bubble.replaceChildren(line);
       }
+      return;
     }
+    const busy = this.state !== 'idle';
+    this.bubble.hidden = !busy;
+    if (!busy) { delete this.bubble.dataset.key; return; }
+    // The pill over a working person: what they are on, what stage it is at, and how far the plan has really got.
+    const task = this.view.taskFor(this);
+    const label = this.state === 'queued' ? 'Waiting for a line' : task?.title || this.activity?.slice(0, 40) || 'Thinking';
+    const stage = STAGE[this.state] || '';
+    const done = task ? planProgress(this.view.tasks, task) : null;
+    const key = `work|${label}|${stage}|${done ? `${done.done}/${done.total}` : ''}`;
+    if (this.bubble.dataset.key === key && this.bubble.dataset.state === this.state) return;
+    this.bubble.dataset.key = key; this.bubble.dataset.state = this.state;
+    this.bubble.dataset.text = label;
+    this.bubble.className = 'char-bubble task-pill';
+    const dots = document.createElement('i'); dots.className = 'dots'; dots.append(document.createElement('b'), document.createElement('b'), document.createElement('b'));
+    const text = document.createElement('span'); text.textContent = label;
+    this.bubble.replaceChildren(dots, text);
+    if (done) { const n = document.createElement('em'); n.className = 'pill-done'; n.textContent = `${done.done}/${done.total}`; n.title = `${done.done} of ${done.total} tasks in this plan are done`; this.bubble.append(n); this.bubble.style.setProperty('--done', `${Math.round((done.done / done.total) * 100)}%`); } else this.bubble.style.removeProperty('--done');
+    this.showProgress();
   }
-  /** Off the clock: a small errand now and then, so an idle floor still feels alive. Nothing here pretends to be work. */
-  idleErrand() {
-    const d = this.view.decor; const L = this.view.plan;
-    const options = [];
-    if (d.coffee) options.push([{ walk: [L.coffee[0] - 1.0, L.coffee[1] + (Math.random() - 0.5) * 1.6] }, { anim: 'sip', hold: 3.5 + Math.random() * 2, face: Math.PI / 2 }]);
-    if (d.arcade) options.push([{ walk: [L.arcade[0] + 1.0, L.arcade[1]] }, { anim: 'phone', hold: 3, face: -Math.PI / 2 }]);
-    const plant = this.view.plantSpots[Math.floor(Math.random() * this.view.plantSpots.length)];
-    if (plant) options.push([{ walk: [plant[0] + plant[2], plant[1] + plant[3]] }, { anim: 'pour', hold: 3, face: Math.atan2(-plant[2], -plant[3]) }]);
-    options.push([{ walk: [L.shelf[0] + 1.0, L.shelf[1] + (Math.random() - 0.5) * 1.5] }, { anim: 'listen', hold: 2.5, face: -Math.PI / 2 }]);
-    options.push([{ walk: this.view.lounge ? [L.sofa[0] - 2.9, L.sofa[1] + 0.2] : [L.hang[0], L.hang[1]] }, { anim: 'phone', hold: 3.5, face: this.view.lounge ? Math.PI / 2 : L.hang[2] }]);
-    options.push([{ anim: 'stretch', hold: 2.6 }]);
-    options.push([{ anim: 'stretch', hold: 2.2 }]);
-    this.perform(options[Math.floor(Math.random() * options.length)]);
+  /** The bar on this person's screen shows the same real count as the pill over their head, and nothing when there is no count. */
+  showProgress() {
+    const bar = this.seat.bar; if (!bar) return;
+    const task = this.state === 'idle' ? null : this.view.taskFor(this);
+    const done = task ? planProgress(this.view.tasks, task) : null;
+    bar.visible = !!done;
+    if (done) { const f = Math.max(0.0001, done.done / done.total); bar.scale.x = f; bar.position.x = -0.5 + f / 2; }
   }
+  /** Off the clock: a break, an errand or a word with a colleague, so an idle floor still feels alive. Nothing here pretends to be work. */
+  idleErrand() { this.view.life.errand(this); }
   update(dt) {
     const g = this.group, time = this.view.time, wall = performance.now() / 1000;
     if (this.pending?.length && wall - this.stateSince >= HOLD) { const [st, ac] = this.pending.shift(); if (!this.pending.length) this.pending = null; this.stateSince = wall; this.applyState(st, ac); }
@@ -546,27 +593,29 @@ export class Actor {
         this.faceTo = Math.atan2(dx, dz);
         moving = 1;
       }
-    } else if (this.action && !this.action.walk && time > this.holdUntil) {
+    } else if (this.action && !this.action.walk && (time > this.holdUntil || this.action.until?.())) {
       this.next();
     } else if (!this.action && this.seated && this.state === 'idle' && !this.isBossAway) {
       this.idleTimer -= dt;
       if (this.idleTimer <= 0) { this.idleTimer = 20 + Math.random() * 40; this.idleErrand(); }
     }
     if (this.seated) this.faceTo = this.seatFace();
+    if (this.listening) {
+      if (time > this.listening.until || this.listening.who.dead) { this.listening = null; if (!this.seated && !this.action && !this.path.length) this.char.setAnim('stand'); }
+      else if (!moving) { const o = this.listening.who.group.position; this.faceTo = Math.atan2(o.x - g.position.x, o.z - g.position.z); }
+    }
     if (this.faceTo !== undefined) {
       let diff = this.faceTo - g.rotation.y;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       g.rotation.y += diff * Math.min(1, dt * 10);
     }
-    // The screen's progress bar fills while real work streams in, and resets when the agent goes idle.
-    if (this.seat.bar && this.seat.bar.visible) { this.progress = Math.min(1, this.progress + dt / 24); this.seat.bar.scale.x = Math.max(0.0001, this.progress); this.seat.bar.position.x = -0.5 + this.progress / 2; }
     this.shadow.position.set(g.position.x, 0.02, g.position.z);
     this.char.update(dt, moving);
   }
 }
 
 export class OfficeView {
-  constructor({ state, labels, onSelect, keep = null }) {
+  constructor({ state, labels, onSelect, onSmallTalk, keep = null }) {
     this.labels = labels; this.onSelect = onSelect;
     this.colors = state.floor.colors; this.decor = state.floor.decor; this.logoUrl = state.floor.logoUrl || null; this.companyName = state.floor.name;
     this.plan = planFor(this.decor.layout);
@@ -582,7 +631,8 @@ export class OfficeView {
     this.time = 0; this.yaw = 0.5; this.targetYaw = 0.5; this.pitch = 0.86; this.zoom = 1; this.targetZoom = 1; this.intro = 0;
     // A preview rebuilds the room under the same camera, with no walk-in, so changing an option just changes the room.
     if (keep) { this.yaw = keep.yaw; this.targetYaw = keep.targetYaw; this.zoom = keep.zoom; this.targetZoom = keep.targetZoom; this.intro = 1; }
-    this.actors = new Map(); this.nav = makeNav(); this.deskSlots = []; this.plantSpots = []; this.sway = [];
+    this.claims = new Map(); this.actors = new Map(); this.nav = makeNav(); this.deskSlots = []; this.plantSpots = []; this.sway = []; this.tasks = state.tasks || []; this.pins = []; this.insets = null;
+    this.life = new FloorLife(this, { onSmallTalk: onSmallTalk || null });
     this.detailOn = (stage.q?.density ?? 1) >= 0.6;
     this.tv = new THREE.Vector3();
     this.codeTex = screenTexture('code', this.colors.primary, this.colors.accent);
@@ -610,7 +660,7 @@ export class OfficeView {
   }
   buildRoom() {
     const s = this.scene; const { primary, accent } = this.colors; const d = this.decor; const L = this.plan;
-    this.lounge = hasSofa(L, this.staffCount);
+    this.lounge = hasSofa(L);
     for (const [x, z, w, dd, bake] of planBlocks(L, { coffee: d.coffee, arcade: d.arcade, plants: d.plants, staffCount: this.staffCount })) this.nav.block(x, z, w, dd, { bake });
     s.add(new THREE.HemisphereLight('#cfe0f6', '#c4a98a', 1.1));
     const sun = new THREE.DirectionalLight('#ffdcb4', 2.7);
@@ -676,7 +726,8 @@ export class OfficeView {
     piece(room, wallDark, 0.03, 0.04, ROOM_D, wallX + 0.015, 0.16, 0, { cast: false });
     if (d.wallMat && d.wallMat !== 'paint') room.add(this.wallSkinMesh(d.wallMat, wall, backParts));
 
-    this.buildMeeting(room, detail, legacy, env);
+    this.buildWalls(room, env);
+    this.buildMeeting(room, detail, legacy);
 
     // Whiteboard, where plans get made.
     const boardMat = new THREE.MeshBasicMaterial({ map: this.boardTexture([]) });
@@ -697,7 +748,7 @@ export class OfficeView {
     if (d.neon) {
       const sign = canvasTex(1024, 180, (x, w, h) => { x.clearRect(0, 0, w, h); });
       this.signTex = sign;
-      const signZ = L.console ?? -2.3;
+      const signZ = L.console ?? L.signZ ?? -0.4;
       piece(room, '#23212f', 0.06, 1.3, 7.2, wallX + 0.03, 2.7, signZ, { cast: false });
       piece(room, accent, 0.07, 0.04, 6.4, wallX + 0.04, 2.78, signZ, { cast: false, mat: new THREE.MeshBasicMaterial({ color: accent }) }).userData.keep = true;
       const m = new THREE.Mesh(new THREE.PlaneGeometry(6.8, 1.19), new THREE.MeshBasicMaterial({ map: sign, transparent: true, depthWrite: false }));
@@ -813,32 +864,44 @@ export class OfficeView {
     this.loading = { settled: false };
     this.loadModels().catch((e) => { console.warn('furniture models unavailable, keeping the stand-ins', e); }).finally(() => { this.loading.settled = true; });
   }
-  /** The meeting: a glass room like the original, or a table out in the open, some crates, or just the lounge's own coffee table. */
-  buildMeeting(room, detail, legacy, env) {
-    const { primary, accent } = this.colors; const m = this.plan.meet;
-    const [tx, tz] = m.table;
-    if (m.glass) {
-      const G = m.glass;
-      // Thin dark frame, tinted panes.
-      const glass = new THREE.MeshStandardMaterial({ color: mix(primary, '#dfeaf2', 0.7), roughness: 0.04, metalness: 0.15, transparent: true, opacity: 0.2, depthWrite: false, envMap: env, side: THREE.DoubleSide });
-      const GH = 3.1;
-      const pane = (x, z, w, dd) => { const p = new THREE.Mesh(new THREE.PlaneGeometry(w || dd, GH - 0.2), glass); p.position.set(x, 0.1 + (GH - 0.2) / 2, z); if (!w) p.rotation.y = Math.PI / 2; p.userData.keep = true; room.add(p); };
-      const frame = '#2b2d35';
-      for (const x of [G.x0, G.x1]) {
-        pane(x, (G.z0 + G.z1) / 2, 0, G.z1 - G.z0);
-        piece(room, frame, 0.08, GH, 0.08, x, 0, G.z1, { cast: false }); piece(room, frame, 0.08, 0.1, G.z1 - G.z0, x, GH - 0.1, (G.z0 + G.z1) / 2, { cast: false });
-        piece(room, frame, 0.1, 0.1, G.z1 - G.z0, x, 0, (G.z0 + G.z1) / 2, { cast: false });
-        piece(room, '#f3f1ea', 0.02, 0.1, G.z1 - G.z0, x, 1.25, (G.z0 + G.z1) / 2, { cast: false, mat: new THREE.MeshBasicMaterial({ color: '#eef1f4', transparent: true, opacity: 0.55, depthWrite: false }) }).userData.keep = true;
+  /**
+   * The walls that make the rooms. Every pane on a floor goes into one mesh, so ten glass rooms cost one draw call, and the frames bake
+   * in with the rest of the room. Door frames get a post each side and a beam over the gap; a screen is waist high and solid.
+   */
+  buildWalls(room, env) {
+    const { primary, accent } = this.colors; const L = this.plan;
+    const GH = 3.1, frame = L.frame || '#2b2d35';
+    const pos = [], idx = [];
+    const pane = (x0, z0, x1, z1, y0, y1) => { const b = pos.length / 3; pos.push(x0, y0, z0, x1, y0, z1, x1, y1, z1, x0, y1, z0); idx.push(b, b + 1, b + 2, b, b + 2, b + 3); };
+    const bar = (x0, z0, x1, z1, y, h, t = 0.08, color = frame) => { const along = x0 !== x1; piece(room, color, along ? x1 - x0 : t, h, along ? t : z1 - z0, (x0 + x1) / 2, y, (z0 + z1) / 2, { cast: false }); };
+    for (const w of wallLines(L)) {
+      if (w.low) {
+        const along = w.x0 !== w.x1;
+        piece(room, primary, along ? w.x1 - w.x0 : 0.1, 1.3, along ? 0.1 : w.z1 - w.z0, (w.x0 + w.x1) / 2, 0, (w.z0 + w.z1) / 2);
+        bar(w.x0, w.z0, w.x1, w.z1, 1.3, 0.05, 0.13, accent);
+        continue;
       }
-      for (const [a, b] of [[G.x0, G.door[0]], [G.door[1], G.x1]]) {
-        pane((a + b) / 2, G.z1, b - a, 0);
-        piece(room, frame, b - a, 0.1, 0.08, (a + b) / 2, GH - 0.1, G.z1, { cast: false }); piece(room, frame, b - a, 0.1, 0.1, (a + b) / 2, 0, G.z1, { cast: false });
-        piece(room, frame, 0.08, GH, 0.08, a === G.x0 ? b : a, 0, G.z1, { cast: false });
-        piece(room, '#f3f1ea', b - a, 0.1, 0.02, (a + b) / 2, 1.25, G.z1, { cast: false, mat: new THREE.MeshBasicMaterial({ color: '#eef1f4', transparent: true, opacity: 0.55, depthWrite: false }) }).userData.keep = true;
-      }
-      piece(room, frame, G.x1 - G.x0, 0.1, 0.08, (G.x0 + G.x1) / 2, GH - 0.1, G.z1, { cast: false });
-      piece(room, mix(primary, '#5a5a66', 0.55), G.x1 - G.x0 - 0.6, 0.02, G.z1 - G.z0 - 0.5, tx, 0, tz + 0.2, { cast: false });
+      pane(w.x0, w.z0, w.x1, w.z1, 0.1, GH - 0.1);
+      bar(w.x0, w.z0, w.x1, w.z1, 0, 0.1, 0.1);
+      bar(w.x0, w.z0, w.x1, w.z1, GH - 0.1, 0.1);
+      for (const [x, z] of [[w.x0, w.z0], [w.x1, w.z1]]) piece(room, frame, 0.09, GH, 0.09, x, 0, z, { cast: false });
     }
+    // A beam over every door, so a gap in the glass reads as a way through.
+    for (const d of doorways(L)) {
+      const half = d.width / 2;
+      if (d.along) bar(d.x - half, d.z, d.x + half, d.z, GH - 0.1, 0.1); else bar(d.x, d.z - half, d.x, d.z + half, GH - 0.1, 0.1);
+    }
+    if (!pos.length) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+    this.glassMat = new THREE.MeshStandardMaterial({ color: mix(primary, '#dfeaf2', 0.72), roughness: 0.04, metalness: 0.15, transparent: true, opacity: 0.18, depthWrite: false, envMap: env, side: THREE.DoubleSide });
+    const glass = new THREE.Mesh(geo, this.glassMat); glass.userData.keep = true; glass.renderOrder = 2; room.add(glass);
+    this.glassGeo = geo;
+  }
+  /** The meeting table, or some crates. The glass round it is one of the plan's walls, see buildWalls. */
+  buildMeeting(room, detail, legacy) {
+    const { accent } = this.colors; const m = this.plan.meet;
+    const [tx, tz] = m.table;
     if (m.kind === 'crates') {
       // A door on two crates: the table of every company that started in a garage.
       for (const dx of [-0.75, 0.75]) { piece(room, '#a57f55', 0.85, 0.74, 1.05, tx + dx, 0, tz); for (const y of [0.2, 0.46]) piece(room, '#8a6a45', 0.87, 0.03, 1.07, tx + dx, y, tz, { cast: false }); }
@@ -847,7 +910,6 @@ export class OfficeView {
       this.nav.footprints.push([tx, tz, 2.6, 1.5]);
       return;
     }
-    if (m.kind === 'lounge') return;
     const sx = m.size[0] / 1.5, sz = (m.size[2] ?? m.size[1]) / 1.5;
     piece(legacy, '#efe6d6', 3.2 * sx, 0.08, 1.1 * sz, tx, 0.86, tz); piece(legacy, '#cdbfa6', 3.2 * sx, 0.04, 1.1 * sz, tx, 0.82, tz, { cast: false });
     piece(legacy, '#3d3b44', 0.14, 0.82, 0.8 * sz, tx - 1.3 * sx, 0, tz); piece(legacy, '#3d3b44', 0.14, 0.82, 0.8 * sz, tx + 1.3 * sx, 0, tz);
@@ -1053,6 +1115,15 @@ export class OfficeView {
         const g = x.createLinearGradient(0, 0, 0, H * 0.5); g.addColorStop(0, 'rgba(255,236,200,.26)'); g.addColorStop(1, 'rgba(255,236,200,0)');
         x.fillStyle = g; x.beginPath(); x.moveTo(px(a), 0); x.lineTo(px(b), 0); x.lineTo(px(b - 2.2), H * 0.5); x.lineTo(px(a - 2.2), H * 0.5); x.closePath(); x.fill();
       }
+      // Each room has its own floor, painted in here so it costs no draw calls: a cool wash in the offices and pods, tile in the kitchen, warm in the lounge.
+      const tone = { office: 'rgba(255,255,255,.07)', pod: 'rgba(120,150,190,.09)', meeting: this.tint(0.16), kitchen: 'rgba(230,235,235,.2)', lounge: 'rgba(255,190,120,.12)' };
+      for (const r of this.plan.rooms || []) {
+        const [x0, z0, x1, z1] = r.rect;
+        x.fillStyle = tone[r.kind] || 'rgba(255,255,255,.05)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0));
+        if (r.kind === 'kitchen') { x.strokeStyle = 'rgba(60,70,80,.1)'; x.lineWidth = 1; x.beginPath(); for (let cx = Math.ceil(x0); cx < x1; cx++) { x.moveTo(px(cx), pz(z0)); x.lineTo(px(cx), pz(z1)); } for (let cz = Math.ceil(z0); cz < z1; cz++) { x.moveTo(px(x0), pz(cz)); x.lineTo(px(x1), pz(cz)); } x.stroke(); }
+      }
+      // A soft dark line under every wall, so the rooms read from above even with no glass glint.
+      x.strokeStyle = 'rgba(20,16,12,.3)'; x.lineWidth = 3; x.beginPath(); for (const w of wallLines(this.plan)) { x.moveTo(px(w.x0), pz(w.z0)); x.lineTo(px(w.x1), pz(w.z1)); } x.stroke();
       // Ambient occlusion along the walls and a faint rim on the open sides.
       const rim = (x0, y0, x1, y1, a) => { const g = x.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, `rgba(20,16,12,${a})`); g.addColorStop(1, 'rgba(20,16,12,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H); };
       rim(0, 0, 0, 70, 0.34); rim(0, 0, 70, 0, 0.34); rim(W, 0, W - 40, 0, 0.12); rim(0, H, 0, H - 40, 0.12);
@@ -1065,6 +1136,7 @@ export class OfficeView {
     this.floorMat.map = tex; this.floorMat.needsUpdate = true;
     old?.dispose();
   }
+  tint(a) { const c = new THREE.Color(this.colors.primary); return `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${a})`; }
   drawClock(x) {
     const now = new Date(); const w = 128;
     x.clearRect(0, 0, w, w);
@@ -1117,6 +1189,8 @@ export class OfficeView {
     });
   }
   updateBoard(tasks) {
+    this.tasks = tasks;
+    for (const a of this.actors.values()) if (a.state !== 'idle') a.renderBubble();
     const shown = tasks.filter((t) => ['todo', 'doing', 'review', 'blocked', 'done'].includes(t.status));
     const open = shown.some((t) => t.status !== 'done');
     const list = open ? shown : [];
@@ -1180,13 +1254,19 @@ export class OfficeView {
     seen.add('boss');
     this.updateBoard(state.tasks);
   }
-  agentEvent(ev) { const a = this.actors.get(ev.id); if (a) a.setState(ev.state, ev.activity); }
-  /** A free place to stand and talk to someone at their desk, and which way to face while doing it. */
-  visitSpot(seat) {
+  agentEvent(ev) { const a = this.actors.get(ev.id); if (a) { a.taskId = ev.taskId ?? null; a.setState(ev.state, ev.activity); } }
+  taskFor(actor) { return actor.taskId == null ? null : this.tasks.find((t) => t.id === actor.taskId) || null; }
+  /** A free place to stand and talk to someone: in the same room as them, on the side the camera can see, and not where someone else is already standing. */
+  visitSpot(seat, visitor = null) {
     const [mx, mz] = seat.at;
-    for (const [dx, dz] of [[2.3, 0.6], [-2.3, 0.6], [0, 2.0], [1.8, 1.6], [-1.8, 1.6], [2.6, -0.6], [-2.6, -0.6], [0, -2.2]]) {
-      const x = mx + dx, z = mz + dz;
-      if (Math.abs(x) < ROOM_W / 2 - 0.4 && Math.abs(z) < ROOM_D / 2 - 0.4 && !this.nav.isBlocked(x, z)) return { at: [x, z], face: Math.atan2(mx - x, mz - z) };
+    const room = roomAt(this.plan, mx, mz);
+    const inside = (x, z) => !room || (x > room.rect[0] + 0.25 && x < room.rect[2] - 0.25 && z > room.rect[1] + 0.25 && z < room.rect[3] - 0.25);
+    const free = (x, z) => [...this.claims.entries()].every(([who, c]) => who === visitor || Math.hypot(c[0] - x, c[1] - z) > 0.95);
+    for (const r of [1.5, 1.9, 2.4, 3.0, 3.6]) for (let i = 0; i < 12; i++) {
+      // Starting toward the camera (+z), then working round both ways.
+      const a = ((i % 2 ? 1 : -1) * Math.ceil(i / 2) * Math.PI) / 6;
+      const x = mx + Math.sin(a) * r, z = mz + Math.cos(a) * r;
+      if (Math.abs(x) < ROOM_W / 2 - 0.4 && Math.abs(z) < ROOM_D / 2 - 0.4 && inside(x, z) && !this.nav.isBlocked(x, z) && free(x, z) && this.nav.reachable(mx, mz, x, z)) return { at: [x, z], face: Math.atan2(mx - x, mz - z) };
     }
     const at = this.nav.freeNear(mx + 1.5, mz + 1.5);
     return { at, face: Math.atan2(mx - at[0], mz - at[1]) };
@@ -1195,25 +1275,12 @@ export class OfficeView {
   bossTalks() {
     const b = this.boss, m = this.manager;
     if (!b || !m || b.action) return;
-    const v = this.visitSpot(this.managerSeat);
+    const v = this.visitSpot(this.managerSeat, b);
+    this.claims.set(b, v.at);
     b.perform([{ walk: v.at }, { anim: 'talk', hold: 2.8, face: v.face }]);
   }
-  /** The whole batch in the glass room: the visible moment a plan is made. The manager talks at the board, the team listens. */
-  meeting(managerId, staffIds) {
-    const { stand, spots } = this.plan.meet;
-    // Face the team, then turn to the board now and then.
-    const cx = spots.reduce((n, p) => n + p[0], 0) / spots.length, cz = spots.reduce((n, p) => n + p[1], 0) / spots.length;
-    const toTeam = Math.atan2(cx - stand[0], cz - stand[1]);
-    const toBoard = Math.atan2(this.plan.board - stand[0], -ROOM_D / 2 - stand[1]);
-    const m = this.actors.get(managerId);
-    m?.perform([{ walk: stand }, { anim: 'talk', hold: 2.4, face: toTeam }, { anim: 'talk', hold: 1.6, face: toBoard }, { anim: 'talk', hold: 2.0, face: toTeam }]);
-    staffIds.forEach((id, i) => {
-      const a = this.actors.get(id); if (!a) return;
-      const sp = spots[i % spots.length];
-      const face = Math.atan2(stand[0] - sp[0], stand[1] - sp[1]);
-      a.perform([{ walk: sp }, { anim: 'listen', hold: 5.2 - i * 0.2, face }]);
-    });
-  }
+  /** The whole batch in the meeting room: the visible moment a plan is made. The manager reads out the real assignments, and the team listens. */
+  meeting(managerId, staffIds) { this.life.meeting(managerId, staffIds); }
   /** The manager rings buddehbot. Purely for show: a seated manager stands up, takes the call, and gets back to work. */
   phoneCall(managerId) {
     const m = this.actors.get(managerId);
@@ -1221,13 +1288,8 @@ export class OfficeView {
     m.standUp();
     m.perform([{ anim: 'phone', hold: 3.2 }]);
   }
-  /** Finished work is physically carried over to the manager. */
-  handoff(fromId, toId) {
-    const a = this.actors.get(fromId), b = this.actors.get(toId);
-    if (!a || !b || a === b) return;
-    const v = this.visitSpot(b.seat);
-    a.perform([{ anim: 'stand', hold: 0.1, paper: true }, { walk: v.at }, { anim: 'talk', hold: 1.2, paper: false, face: v.face }]);
-  }
+  /** Finished work is physically carried over, unless the words that go with it are already on their way. */
+  handoff(fromId, toId) { this.life.handoff(fromId, toId); }
   cheer() {
     for (const a of this.actors.values()) {
       if (a.action) continue;
@@ -1293,19 +1355,25 @@ export class OfficeView {
       if (o.geometry && o.geometry !== box && o.geometry !== cyl && o.geometry !== cone && o.geometry !== ico && o.geometry !== sph && !o.geometry.parameters?.shared && (o.userData.merged || !root.userData.fromKit)) o.geometry.dispose?.();
       if (o.material?.map && o.material.map !== this.glowTex) o.material.map.dispose();
     });
+    this.glassGeo?.dispose(); this.glassMat?.dispose();
     this.codeTex.dispose(); this.pageTex.dispose(); this.idleTex.dispose(); this.glowTex.dispose(); this.discGeo.dispose(); this.discMat.map.dispose(); this.discMat.dispose();
   }
   resize(w, h) {
     this.w = w; this.h = h;
-    const phone = w <= 760;
-    // Keep the room inside the area the panel leaves free.
-    const panel = phone ? 0 : Math.min(430, w * 0.34);
-    const sheet = phone ? h * 0.54 : 0;
-    const top = phone ? 58 : 76, bottom = phone ? 44 : 60; // room for the title above and the controls below
-    const vw = w - panel, vh = h - sheet - top - bottom;
-    this.visW = vw; this.visH = vh;
+    if (!this.insetNow) this.insetNow = { ...(this.insets || this.defaultInsets()) };
+    this.applyInsets();
+  }
+  defaultInsets() {
+    const phone = this.w <= 760;
+    return phone ? { left: 0, right: 0, top: 58, bottom: this.h * 0.54 + 44 } : { left: 0, right: Math.min(430, this.w * 0.34), top: 76, bottom: 60 };
+  }
+  /** The part of the screen the room may use: the page says what its panels cover, and the room eases over to fit what is left. */
+  setInsets(next) { this.insets = next; if (this.insetNow && this.intro < 1) { this.insetNow = { ...next }; this.applyInsets(); } }
+  applyInsets() {
+    const { w, h, insetNow: i } = this;
+    this.visW = Math.max(120, w - i.left - i.right); this.visH = Math.max(120, h - i.top - i.bottom);
     this.camera.aspect = w / h;
-    this.camera.setViewOffset(w, h, panel / 2, (sheet + bottom - top) / 2, w, h);
+    this.camera.setViewOffset(w, h, (i.right - i.left) / 2, (i.bottom - i.top) / 2, w, h);
     this.camera.updateProjectionMatrix();
   }
   placeCamera(dist) {
@@ -1315,7 +1383,7 @@ export class OfficeView {
   }
   /** The closest camera distance at which every corner of the room lands inside the free area. Cached per angle. */
   fitDistance() {
-    const key = `${this.yaw.toFixed(3)}|${this.visW}|${this.visH}`;
+    const key = `${this.yaw.toFixed(3)}|${this.visW.toFixed(0)}|${this.visH.toFixed(0)}`;
     if (key === this.fitKey) return this.fitValue;
     const cam = this.camera; const tan = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
     const fx = tan * cam.aspect * (this.visW / this.w), fy = tan * (this.visH / this.h);
@@ -1334,6 +1402,7 @@ export class OfficeView {
   }
   update(dt) {
     this.time += dt; this.intro = Math.min(1, this.intro + dt / 1.35);
+    this.easeInsets(dt);
     this.world.update(dt, this.time);
     const e = 1 - Math.pow(1 - this.intro, 3);
     const k = 1 - Math.exp(-dt * 6);
@@ -1354,14 +1423,47 @@ export class OfficeView {
     for (let i = 0; i < this.sway.length; i++) { const c = this.sway[i]; c.rotation.z = Math.sin(this.time * 0.9 + i * 2) * 0.035; c.rotation.x = Math.cos(this.time * 0.7 + i) * 0.025; }
     const sec = Math.floor(Date.now() / 1000);
     if (sec !== this.clockSec) { this.clockSec = sec; this.drawClock(this.clockTex.image.getContext('2d')); this.clockTex.needsUpdate = true; }
+    this.life.update(dt);
     for (const a of this.actors.values()) { a.update(dt); this.placeTag(a); }
+    this.placePins();
     this.updatePet(dt);
+  }
+  easeInsets(dt) {
+    const want = this.insets; if (!want || !this.insetNow) return;
+    const now = this.insetNow, k = 1 - Math.exp(-dt * 7); let moved = false;
+    for (const key of ['left', 'right', 'top', 'bottom']) {
+      const d = want[key] - now[key];
+      if (Math.abs(d) > 0.5) { now[key] += d * k; moved = true; } else if (d) { now[key] = want[key]; moved = true; }
+    }
+    if (moved) this.applyInsets();
+  }
+  /** Where the page's round pins float. Each one sits over the room it opens, above the glass so it stays off the people. */
+  pinAnchors() {
+    const L = this.plan; const top = 3.55;
+    const over = (kind, id) => { const r = id ? (L.rooms || []).find((x) => x.id === id) : roomOfKind(L, kind); const [x, z] = r ? roomCentre(r) : [0, 0]; return [x, top, z]; };
+    return { chat: over(null, 'manager'), requests: over(null, 'boss'), tasks: over('meeting'), talk: over('kitchen'), projects: over('lounge'), orders: [L.printer[0] + 0.3, 2.2, L.printer[1]] };
+  }
+  setPins(list) { this.pins = list; this.pinKey = ''; }
+  /** Pins only move with the camera, so most frames leave the page alone. */
+  placePins() {
+    if (!this.pins.length) return;
+    const key = `${this.yaw.toFixed(3)}|${this.zoom.toFixed(3)}|${this.intro.toFixed(2)}|${this.visW.toFixed(0)}|${this.visH.toFixed(0)}`;
+    if (key === this.pinKey) return;
+    this.pinKey = key;
+    this.camera.updateMatrixWorld();
+    for (const p of this.pins) {
+      this.tv.set(p.at[0], p.at[1], p.at[2]).project(this.camera);
+      const x = (this.tv.x * 0.5 + 0.5) * this.w, y = (-this.tv.y * 0.5 + 0.5) * this.h;
+      p.el.style.transform = `translate(-50%,-50%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
+    }
   }
   placeTag(a) {
     const p = this.tv.copy(a.group.position); p.y += (a.char.labelY ?? HEAD_TOP * CHAR_SCALE) + 0.2;
     p.project(this.camera);
     const x = (p.x * 0.5 + 0.5) * this.w, y = (-p.y * 0.5 + 0.5) * this.h;
+    a.tagX = x;
     a.tag.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
+    if (a.speech) a.placeSide();
     // Nearer people keep their labels on top of farther ones.
     const z = Math.round((1 - p.z) * 5000);
     if (z !== a.tagZ) { a.tagZ = z; a.tag.style.zIndex = z; }
