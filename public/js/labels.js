@@ -62,15 +62,23 @@ export function tidyLabels(actors, viewWidth) {
     const bw = showing ? a.bubble.offsetWidth || Math.min(150, 26 + a.bubble.textContent.length * 5.6) : 0;
     items.push({ id: a, x: a.tagX, y: a.tagY, nameW: a.nameW, nameH: a.nameH, bubbleW: bw, bubbleH: showing ? a.bubble.offsetHeight || 22 : 0, z: a.tagZ || 0, side: a.tag.dataset.side || 'right', priority: a.speech ? 9 : RANK[a.state] || 1 });
   }
-  const solved = layoutLabels(items, { width, minX: left });
+  const top = viewWidth <= 760 ? 60 : 0;  // a phone's floor title sits at the top with nothing behind it
+  const solved = layoutLabels(items, { width, minX: left, top });
   for (const [a, o] of solved) {
     a.lift = o.lift;
     if (o.side !== a.tag.dataset.side) a.tag.dataset.side = o.side;
     // A bubble that has been shown stays a moment, so two people passing don't make it flicker.
     if (o.bubble) a.bubbleSince = now;
-    if (o.bubble && (o.bx !== a.bx || o.by !== a.by)) { a.bx = o.bx; a.by = o.by; a.bubble.style.setProperty('--bx', `${o.bx}px`); a.bubble.style.setProperty('--by', `${-o.by}px`); }
+    if (!a.speech && a.bx !== a.solvedX) { a.bx = a.solvedX; a.bubble.style.setProperty('--bx', `${a.bx || 0}px`); }  // the nudge below is only for as long as the line lasts
+    if (o.bubble && (o.bx !== a.solvedX || o.by !== a.by)) { a.solvedX = a.bx = o.bx; a.by = o.by; a.bubble.style.setProperty('--bx', `${o.bx}px`); a.bubble.style.setProperty('--by', `${-o.by}px`); }
     // Somebody's words are never set aside. If nowhere is clear they still show, opening toward the middle of the screen.
     if (a.speech && !o.bubble) a.placeSide();
+    // However the sums came out, a line someone is saying stays on screen in full.
+    if (a.speech) {
+      const r = a.bubble.getBoundingClientRect();
+      const shift = r.left < left + 4 ? left + 4 - r.left : r.right > width - 4 ? width - 4 - r.right : 0;
+      if (Math.abs(shift) > 1) { a.bx = (a.bx || 0) + shift; a.bubble.style.setProperty('--bx', `${a.bx}px`); }
+    }
     const crowded = !a.speech && !o.bubble && !a.bubble.hidden && now - (a.bubbleSince || 0) > 900;
     if (crowded !== a.tag.classList.contains('crowded')) a.tag.classList.toggle('crowded', crowded);
   }
