@@ -284,7 +284,7 @@ if (!ONLY || ONLY === 'plans') {
     await enter(p, old, 'low');
     await p.until('window.__office.view.modelsOn === true', 'models', 45000);
     const st = await p.ev('({ plan: window.__office.view.plan.label, actors: window.__office.view.actors.size, seated: [...window.__office.view.actors.values()].every((a) => a.seated) })');
-    if (st.plan !== 'Open plan' || st.actors !== 6 || !st.seated) throw new Error(JSON.stringify(st));
+    if (st.plan !== 'Corridors' || st.actors !== 6 || !st.seated) throw new Error(JSON.stringify(st));
     await openPanel(p);
     await p.click('[data-custom=decor]');
     await p.until('document.querySelector(".plan[aria-checked=true]")?.dataset.v === "open"', 'plan shown');
