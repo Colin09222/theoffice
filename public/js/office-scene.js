@@ -364,7 +364,7 @@ export class OfficeView {
     this.world = getWorld();
     const n = this.floorNumber;
     // A little lower than exact, so the tower's own slab sits just under our plate instead of fighting it for the same plane.
-    const lift = -(GROUND + (n - 1) * FLOOR_H) * WORLD_SCALE - 0.35;
+    const lift = -(GROUND + (n - 1) * FLOOR_H) * WORLD_SCALE - (n === 1 ? 0.9 : 0.35);  // the ground floor also clears the podium canopy
     this.worldLift = lift;
     this.stub = makeTower(Math.max(0, n - 1), { stub: true, env: this.world.environment() });
     this.stub.group.scale.setScalar(WORLD_SCALE); this.stub.group.position.y = lift;

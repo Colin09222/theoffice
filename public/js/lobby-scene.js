@@ -500,8 +500,9 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
 
   // Corner piers and vertical fins give the shaft its lines; a pale stone frame rather than a dark one.
   const ph = floorCount * FLOOR_H;
-  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) add(stone, 0.9, ph + 0.2, 0.9, sx * (half + 0.12), GROUND, sz * (half + 0.12));
-  for (let side = 0; side < 4; side++) {
+  // No shaft at all for a ground-floor stub: a zero-height box would only contribute degenerate triangles.
+  if (ph > 0) for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) add(stone, 0.9, ph + 0.2, 0.9, sx * (half + 0.12), GROUND, sz * (half + 0.12));
+  if (ph > 0) for (let side = 0; side < 4; side++) {
     for (const o of [-half * 0.5, 0, half * 0.5]) {
       const [x, z, w, d] = side === 0 ? [o, half + 0.22, 0.16, 0.5] : side === 1 ? [o, -half - 0.22, 0.16, 0.5] : side === 2 ? [half + 0.22, o, 0.5, 0.16] : [-half - 0.22, o, 0.5, 0.16];
       add(stone, w, ph, d, x, GROUND, z);
