@@ -666,6 +666,9 @@ export class Engine {
   bossMessage(floor, text) {
     this.addMessage(floor.id, 'boss', null, text);
     run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
+    // Plenty of people answer a question by just typing in the chat. Waiting for the form would leave someone blocked for good.
+    const waiting = get(this.db, 'SELECT id FROM questions WHERE floor_id=? AND answer IS NULL ORDER BY id LIMIT 1', floor.id);
+    if (waiting) this.answerQuestion(floor, waiting.id, text);
     if (this.floorState(floor.id).budgetStopped) this.officeNotice(floor.id, 'Noted, boss. Today\'s budget is used up, so I\'ll pick this up first thing tomorrow.');
     this.kick();
   }

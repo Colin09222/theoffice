@@ -188,7 +188,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     const parts = [bossText(db, floorId)];
     for (const t of all(db, "SELECT transcript FROM tasks WHERE floor_id=? AND transcript!=''", floorId)) {
       let msgs; try { msgs = JSON.parse(t.transcript); } catch { continue; }
-      for (const m of msgs) if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string') parts.push(m.content);
+      // A refusal quotes the link, and reading a draft back shows it again. Neither means anyone has seen the page.
+      for (const m of msgs) if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string' && !/^Error:|^<untrusted_data source="workspace:/.test(m.content)) parts.push(m.content);
     }
     for (const f of all(db, "SELECT path,content FROM files WHERE floor_id=? AND path LIKE 'projects/%.md'", floorId)) if (!f.path.startsWith(exceptPrefix) && typeof f.content === 'string') parts.push(f.content);
     return parts.join('\n').toLowerCase().replaceAll('://www.', '://');

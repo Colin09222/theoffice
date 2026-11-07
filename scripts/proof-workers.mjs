@@ -139,11 +139,65 @@ const SCENARIOS = {
   'plan-biz-vague': { plan: true, company: 'Big Plans', boss: 'Mo', steps: ['i wanna make money online, ideas?', 'the second one. go'] },
   'plan-biz-dog': { plan: true, company: 'Good Boy', boss: 'Ana', steps: ['dog walking biz in austin, can u figure it out', 'sure'] },
   'plan-hi': { plan: true, company: 'Just Saying', boss: 'Lu', steps: ['hi'] },
+  // The three buttons on a new floor.
+  'plan-tap-game': { plan: true, company: 'Tap Games', boss: 'Sam', steps: ['Let\'s do a game. What could we build?', 'u pick'] },
+  'plan-tap-web': { plan: true, company: 'Tap Sites', boss: 'Sam', steps: ['Let\'s do a website. What do you need from me?', 'its for my moms bakery'] },
+  'plan-tap-biz': { plan: true, company: 'Tap Biz', boss: 'Sam', steps: ['Let\'s do a small business. Help me work it out.', 'idk u pick'] },
   // ---- whole jobs ----
   'game-vague': { company: 'Snack Attack', boss: 'Dee', steps: ['make me a game. idk something fun, not too hard', 'u pick'] },
   'web-vague': { company: 'Rosa Sweets', boss: 'Tony', steps: ['need a website for my moms bakery', 'its called rosas. in queens. she does cakes mostly, birthday and quinceañera stuff. no prices yet, ppl should just call or ask. i dont have her number on me so leave it out for now'] },
   'biz-vague': { company: 'Good Boy', boss: 'Ana', steps: ['dog walking biz in austin, can u figure it out', 'sure go'] },
 };
+
+// A person changing their mind part-way through a real job on a real computer. Each line of the result says what was seen, not what was hoped.
+async function midJob(db, app) {
+  const sc = { company: 'Cat Stuff', boss: 'Pat' };
+  const boss = new Boss();
+  const made = await boss.claim(db, sc.company, sc.boss);
+  const floor = get(db, 'SELECT * FROM floors WHERE slug=?', made.slug);
+  app.bus.subscribe(floor.id, { ip: 'proof', send: (ev) => {
+    if (ev.type === 'feed') log(`[${floor.slug}]`, ev.data.name, ev.data.text);
+    if (ev.type === 'message' && ev.data.role !== 'boss') log(`[${floor.slug}] SAYS`, `[${ev.data.role}] (${words(ev.data.text)}w)`, String(ev.data.text).slice(0, 600));
+  }, close() {} });
+  const until = async (what, fn, ms = 240000) => { const end = Date.now() + ms; for (;;) { const v = await fn(); if (v) return v; if (Date.now() > end) throw new Error(`timed out: ${what}`); await sleep(1500); } };
+  const results = [];
+  const check = (name, ok, detail = '') => { results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); log(results.at(-1)); };
+  const say = (text) => { log(`[${floor.slug}] BOSS:`, text); return boss.say(text); };
+  const session = () => get(db, "SELECT id,status,session_id FROM tasks WHERE floor_id=? AND session_id!='' AND status='doing' ORDER BY id DESC LIMIT 1", floor.id);
+  await say('make me a tiny game about a cat');
+  const first = await until('a computer to start', session);
+  check('a vague request started a real computer without a second message', !!first.session_id);
+  await sleep(20000);
+  log('PAUSING'); await boss.control('pause');
+  await until('runs to stop', () => ![...app.engine.runs.values()].some((r) => r.floorId === floor.id), 60000);
+  const costPaused = floorCost(db, floor.id);
+  await sleep(15000);
+  check('pausing stopped everything, and spending with it', ![...app.engine.runs.values()].some((r) => r.floorId === floor.id) && floorCost(db, floor.id) - costPaused < 0.02, `${(floorCost(db, floor.id) - costPaused).toFixed(3)} after the pause`);
+  log('RESUMING'); await boss.control('resume');
+  await until('the same computer to carry on', session, 60000);
+  check('resume went back to the same computer', session().session_id === first.session_id);
+  await sleep(15000);
+  const openBefore = get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing')", floor.id).n;
+  const mgrBefore = get(db, "SELECT COUNT(*) n FROM messages WHERE floor_id=? AND role='manager'", floor.id).n;
+  await say('oh make the cat orange');
+  await until('the manager to answer', () => get(db, "SELECT COUNT(*) n FROM messages WHERE floor_id=? AND role='manager'", floor.id).n > mgrBefore && ![...app.engine.runs.values()].some((r) => r.floorId === floor.id && r === app.engine.runs.get(get(db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", floor.id).id)), 120000);
+  const stillOn = get(db, 'SELECT status FROM tasks WHERE id=?', first.id).status;
+  check('a late add-on did not cancel the work under way', stillOn !== 'cancelled', `first task is ${stillOn}, ${get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing')", floor.id).n} open, was ${openBefore}`);
+  log('REDIRECTING'); await boss.control('redirect', 'actually forget the game. make a one page site for my cat sitting biz instead');
+  await until('the old work to stop and a new plan to appear', () => get(db, 'SELECT status FROM tasks WHERE id=?', first.id).status === 'cancelled' && get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing') AND id>?", floor.id, first.id).n > 0, 180000);
+  check('redirect cancelled the old work and made a new plan', true, all(db, "SELECT title,status FROM tasks WHERE floor_id=? AND id>? ORDER BY id", floor.id, first.id).map((t) => `${t.title} [${t.status}]`).join(' | ').slice(0, 300));
+  const slugs = all(db, "SELECT DISTINCT project FROM tasks WHERE floor_id=? AND status IN ('todo','doing')", floor.id).map((t) => t.project);
+  check('the new plan is about the new thing', slugs.some((x) => /cat|sit/.test(x)), slugs.join(','));
+  log('STOPPING'); await boss.control('stop');
+  await until('everything to stop', () => ![...app.engine.runs.values()].some((r) => r.floorId === floor.id), 60000);
+  const costStopped = floorCost(db, floor.id);
+  await sleep(15000);
+  const left = get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked','review')", floor.id).n;
+  check('stop left nothing open or running, and nothing spending', left === 0 && floorCost(db, floor.id) - costStopped < 0.02, `${left} open, ${(floorCost(db, floor.id) - costStopped).toFixed(3)} after the stop`);
+  writeFileSync(join(DIR, 'midjob.txt'), [...results, `cost ${floorCost(db, floor.id)}`].join('\n'));
+  await dump(db, floor, 'midjob', { shots: false });
+  return results;
+}
 
 async function runOne(db, app, name, sc) {
   const boss = new Boss();
@@ -229,6 +283,13 @@ if (args[0] === 'again') {
   await waitQuiet(db, app, boss, floor, 30 * 60000, false);
   log('FOLLOW-UP COST', (floorCost(db, floor.id) - c0).toFixed(4));
   await dump(db, floor, args[3] || 'after-change');
+  await app.close(); db.close();
+  process.exit(0);
+}
+if (args[0] === 'midjob') {
+  const { db, app } = await makeApp({ dry: false });
+  await midJob(db, app).catch((e) => log('MIDJOB FAILED', e.message));
+  log('spent after this', JSON.stringify(spentEverywhere()));
   await app.close(); db.close();
   process.exit(0);
 }

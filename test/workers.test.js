@@ -35,7 +35,8 @@ async function start(llm, overrides = {}, deps = {}) {
   return { t, c, f, mgr, e: t.app.engine };
 }
 const idle = (h) => until(() => !h.e.runs.size && !get(h.t.db, 'SELECT manager_wake w FROM floors WHERE id=?', h.f.id).w && !h.e.tickQueued, { what: 'the floor to go quiet' });
-const said = (h, role) => all(h.t.db, 'SELECT text FROM messages WHERE floor_id=? AND role=? ORDER BY id', h.f.id, role).map((m) => m.text);
+// The welcome on a new floor isn't part of any test here.
+const said = (h, role) => all(h.t.db, 'SELECT text FROM messages WHERE floor_id=? AND role=? ORDER BY id', h.f.id, role).map((m) => m.text).filter((x) => !x.startsWith('Welcome to the building'));
 
 describe('the manager reads a vague boss', () => {
   const p = managerPrompt(floor, BOSS, ROSTER, FULL);
@@ -263,6 +264,21 @@ describe('ending a job', () => {
   });
 });
 
+describe('questions', () => {
+  test('an answer typed in the chat unblocks whoever asked, and the manager hears it as well', async () => {
+    const llm = scripted({ staff: (a) => (a.meta.step === 0 ? { toolCalls: [['ask_boss', { question: 'Silly or serious?' }]] } : { content: `Going with: ${a.messages.at(-1).content}` }), manager: () => ({ content: 'Noted.' }) });
+    const h = await start(llm);
+    const { id } = h.e.assignTask(h.f, h.mgr, { to: 'writer', title: 'W', brief: 'b', plan: '', project: 'p', dependsOn: [], afterPrevious: false });
+    h.e.kick();
+    await until(() => get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status === 'blocked' && !h.e.runs.size, { what: 'the question' });
+    h.e.bossMessage(h.f, 'silly obv');
+    await until(() => ['review', 'done'].includes(get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status), { what: 'the work to carry on' });
+    assert.match(get(h.t.db, 'SELECT result FROM tasks WHERE id=?', id).result, /silly obv/);
+    assert.equal(get(h.t.db, 'SELECT answer FROM questions WHERE task_id=?', id).answer, 'silly obv');
+    assert.ok(said(h, 'manager').includes('Noted.'));
+  });
+});
+
 describe('never going quiet', () => {
   test('a turn that runs out of steps tells the boss, and is warned before it does', async () => {
     const llm = scripted({ manager: () => ({ toolCalls: [['list_files', {}]] }) });
@@ -301,30 +317,33 @@ describe('never going quiet', () => {
     assert.match(get(h.t.db, 'SELECT result FROM tasks WHERE id=?', id).result, /Ran out of steps.*1 files are saved.*isn't lost/);
     assert.ok(llm.calls.some((c) => c.messages.some((m) => /three steps left/.test(String(m.content)))));
   });
-  test('a computer nearly out of budget is told to save, and a stopped one reports where it got to', async () => {
+  test('a computer nearly out of budget is told to save, and one stopped by its step limit reports where it got to', async () => {
     const seen = [];
-    const sessions = createMockSessions({}, { turn: async (api) => {
-      await api.step(); await api.tool('bash', { command: 'mkdir -p /workspace && tar xzf /mnt/session/uploads/office/bundle.tgz -C /workspace' });
-      await api.step(); await api.message('Halfway through the level select.');
+    const sessions = createMockSessions({}, { usage: { input_tokens: 20000, output_tokens: 10000 }, onTurn: async (api) => {
+      await api.step(); await api.tool('bash', { command: 'tar xzf bundle.tgz' });
+      await api.message('Halfway through the level select.');
       await api.save([{ path: 'index.html', data: Buffer.from('<h1>x</h1>') }]);
+      await api.step(); await api.step(); await api.step();
     } });
     const send = sessions.send.bind(sessions);
     sessions.send = (id, evs) => { seen.push(...evs); return send(id, evs); };
-    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0, sessionMaxUsd: 0.2, sessionMaxSteps: 1 }, { sessions });
+    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0, sessionMaxUsd: 2, taskMaxUsd: 2, sessionMaxSteps: 3 }, { sessions });
     h.e.runManager = async () => {};
+    h.e.computer.room = () => ({ usd: 0.3, daily: false });
+    h.e.computer.stopGraceMs = 50;
     const { id } = h.e.assignTask(h.f, h.mgr, { to: 'builder', title: 'B', brief: 'b', plan: '', project: 'g', dependsOn: [], afterPrevious: false });
     h.e.kick();
-    await until(() => ['failed', 'review'].includes(get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status) && !h.e.runs.size, { what: 'it to stop', timeout: 20000 });
-    const row = get(h.t.db, 'SELECT status,result FROM tasks WHERE id=?', id);
-    if (row.status === 'failed') assert.match(row.result, /Ran out of steps/);
-    assert.ok(seen.length);
+    await until(() => get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status === 'failed' && !h.e.runs.size, { what: 'it to stop', timeout: 20000 });
+    assert.ok(seen.some((ev) => ev.type === 'system.message' && /nearly out of budget/.test(ev.content[0].text)), 'told to save');
+    const r = get(h.t.db, 'SELECT result FROM tasks WHERE id=?', id).result;
+    assert.match(r, /Ran out of steps/); assert.match(r, /Last thing it said: Halfway through the level select/);
   });
 });
 
 describe('one computer at a time on a project', () => {
   test('a second task on the same project waits, even if nobody set the order', async () => {
     const order = [];
-    const sessions = createMockSessions({}, { turn: async (api, text) => {
+    const sessions = createMockSessions({}, { onTurn: async (api, text) => {
       const title = text.match(/Task #\d+: (.+)/)?.[1];
       order.push(`start ${title}`);
       await api.step(); await new Promise((r) => setTimeout(r, 30)); await api.step();
@@ -354,7 +373,7 @@ describe('sources', () => {
     await until(() => get(h.t.db, "SELECT status FROM tasks WHERE project='r' AND floor_id=?", h.f.id).status !== 'doing' && !h.e.runs.size && get(h.t.db, "SELECT status FROM tasks WHERE project='r' AND floor_id=?", h.f.id).status !== 'todo', { what: 'the task to end' });
     return { h, llm };
   }
-  const toolText = (llm) => llm.calls.at(-1).messages.filter((m) => m.role === 'tool').map((m) => m.content).join('\n');
+  const toolText = (llm) => llm.calls.filter((c) => c.meta.kind === 'staff').at(-1).messages.filter((m) => m.role === 'tool').map((m) => m.content).join('\n');
   test('a link nobody opened refuses the research, and opening it first lets it through', async () => {
     const write = () => ({ toolCalls: [['write_file', { path: 'projects/r/index.md', content: body('https://www.rover.example-site.net/austin/') }]] });
     const pub = (extra = {}) => () => ({ toolCalls: [['publish_project', { project: 'r', title: 'R', kind: 'research', ...extra }]] });
@@ -370,6 +389,7 @@ describe('sources', () => {
     const p = get(r.h.t.db, "SELECT published_at p, launch_check c FROM projects WHERE slug='r' AND floor_id=?", r.h.f.id);
     assert.ok(p.p); const check = JSON.parse(p.c);
     assert.match(check.claims.join(' '), /made-up-source\.net/); assert.equal(check.reason, 'The boss sent me this link by name.');
+    assert.match(r.llm.calls.filter((c) => c.meta.kind === 'staff').at(-1).messages.filter((m) => m.role === 'tool').map((m) => m.content).join(' '), /a link nobody here opened/, 'being refused once doesn\'t count as having seen it');
   });
   test('links handed down from a teammate, and example links, are fine', async () => {
     const llm = scripted({ staff: (a) => {
