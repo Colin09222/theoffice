@@ -398,6 +398,39 @@ Node 22, mock mode, on the final code, one browser suite at a time. Another work
 
 Earlier runs on the way there failed, and each cause is listed above. Runs that died because another worker's cleanup (`pkill -f "officecdp-"`) killed the browser were thrown away and rerun. `CDP_PROFILE_PREFIX` now keeps one worker's browsers out of the way of another's cleanup, and any worker that shares the machine should set its own. No test was weakened: where an expectation changed, it follows a decision recorded here, and the new leak and launch checks are stricter than the ones they replaced.
 
+### Work caps off
+The owner, partway through this work: "Make if unlimited steps and sessions dude i told you im fine without guardrails the money if i lose it is fine its within the budgeted amount i had and it literally cannot go above that because its all capped thru the provider". So every limit on how much work gets done is now an env setting that is off unless set. That covers steps, tasks, revisions, staff, computer steps, minutes and sessions, the stuck-loop stop, and also the dollar limits per task, per computer and per day, the picture, review and search quotas, and the standing-order limits. The $120 per provider, the domain rules, LLM call concurrency and every security rule stay. `docs/DEPLOY-NEXT.md` has the full table, what was left alone and why.
+
+**Taking the caps off wasn't the hard part.** Those were doing other jobs that nobody had written down, and each of these would have gone wrong:
+- **The first computer would have frozen the building.** A session holds everything it is promised, and with no limit of its own it would be promised all that's left, so every other Claude call would wait for it to finish. A session is now promised $2 at a time and tops up as it goes. A big number in `SESSION_MAX_USD`, which is what a by-hand "no limit" on live could look like, behaves the same way.
+- **`Infinity` would have reached the platform.** The budget is whole cents as an integer string, so the amount now can't be anything else.
+- **`null` would have reached the page.** `staffN >= null` is true, so an uncapped floor would have shown every desk as taken, and `?? 3` would have put the three-order limit straight back.
+- **A long task would have outgrown the model**, and stopped the floor with a provider error. It would also have grown in memory, in the database and in every request. A run now keeps its opening and latest steps, and whole steps go, so every tool result still has its call.
+- **Doing that would have refused honest docs.** Publishing checks that a cited link was really opened, and the proof was in the steps being dropped, so the links now move to `tasks.seen_links`.
+- **Ten computers finishing together could have run out of memory.** The old limit of 4 sessions was also the only thing limiting how many whole projects were in memory. File work now takes turns, two at a time.
+- **The manager's state message listed every open task**, and would have grown until it didn't fit. It now shows 40, reports first. Anything left over gets its own look, but only if the last look got through some, so it can't loop on its own.
+- **The board could have hidden what was running.** It shows the latest 80, and the queue runs oldest first.
+- **Waiting leaked.** A call or computer waiting for room added a listener to its run every two seconds and never took it off. Harmless when a run was short.
+
+**A bug this showed up that was already there.** A session stopped at its cap and sent to wait for room was also sent an interrupt. On the mock, that ended its turn, so when it woke it looked finished and went to review with the job half done. Whether the real platform does the same isn't known. It now just waits.
+
+**Two mistakes of mine, caught before they shipped.** The first slice rule only applied with no session limit at all, which the ops notes showed wouldn't match what's on live. The first guard on slow viewers also counted the catch-up burst on connecting, which would have dropped a viewer back into the same burst for ever. Both have tests now.
+
+**Measured with `scripts/soak-unlimited.mjs`**, with no model and no spend:
+
+| Run | Heap along the way | Size |
+|---|---|---|
+| Staff task, 3000 steps of 30 KB | 14, 15, 15, 15, 15, 15, 14 MB | Largest request 217 KB, stored 125 KB |
+| Computer session, 100,000 steps, 200,000 events | 15, 19, 18, 19, 18, 14 MB | Event ids follow the 15-minute window. The most it held was 25,604, with the window cut to 1 second and the mock running far faster than any real session |
+
+**Tests with the caps off.** Node 22, mock mode, one browser suite at a time, with `floors2` and the security review running on the same machine. `npm test` 709 of 709, `e2e` 66 of 66, `e2e:apps` 26 of 26, `e2e:launch` 18 of 18, `floors.mjs` 14 of 14, `custom.mjs` 41 of 41, `e2e:resilience` 16 of 16. `custom.mjs` first failed 6 steps, 3 at each screen size. Its hiring step still looked for "4 of 8" desks, and throwing there left the panel open over the next two steps. It passed once that check was updated. Nothing in `server/` has changed since those runs. New tests are in `test/unlimited.test.js`.
+
+**The review got this early.** Worktrees share a repository, so `office-review` merged these commits from the local branch before they were pushed, and has everything except the last commit, which only holds that test fix and this section. The parent wrote `DONE NEXT ee530ef` when this session looked crashed, and that commit doesn't have the cap work.
+
+**What it costs.** One looping job can now spend all of what is left of a provider's $120, with nothing to slow it down. The owner has said that's fine, so this is here to be known rather than to be argued with. `admin.mjs budget --json` still flags 50%, 80% and 100%.
+
+**Not proven on the real platform.** No real run was made for this part. The keys weren't in this session's environment, and I couldn't re-read the part of my brief that allowed real spending, so I didn't go and fetch them. Raising a running session's budget and the date filter on its events have only met the mock and a fake HTTP server. If the platform refuses either, a job still carries on: with a short stop at the end of each slice, or by reading the whole history. `node scripts/proof-next.mjs slices` settles both for about $1, and that mode itself hasn't been run either.
+
 ### Not proven
 - Nothing here has been deployed, or run on hz, in Docker, on a real phone, or in Safari or Firefox.
 - The scrub has only run on test data. It matches a spend word and an amount in the same sentence, so an unusual phrasing could survive it, and an old sentence about a real price with "spent" in it could lose its number. Read a few old floors after deploying.
