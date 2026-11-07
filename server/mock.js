@@ -111,7 +111,9 @@ function managerStep(meta, messages = []) {
       calls.push(call('assign_task', { ...p, to: 'researcher', title: 'Find out who this is for', brief: `Research the idea: ${boss}${flag(/\[buy\]/, '[buy]')}${flag(/\[ssrf\]/, '[ssrf]')}${flag(/\[web\]/, '[web]')}` }, 0));
       calls.push(call('assign_task', { ...p, to: 'writer', title: 'Write the launch brief', brief: `Write the brief.${flag(/\[ask\]/, '[ask]')}${flag(/\[revise\]/, '[revise]')}` }, 1));
       calls.push(call('assign_task', { ...p, to: 'designer', title: 'Pick the look', brief: 'Write style.css.' }, 2));
-      calls.push(call('assign_task', { ...p, to: 'builder', title: 'Build the mini-site', after_previous: true, brief: `Build and publish the site.${flag(/\[traverse\]/, '[traverse]')}${flag(/\[inject\]/, '[inject]')}` }, 3));
+      // The boss's files go to whoever puts the page together, as a real model is told to.
+      const files = (meta.bossFiles || []).slice(-10);
+      calls.push(call('assign_task', { ...p, to: 'builder', title: 'Build the mini-site', after_previous: true, brief: `Build and publish the site.${files.length ? ' Use the boss\'s photo.' : ''}${flag(/\[traverse\]/, '[traverse]')}${flag(/\[inject\]/, '[inject]')}`, ...(files.length ? { files } : {}) }, 3));
       if (/\[hire\]/.test(boss)) calls.push(call('assign_task', { ...p, to: 'analyst', title: 'Size it up', brief: 'Write a note on the numbers.' }, 4));
       return { toolCalls: calls };
     }
@@ -144,14 +146,18 @@ function staffStep(meta) {
     if (/\[traverse\]/.test(b)) list.push(call('write_file', { path: '../../../etc/passwd', content: 'nope' }));
     list.push(call('read_file', { path: `${dir}/style.css` }));
     if (/\[img\]/.test(meta.allBoss || b)) list.push(call('generate_image', { prompt: 'A small hero picture', name: 'hero', project: p }));
-    list.push(call('write_file', { path: `${dir}/index.html`, content: /\[inject\]/.test(b) ? EVIL : SITE(p, 'A real page, written by a tiny staff while you watched.') }));
+    // A photo from the boss: look at it, then put a copy in the project, where the page can use it.
+    const photo = (meta.files || []).find((f) => /\.(png|jpe?g|webp|gif)$/i.test(f));
+    const photoAt = photo ? `images/${photo.split('/').pop().replace(/^u[A-Za-z0-9_-]{12}-/, '')}` : '';
+    if (photo) list.push(call('view_file', { path: photo }), call('copy_file', { from: photo, to: `${dir}/${photoAt}` }));
+    list.push(call('write_file', { path: `${dir}/index.html`, content: /\[inject\]/.test(b) ? EVIL : SITE(p, 'A real page, written by a tiny staff while you watched.').replace('</main>', photo ? `<img src="${photoAt}" alt="The boss's photo" width="320"></main>` : '</main>') }));
     list.push(call('write_file', { path: `${dir}/app.js`, content: JS }));
     list.push(call('publish_project', { project: p, title: p, description: 'A working little site.', kind: 'site' }));
   } else {
     list.push(call('write_file', { path: `${dir}-notes/${role}.md`, content: `# ${role} notes\n\nDone.\n` }));
   }
   if (step < list.length) return { toolCalls: [list[step]] };
-  return { content: `Finished "${task.title}".` };
+  return { content: `Finished "${task.title}".${meta.saw ? ` I could see ${meta.saw}.` : ''}` };
 }
 
 export function createMockClient(cfg) {
@@ -169,7 +175,10 @@ export function createMockClient(cfg) {
       const delay = /\[slow\]/.test(boss) || /\[slow\]/.test(meta.allBoss || '') ? Math.max(cfg.mockDelayMs, 120) * 4 : cfg.mockDelayMs;
       await sleep(delay / 2, signal);
       if (/\[fail\]/.test(meta.allBoss || '') && !failed.has(meta.floorId)) { failed.add(meta.floorId); throw new ProviderError('Model provider said 503: mock outage', { status: 503, retryable: true }); }
-      const r = voiced(meta.kind === 'manager' ? managerStep(meta, messages) : staffStep(meta), messages, meta.kind);
+      // What a real model would have been shown: the boss's pictures and PDFs, as blocks.
+      const blocks = messages.flatMap((m) => m.office_blocks || []);
+      const shown = ['image', 'document'].map((t) => [t, blocks.filter((x) => x.type === t).length]).filter(([, n]) => n).map(([t, n]) => `${n} ${t === 'image' ? 'picture' : 'PDF'}${n > 1 ? 's' : ''}`).join(' and ');
+      const r = voiced(meta.kind === 'manager' ? managerStep(meta, messages) : staffStep({ ...meta, saw: shown }), messages, meta.kind);
       const content = r.content || '';
       if (r.toolCalls?.length) onToolCall?.(r.toolCalls[0].name);
       await sleep(delay / 2, signal);

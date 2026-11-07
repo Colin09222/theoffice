@@ -16,7 +16,7 @@ const open = []; const stubs = [];
 after(async () => { for (const t of open) await t.close(); for (const s of stubs) await s.close(); });
 async function start(over = {}) {
   const stub = await startNamecheapStub(); stubs.push(stub);
-  const t = await boot({ namecheapUser: 'colin', namecheapKey: 'NCSECRETKEY123', namecheapClientIp: '203.0.113.7', namecheapBase: stub.url, domainContactSource: 'owned-already.com', serverIp: '198.51.100.9', appsBaseDomain: APPS, appsScheme: 'http', domainReconcileMs: 10, domainRetryMs: 5, publicOrigin: '', ...over });
+  const t = await boot({ namecheapUser: 'colin', namecheapKey: 'NCSECRETKEY123', namecheapClientIp: '203.0.113.7', namecheapBase: stub.url, domainContactSource: 'owned-already.com', serverIp: '198.51.100.9', appsBaseDomain: APPS, appsScheme: 'http', domainReconcileMs: 10, domainRetryMs: 5, publicOrigin: '', peopleTalk: false, ...over });
   open.push(t);
   t.app.engine.runManager = async () => {};
   const c = await claim(t, `Floor ${open.length} Co`);

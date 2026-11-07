@@ -1,5 +1,5 @@
 // Per-floor virtual workspace stored in SQLite. Paths here are only ever database keys; no agent path touches the real filesystem.
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { get, all, run, tx } from './db.js';
 
 export const MAX_FILE_BYTES = 400 * 1024;
@@ -28,7 +28,8 @@ export function cleanPath(p, { binary = false } = {}) {
     if (!/^[A-Za-z0-9._ -]{1,80}$/.test(seg) || seg.startsWith('.')) throw new WorkspaceError(`bad path segment "${seg.slice(0, 40)}"`);
   }
   const ext = p.includes('.') ? p.split('.').pop().toLowerCase() : '';
-  if (!TEXT_EXT[ext] && !(binary && BINARY_EXT[ext])) throw new WorkspaceError(`only text files are allowed (${Object.keys(TEXT_EXT).join(', ')})`);
+  // A zip only ever comes from the boss, so it only lives among the uploads.
+  if (!TEXT_EXT[ext] && !(binary && (BINARY_EXT[ext] || (ext === 'zip' && parts[0] === 'uploads')))) throw new WorkspaceError(`only text files are allowed (${Object.keys(TEXT_EXT).join(', ')})`);
   return p;
 }
 
@@ -44,8 +45,12 @@ export const floorBytes = (db, floorId) => {
   return a + b;
 };
 
+// The boss's own files. Nobody on the staff can change one, only copy it into a project.
+const readOnly = (p) => { if (p.split('/')[0] === 'uploads') throw new WorkspaceError('uploads/ holds the boss\'s files and nobody can change them. Copy one into a project with copy_file to use it.'); };
+
 export function writeFile(db, floorId, path, content, agentId, quotaBytes) {
   const p = cleanPath(path);
+  readOnly(p);
   if (typeof content !== 'string') throw new WorkspaceError('content must be text');
   const size = Buffer.byteLength(content);
   if (size > MAX_FILE_BYTES) throw new WorkspaceError(`file too big (limit ${MAX_FILE_BYTES} bytes)`);
@@ -82,6 +87,7 @@ export function publishSnapshot(db, floorId, slug, quotaBytes, directory = '') {
 /** A picture made by a broker on the server. Binary, so only a server path can write one: an agent's own write_file stays text-only. */
 export function writeBinaryFile(db, floorId, path, bytes, agentId, quotaBytes) {
   const p = cleanPath(path, { binary: true });
+  readOnly(p);
   if (bytes.length > MAX_SYNC_FILE_BYTES) throw new WorkspaceError('file too big');
   return tx(db, () => {
     const prev = get(db, 'SELECT size FROM files WHERE floor_id=? AND path=?', floorId, p);
@@ -106,9 +112,10 @@ export const baselineOf = (files) => Object.fromEntries(files.map((f) => [f.path
 /** A build's files back into the workspace, as a three-way merge against what the computer started from, so someone else's edit made meanwhile survives. All or nothing. */
 export function applySync(db, floorId, slug, entries, baseline, agentId, quotaBytes) {
   const prefix = `projects/${slug}/`;
-  const incoming = new Map(); const skipped = [];
+  const incoming = new Map(); const skipped = []; const kept = new Set();
   for (const e of entries) {
-    if (e.data.length > MAX_SYNC_FILE_BYTES) { skipped.push(`${e.path.slice(0, 120)} (over ${MAX_SYNC_FILE_BYTES / 1048576} MB)`); continue; }
+    // Too big to take back, but still there: what was already saved stays rather than being taken for deleted.
+    if (e.data.length > MAX_SYNC_FILE_BYTES) { skipped.push(`${e.path.slice(0, 120)} (over ${MAX_SYNC_FILE_BYTES / 1048576} MB)`); kept.add(e.path); continue; }
     try { cleanPath(prefix + e.path, { binary: true }); incoming.set(e.path, e.data); } catch { skipped.push(e.path.slice(0, 120)); }
   }
   const t = Date.now();
@@ -125,7 +132,7 @@ export function applySync(db, floorId, slug, entries, baseline, agentId, quotaBy
       written++;
     }
     for (const path of Object.keys(baseline)) {
-      if (incoming.has(path)) continue;
+      if (incoming.has(path) || kept.has(path)) continue;
       const cur = get(db, 'SELECT content FROM files WHERE floor_id=? AND path=?', floorId, prefix + path);
       if (cur && hashOf(cur.content) === baseline[path]) { run(db, 'DELETE FROM files WHERE floor_id=? AND path=?', floorId, prefix + path); removed++; }
     }
@@ -134,3 +141,63 @@ export function applySync(db, floorId, slug, entries, baseline, agentId, quotaBy
     return { written, removed, skipped, accepted: [...incoming].map(([path, data]) => ({ path, data })) };
   });
 }
+
+// ---- the boss's uploads ----
+export const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+// What each kind is allowed to be, judged by its bytes. The name's extension has to agree with them.
+export const UPLOAD_TYPES = { png: 'image/png', jpg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', json: 'application/json', zip: 'application/zip' };
+const TEXT_UPLOADS = new Set(['txt', 'md', 'csv', 'json']);
+export const isImageType = (type) => /^image\/(png|jpeg|webp|gif)$/.test(type);
+const starts = (b, ...sig) => sig.every((v, i) => b[i] === v);
+const ascii = (b, at, str) => b.length >= at + str.length && b.toString('latin1', at, at + str.length) === str;
+/** The kind these bytes really are, or '' when they are none of the kinds taken. */
+export function sniff(bytes) {
+  const b = Buffer.from(bytes);
+  if (starts(b, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'png';
+  if (starts(b, 0xff, 0xd8, 0xff)) return 'jpg';
+  if (ascii(b, 0, 'GIF87a') || ascii(b, 0, 'GIF89a')) return 'gif';
+  if (ascii(b, 0, 'RIFF') && ascii(b, 8, 'WEBP')) return 'webp';
+  if (ascii(b, 0, '%PDF-')) return 'pdf';
+  if (starts(b, 0x50, 0x4b, 0x03, 0x04) || starts(b, 0x50, 0x4b, 0x05, 0x06)) return 'zip';
+  if (b.includes(0)) return '';
+  try { new TextDecoder('utf-8', { fatal: true }).decode(b); } catch { return ''; }
+  return 'text';
+}
+/** A name that is safe as one path segment, keeping the extension. */
+export function uploadName(raw) {
+  let n = String(raw ?? '');
+  try { n = decodeURIComponent(n); } catch { /* left as sent */ }
+  n = n.split(/[/\\]/).pop().normalize('NFKC').replace(/[^A-Za-z0-9._ -]+/g, '-').replace(/\.{2,}/g, '.').replace(/^[.\s-]+/, '').trim();
+  const dot = n.lastIndexOf('.');
+  const ext = dot > 0 ? n.slice(dot + 1).toLowerCase() : '';
+  const base = (dot > 0 ? n.slice(0, dot) : n).replace(/[.\s-]+$/, '').slice(0, 60) || 'file';
+  return { base, ext: ext === 'jpeg' ? 'jpg' : ext, display: n.slice(0, 120) || 'file' };
+}
+/** Checks an upload against its name and stores it among the floor's files, counted in its quota. Text kinds are kept as text so read_file can read them. */
+export function saveUpload(db, floorId, rawName, bytes, quotaBytes, t = Date.now()) {
+  const { base, ext, display } = uploadName(rawName);
+  if (!UPLOAD_TYPES[ext]) throw new WorkspaceError(`That kind of file can't be sent. Send ${Object.keys(UPLOAD_TYPES).join(', ')}.`);
+  if (!bytes.length) throw new WorkspaceError('That file is empty.');
+  if (bytes.length > MAX_UPLOAD_BYTES) throw new WorkspaceError(`That file is over ${MAX_UPLOAD_BYTES / 1048576} MB.`);
+  const real = sniff(bytes);
+  const fits = TEXT_UPLOADS.has(ext) ? real === 'text' : real === ext;
+  if (!fits) throw new WorkspaceError(`That file isn't really a .${ext} file.`);
+  let content = new Uint8Array(bytes);
+  if (TEXT_UPLOADS.has(ext)) {
+    content = Buffer.from(bytes).toString('utf8');
+    if (ext === 'json') { try { JSON.parse(content); } catch { throw new WorkspaceError('That .json file is not valid JSON.'); } }
+  }
+  const id = `u${randomBytes(9).toString('base64url')}`;
+  const path = cleanPath(`uploads/${id}-${base}.${ext}`, { binary: true });
+  return tx(db, () => {
+    if (get(db, 'SELECT COUNT(*) n FROM files WHERE floor_id=?', floorId).n >= MAX_FILES) throw new WorkspaceError('too many files in this workspace');
+    if (floorBytes(db, floorId) + bytes.length > quotaBytes) throw new WorkspaceError('This floor has used all of its storage quota.');
+    run(db, 'INSERT INTO files (floor_id,path,content,size,agent_id,updated_at) VALUES (?,?,?,?,?,?)', floorId, path, content, bytes.length, null, t);
+    run(db, 'INSERT INTO attachments (id,floor_id,name,type,size,path,created_at) VALUES (?,?,?,?,?,?,?)', id, floorId, display, UPLOAD_TYPES[ext], bytes.length, path, t);
+    return { id, name: display, type: UPLOAD_TYPES[ext], size: bytes.length, path };
+  });
+}
+export const attachmentsOf = (db, floorId, ids) => {
+  const list = [...new Set((Array.isArray(ids) ? ids : []).filter((x) => typeof x === 'string' && /^u[A-Za-z0-9_-]{12}$/.test(x)))];
+  return list.map((id) => get(db, 'SELECT id,name,type,size,path FROM attachments WHERE id=? AND floor_id=?', id, floorId)).filter(Boolean);
+};

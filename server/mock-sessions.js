@@ -18,8 +18,13 @@ export async function defaultTurn(api, text) {
   await api.step(); await api.tool('bash', { command: 'node /workspace/project/check-with-playwright.cjs' });
   await api.step();
   if (api.role !== 'tester') await api.custom('publish_project', { project: slug, title: slug, description: 'Built on a computer.', kind: 'game', directory: 'dist' });
+  // The boss's photos, as a real agent is told: copied out of /workspace/uploads into the project and its build.
+  const photos = api.bundleFiles.filter((f) => /^uploads\/[^/]+\.(png|jpe?g|webp|gif)$/i.test(f.path))
+    .flatMap((f) => { const name = f.path.split('/').pop().replace(/^u[A-Za-z0-9_-]{12}-/, ''); return [{ path: `images/${name}`, data: f.data }, { path: `dist/images/${name}`, data: f.data }]; });
+  if (photos.length) { await api.step(); await api.tool('bash', { command: 'mkdir -p /workspace/project/images && cp /workspace/uploads/* /workspace/project/images/' }); }
   await api.step(); await api.tool('bash', { command: 'bash /workspace/.office/save.sh' });
   await api.save([
+    ...photos,
     ...api.bundleFiles.filter((f) => f.path.startsWith('project/')).map((f) => ({ path: f.path.slice('project/'.length), data: f.data })),
     { path: 'package.json', data: Buffer.from('{"name":"mock"}') }, { path: 'src/main.js', data: Buffer.from(GAME_JS) },
     { path: 'dist/index.html', data: Buffer.from(GAME_HTML) }, { path: 'dist/app.js', data: Buffer.from(GAME_JS) },

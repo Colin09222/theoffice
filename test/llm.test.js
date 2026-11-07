@@ -114,7 +114,8 @@ describe('the real tool loop, end to end against the stub', () => {
       if (toolMsgs === 1) return streamCall(res, 'publish_project', { project: 'real-site', title: 'Real', kind: 'site' }, usage);
       return streamText(res, 'Published the site', usage);
     });
-    const over = { openrouterKey: 'sk-or-test', openrouterBase: stub.base, aiMode: 'live' };
+    // Every call is counted and checked here, so the people's own chatter stays out.
+    const over = { openrouterKey: 'sk-or-test', openrouterBase: stub.base, aiMode: 'live', peopleTalk: false };
     const t = await boot(over, { llm: createOpenRouterClient(over) });
     const a = await claim(t, 'Live Loop');
     await a.post(`/api/floors/${a.slug}/chat`, { text: 'build a page' });

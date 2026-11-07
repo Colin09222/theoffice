@@ -10,7 +10,8 @@ export function toAnthropic(messages, tools) {
   for (const m of messages) {
     if (m.role === 'system') { system.push(m.content); continue; }
     if (m.role === 'tool') {
-      const block = { type: 'tool_result', tool_use_id: m.tool_call_id, content: String(m.content ?? '') };
+      // A tool that showed a picture or a PDF hands back the file itself, after its words.
+      const block = { type: 'tool_result', tool_use_id: m.tool_call_id, content: m.office_blocks ? [{ type: 'text', text: String(m.content ?? '') || '(no text)' }, ...m.office_blocks] : String(m.content ?? '') };
       const last = out.at(-1);
       // All results of one assistant turn go back in a single user message.
       if (last?.role === 'user' && Array.isArray(last.content) && last.content.at(-1)?.type === 'tool_result') last.content.push(block);
@@ -25,7 +26,8 @@ export function toAnthropic(messages, tools) {
       if (content.length) out.push({ role: 'assistant', content });
       continue;
     }
-    out.push({ role: 'user', content: m.content });
+    // The boss's pictures and PDFs follow the words that name them.
+    out.push({ role: 'user', content: m.office_blocks ? [{ type: 'text', text: String(m.content ?? '') }, ...m.office_blocks] : m.content });
   }
   return {
     system: system.join('\n\n'),
@@ -104,7 +106,7 @@ export function createRouter({ anthropic, openrouter }) {
   return {
     chat(args) {
       if (args.provider === 'anthropic') return anthropic.chat(args);
-      return openrouter.chat({ ...args, messages: args.messages.map(({ anthropic_content, ...m }) => m) });
+      return openrouter.chat({ ...args, messages: args.messages.map(({ anthropic_content, office_blocks, files, ...m }) => m) });
     },
   };
 }

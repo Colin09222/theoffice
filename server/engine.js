@@ -11,7 +11,8 @@ import { createSearch, createMockSearch } from './search.js';
 import { appLabel, appOrigin } from './apps.js';
 import { formCount } from './launch.js';
 import { managerPrompt, staffPrompt } from './prompts.js';
-import { slugify, WorkspaceError, listFiles, readFile } from './workspace.js';
+import { slugify, WorkspaceError, listFiles, readFile, attachmentsOf } from './workspace.js';
+import { describeFiles, toolMessage, withFiles, fileTokens } from './attachments.js';
 import { seededLook } from '../public/js/looks.js';
 import { Computer } from './computer.js';
 import { deleteFloorData } from './appdata.js';
@@ -246,13 +247,16 @@ export class Engine {
     const provider = providerForRole(role);
     const paid = { ...ctx, provider };
     const pricing = { prompt: role.pricing?.prompt || 0, completion: role.pricing?.completion || 0, cacheRead: role.pricing?.cacheRead };
+    // Pictures and PDFs the boss sent, read in for this call only. What the caller keeps still holds just their paths.
+    const withBlocks = withFiles(this.db, floorId, messages, this.cfg.aiMode === 'mock' ? 'mock' : provider);
+    const extra = withBlocks === messages ? 0 : fileTokens(this.db, floorId, messages);
     let attempt = 0;
     for (;;) {
       this.setAgent(agent.id, { state: 'queued' });
       const release = await this.limiter.acquire(floorId, signal);
       let reservation = 0, holdId = 0;
       try {
-        const est = (JSON.stringify(messages).length / 4 * pricing.prompt + (role.maxTokens || 2000) * pricing.completion) / 1e6;
+        const est = ((JSON.stringify(messages).length / 4 + extra) * pricing.prompt + (role.maxTokens || 2000) * pricing.completion) / 1e6;
         if (this.budget.out(provider)) throw new Halt('building_budget');
         if (this.overBudget(floorId, est) || this.budget.room(provider) <= 0) {
           if (this.spentOver(floorId, est)) throw new Halt('budget');  // est assumes maxTokens, so the cap holds
@@ -268,7 +272,7 @@ export class Engine {
         this.setAgent(agent.id, { state: 'thinking' });
         const chars = { n: 0 };
         const res = await this.llm.chat({
-          model: role.model, provider: role.provider, effort: role.effort, messages, tools, maxTokens: role.maxTokens || 2000, signal, pricing, meta,
+          model: role.model, provider: role.provider, effort: role.effort, messages: withBlocks, tools, maxTokens: role.maxTokens || 2000, signal, pricing, meta,
           onToken: (t) => { chars.n += t.length; onToken?.(t); },
           onToolCall: (name) => {
             const show = TOOL_LOOK[name];
@@ -336,12 +340,14 @@ export class Engine {
     // 'office' notices (outage, stop) are for the boss only. If they reached the model it would lose the thread.
     // Reports stay out too: they quote what was found on pages, and the manager has the facts in the state message.
     // So does anything about the budget: a bot that doesn't know can't tell anyone.
-    const msgs = all(this.db, "SELECT id,role,text FROM messages WHERE floor_id=? AND role NOT IN ('office','report','budget') ORDER BY id DESC LIMIT 30", floor.id).reverse();
+    const msgs = all(this.db, "SELECT id,role,text,files FROM messages WHERE floor_id=? AND role NOT IN ('office','report','budget') ORDER BY id DESC LIMIT 30", floor.id).reverse();
     const roster = { manager: mgr.name, person: this.people.personBlock(mgr) };
     const out = [{ role: 'system', content: managerPrompt(floor, boss, roster, this.cfg) }];
     for (const m of msgs) {
-      if (m.role === 'boss') out.push({ role: 'user', content: m.text });
-      else if (m.role === 'manager') out.push({ role: 'assistant', content: m.text });
+      if (m.role === 'boss') {
+        const files = m.files ? attachmentsOf(this.db, floor.id, JSON.parse(m.files)) : [];
+        out.push({ role: 'user', content: m.text + describeFiles(files), ...(files.length ? { files: files.map((f) => f.path) } : {}) });
+      } else if (m.role === 'manager') out.push({ role: 'assistant', content: m.text });
       else if (m.role === 'help') out.push({ role: 'user', content: `${GUIDANCE_LABEL} ${m.text}` });
       else out.push({ role: 'user', content: `[Office note, not from the boss] ${m.text}` });
     }
@@ -350,7 +356,7 @@ export class Engine {
     const last = msgs[msgs.length - 1];
     const toReview = tasks.filter((t) => t.status === 'review');
     return { messages: out, meta: {
-      kind: 'manager', setup: !floor.name, floorId: floor.id, floorSlug: floor.slug, step: 0, lastBoss: bossMsgs[bossMsgs.length - 1]?.text || '', allBoss: bossMsgs.map((m) => m.text).join(' '),
+      kind: 'manager', setup: !floor.name, floorId: floor.id, floorSlug: floor.slug, step: 0, lastBoss: bossMsgs[bossMsgs.length - 1]?.text || '', bossFiles: out.filter((m) => m.role === 'user' && m.files).flatMap((m) => m.files), allBoss: bossMsgs.map((m) => m.text).join(' '),
       isFreshBoss: last?.role === 'boss', answered: last?.role === 'note' && /answered/.test(last.text), guidance: last?.role === 'help' ? last.text : '', helpDeadEnd: last?.role === 'note' && /buddehbot/.test(last.text),
       toReview, reviewsWaiting: counts.review, openCount: counts.n - counts.review, published,
       slugFor: (s) => slugify(String(s).replace(/\[[a-z]+\]/g, '').replace(ACT_WORDS, ' '), 'launch').slice(0, 30).replace(/-+$/, '') || 'launch',
@@ -409,7 +415,7 @@ export class Engine {
         for (const c of res.toolCalls) {
           this.checkpoint(floorId, signal);
           const out = await this.tools.exec(ctx, c.name, c.args);
-          messages.push({ role: 'tool', tool_call_id: c.id, content: out });
+          messages.push(toolMessage(c.id, out));
         }
         if (ctx.assigned.length) {
           // The whole batch gathers at the whiteboard: the visual cue that a plan was made.
@@ -457,7 +463,7 @@ export class Engine {
     if (!messages) {
       messages = [
         { role: 'system', content: staffPrompt(floor, agent, roleCfg, { ...task, live: this.isLive(floor.id, task.project) }, this.cfg, this.people.personBlock(agent, task)) },
-        { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${this.handoffFor(floor, task)}` },
+        { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${this.handoffFor(floor, task)}${describeFiles(this.taskFiles(task))}`, ...(this.taskFiles(task).length ? { files: this.taskFiles(task).map((f) => f.path) } : {}) },
       ];
     }
     // A task that started on a computer has no system prompt of its own here. It never runs without the safety rules.
@@ -478,7 +484,7 @@ export class Engine {
         task = get(this.db, 'SELECT * FROM tasks WHERE id=?', taskId);
         if (task.cost_usd >= this.cfg.taskMaxUsd) { this.finishTask(floor, agent, task.id, 'failed', 'Stopped: this task reached its limit.'); return; }
         this.setAgent(agent.id, { state: 'thinking', activity: task.title, project: task.project, task_id: task.id });
-        const res = await this.callLLM(call, { messages: compact(messages), tools: defs, meta: { kind: 'staff', role: agent.role, floorId, floorSlug: floor.slug, step, task, allBoss, answers: answers() } });
+        const res = await this.callLLM(call, { messages: compact(messages), tools: defs, meta: { kind: 'staff', role: agent.role, floorId, floorSlug: floor.slug, step, task, allBoss, answers: answers(), files: this.taskFiles(task).map((f) => f.path) } });
         step++;
         const assistant = { role: 'assistant', content: res.content || null };
         if (res.toolCalls.length) assistant.tool_calls = res.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args } }));
@@ -492,7 +498,7 @@ export class Engine {
         for (const c of res.toolCalls) {
           this.checkpoint(floorId, signal);
           const out = await this.tools.exec(ctx, c.name, c.args);
-          messages.push({ role: 'tool', tool_call_id: c.id, content: out });
+          messages.push(toolMessage(c.id, out));
         }
         // Done before saving, so what's stored stays as small as what's sent. The system prompt and the brief always stay.
         this.keepLinks(task.id, trimSteps(messages, 2));
@@ -657,7 +663,12 @@ export class Engine {
     if (makePrivate) run(this.db, 'UPDATE projects SET private=1 WHERE floor_id=? AND slug=?', floor.id, slug);
     if (published) run(this.db, 'UPDATE projects SET title=?,description=?,kind=?,sources=?,published_at=? WHERE floor_id=? AND slug=?', title || slug, description || '', kind, JSON.stringify(sources || []), this.now(), floor.id, slug);
   }
-  assignTask(floor, mgr, { to, title, brief, plan, project: wanted, private: priv, dependsOn, afterPrevious, lane = '' }) {
+  /** The boss's files the manager handed to this task. */
+  taskFiles(task) {
+    let ids = []; try { ids = JSON.parse(task.files || '[]'); } catch { /* none */ }
+    return attachmentsOf(this.db, task.floor_id, ids);
+  }
+  assignTask(floor, mgr, { to, title, brief, plan, project: wanted, private: priv, dependsOn, afterPrevious, lane = '', files = [] }) {
     const q = to.toLowerCase();
     const staff = all(this.db, "SELECT * FROM agents WHERE floor_id=? AND role!='manager'", floor.id);
     const target = staff.find((s) => s.role === q || s.name.toLowerCase() === q || s.title.toLowerCase() === q);
@@ -673,7 +684,7 @@ export class Engine {
       if (prev) deps.push(prev.id);
     }
     const t = this.now();
-    const r = run(this.db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,depends_on,created_at,updated_at,lane) VALUES (?,?,?,?,?,?,?,?,?,?)', floor.id, plan, title, brief, target.id, project, JSON.stringify([...new Set(deps)]), t, t, lane);
+    const r = run(this.db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,depends_on,created_at,updated_at,lane,files) VALUES (?,?,?,?,?,?,?,?,?,?,?)', floor.id, plan, title, brief, target.id, project, JSON.stringify([...new Set(deps)]), t, t, lane, JSON.stringify(files.map((f) => f.id)));
     const id = Number(r.lastInsertRowid);
     this.emitTask(id);
     this.feed(floor.id, mgr, `gave ${target.name} a task: "${title}"`, project);
@@ -775,13 +786,13 @@ export class Engine {
 
   // ---- boss controls ----
   /** What the boss typed. Plenty of people answer a question by just typing in the chat, and waiting for the form would leave someone blocked for good. */
-  bossChat(floor, text) {
-    this.bossMessage(floor, text);
+  bossChat(floor, text, files = []) {
+    this.bossMessage(floor, text, files);
     const waiting = get(this.db, 'SELECT id FROM questions WHERE floor_id=? AND answer IS NULL ORDER BY id LIMIT 1', floor.id);
     if (waiting) this.answerQuestion(floor, waiting.id, text);
   }
-  bossMessage(floor, text) {
-    this.addMessage(floor.id, 'boss', null, text);
+  bossMessage(floor, text, files = []) {
+    this.addMessage(floor.id, 'boss', null, text, files);
     run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
     const state = this.floorState(floor.id);
     if (state.budgetStopped) this.bossNotice(floor.id, 'Noted, boss. Today\'s budget is used up, so I\'ll pick this up first thing tomorrow.');
@@ -827,9 +838,11 @@ export class Engine {
   }
 
   // ---- events ----
-  addMessage(floorId, role, agentId, text) {
-    const r = run(this.db, 'INSERT INTO messages (floor_id,role,agent_id,text,created_at) VALUES (?,?,?,?,?)', floorId, role, agentId, text, this.now());
-    if (role !== 'note') this.emit(floorId, 'message', { id: Number(r.lastInsertRowid), role, agentId, text, createdAt: this.now() }, { chat: true, ownerOnly: role === 'budget' });
+  addMessage(floorId, role, agentId, text, files = []) {
+    const r = run(this.db, 'INSERT INTO messages (floor_id,role,agent_id,text,files,created_at) VALUES (?,?,?,?,?,?)', floorId, role, agentId, text, files.length ? JSON.stringify(files.map((f) => f.id)) : '', this.now());
+    for (const f of files) run(this.db, 'UPDATE attachments SET message_id=COALESCE(message_id,?) WHERE id=? AND floor_id=?', Number(r.lastInsertRowid), f.id, floorId);
+    const attachments = files.length ? { attachments: files.map(({ id, name, type, size }) => ({ id, name, type, size })) } : {};
+    if (role !== 'note') this.emit(floorId, 'message', { id: Number(r.lastInsertRowid), role, agentId, text, createdAt: this.now(), ...attachments }, { chat: true, ownerOnly: role === 'budget' });
   }
   managerSays(floorId, text) {
     const mgr = get(this.db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", floorId);
@@ -1002,7 +1015,8 @@ export function viewEvent(db, raw, viewer) {
   if (ev.type === 'help_state' && viewer.defaultPrivate) return null;
   // Visitors on a public-chat floor get whole messages only. A private name split across two tokens could not be redacted.
   if (ev.type === 'token' || ev.type === 'token_reset') return null;
-  if (ev.chat || ev.type === 'message') return viewer.publicChat ? { ...ev, data: { ...ev.data, text: redactChat(db, ev.floorId, ev.data.text) } } : null;
+  // The boss's files are the boss's: a visitor reading an open chat sees the words and nothing about what came with them.
+  if (ev.chat || ev.type === 'message') { const { attachments: _a, ...said } = ev.data; return viewer.publicChat ? { ...ev, data: { ...said, text: redactChat(db, ev.floorId, said.text) } } : null; }
   // On a default-private floor, anything not tied to a public project counts as private. Office notices carry no agent.
   const isPrivate = ev.project
     ? get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', ev.floorId, ev.project)?.private
