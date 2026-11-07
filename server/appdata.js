@@ -59,9 +59,8 @@ const readKv = (db, f, p, scope, key) => get(db, 'SELECT value,version,updated_a
 const viewKv = (key, r) => ({ key, value: JSON.parse(r.value), version: r.version, updatedAt: r.updated_at });
 
 /** Handles one request. `body()` reads the JSON body. Returns [status, object]. Isolation comes from the caller: f and p are derived from the Host, never from the request. */
-export async function handleData({ db, req, floorId: f, project: p, path, query, body, now }) {
+export async function handleData({ db, req, floorId: f, project: p, segments: seg, query, body, now }) {
   const m = req.method;
-  const seg = path.split('/').filter(Boolean);
   if (seg.length > 3 || seg.some((s) => s.length > 80)) throw new DataError(404, 'not_found');
   const t = now();
 

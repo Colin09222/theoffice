@@ -632,9 +632,10 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       const url = new URL(rawUrl, 'http://x');
       const m = url.pathname.match(/^\/_data\/v1\/(.*)$/);
       if (!m) return reply(404, { error: 'not_found' });
-      let path;
-      try { path = m[1].split('/').map((s) => decodeURIComponent(s)).join('/'); } catch { return reply(400, { error: 'bad_path' }); }
-      const [status, out] = await handleData({ db, req, floorId: f.id, project: pr.slug, path, query: url.searchParams, body: () => readJson(req, DATA_LIMITS.bodyBytes), now });
+      // Decoded one segment at a time, so %2f can never add a level.
+      let segments;
+      try { segments = m[1].split('/').filter(Boolean).map((s) => decodeURIComponent(s)); } catch { return reply(400, { error: 'bad_path' }); }
+      const [status, out] = await handleData({ db, req, floorId: f.id, project: pr.slug, segments, query: url.searchParams, body: () => readJson(req, DATA_LIMITS.bodyBytes), now });
       reply(status, out);
     } catch (e) {
       if (e instanceof DataError || e instanceof HttpError) return reply(e.status, { error: e.code, message: e.message });

@@ -146,7 +146,8 @@ export class Computer {
         run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], task, e.cfg) }]), task.id);
         task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       }
-      st = await this.attach(floor, agent, task, signal);
+      st = this.newState(floor, agent, task, signal);
+      await this.attach(st, task);
       await this.finish(st, await this.drive(st));
     } catch (err) {
       const why = err?.why ?? signal.reason?.why;
@@ -170,22 +171,30 @@ export class Computer {
     run(this.engine.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify(msgs), taskId);
   }
 
-  /** Reattach to this task's session if it is still alive, otherwise box up the project and start a fresh one. */
-  async attach(floor, agent, task, signal) {
+  newState(floor, agent, task, signal) {
     const e = this.engine;
-    const room = this.room(floor.id, task);
-    const st = {
-      id: task.session_id || '', floorId: floor.id, floor, agent, taskId: task.id, project: task.project, signal, room,
+    const comp = computerRole(e.models.all[agent.role]);
+    return {
+      id: task.session_id || '', floorId: floor.id, floor, agent, taskId: task.id, project: task.project, signal, room: null,
       charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, warned: false, limit: '', lastText: '', lastFeed: '',
-      pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, startedAt: Date.now(),
-      publish: JSON.parse(task.session_publish || '[]'), model: computerRole(e.models.all[agent.role]).model, pricing: computerRole(e.models.all[agent.role]).pricing,
+      pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
+      publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
       ctx: e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request']),
     };
+  }
+
+  /** Reattach to this task's session if it is still alive, otherwise box up the project and start a fresh one. */
+  async attach(st, task) {
+    const e = this.engine; const { floor, agent, signal } = st;
+    const room = this.room(floor.id, task);
+    st.room = room;
     if (room.usd < MIN_ROOM_USD) {
       if (room.daily) throw new e.Halt('budget');
       e.finishTask(floor, agent, task.id, 'failed', 'Stopped: this task hit its spending limit.');
       throw new e.Halt('stop');
     }
+    // Held from this moment, so nothing else on the floor can spend the same dollars while this one starts up.
+    st.hold = room.usd; e.reserve(floor.id, st.hold);
     if (st.id) {
       let live = null;
       try { live = await this.client.retrieve(st.id); } catch (err) { if (err?.status !== 404) throw err; }
@@ -193,10 +202,9 @@ export class Computer {
         // The budget is fixed at creation, so a reattached session is re-capped to what may be spent from now on.
         const spent = Number(live.usage?.list_cost?.amount) || 0;
         await this.client.updateSession(st.id, { budget: { type: 'limit', max_list_cost: { amount: String(spent + Math.floor(room.usd * 100)), currency: 'USD' } } });
-        st.hold = room.usd; e.reserve(floor.id, st.hold);
         st.budgetRaised = true;
         e.feed(floor.id, agent, `went back to the computer for "${task.title}"`, task.project);
-        return st;
+        return;
       }
       if (task.session_tries >= MAX_LOST) throw new ProviderError('The computer keeps disappearing.', { retryable: false });
       run(e.db, "UPDATE tasks SET session_id='', session_charged=0, session_sent=0, session_tries=session_tries+1 WHERE id=?", task.id);
@@ -213,7 +221,6 @@ export class Computer {
       { path: '.office/three.module.min.js', data: THREE_JS },
       ...files.map((f) => ({ path: `project/${f.path}`, data: f.data })),
     ]);
-    st.hold = room.usd; e.reserve(floor.id, st.hold);
     e.checkpoint(floor.id, signal);
     const upload = await this.client.upload(box, 'bundle.tgz');
     const session = await this.client.createSession({
@@ -228,7 +235,6 @@ export class Computer {
     run(e.db, 'UPDATE tasks SET session_id=?, session_baseline=?, session_sent=0, session_charged=0 WHERE id=?', session.id, JSON.stringify(baselineOf(files)), task.id);
     e.feed(floor.id, agent, `started a computer for "${task.title}"`, task.project);
     e.setAgent(agent.id, { state: 'thinking', activity: 'Starting up the computer', project: task.project, task_id: task.id });
-    return st;
   }
 
   /** Follow a session until its turn ends, surviving dropped streams without missing or repeating anything. Returns how the turn ended. */
@@ -277,6 +283,7 @@ export class Computer {
         st.signal.removeEventListener('abort', onAbort);
         conn.abort();
       }
+      if (st.signal.aborted) throw st.signal.reason;
       await sleep(Math.min(250 * 2 ** failures, 8000));
     }
   }
