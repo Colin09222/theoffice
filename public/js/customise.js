@@ -136,7 +136,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
         };
         paintLeave(false);
         clear(editor).append(
-          field('Name', text(a.name, LIMITS.name, (v) => { a.name = v; }, { 'aria-label': 'Name', name: 'staff-name' })),
+          field('Name', text(a.name, LIMITS.name, (v) => { a.name = v; const chip = [...list.children].find((x) => x.dataset.v === String(a.id)); if (chip) chip.textContent = v.trim() || '...'; }, { 'aria-label': 'Name', name: 'staff-name' })),
           field('Job title', text(a.title, LIMITS.title, (v) => { a.title = v; }, { name: 'staff-title', placeholder: page.state.hiring?.roles.find((r) => r.role === a.role)?.title || 'Office Manager' }), `Real job: ${a.role === 'manager' ? 'office manager' : a.role}. The title is what they go by and how they sign their work.`),
           h('div.field', {}, h('span', {}, 'Personality'), chips(['', ...Object.keys(PERSONALITIES)], a.persona.vibe, (v) => { a.persona.vibe = v; }, 'Personality', { '': 'None', ...Object.fromEntries(Object.entries(PERSONALITIES).map(([k, p]) => [k, p.label])) })),
           field('More about them', area(a.persona.notes, LIMITS.notes, 2, (v) => { a.persona.notes = v; }, { name: 'staff-notes', placeholder: 'Obsessed with trains. Thinks everything could be shorter.' }), 'Private: visitors see the label above, never this.'),

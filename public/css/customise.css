@@ -1,6 +1,6 @@
 /* The Customise panel. The room stays in view and stays live behind it: docked to the side on a desktop, a sheet on a phone. */
 .customise-back { background: none; -webkit-backdrop-filter: none; backdrop-filter: none; pointer-events: none; place-items: stretch end; padding: 14px; }
-.modal.customise { pointer-events: auto; width: min(480px, 100%); max-height: none; height: 100%; background: rgba(28, 34, 47, .96); }
+.modal.customise { pointer-events: auto; width: min(480px, 100%); max-height: none; height: 100%; background: #1f2634; }
 .customise .modal-head { padding: 12px 14px 4px 20px; }
 .customise .modal-head h2 { font-size: 21px; }
 .customise .modal-body { padding: 0; overflow: hidden; display: flex; flex: 1; min-height: 0; }
@@ -8,7 +8,7 @@
 .custom-tabs { display: flex; gap: 2px; padding: 0 12px; flex: none; overflow-x: auto; scrollbar-width: none; }
 .custom-tabs .tab { flex: 1 0 auto; min-height: 42px; }
 .custom-pane { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 14px 18px 18px; }
-.custom-foot { flex: none; display: flex; gap: 10px; padding: 10px 18px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--glass-line); background: rgba(28, 34, 47, .98); }
+.custom-foot { flex: none; display: flex; gap: 10px; padding: 10px 18px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--glass-line); background: #1f2634; }
 .custom-foot .btn { min-height: 46px; }
 .custom-pane textarea, .custom-pane input:not([type]) { font-size: 16px; }
 .custom-pane .chip { min-height: 36px; padding: 5px 13px; }

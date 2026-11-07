@@ -2,7 +2,7 @@
 // Everything typed here is cut to length and cleaned before it is stored, and it can only ever reach its own floor. Nothing here touches
 // budgets, tools, rules or purchases, and the one route takes a fixed list of fields.
 import { get, all, run, tx } from './db.js';
-import { TONES, PERSONALITIES, WORK_KINDS, LOOK_FIELDS } from '../public/js/looks.js';
+import { TONES, PERSONALITIES, WORK_KINDS } from '../public/js/looks.js';
 import { BRIEF_LIMITS, settingText } from './brief.js';
 
 const IMAGE = /\.(png|jpe?g|webp|svg)$/i;
@@ -88,8 +88,8 @@ export function installCustomise(ext) {
   };
 
   hooks.snapshot.push((f, viewer, out) => {
-    const decor = out.floor.decor;
-    if (decor?.artStyle === 'logo') {
+    // The boss always gets it, so the panel can preview it; a visitor only on a floor that hangs it.
+    if (viewer.owner || out.floor.decor?.artStyle === 'logo') {
       const logo = findLogo(f);
       if (logo) out.floor.logoUrl = `${publicUrl(f.slug, logo.project)}${logo.path.split('/').map(encodeURIComponent).join('/')}`;
     }

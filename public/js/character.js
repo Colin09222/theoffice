@@ -481,7 +481,7 @@ export function createPreview(canvas, look, accent) {
   const fill = new THREE.DirectionalLight('#dbe8ff', 0.6); fill.position.set(-3, 2, -2); scene.add(fill);
   const floor = new THREE.Mesh(new THREE.CircleGeometry(1.1, 28), new THREE.ShadowMaterial({ opacity: 0.22 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
   const cam = new THREE.PerspectiveCamera(26, (rect.width || 200) / (rect.height || 240), 0.1, 30);
-  cam.position.set(0, 1.5, 5.4); cam.lookAt(0, 0.95, 0);
+  cam.position.set(0, 1.65, 6.3); cam.lookAt(0, 1.12, 0);  // room above the head for the tallest hat
   let ch = new Character(look, { accent }); scene.add(ch.group);
   let gen = 0, raf, dead = false, last = performance.now();
   // The person on screen stays until the next one is ready, so changing an option never flashes a stand-in once the model is cached.

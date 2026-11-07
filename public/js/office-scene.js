@@ -899,6 +899,8 @@ export class OfficeView {
           const k = Math.min((w - 36) / img.width, (h - 36) / img.height), iw = img.width * k, ih = img.height * k;
           x.drawImage(img, (w - iw) / 2, (h - ih) / 2, iw, ih);
         });
+        // An odd SVG can taint a canvas in some browsers, and uploading that would throw on every frame. The monogram stays instead.
+        try { tex.image.getContext('2d').getImageData(0, 0, 1, 1); } catch { tex.dispose(); return; }
         frames[0].material.map?.dispose(); frames[0].material.map = tex; frames[0].material.needsUpdate = true;
         this.logoLoaded = true;  // read by the browser test
       };

@@ -669,8 +669,6 @@ class FloorPage {
     this.view.destroy(); clear(this.labels);
     this.view = new OfficeView({ state: this.viewState(), labels: this.labels, keep: { yaw, targetYaw, zoom, targetZoom } });
     stage.setView(this.view);
-    for (const a of this.state.agents) this.view.agentEvent(a);
-    this.view.updateBoard(this.state.tasks);
   }
   catchUpBanner() {
     const key = `office.seen.${this.slug}`;
