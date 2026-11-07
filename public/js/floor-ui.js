@@ -229,9 +229,8 @@ class FloorPage {
   }
   setTab(id) {
     if (!this.tabsFor().some(([t]) => t === id)) return;
+    if (!this.panelOpen) this.setPanel(true);  // first, so a list can scroll to its newest line
     this.tab = id; this.renderTabs(); this.renderBody();
-    if (!this.panelOpen) this.setPanel(true);
-    if (id === 'talk') this.markTalkRead();
   }
   renderBody() {
     this.renderBanner();
@@ -332,7 +331,7 @@ class FloorPage {
     for (const l of lines) list.append(this.talkEl(l));
     this.talkList = list;
     this.bodyEl.append(list);
-    this.markTalkRead();
+    if (this.panelOpen) this.markTalkRead();
     list.scrollTop = list.scrollHeight;
   }
   talkEl(l) {
@@ -348,12 +347,12 @@ class FloorPage {
       this.talkList.querySelector('.empty')?.remove();
       this.talkList.append(this.talkEl(l));
       if (keep) this.talkList.scrollTop = this.talkList.scrollHeight;
-      if (this.panelOpen) this.markTalkRead();
-    } else if (l.kind !== 'small') {
-      this.talkUnread = (this.talkUnread || 0) + 1;
-      const b = this.pinEls?.talk?.badge;
-      if (b) { b.hidden = false; b.textContent = String(Math.min(this.talkUnread, 99)); }
     }
+    if (this.tab === 'talk' && this.panelOpen) { this.markTalkRead(); return; }
+    if (l.kind === 'small') return;
+    this.talkUnread = (this.talkUnread || 0) + 1;
+    const b = this.pinEls?.talk?.badge;
+    if (b) { b.hidden = false; b.textContent = String(Math.min(this.talkUnread, 99)); }
   }
   markTalkRead() { this.talkUnread = 0; const b = this.pinEls?.talk?.badge; if (b) b.hidden = true; }
   /** Small talk happens in this browser only. It isn't work, so it's kept here, not on the server, and never many of them. */
