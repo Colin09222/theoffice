@@ -48,7 +48,7 @@ const DEFS = {
     after_previous: { type: 'boolean', description: 'True to start only after the task you assigned just before this one finishes' },
     lane: { type: 'string', enum: ['game', 'website', 'business'], description: 'Which lane this plan is in. The person doing the task gets their part of that playbook.' },
   }, ['to', 'title', 'brief']),
-  review_task: fn('review_task', 'Approve finished work or send it back once with notes.', { task_id: { type: 'integer', description: 'Task id' }, verdict: { type: 'string', enum: ['approve', 'revise'] }, notes: S('Feedback for the staff member') }, ['task_id', 'verdict']),
+  review_task: fn('review_task', 'Approve finished work or send it back with notes.', { task_id: { type: 'integer', description: 'Task id' }, verdict: { type: 'string', enum: ['approve', 'revise'] }, notes: S('Feedback for the staff member') }, ['task_id', 'verdict']),
   cancel_task: fn('cancel_task', 'Cancel a task that is no longer needed.', { task_id: { type: 'integer', description: 'Task id' } }),
   check_domain: fn('check_domain', 'Check whether domain names can be bought and what they cost for a year. Checking costs nothing.', { names: { type: 'array', items: { type: 'string' }, description: 'Up to 10 names, such as tinyteacups.com' } }),
   request_domain: fn('request_domain', 'Ask the boss to buy a domain for a project. This does not buy anything: it puts a Buy button in front of the boss, and only their click spends money. Ordinary names only, within the price limit.', { domain: S('The name, such as tinyteacups.com'), project: S('Project slug it will serve'), why: S('One sentence for the boss') }),
@@ -61,7 +61,7 @@ const DEFS = {
   launch_report: fn('launch_report', 'Give the boss the launch report for a published project. The office fills in the live link, checklist, domain, visitors and sign-ups from its own records; you add the headline and what comes next.', { project: S('Project slug'), headline: S('A sentence or two on what launched and for whom'), next_steps: S('What you suggest next, and anything the boss must do') }, ['project', 'headline']),
   ios_start: fn('ios_start', 'Put the Expo iPhone app template into a project. Free.', { project: S('Project slug'), app_name: S('The name on the home screen') }),
   ios_request: fn('ios_request', 'Ask the boss to allow an iPhone build, or to send a finished build to TestFlight. Nothing happens until they click.', { project: S('Project slug'), kind: { type: 'string', enum: ['build', 'submit'] }, build_id: S('For submit: the EAS build id') }, ['project', 'kind']),
-  hire_staff: fn('hire_staff', 'Hire another staff member, within this floor\'s limit.', { role: S('Role to hire'), name: S('Optional first name') }, ['role']),
+  hire_staff: fn('hire_staff', 'Hire another staff member.', { role: S('Role to hire'), name: S('Optional first name') }, ['role']),
   // Standing orders (floors-plus). An order fires as an ordinary boss message on its schedule; it can't spend beyond the floor's normal caps.
   set_standing_order: fn('set_standing_order', 'Set a recurring job for the floor: the instruction is handed to you again on a schedule, every day or every week, when the floor is quiet. Use it when the boss asks for something regular ("every morning", "weekly"). It shows to the boss under Orders, where they can edit, pause or delete it.', {
     instruction: S('What to do each time, written as the boss would say it'), every: { type: 'string', enum: ['day', 'week'] }, at: S('Time of day as HH:MM, 24-hour'),
