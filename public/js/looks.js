@@ -91,3 +91,10 @@ export function randomLook(rand = Math.random) {
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
   return { skin: pick(SKIN), hair: pick(HAIR), hairColor: pick(HAIR_COLOR), outfit: pick(OUTFIT), outfitColor: pick(OUTFIT_COLOR), hat: rand() < 0.6 ? pick(HAT.slice(1)) : 'none', glasses: rand() < 0.35 ? pick(GLASSES.slice(1)) : 'none', wear: rand() < 0.4 ? pick(WEAR.slice(1)) : 'none', body: pick(BODY) };
 }
+
+/** What people actually type for their floor when signing in: the name as they remember it, the slug, or the whole link. The same rules as the server's slugify. */
+export const slugFrom = (text) => {
+  const t = String(text || '').trim();
+  const fromLink = t.match(/\/floor\/([a-z0-9-]+)/i);
+  return (fromLink ? fromLink[1] : t).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+};

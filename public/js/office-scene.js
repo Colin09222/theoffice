@@ -8,6 +8,7 @@ import { mergeColored } from './batch.js';
 import { getWorld, makeTower, GROUND, FLOOR_H, TOWER_W } from './lobby-scene.js';
 import { furniture, place } from './models.js';
 import { planFor, makeNav, planBlocks, seatOf, deskRect, hasSofa, ROOM_W, ROOM_D, WALL_H } from './layouts.js';
+import { tidyLabels } from './labels.js';
 
 const FS = 2.5;  // Kenney's furniture kit is about 0.4 of our room units; a desk comes out 0.96 high
 const SEAT_LEGACY = 0.65, SEAT_MODEL = 0.5;  // cushion heights of the stand-in chair and the kit's desk chair
@@ -573,7 +574,7 @@ export class OfficeView {
     this.staffCount = state.agents.filter((a) => a.role !== 'manager').length;
     this.scene = new THREE.Scene();
     // Linear fog with a long start: the room and the near city keep their full colour, only the far shore softens.
-    this.scene.fog = new THREE.Fog('#d7e1ea', 140 * WORLD_SCALE, 620 * WORLD_SCALE);
+    this.scene.fog = new THREE.Fog('#ffffff', 140 * WORLD_SCALE, 620 * WORLD_SCALE);
     this.grade = { vignette: 0.22, grain: 0.016 };
     this.ao = { radius: 0.9, intensity: 1.9, color: '#2b1b10', falloff: 1 };
     this.bloom = 0.1;
@@ -1355,13 +1356,16 @@ export class OfficeView {
     const sec = Math.floor(Date.now() / 1000);
     if (sec !== this.clockSec) { this.clockSec = sec; this.drawClock(this.clockTex.image.getContext('2d')); this.clockTex.needsUpdate = true; }
     for (const a of this.actors.values()) { a.update(dt); this.placeTag(a); }
+    tidyLabels(this.actors, this.w);
     this.updatePet(dt);
   }
   placeTag(a) {
     const p = this.tv.copy(a.group.position); p.y += (a.char.labelY ?? HEAD_TOP * CHAR_SCALE) + 0.2;
     p.project(this.camera);
     const x = (p.x * 0.5 + 0.5) * this.w, y = (-p.y * 0.5 + 0.5) * this.h;
-    a.tag.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
+    a.tagX = x; a.tagY = y;
+    a.liftNow = (a.liftNow || 0) + ((a.lift || 0) - (a.liftNow || 0)) * 0.18;
+    a.tag.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${(y - a.liftNow).toFixed(1)}px)`;
     // Nearer people keep their labels on top of farther ones.
     const z = Math.round((1 - p.z) * 5000);
     if (z !== a.tagZ) { a.tagZ = z; a.tag.style.zIndex = z; }

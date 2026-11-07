@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow,noarchive">
-<meta name="theme-color" content="#1a2230">
+<meta name="theme-color" content="#2a1f24">
+<meta name="color-scheme" content="dark">
 <title>The Office</title>
 <link rel="icon" href="data:,">
 <link rel="preload" href="/theoffice/vendor/fonts/fraunces-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/theoffice/vendor/fonts/fraunces-latin-wght-italic.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/theoffice/css/app.css">
 <link rel="stylesheet" href="/theoffice/css/office.css">
 <link rel="stylesheet" href="/theoffice/css/orders.css">
@@ -15,8 +17,15 @@
 <link rel="stylesheet" href="/theoffice/css/filler.css">
 <link rel="stylesheet" href="/theoffice/css/customise.css">
 <link rel="modulepreload" href="/theoffice/vendor/three/three.module.min.js">
+<link rel="modulepreload" href="/theoffice/js/stage.js">
+<link rel="modulepreload" href="/theoffice/js/dom.js">
+<link rel="modulepreload" href="/theoffice/js/lobby-ui.js">
+<link rel="modulepreload" href="/theoffice/js/lobby-scene.js">
+<link rel="modulepreload" href="/theoffice/js/batch.js">
+<link rel="modulepreload" href="/theoffice/js/addons.js">
 </head>
 <body>
+<div id="boot" aria-hidden="true"><div class="boot-mark">The Office<i class="boot-bar"></i></div><p class="boot-slow">Still on its way. A slow connection, perhaps.</p></div>
 <canvas id="scene" aria-hidden="true"></canvas>
 <div id="labels" aria-hidden="true"></div>
 <div id="ui"></div>

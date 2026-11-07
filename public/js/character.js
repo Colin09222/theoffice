@@ -473,7 +473,7 @@ export function createPreview(canvas, look, accent) {
   try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); } catch { canvas.hidden = true; return { update() {}, dispose() {} }; }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.0;
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   const rect = canvas.getBoundingClientRect();
   renderer.setSize(rect.width || 200, rect.height || 240, false);
   const scene = new THREE.Scene();
@@ -507,7 +507,8 @@ export function createPreview(canvas, look, accent) {
     const size = `${canvas.clientWidth}x${canvas.clientHeight}`;
     if (size !== shown && canvas.clientWidth && canvas.clientHeight) { shown = size; renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); cam.aspect = canvas.clientWidth / canvas.clientHeight; cam.updateProjectionMatrix(); }
     const dt = Math.min((now - last) / 1000, 0.1); last = now;
-    ch.group.rotation.y = Math.sin(now / 1400) * 0.55;
+    // People walk with their backs to the room's camera, so here they turn round to face you.
+    ch.group.rotation.y = Math.PI + Math.sin(now / 1400) * 0.55;
     ch.update(dt);
     renderer.render(scene, cam);
   };

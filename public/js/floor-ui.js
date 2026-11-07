@@ -705,10 +705,21 @@ export async function showFloor(root, slug) {
     return;
   }
   const fade = $('#fade');
+  fade.dataset.title = `Floor ${page.state.floor.number} · ${page.state.floor.name}`;
   fade.classList.add('in');
   F = page;
   page.mount();
-  requestAnimationFrame(() => fade.classList.remove('in'));
+  // The flash of light lifts once the room has its real furniture and people, so nobody watches them swap in. A slow line gets the stand-ins after a moment.
+  page.ready = new Promise((done) => {
+    const from = performance.now();
+    const check = () => {
+      const v = page.view;
+      const there = !v || page.dead || (v.loading?.settled && [...v.actors.values()].every((a) => a.char.isModel));
+      if (there || performance.now() - from > 2200) { fade.classList.remove('in'); done(); } else requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+    setTimeout(() => { fade.classList.remove('in'); done(); }, 2400);  // rAF sleeps in a hidden tab
+  });
   window.__office = page; // read by the browser e2e tests
 }
 export function hideFloor() {

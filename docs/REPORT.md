@@ -262,6 +262,100 @@ Existing suites, on a machine with a load average of 70 to 100 because other bui
 
 **Still weak.** Only the mock has been run, so how well a real model holds a tone is unproven. Personalities and tones are short instructions, and tests prove delivery, not quality. Hats and extras are simple shapes on the kit's heads, and some hair pokes through a cap. A floor reset doesn't bring back founding staff the boss let go, though the boss or the manager can hire them again. Nothing has run on a real phone: the phone numbers are emulation on a software renderer.
 
+## The second look pass (branch `ultra-look`, not merged, not deployed)
+Owner's request: "make it so the whole thing is better for the next hour... make sure shit works and works well." He felt the lobby still wasn't as good-looking as the reference and hadn't tried it on a phone. Everything here was tuned against real GPU screenshots on this Mac's M4 (ANGLE on Metal), not the software renderer. Reference rules stayed in force: I looked at their page by eye in a browser and read none of its files. Our lobby stays one tower, our own design. Three of our strings had drifted too close to theirs while this was being built ("Find a company or what it does", "Drag to turn. Scroll to ride.", "Turn the tower, ride the floors") and are now reworded.
+
+**The lobby.** It is now golden hour instead of a cool grey afternoon.
+- **Sky and horizon:** a new sky runs from a glowing haze at the horizon through apricot to powder blue, with thin bands of cloud lit from below. Fog now takes its colour from the view direction, rosy away from the sun and hot gold toward it, using the same function as the bottom of the sky. Sea and sky meet with no seam, and that is what makes the horizon glow.
+- **Light:** a lower, warmer sun with long violet shadows and a cool fill. The shadow map covers the whole island, and because nothing that casts a shadow moves in the lobby, it is drawn once and kept (about 110k fewer triangles on every frame that used to redraw it).
+- **Tower glass:** the panes are calmer: six broad bays, not eight narrow ones, and no flicker. Each pane traces the view ray into a small room behind the glass, and the glass reflects the sky and a soft skyline, with a low-contrast variation per pane. Taken floors show the company's colour as a ribbon round the shaft and warm lit rooms. The scattered white balconies became a planted terrace on every eighth floor.
+- **City:** window glass is dark and warm, not bright blue stripes, so facades read as walls with windows. Balcony rails are a mid tone, not near-black dashes. The palette has a few charcoal blocks for contrast.
+- **Sea:** deep teal with turquoise shallows that follow the real shoreline, foam along the quay and a path of light toward the sun. Each wave drops out before it would alias, which removed the scan lines.
+- **Distance:** three layers of hills and a few low islands fade into the haze, with open water left toward the sun.
+- **Lens and grade:** the camera sits further back on a slightly wider lens, so the whole tower and the horizon are in frame, with a tilt-shift softening at the bottom of the picture and a gold-and-violet grade.
+- **Interface:** the panels and the text scrim are warmer, and the directory shrinks to fit its contents instead of filling the height of the screen.
+- **Low tier:** still no post and no shadow map, but it gets the same sky, haze and sea, and long shadows baked once onto a texture for the ground. On the shots I took those shadows barely show, because the buildings hide most of the ground from this camera.
+
+**Speed.** `server/statics.js` reads `public/` at start-up, stamps every internal reference with a content version and serves stamped URLs as `immutable` for a year. A wrong or missing stamp is never pinned. Assets are precompressed with brotli at start-up, with gzip until it lands. The floor, admin and claim code now load on demand, and the floor code is fetched in the background a few seconds after the lobby settles. `scripts/strip-models.mjs` slims the models by removing 29 animation clips nobody plays, removing unused UVs, and storing normals, UVs and skin weights in small integers. A character went from 36 KB to about 19 KB gzipped, and all the furniture fell by about a third raw. A curtain in the colours of the first picture holds until that picture is finished, including the post chain, so there is no pop. A floor shows a title card in a warm flash until its real furniture and people are in, up to about 2.4 seconds. On an emulated 1.6 Mbit/s, 150 ms phone connection, the first thing on screen went from a blank navy page until 2.6 seconds to the curtain at 0.7 seconds (`media/ultra-loading-before.jpg` and `-after.jpg` are both at 1.2 seconds). The page is ready at 3.1 seconds instead of 2.7, because it now waits for the finished picture. Layout shift measured 0 before and after.
+
+| Bytes on the wire, first visit | Before | After |
+|---|---|---|
+| Lobby, desktop or phone (mid), when ready | 449 KB | 389 KB |
+| Lobby, desktop or phone (mid), settled, with the floor's code fetched in the background | 495 KB | 448 KB |
+| Lobby, phone (low), when ready | 345 KB | 296 KB |
+| Then opening a floor from the lobby, desktop | 286 KB | 155 KB |
+| Then opening a floor from the lobby, phone (low), which still needs the loader | 390 KB | 252 KB |
+| A floor by direct link | 809 KB | 630 KB |
+| The same floor on a return visit | 5 KB | 4 KB |
+
+Those are bytes on the wire for one mock floor of six people, from an empty cache with the cache on. Before is commit d4fd32c measured the same way, which came out at 809 KB against the older report's 875 KB. Three.js (152 KB with brotli) and the addons bundle (98 KB) are still the biggest parts; neither was tree-shaken, because the bundle needs a build step we don't have and published sites use the whole of three.
+
+| Uncapped frame rate on the M4, both builds measured back to back | Lobby, before → after | Floor, before → after |
+|---|---|---|
+| 1440x900 at 2x, high | 41 → 48 fps | 39 → 47 fps |
+| 1440x900 at 1x, high | 145 → 147 fps | 133 → 125 fps |
+| 390x844, mid (pixel ratio 1.5) | 281 → 273 fps | 241 → 239 fps |
+| 390x844, low | 564 → 509 fps | 499 → 479 fps |
+
+These are with vsync and the 60 fps limit off, while the machine was at a load average of 30 to 50 from other workers' test runs, so they are for comparing builds, not absolute speed. `node scripts/measure-look.mjs` reproduces this branch's frame rates and bytes. With vsync on it held a steady 60 fps at 1x and on both phone tiers. At 2x with vsync on it had a median frame of 16.7 ms but dropped frames under that load (42 fps average, p95 33 ms). Lobby at high: 85 draw calls and 152k triangles on every frame. Before, it was 97 calls and 265k on the frames that redrew the shadow map. Lobby at low: 41 calls, 52k triangles. Office draw calls and triangles are about the same as before.
+
+**A bug these screenshots caught.** My first version of the model slimmer left out the stride on three-byte normals. Normals came out as garbage, shaders produced NaN pixels, and bloom smeared those across the whole frame, so the floor went black with no errors in the console. The script is fixed, and the post chain now has a guard pass that darkens any NaN or infinite pixel, so one bad pixel from any shader or driver can never black out the screen.
+
+**Phones.**
+- **Labels:** when people bunch up, `public/js/labels.js` lifts farther names clear of nearer ones, places bubbles by importance and edges them sideways or upward to find room. A bubble with no room waits rather than covering someone. It runs about six times a second, eases its moves and is unit tested with a five-person huddle.
+- **Layout:** there are safe-area insets everywhere. The canvas ignores toolbar and keyboard height changes, the sheets lift above the keyboard, and the page is put back when it closes. There are `dvh` units with `vh` fallbacks, a layout for a phone on its side, and readable text (nothing under about 10 px).
+- **Tap targets:** controls are sized for fingers, with `pointer: coarse` targets around 44 px. The walkthrough flagged only colour swatches at 34 px, checkboxes at 22 px and the sheet's grip at 390x26.
+- **Framing:** the ticker moved down beside the pill, so it no longer covers the crown of the tower.
+- **Blur:** there is no backdrop blur on phones. Re-blurring a moving 3D scene every frame is among the heaviest things a panel can ask of a phone, so the panels are more solid instead.
+
+**A device that struggles.**
+- A lost WebGL context shows a painted CSS city at once, with the interface still working.
+- When the context comes back, the sky's reflections are baked again, the post chain is rebuilt and the tier steps down.
+- A third loss gives up on 3D for the visit.
+- With no WebGL2 at all, or no renderable half-float targets, the device goes to the painted city or to the direct path.
+- The watchdog goes by time, not frames. It aims above about 42 fps on a desktop and accepts a steady 30 on a phone (Low Power Mode). A forced `?q=` tier stays put.
+- `npm run e2e:resilience` proves the lost-context path in real Chrome on desktop and phone tiers, plus a browser with no WebGL at all.
+
+**First hour, walked as a new friend on desktop and phone** (lobby, wrong code, claim, first chat, watch, tabs, customise, back to the lobby, visit another floor, reload, new device, sign in with the recovery code).
+
+Fixed:
+- Closing the recovery-code dialog any way other than the button stranded a brand-new boss in the lobby showing "Sign in". It now always goes to their floor, and the same applies after signing back in.
+- Sign-in wanted the floor's slug. It now also takes the company name or the floor's whole link.
+- There is now wording for having no code and for a lost recovery code.
+- The character builder showed the boss's back. It now faces you.
+- Dollar figures on the floor page are gone. The header's spend was public to every visitor. A boss now sees "12% of today's allowance" when a cap is set, and visitors see nothing. Task costs and standing-order costs are off the page.
+- On a phone with the directory sheet open, the invisible "Open an office" pill and the ticker went on catching taps meant for the rows beneath them, so tapping a floor there could open the claim wizard. A CSS rule was losing on specificity. The e2e suite caught it, and it is fixed.
+- Tapping search on a phone now raises the sheet instead of leaving the field behind the keyboard.
+- The console is clean of the deprecated-clock and shadow-type warnings.
+
+**Outside my files, for whoever owns them.**
+- `server/orders.js:277` still puts a dollar cost line in the standing-order report that goes to the boss's chat.
+- `server/engine.js:253` tells the manager the day's spend in dollars, so the model could repeat it in chat.
+- Domain and purchase-request prices still show to the boss, because that is the price they are being asked to approve. The owner should decide if "never" covers those.
+- On a phone, a new floor's chat opens scrolled so the first lane is cut off and the greeting is above the fold (`scrollChat` in `floor-ui.js`). I left it because a test pins the lanes on screen.
+- The room itself is still lit neutrally, not for golden hour.
+
+**Tests on this branch** (Node 22, mock mode, on the final code, with the machine at a load average of 50 to 90 from several workers' test runs at once).
+- `npm test`: 516 of 516 (76 more than the last report's 440, of which this branch's new `test/statics.test.js` adds 16).
+- `npm run e2e:resilience` (new): 16 of 16.
+- `node test/browser/floors.mjs`: 14 of 14.
+- `npm run e2e:apps`: 26 of 26.
+- `npm run e2e:launch`: 18 of 18.
+- `npm run e2e`: 64 of 64, at 1440x900 and 390x844 plus the admin pass.
+
+The earlier e2e attempts in this session did not all pass. The first ones found one real bug (the invisible pill catching taps), and one failure came from a variable clash in a test I had edited. The other failures, which came and went between runs, did not reproduce on their own and don't look like app bugs: clicks landing on sheets still sliding into place, a guessed browser port, a mock job that had already finished before it could be redirected, and the admin table re-rendering during a click. I hardened the harness against the first two. The last two were not fixed; they simply didn't recur in the final run. All of the numbers above are from the final commit.
+
+Two test changes follow from the no-dollars rule: the spend label now expects a share of the allowance, and a standing order's card expects "Not run yet" and no dollar sign. `test/browser/cdp.mjs` gained optional launch flags, so the resilience test can start a browser with WebGL off. Its click now waits for a sliding sheet or dialog to come to rest, because under load a click could land on whatever had moved there. That is what opened the claim wizard by accident in one run.
+
+**Still weak or unproven.**
+- **Nothing here ran on a real phone or in Safari.** iOS is known-problems avoidance only: `dvh` with fallback, prefixed `backdrop-filter`, half-float check, no autoplay, `visualViewport` for the keyboard. The phone rows in the frame-rate table are the M4 drawing a phone's pixels, not a phone's GPU, so they say the look is cheap per pixel and nothing about an actual iPhone's frame rate or heat.
+- **The look at 2x on the M4 is not comfortably over 60.** Uncapped, it changed from run to run with the load from other workers' test runs: 47 to 48 fps in the back-to-back table above, 33 to 37 fps in another loaded run, and about 65 to 75 fps in a tuning run earlier in the session (not a clean comparison). Full-resolution occlusion alone cost half the frame rate, so dense screens now use half resolution, and the watchdog steps down from there.
+- **Closer than before, not equal to the reference.** Our buildings are still boxes with shader windows, so up close they are simpler than modelled facades, and the far hills are soft shapes, not terrain. The water has no real reflections of the city.
+- **The browser tool can't open localhost.** Its policy blocks private addresses, and I did not change that setting. My GPU shots came from a separately launched Chrome on Metal, pointed only at my own mock server. The browser tool was used only to look at the reference.
+- **Huddled names can float well above their heads** (up to 60 px), which loosens who is who, though nothing overlaps.
+- **Brotli depends on the proxy in front** passing `content-encoding` through. Check it after deploying (see `docs/DEPLOY-LOOK.md`).
+- **Not measured:** real network timings (all of this ran on localhost) and memory on a phone.
+
 ## Known limits
 - An interrupted task resumes from its last completed step, and the aborted call is charged as an estimate.
 - Spend caps reset at midnight UTC.

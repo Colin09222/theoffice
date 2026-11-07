@@ -5,13 +5,19 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import { loadAddons } from './addons.js';
 
 const BASE = `${location.pathname.startsWith('/theoffice') ? '/theoffice' : ''}/models/`;
+// The server stamps the version of the whole models folder here at start-up (server/statics.js), so these files can be cached for good.
+const MODELS_V = '__MODELS_V__';
 const files = new Map();
 let loader = null;
 
 async function fetchGLTF(path) {
   if (!files.has(path)) {
     files.set(path, loadAddons().then((A) => {
-      loader ||= new A.GLTFLoader();
+      if (!loader) {
+        const manager = new THREE.LoadingManager();
+        if (!MODELS_V.startsWith('__')) manager.setURLModifier((u) => (/^(blob|data):/.test(u) ? u : `${u}${u.includes('?') ? '&' : '?'}v=${MODELS_V}`));
+        loader = new A.GLTFLoader(manager);
+      }
       return new Promise((resolve, reject) => loader.load(BASE + path, resolve, undefined, (e) => reject(new Error(`model ${path}: ${e?.message || 'failed'}`))));
     }).catch((e) => { files.delete(path); throw e; }));
   }

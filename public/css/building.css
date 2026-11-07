@@ -60,10 +60,10 @@ body.flying .ticker { opacity: 0; transition: opacity .2s; }
 
 @media (min-width: 1700px) { .wall-grid { grid-template-columns: 1fr 1fr; } }
 
-/* ---- phones: the ticker sits under the headline, clear of the pill and the directory sheet ---- */
+/* ---- phones: the ticker sits just above the pill, down in the city, so the tower stands clear ---- */
 @media (max-width: 760px) {
-  .ticker { left: 12px; right: 12px; bottom: auto; top: 150px; height: 36px; border-radius: 12px; }
-  .ticker-label { padding: 0 10px; font-size: 9.5px; }
+  .ticker { left: 12px; right: 12px; bottom: calc(190px + env(safe-area-inset-bottom)); height: 36px; border-radius: 12px; }
+  .ticker-label { padding: 0 10px; font-size: 10px; letter-spacing: .08em; }
   .ticker-label .live-dot { display: none; }
   .ticker-item, .ticker-ghost { font-size: 13px; }
   .wall-toggle { min-height: 36px; padding: 0 11px; }
@@ -72,7 +72,10 @@ body.flying .ticker { opacity: 0; transition: opacity .2s; }
   .wall-card h4 { font-size: 16px; }
   .wall-card p { font-size: 12.5px; -webkit-line-clamp: 2; }
   .wall-body { padding: 8px 10px 10px; gap: 5px; }
-  .wall-acts .btn.small { padding: 3px 8px; font-size: 12px; min-height: 28px; }
+  .wall-acts .btn.small { padding: 3px 8px; font-size: 12.5px; min-height: 36px; }
   .wall-floor { max-width: 100%; }
-  .directory.open .ticker, .directory.open ~ .ticker { opacity: 0; pointer-events: none; }
+  #ui .directory.open ~ .ticker { opacity: 0; pointer-events: none; }
 }
+
+/* ---- a phone on its side: no room for the ticker ---- */
+@media (max-height: 520px) and (min-width: 761px) { .ticker { display: none; } }

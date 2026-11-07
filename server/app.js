@@ -1,8 +1,8 @@
 // HTTP layer: routing, security headers, CSRF, rate limits, static files, published sites and the JSON API. Everything lives under /theoffice.
 import http from 'node:http';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, extname, relative } from 'node:path';
-import { gzipSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { buildStatics, pickEncoding, warmBrotli } from './statics.js';
 import { get, all, run, tx } from './db.js';
 import { ROOT } from './config.js';
 import * as A from './auth.js';
@@ -66,30 +66,13 @@ function validDecor(input, base = DEFAULT_DECOR) {
 }
 const validColors = (i, base = DEFAULT_COLORS) => ({ primary: hex(i?.primary, base.primary), accent: hex(i?.accent, base.accent) });
 
-function buildStatic() {
-  const pub = join(ROOT, 'public'); const map = new Map();
-  // .glb and .png are the CC0 Kenney models under public/models (see public/models/NOTICE.txt). The binary models gzip to about a third.
-  const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary', '.png': 'image/png' };
-  const walk = (d) => {
-    for (const n of readdirSync(d)) {
-      const p = join(d, n);
-      if (statSync(p).isDirectory()) { walk(p); continue; }
-      const ext = extname(n); if (!TYPES[ext]) continue;
-      const body = readFileSync(p); const compressible = ext !== '.woff2' && ext !== '.png';
-      map.set('/' + relative(pub, p).split('\\').join('/'), { body, gz: compressible ? gzipSync(body, { level: 9 }) : null, type: TYPES[ext] });
-    }
-  };
-  walk(pub);
-  return map;
-}
-
 export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm, fetcher, httpFetch, sessions, namecheap, media, search }) {
   const bus = new Bus();
   const sessionClient = !cfg.computerEnabled ? null : sessions || (cfg.aiMode === 'mock' ? createMockSessions(cfg) : createManagedClient(cfg));
   const client = llm || (cfg.aiMode === 'mock' ? createMockClient(cfg) : createRouter({ anthropic: createAnthropicClient(cfg), openrouter: createOpenRouterClient(cfg) }));
   const engine = new Engine({ db, cfg, models, llm: client, bus, log, now, fetcher, httpFetch, sessions: sessionClient, namecheap, media, search });
   const rates = new A.RateLimiter(cfg.rateScale, now);
-  const statics = buildStatic();
+  const statics = buildStatics(join(ROOT, 'public'), BASE);
   // Same-origin copies every project can load, so nothing published needs a CDN or a shared host.
   const clientLib = readFileSync(join(ROOT, 'server/app-client/office.js'));
   const threeLib = statics.get('/vendor/three/three.module.min.js');
@@ -821,13 +804,18 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
 
   // ---- static app ----
   const INDEX = '/index.html';
-  function serveStatic(req, res, path) {
+  function serveStatic(req, res, path, stamp) {
     const file = statics.get(path);
     if (!file) return send(res, 404, 'Not found', { 'content-type': 'text/plain; charset=utf-8' });
-    const headers = { 'content-type': file.type, 'cache-control': path === INDEX ? 'no-cache' : 'public, max-age=3600' };
-    const gz = file.gz && /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
-    if (gz) { headers['content-encoding'] = 'gzip'; headers.vary = 'accept-encoding'; }
-    send(res, 200, req.method === 'HEAD' ? undefined : gz ? file.gz : file.body, headers);
+    // A URL stamped with this very file's version never changes meaning, so it can stay in a cache for good. The page shell always revalidates, cheaply.
+    const pinned = stamp && stamp === file.version;
+    const etag = `W/"${file.version}"`;
+    const headers = { 'content-type': file.type, etag, 'cache-control': path === INDEX ? 'no-cache' : pinned ? 'public, max-age=31536000, immutable' : stamp ? 'no-cache' : 'public, max-age=3600' };
+    if (file.gz) headers.vary = 'accept-encoding';
+    if (req.headers['if-none-match'] === etag) return send(res, 304, undefined, headers);
+    const { encoding, body } = pickEncoding(file, req.headers['accept-encoding']);
+    if (encoding) headers['content-encoding'] = encoding;
+    send(res, 200, req.method === 'HEAD' ? undefined : body, headers);
   }
 
   function refuseSiblings(req) {
@@ -903,7 +891,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       limit('read', ip);
       // App pages are all the one shell. Anything else must be an exact known asset.
       if (rest === '/' || /^\/admin\/?$/.test(rest) || /^\/floor\/[a-z0-9-]+\/?$/.test(rest)) return serveStatic(req, res, INDEX);
-      return serveStatic(req, res, rest);
+      return serveStatic(req, res, rest, url.searchParams.get('v'));
     } catch (e) {
       if (e instanceof HttpError) { if (e.status >= 500) log('error', 'http', { code: e.code }); return json(res, e.status, { error: e.code, message: e.message }, e.status === 429 ? { 'retry-after': '30' } : {}); }
       if (e instanceof WorkspaceError) return json(res, 400, { error: 'bad_request', message: e.message });
@@ -919,6 +907,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   server.requestTimeout = 30000; server.headersTimeout = 15000; server.keepAliveTimeout = 5000; server.maxConnections = 1200;
   return {
     server, engine, bus, rates,
+    /** Brotli every asset ahead of the first visitor. Called by the real entry point only, so tests don't pay for it. */
+    warmStatics: () => warmBrotli(statics),
     async close() {
       rates.close();
       for (const x of extensions) { try { await x.stop?.(); } catch (e) { log('error', 'extension stop', { err: scrub(e?.message, cfg) }); } }

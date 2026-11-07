@@ -3,15 +3,19 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:net';
 
 const MAC = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Asked of the system, not guessed: with several browsers up at once, a guessed port can land on a running one, and a "new" browser then quietly shares its cookies.
+const freePort = () => new Promise((resolve, reject) => { const s = createServer(); s.on('error', reject); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 
-export async function launch() {
+export async function launch({ args = [], noAngle = false } = {}) {
   const exe = process.env.CHROME || (existsSync(MAC) ? MAC : '/opt/pw-browsers/chromium');
-  const port = 9300 + Math.floor(Math.random() * 400);
+  const port = await freePort();
   const dir = mkdtempSync(join(tmpdir(), 'officecdp-'));
-  const proc = spawn(exe, ['--headless=new', '--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--mute-audio', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore' });
+  const gfx = noAngle ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
+  const proc = spawn(exe, ['--headless=new', '--no-sandbox', ...gfx, ...args, '--mute-audio', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore' });
   let list;
   for (let i = 0; i < 300; i++) { try { list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); if (list.find((x) => x.type === 'page')) break; } catch { /* still starting */ } await sleep(200); }
   return {
@@ -62,6 +66,8 @@ async function openPage(port, { mobile = false, width = 1440, height = 900 } = {
     async shot(file) { const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: 86 }); writeFileSync(file, Buffer.from(r.result.data, 'base64')); },
     // A real click through the input pipeline, so overlapping elements fail the test as they would fail a person.
     async click(selector) {
+      // On a slow machine a sheet or dialog can still be sliding into place, and the click would land on whatever is there by then. Wait for it to come to rest first.
+      await page.until(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return true; return !document.getAnimations().some((a) => a.playState === 'running' && a.effect?.getComputedTiming?.().iterations !== Infinity && a.effect?.target?.contains?.(el)); })()`, `${selector} to come to rest`, 6000).catch(() => {});
       const box = await page.until(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({ block: 'center', inline: 'nearest' }); const r = el.getBoundingClientRect(); if (!r.width || !r.height) return null; return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`, `element ${selector}`);
       const top = await ev(`(() => { const t = document.elementFromPoint(${box.x}, ${box.y}); const el = document.querySelector(${JSON.stringify(selector)}); return !!t && (t === el || el.contains(t) || t.contains(el)); })()`);
       if (!top) throw new Error(`${selector} is covered by ${await ev(`(() => { const t = document.elementFromPoint(${box.x}, ${box.y}); return t ? t.tagName + '.' + t.className : 'nothing'; })()`)} at ${Math.round(box.x)},${Math.round(box.y)}`);

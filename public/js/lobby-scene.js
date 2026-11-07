@@ -1,17 +1,54 @@
-// The lobby: a daylight harbour city built procedurally, with one tall tower you can turn and ride. No external models or textures.
-// Everything is instanced or merged, lit by one sun with a real shadow map, and softened by distance haze. The look is a calm,
-// slightly hazy afternoon: pale sky, warm stone, blue-green water, long soft shadows.
+// The lobby: a harbour city at golden hour, built procedurally, with one tall tower you can turn and ride. No external models or textures.
+// Everything is instanced or merged, lit by one low sun with a real shadow map, and melts into warm haze with distance. The look is
+// the last good hour of the day: a glowing horizon, warm stone, deep teal water with a path of light on it, long soft violet shadows.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { mergeMeshes } from './batch.js';
 import { stage } from './stage.js';
 
 export const FLOOR_H = 1.0, TOWER_W = 8.6, GROUND = 3.6;
-// A lower afternoon sun than before: longer shadows down the streets, and the shadowed faces of the blocks read against the lit ones.
-const SUN = new THREE.Vector3(0.74, 0.47, -0.32).normalize();
-const FOG = '#cfdce8';
+// A low sun off to one side: long shadows down the streets, one lit face and one shaded face on every block.
+const SUN = new THREE.Vector3(0.72, 0.30, -0.36).normalize();
+const SUN_GLSL = `vec3(${SUN.x.toFixed(4)}, ${SUN.y.toFixed(4)}, ${SUN.z.toFixed(4)})`;
 const GRID = 9, LOT = 3.3, CELLS = 36;
 
 function rng(seed) { let s = seed; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
+
+// The haze colour for a world direction: rosy away from the sun, hot gold toward it. Distant land, the far sea and the bottom of the
+// sky all take this one colour, which is what makes the horizon glow with no seam between sea and sky.
+const HAZE_GLSL = `
+  vec3 hazeTint(vec3 d) {
+    vec2 h = normalize(d.xz + 1e-4), sh = normalize(${SUN_GLSL}.xz);
+    float a = dot(h, sh) * 0.5 + 0.5;
+    return mix(vec3(1.0, 0.75, 0.57), vec3(1.26, 0.86, 0.50), a * a);
+  }`;
+// Fog is linear in distance as usual, but tinted per pixel by direction and a little thinner high up. The scene's fog colour multiplies
+// it, so each view can still shift it. Built-in materials and our own shaders share this through the chunks.
+THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\nvarying float vFogDepth; varying vec3 vFogDir;\n#endif';
+THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\nvFogDepth = -mvPosition.z; vFogDir = transpose(mat3(viewMatrix)) * mvPosition.xyz;\n#endif';
+THREE.ShaderChunk.fog_pars_fragment = `#ifdef USE_FOG
+  uniform vec3 fogColor; varying float vFogDepth; varying vec3 vFogDir;
+  #ifdef FOG_EXP2
+    uniform float fogDensity;
+  #else
+    uniform float fogNear; uniform float fogFar;
+  #endif
+  ${HAZE_GLSL}
+  #endif`;
+THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
+  #ifdef FOG_EXP2
+    float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+  #else
+    float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
+  #endif
+  fogFactor *= mix(1.0, 0.78, smoothstep(14.0, 70.0, cameraPosition.y + vFogDir.y));
+  vec3 hazeNow = hazeTint(normalize(vFogDir));
+  // Drawing straight to the screen, built-in materials reach this point already tone mapped and encoded, so the haze has to be too. In a render target, or in our own shaders, everything here is still linear.
+  #if defined(TONE_MAPPING) && !defined(FOG_IN_LINEAR)
+    hazeNow = linearToOutputTexel(vec4(toneMapping(hazeNow), 1.0)).rgb;
+  #endif
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, hazeNow * fogColor, fogFactor);
+  #endif`;
+
 const GLSL_COMMON = `
   float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   vec3 s2l(vec3 c){ return pow(c, vec3(2.2)); }
@@ -31,6 +68,18 @@ const GLSL_COMMON = `
     float streak = smoothstep(0.55, 0.95, vnoise(vec2(p.x * 2.5, p.y * 0.12))) * 0.1 * strength * (1.0 - far);
     return base * shade * grain * (1.0 - 0.16 * strength * joint) * (1.0 - streak);
   }`;
+// The sky as a function, for the dome and for anything that reflects it: haze at the horizon, apricot just above it, powder blue higher up.
+const SKY_GLSL = `
+  vec3 skyColor(vec3 d) {
+    float y = max(d.y, 0.0);
+    vec3 c = mix(skyHaze(d), s2l(vec3(1.0, 0.88, 0.74)), smoothstep(0.0, 0.05, y));
+    c = mix(c, s2l(vec3(0.74, 0.82, 0.90)), smoothstep(0.04, 0.2, y));
+    c = mix(c, s2l(vec3(0.38, 0.58, 0.86)), smoothstep(0.16, 0.72, y));
+    float s = max(dot(d, ${SUN_GLSL}), 0.0);
+    c += vec3(1.0, 0.66, 0.36) * (pow(s, 5.0) * 0.36 + pow(s, 36.0) * 0.6);
+    return c;
+  }`;
+const SKY_HAZE = HAZE_GLSL.replace('hazeTint', 'skyHaze');
 
 /** Adds world position, object-space normal and instance size varyings to a built-in material, then lets a callback patch the shaders. */
 function patch(material, { attributes = '', vertex = '', fragmentHead = '', color = '', emissive = '' }) {
@@ -61,26 +110,22 @@ let patchCount = 0;
 
 function makeSky() {
   const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false, uniforms: { uTime: { value: 0 } },
+    side: THREE.BackSide, depthWrite: false, fog: false, uniforms: { uTime: { value: 0 } },
     vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * mat4(mat3(viewMatrix)) * vec4(position, 1.0); gl_Position = p.xyww; }',
-    fragmentShader: `varying vec3 vDir; uniform float uTime; ${GLSL_COMMON}
+    fragmentShader: `varying vec3 vDir; uniform float uTime; ${GLSL_COMMON} ${SKY_HAZE} ${SKY_GLSL}
       void main(){
         vec3 d = normalize(vDir); float y = clamp(d.y, -0.02, 1.0);
-        vec3 zen = s2l(vec3(0.26, 0.52, 0.92)), mid = s2l(vec3(0.50, 0.71, 0.94)), hor = s2l(vec3(0.80, 0.87, 0.93));
-        vec3 c = mix(hor, mid, smoothstep(0.0, 0.06, y));
-        c = mix(c, zen, smoothstep(0.05, 0.4, y));
-        vec3 sunDir = normalize(vec3(${SUN.x.toFixed(3)}, ${SUN.y.toFixed(3)}, ${SUN.z.toFixed(3)}));
-        float s = max(dot(d, sunDir), 0.0);
-        c += s2l(vec3(1.0, 0.86, 0.66)) * pow(s, 6.0) * 0.22;
-        c += s2l(vec3(1.0, 0.95, 0.85)) * pow(s, 60.0) * 0.5;
-        c += vec3(2.4, 2.2, 1.9) * smoothstep(0.9988, 0.9994, s);
-        // Thin cirrus and a few soft cumulus, drifting very slowly.
-        vec2 uv = d.xz / (d.y + 0.08);
-        float cir = vnoise(uv * 1.6 + vec2(uTime * 0.004, 0.0)) * 0.6 + vnoise(uv * 4.2 - uTime * 0.006) * 0.4;
-        cir = smoothstep(0.55, 0.85, cir) * smoothstep(0.03, 0.2, y) * smoothstep(0.75, 0.3, y);
+        vec3 c = skyColor(d);
+        float s = max(dot(d, ${SUN_GLSL}), 0.0);
+        c += vec3(2.6, 2.1, 1.5) * smoothstep(0.9988, 0.9994, s);
+        // Long thin bands low down and soft cumulus above them, both lit from below by the sun, drifting very slowly.
+        vec2 uv = d.xz / (d.y + 0.07);
+        float bands = vnoise(vec2(uv.x * 0.5, uv.y * 2.6) + vec2(uTime * 0.004, 0.0)) * 0.65 + vnoise(vec2(uv.x * 1.4, uv.y * 7.0) - uTime * 0.006) * 0.35;
+        bands = smoothstep(0.52, 0.8, bands) * smoothstep(0.012, 0.05, y) * smoothstep(0.34, 0.1, y);
         float cum = vnoise(uv * 0.9 + 7.0 + uTime * 0.003) * 0.55 + vnoise(uv * 2.6 + 3.0) * 0.3 + vnoise(uv * 7.0) * 0.15;
-        cum = smoothstep(0.58, 0.72, cum) * smoothstep(0.04, 0.14, y) * smoothstep(0.5, 0.18, y);
-        c = mix(c, vec3(0.92, 0.93, 0.95), cir * 0.35 + cum * 0.75);
+        cum = smoothstep(0.58, 0.74, cum) * smoothstep(0.06, 0.16, y) * smoothstep(0.52, 0.2, y);
+        vec3 lit = mix(s2l(vec3(0.98, 0.72, 0.60)), s2l(vec3(1.0, 0.92, 0.80)), s * s);
+        c = mix(c, lit, bands * 0.55 + cum * 0.7);
         gl_FragColor = vec4(c, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -93,29 +138,48 @@ function makeSky() {
 
 function makeWater() {
   const mat = new THREE.ShaderMaterial({
+    defines: { FOG_IN_LINEAR: 1 },
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }]), fog: true,
     vertexShader: `varying vec3 vW;
       #include <fog_pars_vertex>
       void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition;
       #include <fog_vertex>
       }`,
-    fragmentShader: `varying vec3 vW; uniform float uTime; ${GLSL_COMMON}
+    fragmentShader: `varying vec3 vW; uniform float uTime; ${GLSL_COMMON} ${SKY_HAZE} ${SKY_GLSL}
       #include <fog_pars_fragment>
-      float wave(vec2 p){ return sin(p.x*0.9+uTime*0.8)+sin(p.y*1.1-uTime*0.6)+sin((p.x+p.y)*2.1+uTime*1.2)*0.5+sin((p.x-p.y)*3.7-uTime*1.7)*0.25; }
+      // Each wave adds its slope only while it is wider than a pixel, so the far water can't break into scan lines.
+      vec2 wv(vec2 p, vec2 k, float w, float a, float fw){ float att = 1.0 - smoothstep(0.35, 1.3, length(k) * fw); return k * cos(dot(k, p) + uTime * w) * a * att; }
+      vec2 slope(vec2 p, float fw){
+        vec2 q = p + 3.2 * vec2(sin(p.y * 0.083 + uTime * 0.05) + 0.5 * sin(p.y * 0.21 + p.x * 0.13), sin(p.x * 0.071 - uTime * 0.04) + 0.5 * sin(p.x * 0.19 - p.y * 0.11));
+        return wv(q, vec2(0.83, 0.31), 0.8, 0.8, fw) + wv(q, vec2(-0.47, 0.97), -0.6, 0.8, fw) + wv(q, vec2(1.71, -1.23), 1.2, 0.42, fw) + wv(q, vec2(0.61, 2.93), -1.4, 0.24, fw) + wv(q, vec2(-3.1, 2.3), 1.7, 0.16, fw);
+      }
+      // The same shoreline as coast() in the script, so the shallows follow the land instead of a circle.
+      float coastR(float a){ return 118.0 + sin(a*3.0+1.0)*12.0 + sin(a*7.0)*6.0 + sin(a*13.0+2.0)*2.5 - pow(max(0.0, cos(a-3.9)), 1.6)*84.0; }
       void main(){
-        vec2 p = vW.xz; float e = 0.22;
-        float far = smoothstep(80.0, 320.0, length(vW - cameraPosition));
-        vec3 n = normalize(mix(vec3(wave(p+vec2(e,0.))-wave(p), 10.0, wave(p+vec2(0.,e))-wave(p)), vec3(0.0, 10.0, 0.0), far));
-        vec3 v = normalize(cameraPosition - vW);
-        vec3 r = reflect(-v, n);
-        vec3 sunDir = normalize(vec3(${SUN.x.toFixed(3)}, ${SUN.y.toFixed(3)}, ${SUN.z.toFixed(3)}));
-        float s = pow(max(dot(r, sunDir), 0.0), 120.0);
-        float fres = pow(1.0 - max(dot(v, n), 0.0), 3.0);
-        vec3 deep = s2l(vec3(0.10, 0.34, 0.58)), shallow = s2l(vec3(0.20, 0.55, 0.68)), sky = s2l(vec3(0.78, 0.87, 0.94));
-        float shore = smoothstep(150.0, 105.0, length(vW.xz));
-        // Layered swell: a long slow set under the ripple, so the sea reads as water from the tower, not as a tint.
-        float swell = 0.5 + 0.5 * sin(p.x * 0.11 + p.y * 0.07 + uTime * 0.35) * sin(p.y * 0.09 - uTime * 0.21);
-        vec3 c = mix(mix(deep, shallow, shore) * (0.92 + 0.16 * swell), sky, 0.14 + fres * 0.58) + vec3(1.0, 0.95, 0.85) * s * 1.6;
+        vec2 p = vW.xz;
+        vec3 toCam = cameraPosition - vW; float dist = length(toCam);
+        float far = smoothstep(120.0, 420.0, dist);
+        float fw = max(fwidth(p.x), fwidth(p.y));
+        // Calm at a distance, where a tiny tilt shows the whole gradient of the sky, and busier in patches of wind.
+        float wind = vnoise(p * 0.035 + vec2(uTime * 0.012, 0.0));
+        vec2 sl = slope(p, fw) * 0.2 * mix(1.0, 0.3, far) * (0.45 + wind);
+        vec3 n = normalize(vec3(-sl.x, 10.0, -sl.y));
+        vec3 v = toCam / dist;
+        vec3 r = reflect(-v, n); r.y = abs(r.y);
+        float fres = 0.05 + 0.95 * pow(clamp(1.0 - dot(v, n), 0.0, 1.0), 3.6);
+        float off = length(p) - coastR(atan(p.y, p.x));
+        // Clear turquoise over the shallows, deep teal beyond, with a long slow swell moving through it.
+        float swell = vnoise(p * 0.06 + vec2(uTime * 0.02, -uTime * 0.013)) * 0.65 + vnoise(p * 0.17 - vec2(uTime * 0.03, 0.0)) * 0.35;
+        vec3 water = mix(s2l(vec3(0.20, 0.56, 0.58)), s2l(vec3(0.075, 0.27, 0.36)), smoothstep(0.0, 30.0, off)) * (0.88 + 0.22 * swell);
+        vec3 c = mix(water, skyColor(r), clamp(fres, 0.0, 1.0));
+        // The path of light toward the sun: a wide soft lobe, broken into glitter close to, smooth far away.
+        float sd = max(dot(r, ${SUN_GLSL}), 0.0);
+        float near = 1.0 - smoothstep(0.1, 0.5, fw);
+        float glitter = smoothstep(0.42, 0.9, vnoise(p * 2.4 + vec2(uTime * 0.7, -uTime * 0.5)) * 0.6 + vnoise(p * 6.1 - uTime * 0.9) * 0.4);
+        c += vec3(1.0, 0.72, 0.42) * (pow(sd, 60.0) * mix(1.0, 0.25 + glitter * 2.6, near) + pow(sd, 500.0) * 2.4);
+        // A line of foam along the quay.
+        float foam = smoothstep(1.9, 0.1, off + (vnoise(p * 0.9 + uTime * 0.25) - 0.5) * 1.6);
+        c = mix(c, vec3(0.86, 0.80, 0.70), foam * 0.42 * (1.0 - far));
         gl_FragColor = vec4(c, 1.0);
         #include <fog_fragment>
         #include <tonemapping_fragment>
@@ -124,6 +188,50 @@ function makeWater() {
   });
   const m = new THREE.Mesh(new THREE.PlaneGeometry(2200, 2200), mat);
   m.rotation.x = -Math.PI / 2; m.position.y = -0.9;
+  return m;
+}
+
+/** Depth in the distance: islands in the bay, then layers of hills along the far shore, each one fainter in the haze. Open water is left toward the sun. */
+function makeFarShore() {
+  const r = rng(3141);
+  const pos = [], col = [];
+  const tint = new THREE.Color();
+  const tri = (a, b, c, ca, cb, cc) => { for (const v of [a, b, c]) pos.push(v[0], v[1], v[2]); for (const k of [ca, cb, cc]) col.push(k.r, k.g, k.b); };
+  const sunAz = Math.atan2(SUN.z, SUN.x);
+  const ridge = (radius, spread, height, palette, step) => {
+    let prev = null;
+    for (let a = 0; a <= Math.PI * 2 + 0.0001; a += step) {
+      const off = Math.abs(Math.atan2(Math.sin(a - sunAz), Math.cos(a - sunAz)));
+      const open = Math.min(1, Math.max(0, (off - 0.55) / 0.5));
+      const n = Math.sin(a * 5.3 + radius) * 0.45 + Math.sin(a * 13.1 + radius * 0.7) * 0.3 + Math.sin(a * 31.0 + radius * 1.3) * 0.15 + 0.6;
+      const h = Math.max(0.05, n) * height * open;
+      const rad = radius + Math.sin(a * 7.0 + radius) * spread;
+      const top = [Math.cos(a) * rad, h - 1, Math.sin(a) * rad], base = [Math.cos(a) * (rad - spread * 0.9), -2, Math.sin(a) * (rad - spread * 0.9)];
+      if (prev && (prev.h > 0.2 || h > 0.2)) {
+        const c1 = tint.set(palette[0]).clone(), c2 = tint.set(palette[1]).clone();
+        tri(prev.base, base, prev.top, c1, c1, c2); tri(base, top, prev.top, c1, c2, c2);
+      }
+      prev = { top, base, h };
+    }
+  };
+  ridge(980, 90, 46, ['#6f6a78', '#8a7f8c'], 0.03);
+  ridge(840, 70, 26, ['#5f6a6a', '#7a7f78'], 0.035);
+  ridge(700, 50, 12, ['#4f6a58', '#7d8a68'], 0.04);
+  // Islands: low, sunlit cones, far enough out to take the haze.
+  for (const [ang, dist, w, hh] of [[2.5, 430, 24, 3.2], [3.0, 540, 30, 4.2], [0.85, 540, 36, 5], [1.75, 400, 14, 2.2], [5.6, 560, 28, 3.6]]) {
+    const cx = Math.cos(ang) * dist, cz = Math.sin(ang) * dist, seg = 14;
+    const ring = []; for (let i = 0; i < seg; i++) { const t = (i / seg) * Math.PI * 2; const k = 0.74 + r() * 0.5; ring.push([cx + Math.cos(t) * w * k, -1, cz + Math.sin(t) * w * k * 0.7]); }
+    const mid = []; for (let i = 0; i < seg; i++) { const t = (i / seg) * Math.PI * 2; const k = 0.3 + r() * 0.26; mid.push([cx + Math.cos(t) * w * k, hh * (0.55 + r() * 0.4), cz + Math.sin(t) * w * k * 0.7]); }
+    const peak = [cx, hh * 1.15, cz];
+    const green = tint.set('#6a8450').clone(), dry = tint.set('#b09b6a').clone(), rock = tint.set('#8a7a66').clone();
+    for (let i = 0; i < seg; i++) { const j = (i + 1) % seg; tri(ring[i], ring[j], mid[i], dry, dry, green); tri(ring[j], mid[j], mid[i], dry, green, green); tri(mid[i], mid[j], peak, green, green, rock); }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.98, side: THREE.DoubleSide }));
+  m.frustumCulled = false;
   return m;
 }
 
@@ -143,13 +251,40 @@ function cellMap(spots) {
   return t;
 }
 
+/**
+ * For the tier with no shadow map: every block's long shadow, and the tower's, drawn once onto a canvas and laid over the ground. Sampled
+ * once per ground pixel, so it costs a weak phone almost nothing, and the streets still get the evening's long shadows.
+ */
+const BAKE_SPAN = 150;
+function bakeGroundShadows(blocks) {
+  const size = 1024, c = document.createElement('canvas'); c.width = c.height = size;
+  const x = c.getContext('2d'); x.fillStyle = '#000'; x.fillRect(0, 0, size, size);
+  x.fillStyle = '#fff';
+  const px = (v) => ((v + BAKE_SPAN) / (BAKE_SPAN * 2)) * size;
+  const drop = (cx, cz, w, d, h) => {
+    const ox = -(SUN.x / SUN.y) * h, oz = -(SUN.z / SUN.y) * h;
+    const corners = [[cx - w / 2, cz - d / 2], [cx + w / 2, cz - d / 2], [cx + w / 2, cz + d / 2], [cx - w / 2, cz + d / 2]];
+    x.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const [ax, az] = corners[i], [bx, bz] = corners[(i + 1) % 4];
+      x.moveTo(px(ax), px(az)); x.lineTo(px(bx), px(bz)); x.lineTo(px(bx + ox), px(bz + oz)); x.lineTo(px(ax + ox), px(az + oz)); x.closePath();
+    }
+    x.fill('nonzero');
+    x.fillRect(px(cx - w / 2 + ox), px(cz - d / 2 + oz), (w / (BAKE_SPAN * 2)) * size, (d / (BAKE_SPAN * 2)) * size);
+  };
+  for (const b of blocks) drop(b.x, b.z, b.w, b.d, b.height);
+  drop(0, 0, TOWER_W + 1, TOWER_W + 1, GROUND + 40 * FLOOR_H);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.NoColorSpace; t.magFilter = t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; t.flipY = false;
+  return t;
+}
+
 function makeLand(cells) {
   const shape = new THREE.Shape();
   const n = 160;
   for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI * 2; const r = coast(a); const x = Math.cos(a) * r, y = -Math.sin(a) * r; if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y); }
   const geo = new THREE.ExtrudeGeometry(shape, { depth: 1.4, bevelEnabled: false, curveSegments: 1 });
   const mat = patch(new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.96, metalness: 0 }), {
-    fragmentHead: 'uniform sampler2D uCells;',
+    fragmentHead: 'uniform sampler2D uCells; uniform sampler2D uBaked; uniform float uBakedOn;',
     color: `
       vec3 base; vec3 wp = vec3(vMp.x, vMp.z - 1.4, -vMp.y);
       if (wp.y < -0.05) {
@@ -162,8 +297,8 @@ function makeLand(cells) {
         float fw = fwidth(c.x) + fwidth(c.y);
         float road = smoothstep(3.75, 3.75 + fw, m);
         float walk = smoothstep(${LOT.toFixed(2)}, ${LOT.toFixed(2)} + fw, m) * (1.0 - road);
-        vec3 asphalt = s2l(vec3(0.33, 0.33, 0.34)), paving = s2l(vec3(0.78, 0.72, 0.62)), lot = s2l(vec3(0.62, 0.56, 0.48));
-        vec3 grass = s2l(vec3(0.48, 0.62, 0.30)), plaza = s2l(vec3(0.87, 0.80, 0.68));
+        vec3 asphalt = s2l(vec3(0.35, 0.33, 0.33)), paving = s2l(vec3(0.80, 0.72, 0.60)), lot = s2l(vec3(0.60, 0.53, 0.44));
+        vec3 grass = s2l(vec3(0.46, 0.58, 0.26)), plaza = s2l(vec3(0.88, 0.79, 0.65));
         // Lane line down the middle of each street, dashed.
         float ns = step(3.75, abs(c.x)) * step(abs(c.y), 3.75), ew = step(3.75, abs(c.y)) * step(abs(c.x), 3.75);
         float along = ns > 0.5 ? c.y : c.x, across = ns > 0.5 ? abs(c.x) : abs(c.y);
@@ -190,11 +325,15 @@ function makeLand(cells) {
         base = mix(base, s2l(vec3(0.85, 0.80, 0.55)), line * 0.7);
         base = mix(base, s2l(vec3(0.86, 0.86, 0.84)), zebra * road * 0.75);
         base *= 0.96 + 0.08 * vnoise(wp.xz * 0.35);
+        // No shadow map on this tier: the long shadows come from the baked sheet, soft by its own low resolution, cool against the warm stone.
+        if (uBakedOn > 0.5) base *= mix(vec3(1.0), vec3(0.42, 0.44, 0.56), texture2D(uBaked, wp.xz / ${(BAKE_SPAN * 2).toFixed(1)} + 0.5).r);
       }
       diffuseColor.rgb = base;`,
   });
-  mat.onBeforeCompile = ((orig) => (shader) => { shader.uniforms.uCells = { value: cells }; orig(shader); })(mat.onBeforeCompile);
+  const baked = { uBaked: { value: null }, uBakedOn: { value: 0 } };
+  mat.onBeforeCompile = ((orig) => (shader) => { Object.assign(shader.uniforms, { uCells: { value: cells } }, baked); orig(shader); })(mat.onBeforeCompile);
   const m = new THREE.Mesh(geo, mat);
+  m.userData.baked = baked;
   // The extrusion runs along +z, which the rotation turns into +y, so the cap lands at y=0 and the quay wall drops to the water.
   m.rotation.x = -Math.PI / 2; m.position.y = -1.4; m.receiveShadow = true;
   return m;
@@ -225,10 +364,12 @@ const FACADE_GLSL = `
     float far = smoothstep(0.18, 0.6, fw);
     win = mix(win, avg, far);
     float shade = mix(f.y * 0.8, 0.4, far);
-    vec3 glass = mix(s2l(vec3(0.20, 0.27, 0.36)), s2l(vec3(0.56, 0.68, 0.80)), shade);
+    // Dark glass with the sky in it: warm on the faces toward the sun, cooler on the others. Low contrast, so a facade reads as a wall with windows, not as stripes.
+    float toSun = max(dot(_nn, ${SUN_GLSL}), 0.0);
+    vec3 glass = mix(s2l(vec3(0.15, 0.17, 0.20)), s2l(vec3(0.27, 0.30, 0.34)), shade) + mix(vec3(0.015, 0.022, 0.034), vec3(0.11, 0.07, 0.034), toSun);
     // The seed is interpolated, so it wobbles in its last bits, and this hash magnifies that into holes in a lit window: the speckle on the facades. Whole numbers don't wobble.
-    float lit = step(0.94, hash(floor(p) + floor(vSeed * 977.0 + 0.5))) * (1.0 - far);
-    glass = mix(glass, s2l(vec3(0.95, 0.85, 0.65)), lit * 0.6);
+    float lit = step(0.965, hash(floor(p) + floor(vSeed * 977.0 + 0.5))) * (1.0 - far);
+    glass = mix(glass, s2l(vec3(0.98, 0.80, 0.55)), lit * 0.5);
     if (style > 1.5 && style < 2.5) {
       // Curtain wall: a darker spandrel band between the glass rows.
       float band = EDGE(0.1, f.y, ey) * (1.0 - EDGE(0.3, f.y, ey));
@@ -300,7 +441,7 @@ function makeCity(density) {
   const mesh = new THREE.InstancedMesh(geo, buildingMaterial(), blocks.length);
   const m = new THREE.Matrix4(), col = new THREE.Color();
   // Warm sand, limestone and terracotta, with a few cooler rendered blocks so the skyline doesn't read as one colour.
-  const palette = ['#ead8b9', '#dcc199', '#c9a885', '#f1e4cf', '#b99b7f', '#e4d3bd', '#a9aeb3', '#cf9570', '#e6c6a2', '#9aa3ad', '#d4ab80', '#e8dfd0', '#ae8a6c', '#c8b596', '#bf6a4e', '#e0b377', '#8f9aa4', '#d6c9b5'];
+  const palette = ['#ead8b9', '#dcc199', '#c9a885', '#f1e4cf', '#b99b7f', '#e4d3bd', '#8d8782', '#cf9570', '#e6c6a2', '#6e6a6c', '#d4ab80', '#e8dfd0', '#ae8a6c', '#c8b596', '#bf6a4e', '#e0b377', '#a59a8e', '#d6c9b5'];
   blocks.forEach((b, i) => {
     m.makeScale(b.w, b.height, b.d); m.setPosition(b.x, 0, b.z);
     mesh.setMatrixAt(i, m);
@@ -366,7 +507,7 @@ function makeCity(density) {
   const balGeo = new THREE.BoxGeometry(1, 1, 1); balGeo.translate(0, 0.5, 0);
   const balMesh = new THREE.InstancedMesh(balGeo, new THREE.MeshStandardMaterial({ color: '#f1e9dc', roughness: 0.9 }), Math.max(1, balconies.length));
   balconies.forEach((b, i) => { m.makeScale(b[3], 0.1, b[4]); m.setPosition(b[0], b[1], b[2]); balMesh.setMatrixAt(i, m); });
-  const railMesh = new THREE.InstancedMesh(balGeo, new THREE.MeshStandardMaterial({ color: '#4c5560', roughness: 0.6 }), Math.max(1, balconies.length));
+  const railMesh = new THREE.InstancedMesh(balGeo, new THREE.MeshStandardMaterial({ color: '#8d8176', roughness: 0.7 }), Math.max(1, balconies.length));
   balconies.forEach((b, i) => { const [, , , w, d, fx, fz] = b; m.makeScale(fz ? w : 0.04, 0.42, fz ? 0.04 : d); m.setPosition(b[0] + fx * 0.2, b[1] + 0.1, b[2] + fz * 0.2); railMesh.setMatrixAt(i, m); });
   balMesh.frustumCulled = railMesh.frustumCulled = false; balMesh.castShadow = true; balMesh.count = railMesh.count = balconies.length;
 
@@ -396,7 +537,7 @@ function makeCity(density) {
   for (const t of [trunks, canopies, pineTrunks, pineCanopies]) { t.frustumCulled = false; t.castShadow = true; t.receiveShadow = true; }
 
   const group = new THREE.Group().add(mesh, roofs, unitMesh, balMesh, railMesh, trunks, canopies, pineTrunks, pineCanopies, poolMesh, terraceMesh, craneGroup);
-  return { group, city: mesh, cells: cellMap(spots), detail: [balMesh, railMesh, unitMesh, poolMesh, terraceMesh, craneGroup], stats: { buildings: blocks.length, trees: trees.length, balconies: balconies.length, pools: pools.length, cranes: tallest.length } };
+  return { group, city: mesh, blocks, cells: cellMap(spots), detail: [balMesh, railMesh, unitMesh, poolMesh, terraceMesh, craneGroup], stats: { buildings: blocks.length, trees: trees.length, balconies: balconies.length, pools: pools.length, cranes: tallest.length } };
 }
 
 function makeTraffic(count) {
@@ -420,6 +561,7 @@ function makeTraffic(count) {
   geo.setAttribute('aRange', new THREE.InstancedBufferAttribute(range, 2));
   geo.setAttribute('aCol', new THREE.InstancedBufferAttribute(cols, 3));
   const mat = new THREE.ShaderMaterial({
+    defines: { FOG_IN_LINEAR: 1 },
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }]), fog: true,
     vertexShader: `attribute vec4 aCar; attribute vec2 aRange; attribute vec3 aCol; uniform float uTime; varying vec3 vCol; varying vec3 vN; varying float vFront;
       #include <fog_pars_vertex>
@@ -458,49 +600,75 @@ function makeTraffic(count) {
 
 function towerGlass() {
   const mat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.28, metalness: 0.2, envMapIntensity: 1.1 });
+  const bays = 6;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = { value: 0 };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute vec3 aState; varying vec3 vState; varying vec3 vLocal; varying vec3 vNrm; varying float vY;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvState = aState; vLocal = position; vNrm = normal; vY = (instanceMatrix * vec4(position, 1.0)).y;');
+      .replace('#include <common>', '#include <common>\nattribute vec3 aState; varying vec3 vState; varying vec3 vLocal; varying vec3 vNrm; varying float vY; varying vec3 vWorldP;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvState = aState; vLocal = position; vNrm = normal; vec4 _ip = instanceMatrix * vec4(position, 1.0); vY = _ip.y; vWorldP = (modelMatrix * _ip).xyz;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nuniform float uTime; varying vec3 vState; varying vec3 vLocal; varying vec3 vNrm; varying float vY; ${GLSL_COMMON}`)
+      .replace('#include <common>', `#include <common>\nuniform float uTime; varying vec3 vState; varying vec3 vLocal; varying vec3 vNrm; varying float vY; varying vec3 vWorldP; ${GLSL_COMMON} ${SKY_HAZE} ${SKY_GLSL}`)
       .replace('#include <color_fragment>', `
+        float roughnessFactor; float metalnessFactor;
         vec3 _nn = normalize(vNrm);
         vec3 brand = vColor.rgb;
-        float u = (abs(_nn.x) > 0.5 ? vLocal.z : vLocal.x) + ${(TOWER_W / 2).toFixed(2)};
-        float bays = 8.0;
-        float cell = fract(u / ${TOWER_W.toFixed(2)} * bays);
-        float fw = fwidth(u / ${TOWER_W.toFixed(2)} * bays);
-        float frame = smoothstep(0.02, 0.05, cell) * smoothstep(0.98, 0.95, cell);
-        frame = mix(frame, 0.92, smoothstep(0.35, 1.1, fw));
+        bool sideX = abs(_nn.x) > 0.5;
+        // Pane coordinates: broad bays with slim mullions, one row of glass per floor. Everything fades to its average once a line would be thinner than a pixel.
+        float along = ((sideX ? vLocal.z : vLocal.x) + ${(TOWER_W / 2).toFixed(2)}) / ${TOWER_W.toFixed(2)} * ${bays.toFixed(1)};
+        float cell = fract(along), fw = fwidth(along);
+        float frame = smoothstep(0.012, 0.012 + fw * 1.4, cell) * smoothstep(0.988, 0.988 - fw * 1.4, cell);
+        frame = mix(frame, 0.95, smoothstep(0.3, 0.9, fw));
         float yv = vLocal.y / ${(FLOOR_H * 0.86).toFixed(2)} + 0.5;
-        float band = smoothstep(0.08, 0.14, yv) * smoothstep(0.995, 0.96, yv);
-        float id = floor(u / ${TOWER_W.toFixed(2)} * bays) + floor(vY) * 13.0 + (abs(_nn.x) > 0.5 ? 40.0 : 0.0) + sign(_nn.x + _nn.z) * 7.0;
-        float rnd = hash(vec2(id, 3.0));
-        float flicker = vState.y * (0.5 + 0.5 * sin(uTime * (1.5 + rnd * 3.0) + rnd * 40.0));
-        float on = clamp(vState.x * (0.7 + 0.3 * step(0.25, rnd)) + flicker * 0.3, 0.0, 1.0);
-        vec3 glass = mix(s2l(vec3(0.30, 0.44, 0.58)), s2l(vec3(0.58, 0.70, 0.80)), yv * 0.7);
-        vec3 blinds = mix(s2l(vec3(0.86, 0.84, 0.80)), brand, 0.72 + 0.28 * step(0.5, rnd));
-        vec3 tint = mix(glass, blinds, on);
-        vec3 spandrel = s2l(vec3(0.78, 0.74, 0.68));
-        vec3 mullion = s2l(vec3(0.62, 0.64, 0.66));
-        vec3 c = mix(spandrel, tint, band);
+        float sill = mix(0.1, 0.24, clamp(vState.x, 0.0, 1.0));
+        float band = smoothstep(sill, sill + 0.03, yv) * smoothstep(0.995, 0.975, yv);
+        float faceId = sideX ? 40.0 + sign(_nn.x) * 7.0 : sign(_nn.z) * 7.0;
+        float rnd = hash(vec2(floor(along) + faceId, floor(vY)));
+        float busy = vState.y * (0.5 + 0.5 * sin(uTime * 0.9 + floor(vY) * 1.7));
+        float on = clamp(vState.x, 0.0, 1.0);
+        // Depth: every pane looks into a real little room. The ray from the camera is traced into a box behind the glass and shaded by the wall it hits.
+        vec3 V = normalize(vWorldP - cameraPosition);
+        vec3 T = sideX ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+        vec3 rd = vec3(dot(V, T), V.y, -dot(V, _nn)) / vec3(${(TOWER_W / bays).toFixed(3)}, ${(FLOOR_H * 0.76).toFixed(3)}, 1.5);
+        vec3 ro = vec3(cell, clamp((yv - 0.12) / 0.87, 0.0, 1.0), 0.0);
+        vec3 rd2 = rd + vec3(1e-5);
+        vec3 tt = (step(vec3(0.0), rd2) - ro) / rd2;
+        float tm = min(tt.x, min(tt.y, tt.z));
+        vec3 hit = ro + rd2 * tm;
+        float lamp = on > 0.5 ? (rnd > 0.16 ? 0.9 : 0.3) + busy * 0.25 : (rnd > 0.93 ? 0.5 : 0.07);
+        vec3 wallTint = mix(vec3(0.34, 0.27, 0.21), mix(vec3(0.42, 0.33, 0.25), brand, 0.62), on);
+        vec3 room;
+        if (tm == tt.z) room = wallTint * (0.72 + 0.28 * hit.y);
+        else if (tm == tt.y) room = rd2.y > 0.0 ? vec3(0.62, 0.53, 0.42) * (0.55 + 0.45 * hit.z) : wallTint * vec3(0.5) * (0.45 + 0.55 * hit.z);
+        else room = wallTint * 0.62 * (0.5 + 0.5 * hit.z);
+        room *= lamp;
+        // Melt the room into its average once a pane is only a few pixels wide.
+        room = mix(room, wallTint * lamp * 0.72, smoothstep(0.12, 0.42, fw));
+        // Reflection: the sky and the skyline, with each pane a hair out of true as real curtain wall is. The ray is bent upward so the glass always holds the glow.
+        vec3 N2 = normalize(_nn + T * (rnd - 0.5) * 0.022);
+        vec3 R = reflect(V, N2); R.y = abs(R.y) * 0.5 + 0.1;
+        float az = atan(R.z, R.x);
+        float line = 0.11 + 0.05 * vnoise(vec2(az * 11.0, 2.0)) * vnoise(vec2(az * 31.0, 5.0));
+        vec3 refl = mix(s2l(vec3(0.40, 0.34, 0.33)), skyColor(normalize(R)) * 0.62, smoothstep(line - 0.006, line + 0.03, R.y));
+        float F = (0.34 + 0.6 * pow(clamp(1.0 + dot(V, _nn), 0.0, 1.0), 2.5)) * (1.0 - on * 0.5);
+        vec3 glassLight = mix(room, refl, F);
+        // The strip under the glass: bronze on an empty floor, the company's own colour on a taken one, so taken floors read as ribbons round the shaft.
+        vec3 spandrel = mix(s2l(vec3(0.34, 0.30, 0.27)), brand, on);
+        vec3 mullion = s2l(vec3(0.44, 0.40, 0.36));
+        vec3 c = mix(spandrel, vec3(0.012), band);
         c = mix(mullion, c, frame);
         if (abs(_nn.y) > 0.5) c = s2l(vec3(0.6, 0.58, 0.56));
         diffuseColor.rgb = c;
-        roughnessFactor = mix(0.6, 0.22, band * frame * (1.0 - on * 0.5));
-        metalnessFactor = mix(0.0, 0.25, band * frame);
+        float paneOn = band * frame * step(abs(_nn.y), 0.5);
+        roughnessFactor = mix(0.65, 0.18, paneOn);
+        metalnessFactor = 0.0;
         float hover = vState.z;
-        vec3 _emis = brand * on * 0.18 * band * frame + vec3(1.0, 0.93, 0.7) * hover * 0.42 * band + brand * hover * 0.2;`)
+        vec3 _emis = glassLight * paneOn + brand * on * 0.22 * (1.0 - band) * frame + vec3(1.0, 0.86, 0.6) * hover * 0.5 * band + brand * hover * 0.25;`)
       .replace('#include <roughnessmap_fragment>', '')
       .replace('#include <metalnessmap_fragment>', '')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += _emis;');
-    // roughnessFactor and metalnessFactor are declared by the chunks we removed, so declare them before use.
-    shader.fragmentShader = shader.fragmentShader.replace('vec3 _nn = normalize(vNrm);', 'float roughnessFactor; float metalnessFactor;\nvec3 _nn = normalize(vNrm);');
     mat.userData.shader = shader;
   };
-  mat.customProgramCacheKey = () => 'towerglass';
+  mat.customProgramCacheKey = () => 'towerglass2';
   return mat;
 }
 
@@ -520,7 +688,7 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   const H = GROUND + floorCount * FLOOR_H;
   // Pale limestone, cut in courses: the same stone shader as the city, so the tower belongs to it.
   const stoneCourses = { color: 'diffuseColor.rgb = stone(diffuseColor.rgb, vec2(vWp.x + vWp.z * 0.7, vWp.y), fwidth(vWp.x + vWp.z * 0.7) + fwidth(vWp.y), 0.45);' };
-  const stone = patch(new THREE.MeshStandardMaterial({ color: '#f0e3cf', roughness: 0.9, metalness: 0 }), stoneCourses);
+  const stone = patch(new THREE.MeshStandardMaterial({ color: '#e6d6be', roughness: 0.9, metalness: 0 }), stoneCourses);
   const stoneDark = patch(new THREE.MeshStandardMaterial({ color: '#dccfbc', roughness: 0.92, metalness: 0 }), stoneCourses);
   const dark = new THREE.MeshStandardMaterial({ color: '#3c4150', roughness: 0.6, metalness: 0.1 });
   const brass = new THREE.MeshStandardMaterial({ color: '#c9a86a', roughness: 0.35, metalness: 0.8, envMap: env });
@@ -548,25 +716,22 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   slabs.frustumCulled = false; slabs.castShadow = true; slabs.receiveShadow = true;
   group.add(slabs);
 
-  // Balconies alternate faces floor by floor, with a planter of greenery on each.
+  // Planted terraces on every eighth floor, stacked in the same two bays on each face: a rhythm the eye can read, not scatter.
   const balGeo = new THREE.BoxGeometry(1, 1, 1); balGeo.translate(0, 0.5, 0);
-  const nBal = floorCount * 2;
-  const balSlab = new THREE.InstancedMesh(balGeo, stone, nBal), balRail = new THREE.InstancedMesh(balGeo, new THREE.MeshStandardMaterial({ color: '#cfdbe4', roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.55, envMap: env }), nBal), balPlant = new THREE.InstancedMesh(balGeo, green, nBal);
-  for (let i = 0; i < floorCount; i++) {
+  const terraces = [];
+  for (let i = 3; i < floorCount; i += 8) for (const [fx, fz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const off of [-half * 0.75, half * 0.75]) terraces.push([i, fx, fz, off]);
+  const nBal = Math.max(1, terraces.length);
+  const balSlab = new THREE.InstancedMesh(balGeo, stone, nBal), balRail = new THREE.InstancedMesh(balGeo, new THREE.MeshStandardMaterial({ color: '#b9b4a8', roughness: 0.3, metalness: 0.2, transparent: true, opacity: 0.25, envMap: env }), nBal), balPlant = new THREE.InstancedMesh(balGeo, green, nBal);
+  terraces.forEach(([i, fx, fz, off], idx) => {
     const y = GROUND + i * FLOOR_H + 0.07;
-    const faces = i % 2 ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]];
-    faces.forEach(([fx, fz], k) => {
-      const idx = i * 2 + k;
-      const off = (((i * 7 + k * 3) % 3) - 1) * 2.2;
-      const x = fx * (half + 0.3 + 0.45) + fz * off, z = fz * (half + 0.3 + 0.45) + fx * off;
-      const w = fz ? 2.6 : 0.9, d = fz ? 0.9 : 2.6;
-      m.makeScale(w, 0.1, d); m.setPosition(x, y, z); balSlab.setMatrixAt(idx, m);
-      const rx = fx * (half + 0.3 + 0.9 - 0.03) + fz * off, rz = fz * (half + 0.3 + 0.9 - 0.03) + fx * off;
-      m.makeScale(fz ? 2.6 : 0.05, 0.46, fz ? 0.05 : 2.6); m.setPosition(rx, y + 0.1, rz); balRail.setMatrixAt(idx, m);
-      m.makeScale(fz ? 2.0 : 0.3, 0.3, fz ? 0.3 : 2.0); m.setPosition(rx - fx * 0.2, y + 0.1, rz - fz * 0.2); balPlant.setMatrixAt(idx, m);
-    });
-  }
-  for (const b of [balSlab, balRail, balPlant]) { b.frustumCulled = false; b.castShadow = b !== balRail; b.receiveShadow = true; group.add(b); }
+    const w = fz ? 2.0 : 0.3, d = fz ? 0.3 : 2.0;
+    const x = fx * (half + 0.3 + 0.15) + fz * off, z = fz * (half + 0.3 + 0.15) + fx * off;
+    m.makeScale(w, 0.08, d); m.setPosition(x, y, z); balSlab.setMatrixAt(idx, m);
+    const rx = fx * (half + 0.3 + 0.28) + fz * off, rz = fz * (half + 0.3 + 0.28) + fx * off;
+    m.makeScale(fz ? 2.0 : 0.03, 0.26, fz ? 0.03 : 2.0); m.setPosition(rx, y + 0.08, rz); balRail.setMatrixAt(idx, m);
+    m.makeScale(fz ? 1.8 : 0.2, 0.26, fz ? 0.2 : 1.8); m.setPosition(rx - fx * 0.14, y + 0.08, rz - fz * 0.14); balPlant.setMatrixAt(idx, m);
+  });
+  for (const b of [balSlab, balRail, balPlant]) { b.count = terraces.length; b.frustumCulled = false; b.castShadow = b !== balRail; b.receiveShadow = true; group.add(b); }
 
   // Corner piers and vertical fins give the shaft its lines; a pale stone frame rather than a dark one.
   const ph = floorCount * FLOOR_H;
@@ -574,7 +739,7 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   if (ph > 0) for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) add(stone, 0.9, ph + 0.2, 0.9, sx * (half + 0.12), GROUND, sz * (half + 0.12));
   if (ph > 0) for (let side = 0; side < 4; side++) {
     for (const o of [-half * 0.5, 0, half * 0.5]) {
-      const [x, z, w, d] = side === 0 ? [o, half + 0.22, 0.16, 0.5] : side === 1 ? [o, -half - 0.22, 0.16, 0.5] : side === 2 ? [half + 0.22, o, 0.5, 0.16] : [-half - 0.22, o, 0.5, 0.16];
+      const [x, z, w, d] = side === 0 ? [o, half + 0.16, 0.11, 0.36] : side === 1 ? [o, -half - 0.16, 0.11, 0.36] : side === 2 ? [half + 0.16, o, 0.36, 0.11] : [-half - 0.16, o, 0.36, 0.11];
       add(stone, w, ph, d, x, GROUND, z);
     }
   }
@@ -582,7 +747,7 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   // Podium: a plaza plinth, steps, a double-height glass lobby behind a colonnade, and a wide canopy.
   add(stoneDark, TOWER_W + 9, 0.3, TOWER_W + 9, 0, 0, 0, false);
   add(stone, TOWER_W + 6.2, 0.22, TOWER_W + 6.2, 0, 0.3, 0, false);
-  const lobbyGlass = new THREE.MeshStandardMaterial({ color: '#8fb0c8', roughness: 0.15, metalness: 0.3, envMapIntensity: 1.2, envMap: env });
+  const lobbyGlass = new THREE.MeshStandardMaterial({ color: '#6d6a68', roughness: 0.12, metalness: 0.45, envMapIntensity: 1.3, envMap: env });
   add(lobbyGlass, TOWER_W - 0.2, GROUND - 0.9, TOWER_W - 0.2, 0, 0.52, 0);
   add(new THREE.MeshStandardMaterial({ color: '#fff1d2', emissive: '#ffd79a', emissiveIntensity: 0.35, roughness: 0.9 }), TOWER_W - 0.6, 0.5, TOWER_W - 0.6, 0, 0.52, 0, false);
   const colGeo = new THREE.CylinderGeometry(0.24, 0.24, GROUND - 0.5, 10);
@@ -662,7 +827,8 @@ export function getWorld() {
   const land = makeLand(city.cells);
   const traffic = makeTraffic(Math.round(160 * density + 40));
   const boats = makeBoats();
-  group.add(sky, water, land, city.group, traffic, boats.group);
+  const shore = makeFarShore();
+  group.add(sky, water, shore, land, city.group, traffic, boats.group);
   worldCache = {
     group, sky, water, land, city: city.city, detail: city.detail, stats: city.stats, boats: boats.boats, env: null,
     update(dt, time) {
@@ -674,10 +840,16 @@ export function getWorld() {
         b.mesh.position.set(x, -0.75 + Math.sin(time * 1.3 + b.r) * 0.04, z); b.mesh.rotation.y = -b.a + Math.PI / 2; b.mesh.rotation.z = Math.sin(time * 0.9 + b.r) * 0.02;
       }
     },
-    setDetail(on) { for (const d of city.detail) d.visible = on; },
-    /** Reflections for glass come from the sky itself, baked once into a small environment map. */
+    setDetail(on) {
+      for (const d of city.detail) d.visible = on;
+      // Detail goes with the tier that also loses its shadow map, so that is when the baked shadows come in.
+      const baked = land.userData.baked;
+      if (!on && !baked.uBaked.value) baked.uBaked.value = bakeGroundShadows(city.blocks);
+      baked.uBakedOn.value = on ? 0 : 1;
+    },
+    /** Reflections for glass come from the sky itself, baked once into a small environment map. Null where half-float targets can't be drawn into. */
     environment() {
-      if (this.env || !stage.renderer) return this.env;
+      if (this.env || !stage.renderer || !stage.floatTargets) return this.env;
       const pm = new THREE.PMREMGenerator(stage.renderer);
       const skyScene = new THREE.Scene(); skyScene.add(sky);
       this.env = pm.fromScene(skyScene, 0.04).texture;
@@ -685,7 +857,18 @@ export function getWorld() {
       pm.dispose();
       return this.env;
     },
+    /** The baked sky lived only on the GPU. Bake it again and hand the new one to everything holding the old. */
+    rebake() {
+      const old = this.env; this.env = null;
+      const env = this.environment();
+      if (!old || !env) return;
+      for (const scene of new Set([stage.view?.scene, this.group.parent].filter(Boolean))) {
+        if (scene.environment === old) scene.environment = env;
+        scene.traverse((o) => { for (const m of [].concat(o.material || [])) if (m.envMap === old) m.envMap = env; });
+      }
+    },
   };
+  stage.onRestored.add(() => worldCache.rebake());
   return worldCache;
 }
 
@@ -693,26 +876,29 @@ export class LobbyView {
   constructor({ floorCount = 40, onHover, onPick } = {}) {
     Object.assign(this, { floorCount, onHover, onPick });
     this.scene = new THREE.Scene();
-    // Linear fog with a long start, so the near city keeps its full colour and only the far shore goes to haze.
-    this.scene.fog = new THREE.Fog(FOG, 300, 1000);
-    this.grade = { vignette: 0.3, grain: 0.02 };
-    this.ao = { radius: 1.6, intensity: 2.3, color: '#2a1a0e', falloff: 1 };
-    this.bloom = 0.18;
-    // A narrower lens from further back: the miniature, tilt-shift feel of a model city.
-    this.camera = new THREE.PerspectiveCamera(30, 1, 0.5, 1400);
-    // Sky-blue over warm ground, a warm sun, and a cool fill from the opposite side so shadowed faces still have colour.
-    this.hemi = new THREE.HemisphereLight('#a9cdf2', '#c8a47c', 0.62); this.scene.add(this.hemi);
-    const sun = new THREE.DirectionalLight('#ffd9b0', 4.2); sun.position.copy(SUN).multiplyScalar(160); sun.target.position.set(0, 0, 0);
-    Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 80, bottom: -60, near: 20, far: 340 });
-    sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.06; sun.shadow.camera.updateProjectionMatrix();
+    // Fog with a long start, so the near city keeps its full colour and everything far melts into the warm haze (see the fog chunks above).
+    this.scene.fog = new THREE.Fog('#ffffff', 170, 1040);
+    this.grade = { vignette: 0.26, grain: 0.018, warm: 1 };
+    this.ao = { radius: 1.6, intensity: 2.5, color: '#21131c', falloff: 1 };
+    this.bloom = 0.24;
+    // Nothing that casts a shadow moves here, so the big shadow map is drawn once and kept.
+    this.staticShadows = true;
+    this.tilt = { center: 0.62, width: 0.62, amount: 0.0042 };
+    // A long lens from far back: the miniature, tilt-shift feel of a model city, with the whole tower and the glowing horizon in frame.
+    this.camera = new THREE.PerspectiveCamera(32, 1, 0.5, 1800);
+    // A soft lilac sky over warm bounce from the ground, a low gold sun, and a cool violet fill from the opposite side, so the shadows have colour against the light.
+    this.hemi = new THREE.HemisphereLight('#b9bfd8', '#cf9f70', 0.6); this.scene.add(this.hemi);
+    const sun = new THREE.DirectionalLight('#ffc087', 4.5); sun.position.copy(SUN).multiplyScalar(240); sun.target.position.set(0, 0, 0);
+    Object.assign(sun.shadow.camera, { left: -140, right: 140, top: 120, bottom: -110, near: 30, far: 520 });
+    sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.08; sun.shadow.camera.updateProjectionMatrix();
     this.sun = sun; this.scene.add(sun, sun.target);
-    const fill = new THREE.DirectionalLight('#9fbde6', 0.7); fill.position.set(-SUN.x * 120, 60, -SUN.z * 120); this.scene.add(fill);
+    const fill = new THREE.DirectionalLight('#8f94d8', 0.5); fill.position.set(-SUN.x * 120, 50, -SUN.z * 120); this.scene.add(fill);
     this.world = getWorld(); this.scene.add(this.world.group); this.stats = this.world.stats;
     const env = this.world.environment();
-    this.scene.environment = env; this.scene.environmentIntensity = 0.4;
+    this.scene.environment = env; this.scene.environmentIntensity = 0.42;
     this.tower = makeTower(floorCount, { env }); this.scene.add(this.tower.group);
     this.startTheta = 0.72; this.theta = 0.72; this.targetTheta = 0.72; this.rideY = 26; this.targetRide = 26;
-    this.dist = 108; this.targetDist = 108; this.time = 0; this.spin = 0.016; this.hover = -1; this.flying = null; this.shiftX = 0;
+    this.dist = 130; this.targetDist = 130; this.time = 0; this.spin = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.016; this.hover = -1; this.flying = null; this.shiftX = 0;
     this.ray = new THREE.Raycaster(); this.ptr = new THREE.Vector2();
     this.floorData = new Map();
     this.setTier(stage.q || { shadow: 2048, density: 1 });
@@ -723,7 +909,7 @@ export class LobbyView {
     this.sun.castShadow = sh > 0;
     if (sh > 0) { this.sun.shadow.mapSize.set(sh, sh); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null; }
     this.world.setDetail(q.density >= 0.6);
-    this.scene.fog.far = sh > 0 ? 1000 : 860;
+    if (this.active) { const r = stage.renderer; r.shadowMap.enabled = sh > 0; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = sh > 0; }
   }
   bind() {
     const el = document.getElementById('scene');
@@ -773,7 +959,7 @@ export class LobbyView {
     this.active = true; this.flying = null; this.camera.clearViewOffset();
     this.scene.add(this.world.group); this.world.group.position.set(0, 0, 0); this.world.group.scale.setScalar(1);
     const r = stage.renderer; r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true;  // the stage redraws it every other frame
-    r.toneMappingExposure = 0.86;
+    r.toneMappingExposure = 0.92;
   }
   leave() { this.active = false; this.setHover(-1); }
   resize(w, h) {
@@ -782,8 +968,9 @@ export class LobbyView {
     const phone = w <= 760;
     // Frame the tower in the clear area: left of the desktop panel, above the phone's sheet.
     this.shiftX = phone ? 0 : -w * 0.055;
-    this.shiftY = phone ? h * 0.07 : 0;
-    this.targetDist = phone ? 148 : 108;
+    this.shiftY = phone ? h * 0.035 : 0;
+    this.targetDist = phone ? 168 : 130;
+    if (!this.framed) { this.dist = this.targetDist; this.framed = true; }  // the first picture is the right one, with no zoom into place
     this.camera.setViewOffset(w, h, this.shiftX, this.shiftY, w, h);
     this.camera.updateProjectionMatrix();
   }
