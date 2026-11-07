@@ -15,7 +15,7 @@ if (cfg.appsBaseDomain && cfg.publicOrigin) {
 }
 if (!cfg.adminPassword) log('warn', 'ADMIN_PASSWORD is not set: the admin view is locked');
 app.engine.start();
-app.server.listen(cfg.port, cfg.host, () => log('info', 'the office is open', { port: cfg.port, aiMode: cfg.aiMode }));
+app.server.listen(cfg.port, cfg.host, () => { log('info', 'the office is open', { port: cfg.port, aiMode: cfg.aiMode }); app.warmStatics(); });
 
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => { await app.close().catch(() => {}); db.close(); process.exit(0); });
 process.on('uncaughtException', (e) => { log('error', 'uncaught', { err: scrub(e?.message, cfg) }); });

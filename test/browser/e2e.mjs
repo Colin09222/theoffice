@@ -172,8 +172,9 @@ async function run(label, opts, t, adminCode) {
     if (!seen.bubbles) throw new Error('no speech bubbles');
     const spend = await p.ev('window.__office.state.spend.today');
     if (!(spend > 0)) throw new Error('no spend recorded');
-    const cap = t.cfg.floorDailyUsd.toFixed(2);
-    if (!new RegExp(`\\$0\\.\\d+ of \\$${cap.replace('.', '\\.')} today`).test(await p.ev('document.querySelector(".spend").textContent'))) throw new Error('spend label');
+    // The boss sees a share of the allowance, never a dollar figure.
+    const label = await p.ev('document.querySelector(".spend").textContent');
+    if (!/^\d+% of today's allowance$/.test(label)) throw new Error(`spend label: ${label}`);
   });
   await step(tag('purchase requests go to the building manager, with no way to pay from here'), async () => {
     await p.click('[data-tab=requests]');

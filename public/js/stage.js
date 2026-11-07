@@ -16,24 +16,26 @@ const AO_STEPS = ['full', 'half', 'off'];
 /**
  * A tilt-shift lens: sharp across most of the picture, softening toward the bottom. It is what makes a city read as a model
  * on a table, and the softer foreground also sits quietly behind the interface. A single 12-tap disc, so it costs little.
+ * This pass always runs, because it is also the guard: one NaN or infinite pixel from any shader, on any driver, would otherwise
+ * be smeared by the bloom's blur across the whole frame, and the picture would go black. Here that pixel just goes dark.
  */
 const TiltShader = {
   uniforms: { tDiffuse: { value: null }, uCenter: { value: 0.55 }, uWidth: { value: 0.3 }, uAmount: { value: 0.005 }, uAspect: { value: 1.6 } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
   fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uCenter; uniform float uWidth; uniform float uAmount; uniform float uAspect;
     const vec2 DISC[12] = vec2[12](vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621), vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893), vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
+    vec3 safe(vec3 c){ return all(lessThan(abs(c), vec3(1e4))) ? c : vec3(0.0); }
     void main(){
       // Only below the band: the crown of the tower up against the sky stays crisp.
       float off = uCenter - vUv.y;
-      float k = smoothstep(uWidth * 0.5, uWidth * 0.5 + 0.34, off);
-      vec4 c = texture2D(tDiffuse, vUv);
+      float k = uAmount > 0.0 ? smoothstep(uWidth * 0.5, uWidth * 0.5 + 0.34, off) : 0.0;
+      vec3 c = safe(texture2D(tDiffuse, vUv).rgb);
       if (k > 0.004) {
-        vec3 sum = c.rgb;
         vec2 r = vec2(uAmount * k / uAspect, uAmount * k);
-        for (int i = 0; i < 12; i++) sum += texture2D(tDiffuse, vUv + DISC[i] * r).rgb;
-        c.rgb = sum / 13.0;
+        for (int i = 0; i < 12; i++) c += safe(texture2D(tDiffuse, vUv + DISC[i] * r).rgb);
+        c /= 13.0;
       }
-      gl_FragColor = c;
+      gl_FragColor = vec4(c, 1.0);
     }`,
 };
 
@@ -100,8 +102,8 @@ class Post {
     this.grade.uniforms.uVignette.value = view.grade?.vignette ?? 0.3;
     this.grade.uniforms.uGrain.value = view.grade?.grain ?? 0.024;
     this.grade.uniforms.uWarm.value = view.grade?.warm ?? 0;
-    this.tilt.enabled = !!view.tilt && q.tilt !== false;
-    if (view.tilt) { this.tilt.uniforms.uCenter.value = view.tilt.center; this.tilt.uniforms.uWidth.value = view.tilt.width; this.tilt.uniforms.uAmount.value = view.tilt.amount; }
+    this.tilt.uniforms.uAmount.value = view.tilt?.amount ?? 0;
+    if (view.tilt) { this.tilt.uniforms.uCenter.value = view.tilt.center; this.tilt.uniforms.uWidth.value = view.tilt.width; }
     this.fxaaWanted = view.fxaa !== false;
   }
   setAO(level) {
@@ -120,11 +122,13 @@ class Post {
 }
 
 class Stage {
-  constructor() { this.view = null; this.clock = new THREE.Clock(); this.ok = false; this.frameMs = 16; this.slow = 0; this.fps = 0; this.time = 0; this.tier = 'high'; this.frame = 0; }
+  constructor() { this.view = null; this.last = 0; this.ok = false; this.frameMs = 16; this.slowFor = 0; this.fps = 0; this.time = 0; this.tier = 'high'; this.frame = 0; this.graceUntil = 0; this.lost = false; this.losses = 0; this.onLost = new Set(); this.onRestored = new Set(); this.notice = null; }
   init(canvas) {
+    this.canvas = canvas;
+    // No WebGL2 at all (a very old device, or one that has blocked it): everything but the 3D still works, over a painted city.
     try {
       this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    } catch { document.body.classList.add('no-webgl'); return false; }
+    } catch { this.giveUp(); return false; }
     this.ok = true;
     this.renderer.info.autoReset = false;  // counted per frame below, so the post passes don't hide the scene's draw calls
     this.detect();
@@ -136,7 +140,11 @@ class Stage {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;  // r186 made this the soft one
     this.resize();
     window.addEventListener('resize', () => this.resize());
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { this.clock.getDelta(); this.loop(); } });
+    window.addEventListener('orientationchange', () => setTimeout(() => this.resize(true), 250));
+    canvas.addEventListener('webglcontextlost', (e) => this.contextLost(e));
+    canvas.addEventListener('webglcontextrestored', () => this.contextRestored());
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { this.last = performance.now(); this.graceUntil = this.last + 1500; this.loop(); } });
+    this.last = performance.now();
     this.loop();
     return true;
   }
@@ -149,21 +157,31 @@ class Stage {
     const mobile = /Mobi|Android/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) < 900);
     const software = /SwiftShader|llvmpipe|Software|Basic Render/i.test(gpu);
     const saveData = navigator.connection?.saveData === true;
+    // The post chain and the sky's reflections draw into half-float targets. Without a renderable one they would come out black, so such a device goes straight to the direct path.
+    this.floatTargets = !!(gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
     this.gpu = gpu;
     this.lowEnd = mobile || cores <= 4;
     this.mobile = mobile;
-    this.tier = software || saveData || (mobile && (cores <= 2 || mem <= 3)) ? 'low' : mobile || cores <= 4 || mem <= 4 ? 'mid' : 'high';
+    this.tier = software || saveData || !this.floatTargets || (mobile && (cores <= 2 || mem <= 3)) ? 'low' : mobile || cores <= 4 || mem <= 4 ? 'mid' : 'high';
     const forced = new URLSearchParams(location.search).get('q');  // ?q=high|mid|low, for testing a look on any machine
-    if (TIERS[forced]) this.tier = forced;
+    if (TIERS[forced] && (this.floatTargets || forced === 'low')) { this.tier = forced; this.forced = true; }
     this.q = { ...TIERS[this.tier] };
+    this.q.shadow = Math.min(this.q.shadow, this.renderer.capabilities.maxTextureSize);
     // A phone starts with half-resolution occlusion; the frame-time watchdog below turns it off if the phone can't keep up.
     if (mobile && this.q.ao === 'full') this.q.ao = 'half';
     this.dprCap = this.q.dpr;
   }
   get dpr() { return Math.min(window.devicePixelRatio || 1, this.dprCap); }
-  resize() {
+  /**
+   * A phone's toolbars and keyboard change the window's height while nothing about the scene should move, so on a phone only a real
+   * change of shape redraws at a new size. The canvas keeps its size under the keyboard; the sheet moves, not the world.
+   */
+  resize(force) {
     if (!this.ok) return;
     const w = window.innerWidth, h = window.innerHeight;
+    const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
+    if (!force && this.mobile && w === this.w && this.h && (typing || Math.abs(h - this.h) < 130)) return;
+    this.w = w; this.h = h;
     this.renderer.setPixelRatio(this.dpr);
     this.renderer.setSize(w, h, false);
     this.post?.setSize(w, h, this.dpr);
@@ -173,8 +191,9 @@ class Stage {
     this.view?.leave?.();
     this.view = view;
     this.renderer.shadowMap.enabled = false;
+    this.graceUntil = performance.now() + 2000;  // the first frames of a new view compile shaders, which says nothing about the device
     this.applyPost();
-    if (view) { view.enter?.(); view.resize?.(window.innerWidth, window.innerHeight); }
+    if (view) { view.enter?.(); view.resize?.(this.w ?? window.innerWidth, this.h ?? window.innerHeight); }
   }
   /** Post-processing is built the first time a tier wants it, once the addons bundle has arrived; until then frames draw directly. */
   applyPost() {
@@ -182,45 +201,62 @@ class Stage {
     if (want && !this.post && !this.postLoading) {
       this.postLoading = loadAddons().then((A) => {
         this.postLoading = null;
-        if (!this.q.post) return;
+        if (!this.q.post || this.lost) return;
         this.post = new Post(this.renderer, A);
-        this.post.setSize(window.innerWidth, window.innerHeight, this.dpr);
+        this.post.setSize(this.w, this.h, this.dpr);
         if (this.view) this.post.setView(this.view, this.q);
       }).catch((e) => { this.postLoading = null; this.q.post = false; console.warn('post-processing unavailable', e); });
     }
     if (!want && this.post) { this.post.dispose(); this.post = null; }
-    if (want && this.post && this.view) { this.post.setView(this.view, this.q); this.post.setSize(window.innerWidth, window.innerHeight, this.dpr); }
+    if (want && this.post && this.view) { this.post.setView(this.view, this.q); this.post.setSize(this.w, this.h, this.dpr); }
+  }
+  /** Resolves once a finished picture is on the canvas, post chain included if this tier has one, or after `ms` whatever happens. */
+  whenPainted(ms = 2500) {
+    const painted = (async () => {
+      await this.postLoading;
+      const from = this.frame;
+      while (this.ok && !this.lost && !document.hidden && this.frame < from + 2) await new Promise((r) => requestAnimationFrame(r));
+    })();
+    return Promise.race([painted, new Promise((r) => setTimeout(r, ms))]);
+  }
+  /** One frame of the current view, on demand as well as from the loop. */
+  renderOnce(dt = 0) {
+    this.renderer.info.reset();
+    if (!this.view?.scene) return;
+    this.view.update?.(dt);
+    // The sun's shadow map is big, so it redraws every other frame, or every third on a phone. Nobody can tell. A view where nothing that casts moves draws it once.
+    const r = this.renderer;
+    if (r.shadowMap.enabled && !r.shadowMap.autoUpdate && !this.view.staticShadows) r.shadowMap.needsUpdate = r.shadowMap.needsUpdate || this.frame % (this.lowEnd ? 3 : 2) === 0;
+    if (this.post && this.post.level && this.view.post !== false) this.post.render(dt, this.time);
+    else r.render(this.view.scene, this.view.camera);
   }
   loop() {
-    if (this.running || !this.ok) return;
+    if (this.running || !this.ok || this.lost) return;
     this.running = true;
-    const tick = () => {
-      if (document.hidden) { this.running = false; return; }
+    const tick = (now) => {
+      if (document.hidden || this.lost || !this.ok) { this.running = false; return; }
       requestAnimationFrame(tick);
-      const dt = Math.min(this.clock.getDelta(), 0.1);
+      const real = Math.max(0, now - this.last); this.last = now;
+      const dt = Math.min(real / 1000, 0.1);
       this.time += dt; this.frame++;
       this.frameMs += (dt * 1000 - this.frameMs) * 0.05;
       this.fps = 1000 / this.frameMs;
-      this.adapt();
-      this.renderer.info.reset();
-      if (this.view?.scene) {
-        this.view.update?.(dt);
-        // The sun's shadow map is big, so it redraws every other frame, or every third on a phone. Nobody can tell. A view where nothing that casts moves draws it once.
-        const r = this.renderer;
-        if (r.shadowMap.enabled && !r.shadowMap.autoUpdate && !this.view.staticShadows) r.shadowMap.needsUpdate = r.shadowMap.needsUpdate || this.frame % (this.lowEnd ? 3 : 2) === 0;
-        if (this.post && this.post.level && this.view.post !== false) this.post.render(dt, this.time);
-        else r.render(this.view.scene, this.view.camera);
-      }
+      this.adapt(dt, now);
+      this.renderOnce(dt);
     };
     requestAnimationFrame(tick);
   }
-  // A device that keeps missing 30fps first loses occlusion, then pixels, then shadows and post. Each step is permanent for the visit, so nothing flickers between looks.
-  adapt() {
-    if (this.frameMs > 34) this.slow++; else this.slow = Math.max(0, this.slow - 1);
-    if (this.slow < 150) return;
-    this.slow = 0;
+  // A device that keeps missing 30fps first loses occlusion, then pixels, then shadows and post. Each step is permanent for the visit, so
+  // nothing flickers between looks. It goes by time, not frames: at 8fps, counting frames would mean twenty seconds of slideshow per step.
+  adapt(dt, now) {
+    if (now < this.graceUntil) return;
+    if (this.frameMs > 34) this.slowFor += dt; else this.slowFor = Math.max(0, this.slowFor - dt);
+    // Far too slow to bother stepping: the lightest look straight away.
+    if (this.frameMs > 70 && this.slowFor > 2 && this.tier !== 'low' && !this.forced) { this.slowFor = 0; this.graceUntil = now + 2000; this.setAO('off'); this.setTier('low'); return; }
+    if (this.slowFor < 3) return;
+    this.slowFor = 0; this.graceUntil = now + 1500;
     if (this.q.ao !== 'off') { this.setAO(AO_STEPS[AO_STEPS.indexOf(this.q.ao) + 1]); return; }
-    if (this.dprCap > 1) { this.dprCap = Math.max(1, this.dprCap - 0.35); this.resize(); return; }
+    if (this.dprCap > 1) { this.dprCap = Math.max(1, this.dprCap - 0.35); this.resize(true); return; }
     if (this.tier === 'high') this.setTier('mid'); else if (this.tier === 'mid') this.setTier('low');
   }
   setAO(level) {
@@ -231,8 +267,44 @@ class Stage {
     this.tier = tier; this.q = { ...TIERS[tier] }; this.dprCap = Math.min(this.dprCap, this.q.dpr);
     if (this.mobile && this.q.ao === 'full') this.q.ao = 'half';
     this.applyPost();
-    this.resize();
+    this.resize(true);
     this.view?.setTier?.(this.q);
+  }
+  // ---- losing the GPU ----
+  // Phones take the context away when memory runs short or the tab sits in the background. The page never goes black: the painted city
+  // shows through at once, the interface carries on, and the 3D comes back on a lighter tier when the browser allows it.
+  contextLost(e) {
+    e.preventDefault();  // without this the browser never gives the context back
+    this.lost = true;
+    if (!document.hidden) this.losses++;
+    document.body.classList.add('gl-lost');
+    for (const f of this.onLost) f();
+    clearTimeout(this.lostTimer);
+    this.lostTimer = setTimeout(() => { if (this.lost) this.notice?.('The 3D view dropped out on this device. Everything else still works.'); }, 3000);
+  }
+  contextRestored() {
+    clearTimeout(this.lostTimer);
+    this.lost = false;
+    if (this.losses >= 3) { this.giveUp(); return; }
+    // Three uploads geometry and textures again by itself. Whatever only ever lived in a render target has to be drawn again.
+    if (this.post) { try { this.post.dispose(); } catch { /* its context is gone */ } this.post = null; }
+    this.postLoading = null;
+    if (this.losses > 0 && !this.forced) this.setTier(this.tier === 'high' ? 'mid' : 'low');
+    this.renderer.setPixelRatio(this.dpr);
+    this.renderer.setSize(this.w, this.h, false);
+    for (const f of this.onRestored) f();
+    this.applyPost();
+    const r = this.renderer;
+    if (r.shadowMap.enabled) r.shadowMap.needsUpdate = true;
+    document.body.classList.remove('gl-lost');
+    this.last = performance.now(); this.graceUntil = this.last + 2500;
+    this.loop();
+  }
+  /** For the rest of the visit there is no 3D, only the painted city under the interface. */
+  giveUp() {
+    this.ok = false;
+    document.body.classList.remove('gl-lost');
+    document.body.classList.add('no-webgl');
   }
 }
 export const stage = new Stage();

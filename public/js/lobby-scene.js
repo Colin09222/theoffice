@@ -154,11 +154,13 @@ function makeWater() {
         vec3 toCam = cameraPosition - vW; float dist = length(toCam);
         float far = smoothstep(120.0, 420.0, dist);
         float fw = max(fwidth(p.x), fwidth(p.y));
-        vec2 sl = slope(p, fw) * 0.2;
+        // Calm at a distance, where a tiny tilt shows the whole gradient of the sky, and busier in patches of wind.
+        float wind = vnoise(p * 0.035 + vec2(uTime * 0.012, 0.0));
+        vec2 sl = slope(p, fw) * 0.2 * mix(1.0, 0.3, far) * (0.45 + wind);
         vec3 n = normalize(vec3(-sl.x, 10.0, -sl.y));
         vec3 v = toCam / dist;
         vec3 r = reflect(-v, n); r.y = abs(r.y);
-        float fres = 0.05 + 0.95 * pow(1.0 - max(dot(v, n), 0.0), 3.6);
+        float fres = 0.05 + 0.95 * pow(clamp(1.0 - dot(v, n), 0.0, 1.0), 3.6);
         float off = length(p) - coastR(atan(p.y, p.x));
         // Clear turquoise over the shallows, deep teal beyond, with a long slow swell moving through it.
         float swell = vnoise(p * 0.06 + vec2(uTime * 0.02, -uTime * 0.013)) * 0.65 + vnoise(p * 0.17 - vec2(uTime * 0.03, 0.0)) * 0.35;
@@ -609,8 +611,7 @@ function towerGlass() {
         float az = atan(R.z, R.x);
         float line = 0.11 + 0.05 * vnoise(vec2(az * 11.0, 2.0)) * vnoise(vec2(az * 31.0, 5.0));
         vec3 refl = mix(s2l(vec3(0.40, 0.34, 0.33)), skyColor(normalize(R)) * 0.62, smoothstep(line - 0.006, line + 0.03, R.y));
-        float nv = max(dot(-V, _nn), 0.0);
-        float F = (0.34 + 0.6 * pow(1.0 - nv, 2.5)) * (1.0 - on * 0.5);
+        float F = (0.34 + 0.6 * pow(clamp(1.0 + dot(V, _nn), 0.0, 1.0), 2.5)) * (1.0 - on * 0.5);
         vec3 glassLight = mix(room, refl, F);
         // The strip under the glass: bronze on an empty floor, the company's own colour on a taken one, so taken floors read as ribbons round the shaft.
         vec3 spandrel = mix(s2l(vec3(0.34, 0.30, 0.27)), brand, on);
@@ -802,9 +803,9 @@ export function getWorld() {
       }
     },
     setDetail(on) { for (const d of city.detail) d.visible = on; },
-    /** Reflections for glass come from the sky itself, baked once into a small environment map. */
+    /** Reflections for glass come from the sky itself, baked once into a small environment map. Null where half-float targets can't be drawn into. */
     environment() {
-      if (this.env || !stage.renderer) return this.env;
+      if (this.env || !stage.renderer || !stage.floatTargets) return this.env;
       const pm = new THREE.PMREMGenerator(stage.renderer);
       const skyScene = new THREE.Scene(); skyScene.add(sky);
       this.env = pm.fromScene(skyScene, 0.04).texture;
@@ -812,7 +813,18 @@ export function getWorld() {
       pm.dispose();
       return this.env;
     },
+    /** The baked sky lived only on the GPU. Bake it again and hand the new one to everything holding the old. */
+    rebake() {
+      const old = this.env; this.env = null;
+      const env = this.environment();
+      if (!old || !env) return;
+      for (const scene of new Set([stage.view?.scene, this.group.parent].filter(Boolean))) {
+        if (scene.environment === old) scene.environment = env;
+        scene.traverse((o) => { for (const m of [].concat(o.material || [])) if (m.envMap === old) m.envMap = env; });
+      }
+    },
   };
+  stage.onRestored.add(() => worldCache.rebake());
   return worldCache;
 }
 
@@ -853,7 +865,7 @@ export class LobbyView {
     this.sun.castShadow = sh > 0;
     if (sh > 0) { this.sun.shadow.mapSize.set(sh, sh); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null; }
     this.world.setDetail(q.density >= 0.6);
-    this.shadowsDirty = true;
+    if (this.active) { const r = stage.renderer; r.shadowMap.enabled = sh > 0; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = sh > 0; }
   }
   bind() {
     const el = document.getElementById('scene');
@@ -912,7 +924,7 @@ export class LobbyView {
     const phone = w <= 760;
     // Frame the tower in the clear area: left of the desktop panel, above the phone's sheet.
     this.shiftX = phone ? 0 : -w * 0.055;
-    this.shiftY = phone ? h * 0.07 : 0;
+    this.shiftY = phone ? h * 0.035 : 0;
     this.targetDist = phone ? 168 : 130;
     this.camera.setViewOffset(w, h, this.shiftX, this.shiftY, w, h);
     this.camera.updateProjectionMatrix();

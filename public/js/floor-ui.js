@@ -90,8 +90,11 @@ class FloorPage {
   }
   renderSpend() {
     const { today, cap } = this.state.spend;
-    this.spendEl.textContent = cap == null ? `${money(today)} today` : `${money(today)} of ${money(cap)} today`;
-    this.spendBar.style.width = cap == null ? '0%' : `${Math.min(100, (today / cap) * 100)}%`;
+    // Only the boss sees how much of today's allowance has gone, and only as a share. Dollar figures stay with the building manager.
+    const share = cap ? Math.min(100, Math.round((today / cap) * 100)) : null;
+    this.spendEl.parentElement.hidden = !(this.owner && share != null);
+    this.spendEl.textContent = share == null ? '' : `${share}% of today's allowance`;
+    this.spendBar.style.width = `${share ?? 0}%`;
   }
   renderControls() {
     clear(this.controlsEl);
@@ -277,7 +280,7 @@ class FloorPage {
       const shown = key === 'done' ? col.slice(-12).reverse() : col;
       board.append(h('section.col', {}, h('h3', {}, title, h('span', {}, String(col.length))),
         ...shown.map((x) => h(`article.card.${x.status}`, {}, h('b', {}, x.title),
-          h('small', {}, agents.find((a) => a.id === x.agentId)?.name || '', x.status === 'blocked' ? ' · waiting on the boss' : '', this.owner && x.costUsd ? ` · ${money(x.costUsd)}` : ''),
+          h('small', {}, agents.find((a) => a.id === x.agentId)?.name || '', x.status === 'blocked' ? ' · waiting on the boss' : ''),
           this.owner && x.result ? h('p', {}, x.result.slice(0, 180)) : null))));
     }
     const failed = t.filter((x) => x.status === 'failed' || x.status === 'cancelled');
@@ -484,8 +487,7 @@ class FloorPage {
       h('div.order-meta', {},
         h('span', {}, h('b', {}, o.scheduleText)),
         h('span', {}, o.status === 'active' ? `Next run ${timeUntil(o.nextRunAt)}` : 'Not scheduled while paused'),
-        h('span', {}, `About ${money(o.estUsd)} a run`),
-        last ? h('span', {}, `Last run ${money(last.costUsd)}${last.status === 'failed' ? ', did not finish' : ''}`) : h('span', {}, 'Not run yet')),
+        last ? h('span', {}, `Last run ${timeAgo(last.startedAt)}${last.status === 'failed' ? ', did not finish' : ''}`) : h('span', {}, 'Not run yet')),
       h('div.order-acts', {},
         o.status === 'active'
           ? h('button.btn.ghost', { type: 'button', 'data-pause': o.id, onclick: () => act('', { status: 'paused' }, 'Paused') }, 'Pause')
@@ -499,7 +501,7 @@ class FloorPage {
     const doc = h('div.doc');
     if (r.report) doc.innerHTML = renderMarkdown(r.report); // renderMarkdown escapes its input, and the CSP forbids inline script regardless
     const label = r.status === 'running' ? 'running' : r.status === 'done' ? 'done' : 'did not finish';
-    return h(`li.order-run.${r.status}`, { 'data-run': r.id }, h('small', {}, `${new Date(r.startedAt).toLocaleString()} · ${label} · ${money(r.costUsd)} (estimated ${money(r.estUsd)})`), r.report ? doc : h('span', {}, 'Working on it...'));
+    return h(`li.order-run.${r.status}`, { 'data-run': r.id }, h('small', {}, `${new Date(r.startedAt).toLocaleString()} · ${label}`), r.report ? doc : h('span', {}, 'Working on it...'));
   }
   // The schedule controls, shared by the new-order form and the edit dialog. read() gives the body the API wants.
   orderFields(draft = {}) {
@@ -761,10 +763,21 @@ export async function showFloor(root, slug) {
     return;
   }
   const fade = $('#fade');
+  fade.dataset.title = `Floor ${page.state.floor.number} · ${page.state.floor.name}`;
   fade.classList.add('in');
   F = page;
   page.mount();
-  requestAnimationFrame(() => fade.classList.remove('in'));
+  // The flash of light lifts once the room has its real furniture and people, so nobody watches them swap in. A slow line gets the stand-ins after a moment.
+  page.ready = new Promise((done) => {
+    const from = performance.now();
+    const check = () => {
+      const v = page.view;
+      const there = !v || page.dead || (v.loading?.settled && [...v.actors.values()].every((a) => a.char.isModel));
+      if (there || performance.now() - from > 2200) { fade.classList.remove('in'); done(); } else requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+    setTimeout(() => { fade.classList.remove('in'); done(); }, 2400);  // rAF sleeps in a hidden tab
+  });
   window.__office = page; // read by the browser e2e tests
 }
 export function hideFloor() {

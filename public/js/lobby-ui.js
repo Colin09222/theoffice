@@ -2,7 +2,11 @@
 import { stage } from './stage.js';
 import { h, api, session, isPhone, toast, clear, put } from './dom.js';
 import { LobbyView } from './lobby-scene.js';
-import { openClaim, openLogin } from './claim.js';
+
+// The claim wizard and its character builder are only fetched when someone opens them.
+const claimModule = () => import('./claim.js');
+const openClaim = () => claimModule().then((m) => m.openClaim());
+const openLogin = () => claimModule().then((m) => m.openLogin());
 
 let view = null, poll = null, keepFloors = [], tip = null, tickerPoll = null;
 
