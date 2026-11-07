@@ -170,6 +170,19 @@ function typing(self, dt, w) {
   const lift = (x) => { const c = Math.sin(x); return c > 0 ? c * c : 0; };
   return { l: lift(s.ph) * s.on, r: lift(s.ph + Math.PI) * s.on, on: s.on, look: 1 - s.on, glance: s.glance * (1 - s.on), nod: Math.sin(s.ph) * s.on };
 }
+/**
+ * Moves every pose weight toward what is wanted on a critically damped spring: it sets off from standstill, never
+ * overshoots and is most of the way there in 0.2s, so a change of pose never jumps on its first frame.
+ */
+function ease(self, want, dt) {
+  const b = self.blend, v = (self.blendV ||= Object.fromEntries(ANIMS.map((n) => [n, 0])));
+  const w = 14, h = Math.min(dt, 0.1), e = Math.exp(-w * h);
+  for (const n of ANIMS) {
+    const x0 = b[n] - want[n], c = v[n] + w * x0;
+    b[n] = want[n] + (x0 + c * h) * e; v[n] = (v[n] - w * c * h) * e;
+    if (b[n] < 0 || b[n] > 1) { b[n] = Math.min(1, Math.max(0, b[n])); v[n] = 0; }
+  }
+}
 /** Arm angles (x: forward swing, z: outward) and head turns for the current blend. Shared by both kinds of character. */
 function poseFor(b, t, dt, self) {
   const swing = Math.sin(t * 9.5);
@@ -275,8 +288,7 @@ export class Character {
     this.t += dt;
     const t = this.t, b = this.blend;
     const want = wantFor(this.anim, speed, this.paper.visible, this.inChair);
-    const k = Math.min(1, dt * 9);
-    for (const n of ANIMS) b[n] += (want[n] - b[n]) * k;
+    ease(this, want, dt);
     this.mug.visible = b.sip > 0.2 || b.pour > 0.2;
     this.phone.visible = b.phone > 0.2;
     const p = poseFor(b, t, dt, this);
@@ -351,7 +363,7 @@ const smooth01 = (x) => { const c = Math.min(1, Math.max(0, x)); return c * c * 
 const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1);
 const _q = new THREE.Quaternion(), PHONE_TILT = new THREE.Quaternion().setFromAxisAngle(AX, -0.6);
 /** Shoulder angles for the kit's people in every state: the same states as poseFor, measured on this rig. */
-function modelArms(b, t, self, still, m) {
+function modelArms(b, t, dt, self, still, m) {
   const O = MODEL_OUT, ty = self.ty;
   let aL = 0, sL = O, aR = 0, sR = O;
   const to = (w, al, sl, ar, sr) => { if (w < 0.001) return; aL += w * (al - aL); sL += w * (sl - sL); aR += w * (ar - aR); sR += w * (sr - sR); };
@@ -372,9 +384,11 @@ function modelArms(b, t, self, still, m) {
   to(b.sip, -0.2, O, -1.5 - 0.75 * (self.sipK ?? 0), 0.22);
   to(b.phone, -0.3, O, -1.55, 0.1);
   to(b.pour, -0.25, O, -1.0, 0.45);
-  // Typing: up over the desk's edge first, then in over the keys, so a hand never passes through the desk. Standing up runs it backwards.
-  const up = smooth01(b.type / 0.55), inw = smooth01((b.type - 0.45) / 0.55);
-  const lean = 0.05 * b.type;  // the body leans in a touch; the arms make up for it so the hands stay on the keys
+  // Typing: up over the desk's edge first, then in over the keys, so a hand never passes through the desk. Standing up runs
+  // it backwards. It is the longest reach any pose makes, so it gets its own steady 0.4s, eased at both ends.
+  const k = (self.typeK = Math.min(1, Math.max(0, (self.typeK ?? 0) + Math.sign((self.anim === 'type' ? 1 : 0) - (self.typeK ?? 0)) * dt * 2.5)));
+  const up = smooth01(k / 0.7), inw = smooth01((k - 0.3) / 0.7);
+  const lean = 0.05 * up;  // the body leans in a touch; the arms make up for it so the hands stay on the keys
   const A = (self.bigDesk ? TYPE_A_BIG : TYPE_A) - lean;
   aL += up * (A - ty.l * TAP - aL); aR += up * (A - ty.r * TAP - aR);
   sL += inw * (TYPE_S + ty.l * 0.03 - sL); sR += inw * (TYPE_S + ty.r * 0.03 - sR);
@@ -489,8 +503,7 @@ export class ModelCharacter {
     this.t += dt;
     const t = this.t, b = this.blend;
     const want = wantFor(this.anim, speed, this.paper.visible, this.inChair);
-    const k = Math.min(1, dt * 9);
-    for (const n of ANIMS) b[n] += (want[n] - b[n]) * k;
+    ease(this, want, dt);
     this.mug.visible = b.sip > 0.2 || b.pour > 0.2;
     this.phone.visible = b.phone > 0.2;
     const A = this.actions;
@@ -512,7 +525,7 @@ export class ModelCharacter {
       this.root.position.y += (Math.abs(Math.sin(t * 7)) * 0.045 * b.cheer + Math.sin(t * 2) * 0.002);
       this.root.rotateX(lean); this.root.rotateZ(Math.sin(t * 0.9) * 0.02 * b.listen);
     }
-    const arms = modelArms(b, t, this, still, m);
+    const arms = modelArms(b, t, dt, this, still, m);
     // Walking, the clip swings the arms, unless the hands are full: then they stay out in front, holding it.
     const hold = Math.min(1, b.carry + b.sip + b.phone + b.pour) * walk;
     const own = 1 - walk + hold;

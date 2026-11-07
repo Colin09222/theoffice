@@ -427,7 +427,8 @@ export class Actor {
     const old = this.char;
     next.group.position.copy(old.group.position); next.group.rotation.copy(old.group.rotation);
     next.setAnim(old.anim); next.paper.visible = old.paper.visible; next.setManner(this.manner);
-    next.inChair = old.inChair; Object.assign(next.blend, old.blend);  // mid-pose stays mid-pose: no stand-and-sit-again on the swap
+    // Mid-pose stays mid-pose: no standing up and sitting down again, or arms rising afresh, when the model takes over.
+    next.inChair = old.inChair; Object.assign(next.blend, old.blend); next.typeK = old.typeK ?? old.blend.type;
     this.view.scene.remove(old.group); old.dispose();
     this.char = next; this.group = next.group; this.view.scene.add(next.group);
     if (this.seated) this.sitDown();
