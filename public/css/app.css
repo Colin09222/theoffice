@@ -388,5 +388,19 @@ body[data-page="floor"] #ui::before { content: ''; position: absolute; inset: 0;
   .staff-chip { min-height: 44px; }
   .ticker-item, .ticker-ghost { min-height: 36px; }
 }
+/* A phone on its side, or any very short window: the headline shrinks and the ticker gives way, so nothing piles up. */
+@media (max-height: 520px) and (min-width: 761px) {
+  .hero { top: 58px; transform: none; width: min(40vw, 420px); }
+  .hero h1 { font-size: 30px; }
+  .hero p, .hints, .ticker { display: none; }
+  .directory { top: 58px; max-height: calc(100% - 70px); width: 300px; right: max(12px, env(safe-area-inset-right)); }
+  .open-pill { left: calc(max(16px, env(safe-area-inset-left)) + 150px); bottom: max(10px, env(safe-area-inset-bottom)); }
+  .topbar { padding-top: 10px; }
+  .floor-panel { width: 340px; top: 8px; bottom: 8px; right: max(8px, env(safe-area-inset-right)); }
+  .floor-meta { right: 360px; top: 8px; }
+  .floor-tag { display: none; }
+  .floor-name { font-size: 20px; }
+  .controls { bottom: max(8px, env(safe-area-inset-bottom)); left: max(10px, env(safe-area-inset-left)); max-width: calc(100vw - 380px); flex-wrap: nowrap; overflow-x: auto; }
+}
 @media (prefers-reduced-motion: reduce) { .boot-bar::after { animation: none; width: 100%; } }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: .01s !important; transition-duration: .01s !important; } }

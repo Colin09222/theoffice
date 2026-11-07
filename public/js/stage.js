@@ -185,6 +185,8 @@ class Stage {
     this.renderer.setPixelRatio(this.dpr);
     this.renderer.setSize(w, h, false);
     this.post?.setSize(w, h, this.dpr);
+    // Measured on an M4 at 1440x900 and a pixel ratio of 2: full-resolution occlusion alone halves the frame rate, from about 70fps to 34, and half resolution looks the same at that density.
+    if (this.q.ao === 'full' && w * h * this.dpr * this.dpr > 2.6e6) this.setAO('half');
     this.view?.resize?.(w, h);
   }
   setView(view) {
@@ -249,8 +251,9 @@ class Stage {
   // A device that keeps missing 30fps first loses occlusion, then pixels, then shadows and post. Each step is permanent for the visit, so
   // nothing flickers between looks. It goes by time, not frames: at 8fps, counting frames would mean twenty seconds of slideshow per step.
   adapt(dt, now) {
-    if (now < this.graceUntil) return;
-    if (this.frameMs > 34) this.slowFor += dt; else this.slowFor = Math.max(0, this.slowFor - dt);
+    if (this.forced || now < this.graceUntil) return;  // ?q= means someone wants to see exactly that tier
+    // A desktop should hold well above 30. A phone is fine at 30: 37ms, not 33, because an iPhone in Low Power Mode caps at a steady 30fps, and that should cost it nothing.
+    if (this.frameMs > (this.mobile ? 37 : 24)) this.slowFor += dt; else this.slowFor = Math.max(0, this.slowFor - dt);
     // Far too slow to bother stepping: the lightest look straight away.
     if (this.frameMs > 70 && this.slowFor > 2 && this.tier !== 'low' && !this.forced) { this.slowFor = 0; this.graceUntil = now + 2000; this.setAO('off'); this.setTier('low'); return; }
     if (this.slowFor < 3) return;

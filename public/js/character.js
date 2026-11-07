@@ -443,7 +443,8 @@ export function createPreview(canvas, look, accent) {
     if (dead) return;
     raf = requestAnimationFrame(loop);
     const dt = Math.min((now - last) / 1000, 0.1); last = now;
-    ch.group.rotation.y = Math.sin(now / 1400) * 0.55;
+    // People walk with their backs to the room's camera, so here they turn round to face you.
+    ch.group.rotation.y = Math.PI + Math.sin(now / 1400) * 0.55;
     ch.update(dt);
     renderer.render(scene, cam);
   };

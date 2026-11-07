@@ -92,7 +92,7 @@ class FloorPage {
     const { today, cap } = this.state.spend;
     // Only the boss sees how much of today's allowance has gone, and only as a share. Dollar figures stay with the building manager.
     const share = cap ? Math.min(100, Math.round((today / cap) * 100)) : null;
-    this.spendEl.parentElement.hidden = !(this.owner && share != null);
+    this.spendEl.parentElement.hidden = !(this.owner && share);
     this.spendEl.textContent = share == null ? '' : `${share}% of today's allowance`;
     this.spendBar.style.width = `${share ?? 0}%`;
   }

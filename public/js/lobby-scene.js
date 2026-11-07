@@ -19,7 +19,7 @@ const HAZE_GLSL = `
   vec3 hazeTint(vec3 d) {
     vec2 h = normalize(d.xz + 1e-4), sh = normalize(${SUN_GLSL}.xz);
     float a = dot(h, sh) * 0.5 + 0.5;
-    return mix(vec3(0.98, 0.70, 0.60), vec3(1.26, 0.84, 0.50), a * a);
+    return mix(vec3(1.0, 0.75, 0.57), vec3(1.26, 0.86, 0.50), a * a);
   }`;
 // Fog is linear in distance as usual, but tinted per pixel by direction and a little thinner high up. The scene's fog colour multiplies
 // it, so each view can still shift it. Built-in materials and our own shaders share this through the chunks.
@@ -854,7 +854,7 @@ export class LobbyView {
     this.scene.environment = env; this.scene.environmentIntensity = 0.42;
     this.tower = makeTower(floorCount, { env }); this.scene.add(this.tower.group);
     this.startTheta = 0.72; this.theta = 0.72; this.targetTheta = 0.72; this.rideY = 26; this.targetRide = 26;
-    this.dist = 130; this.targetDist = 130; this.time = 0; this.spin = 0.016; this.hover = -1; this.flying = null; this.shiftX = 0;
+    this.dist = 130; this.targetDist = 130; this.time = 0; this.spin = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.016; this.hover = -1; this.flying = null; this.shiftX = 0;
     this.ray = new THREE.Raycaster(); this.ptr = new THREE.Vector2();
     this.floorData = new Map();
     this.setTier(stage.q || { shadow: 2048, density: 1 });
@@ -926,6 +926,7 @@ export class LobbyView {
     this.shiftX = phone ? 0 : -w * 0.055;
     this.shiftY = phone ? h * 0.035 : 0;
     this.targetDist = phone ? 168 : 130;
+    if (!this.framed) { this.dist = this.targetDist; this.framed = true; }  // the first picture is the right one, with no zoom into place
     this.camera.setViewOffset(w, h, this.shiftX, this.shiftY, w, h);
     this.camera.updateProjectionMatrix();
   }
