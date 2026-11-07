@@ -1141,7 +1141,7 @@ export class OfficeView {
     for (const a of this.actors.values()) if (a.seated) a.sitDown();
     this.modelsOn = true;
     if (!this.detailOn) models.traverse((o) => { if (o.isMesh) o.castShadow = false; });
-    await this.furnishOffices();
+    this.furnishOffices();
   }
   /** The floor is one big texture: each room's own material (a CC0 photo-texture once it has loaded, a drawn tile until then), a darker rim along
    *  the walls, soft contact shadows under every piece of furniture, pools of window and lamp light, and each office's owner lettered by the door.
@@ -1422,8 +1422,12 @@ export class OfficeView {
     const names = new Set();
     for (const o of this.offices.values()) for (const t of o.theme.things) if (t.m) { names.add(t.m); if (ON_TABLE.has(t.m)) names.add('sideTableDrawers'); }
     const missing = [...names].filter((n) => !this.kit[n]);
-    try { const got = await Promise.all(missing.map((n) => furniture(n))); missing.forEach((n, i) => { this.kit[n] = got[i]; }); } catch (e) { console.warn('office furniture unavailable', e); }
-    if (this.dead || token !== this.furnishToken) return;
+    // Each piece on its own: one that fails to load is just left out.
+    const got = await Promise.allSettled(missing.map((n) => furniture(n)));
+    missing.forEach((n, i) => { if (got[i].status === 'fulfilled') this.kit[n] = got[i].value; });
+    // Whichever pass finishes builds from the offices as they are now, so a slow earlier pass can't put back an old room.
+    if (this.dead || (token < this.furnishedToken)) return;
+    this.furnishedToken = token;
     const T = this.kit; const g = new THREE.Group(); g.userData.fromKit = true;
     const tints = (c) => ({ carpet: c, carpetBlue: c });
     for (const o of this.offices.values()) {
@@ -1729,6 +1733,8 @@ export class OfficeView {
     if (sec !== this.clockSec) { this.clockSec = sec; this.drawClock(this.clockTex.image.getContext('2d')); this.clockTex.needsUpdate = true; }
     this.life.update(dt);
     for (const a of this.actors.values()) { a.update(dt); this.placeTag(a); }
+    // On a slow device the first furnishing pass can stall behind the frame loop; another pass picks it up.
+    if (this.modelsOn && !this.officeModels && this.time - (this.lastFurnish ?? 0) > 5) { this.lastFurnish = this.time; this.furnishOffices(); }
     if (this.ring?.visible) { const a = this.actors.get(this.selected); if (!a) this.ring.visible = false; else { this.ring.position.set(a.group.position.x, 0.04, a.group.position.z); this.ring.scale.setScalar(1 + Math.sin(this.time * 4) * 0.06); } }
     this.placePins();
     tidyLabels(this.actors, this.w);
