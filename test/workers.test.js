@@ -439,6 +439,15 @@ describe('sources', () => {
   });
 });
 
+describe('a page people open on phones', () => {
+  test('a huge picture is flagged by the checklist, on the server and in the box alike', async () => {
+    const { checkSite } = await import('../server/launch-check.js');
+    assert.match(checkSite({ files: [{ path: 'index.html', data: '<title>Hello there</title>' }, { path: 'images/hero.jpg', data: '', size: 1200 * 1024 }] }).warnings.join(' '), /images\/hero\.jpg is 1200 KB/);
+    assert.match(checkSite({ files: [{ path: 'index.html', data: '<title>Hello there</title>' }, { path: 'images/hero.jpg', data: Buffer.alloc(900 * 1024) }] }).warnings.join(' '), /images\/hero\.jpg is 900 KB/);
+    assert.doesNotMatch(checkSite({ files: [{ path: 'index.html', data: '<title>Hello there</title>' }, { path: 'images/hero.jpg', data: '', size: 200 * 1024 }] }).warnings.join(' '), /hero/);
+  });
+});
+
 describe('the final word in the chat', () => {
   const facts = { project: { title: 'Rosa\'s' }, url: 'https://rosas.example/', check: { claims: [], warnings: ['index.html needs an og:image'], passed: ['page title'] }, stats: { uniques: 0, views: 0 }, signups: 0, hasPayment: false };
   test('the link comes first and it stays short, with the detail one click away', () => {

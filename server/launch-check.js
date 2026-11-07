@@ -53,6 +53,10 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
   const pages = files.filter((f) => HTML.test(f.path));
   const isDoc = kind === 'doc' || kind === 'research';
   const seen = new Set();
+  for (const f of files) {
+    const bytes = f.size ?? f.data?.length ?? 0;
+    if (/\.(jpe?g|png|webp|gif|avif)$/i.test(f.path) && bytes > 500 * 1024) warnings.push(`${f.path} is ${Math.round(bytes / 1024)} KB, which is slow on a phone. Resize it to the size it's shown, under about 300 KB.`);
+  }
   const flag = (what, where, sample) => { const k = `${what}|${sample}`; if (seen.has(k)) return; seen.add(k); claims.push(`${where}: ${what}: "${String(sample).replace(/\s+/g, ' ').trim().slice(0, 90)}"`); };
 
   let scanned = 0;

@@ -62,7 +62,7 @@ let line = Promise.resolve();
 export function runCheck(db, floor, slug, directory = '', kind = 'site') {
   const pr = get(db, 'SELECT payment_link FROM projects WHERE floor_id=? AND slug=?', floor.id, slug);
   // Only the names of binary files matter here.
-  const files = filesToPublish(db, floor.id, slug, directory).map((f) => (TEXTY.test(f.path) ? f : { path: f.path, data: '' }));
+  const files = filesToPublish(db, floor.id, slug, directory).map((f) => (TEXTY.test(f.path) ? f : { path: f.path, data: '', size: f.data?.length ?? 0 }));
   const input = { files, bossText: bossText(db, floor.id), paymentLink: !!pr?.payment_link, kind };
   const job = line.then(() => new Promise((resolve) => setImmediate(resolve))).then(() => checkSite(input));
   line = job.catch(() => {});
