@@ -1,14 +1,19 @@
-// The floor page. One SSE stream feeds the 3D characters and the panels: chat, work feed, task board, projects, requests.
+// The floor page. One SSE stream feeds the 3D characters and the desk: the intercom, the group chat, the logbook, the corkboard, the filing cabinet, the in-tray.
 import { stage } from './stage.js';
 import { h, api, BASE, $, clear, put, modal, toast, money, timeAgo, session, ApiError } from './dom.js';
 import { OfficeView } from './office-scene.js';
 import { renderMarkdown } from './markdown.js';
 import { openCustomisePanel } from './customise.js';
 import { openLogin } from './claim.js';
-import { renderCard, buildScrubber, buildPins, wirePins } from './floor-chrome.js';
+import { renderCard, buildScrubber, buildPins, wirePins, tabIcon } from './floor-chrome.js';
+import { icon } from './icons.js';
+import { portrait } from './portrait.js';
+import { muteButton, sfx } from './sfx.js';
+import * as THREE from '../vendor/three/three.module.min.js';
 
 const isPhone = () => window.innerWidth <= 760;
-const TALK_KIND = { assign: 'Assignment', plan: 'The plan', handoff: 'Handoff', findings: 'Findings', review: 'Review', question: 'Question', answer: 'Answer', small: 'Small talk', private: '' };
+const TALK_KIND = { assign: 'Assignment', plan: 'The plan', handoff: 'Handoff', findings: 'Findings', review: 'Review', question: 'Question', answer: 'Answer', ask: 'Asking', meeting: 'Meeting' };
+const NAME_INK = ['#b3261e', '#0b6e69', '#1d5fb8', '#8a5200', '#8a2f6b', '#2c7a31', '#a33f00', '#22577a'];
 const COLUMNS = [['todo', 'To do'], ['doing', 'Doing'], ['review', 'With manager'], ['done', 'Done']];
 const STATE_LABEL = { idle: 'At desk', thinking: 'Thinking', typing: 'Writing', browsing: 'On the web', reading: 'Reading', talking: 'Talking', queued: 'Waiting for a line' };
 // Three ways in for a new floor. Tapping one is simply the boss's first message, so typing anything else works just as well.
@@ -38,6 +43,8 @@ class FloorPage {
     // The boss arrives at the chat with the manager. A visitor arrives at the room, with the panel a tap away.
     this.panelOpen = this.owner;
     this.localTalk = [];
+    this.tapAgent = (e) => { const id = typeof e.detail === 'string' ? e.detail : e.detail?.id; const a = this.state.agents.find((x) => x.id === id); if (a) this.openAgent(a); };
+    window.addEventListener('office:agent-tap', this.tapAgent);
     this.applyBrand();
     this.buildShell();
     if (stage.ok) {
@@ -52,7 +59,49 @@ class FloorPage {
     window.addEventListener('resize', this.onResize);
     this.catchUpBanner();
     this.connect();
+    this.wireSceneTaps();
+    if (s.floor.setup && this.owner) setTimeout(() => { if (!this.dead && !isPhone()) this.bodyEl.querySelector('.chat-input textarea')?.focus(); }, 500);
   }
+  /** Tap someone in the room to open their file. A drag still spins the room: only a tap that barely moved counts, and only on a person. */
+  wireSceneTaps() {
+    const scene = $('#scene'); if (!scene || !stage.ok) return;
+    let down = null;
+    const onDown = (e) => { down = e.target === scene ? [e.clientX, e.clientY] : null; };
+    const onUp = (e) => {
+      if (!down || e.target !== scene) return;
+      const moved = Math.hypot(e.clientX - down[0], e.clientY - down[1]); down = null;
+      if (moved > 9) return;
+      const a = this.agentAt(e.clientX, e.clientY);
+      if (a) { sfx('tab'); this.openAgent(a); }
+    };
+    scene.addEventListener('pointerdown', onDown); window.addEventListener('pointerup', onUp);
+    this.unwireTaps = () => { scene.removeEventListener('pointerdown', onDown); window.removeEventListener('pointerup', onUp); };
+  }
+  agentAt(x, y) {
+    const v = this.view; if (!v?.camera || !v.actors) return null;
+    const rect = $('#scene').getBoundingClientRect();
+    const toScreen = (p) => { const q = p.clone().project(v.camera); return [rect.left + (q.x + 1) / 2 * rect.width, rect.top + (1 - q.y) / 2 * rect.height]; };
+    let best = null, bestD = Infinity;
+    for (const [id, actor] of v.actors) {
+      const g = actor.char?.group; if (!g || id === 'boss') continue;
+      const a = this.state.agents.find((p) => p.id === id); if (!a) continue;
+      const foot = g.getWorldPosition(new THREE.Vector3());
+      const [fx, fy] = toScreen(foot), [, hy] = toScreen(foot.clone().setY(foot.y + 1.8));
+      const tall = Math.max(30, fy - hy), half = Math.max(22, tall * 0.42);  // never smaller than a fingertip
+      if (x < fx - half || x > fx + half || y < hy - 6 || y > fy + 6) continue;
+      const d = Math.hypot(x - fx, y - (fy + hy) / 2);
+      if (d < bestD) { bestD = d; best = a; }
+    }
+    return best;
+  }
+  /** Find anyone by id or name: the staff, or the boss. */
+  person(id, name) {
+    if (id === 'boss' || (name && name === this.state.floor.boss?.name)) return { ...this.state.floor.boss, boss: true };
+    return this.state.agents.find((a) => a.id === id) || (name ? this.state.agents.find((a) => a.name === name) : null) || null;
+  }
+  face(person) { return portrait(person?.look, { accent: this.state.floor.colors?.accent, name: person?.name }); }
+  nameInk(name) { let h2 = 7; for (const c of String(name || '')) h2 = (h2 * 31 + c.charCodeAt(0)) >>> 0; return NAME_INK[h2 % NAME_INK.length]; }
+  get manager() { return this.state.agents.find((a) => a.role === 'manager'); }
   applyBrand() {
     const { primary, accent } = this.preview?.colors || this.state.floor.colors;
     document.documentElement.style.setProperty('--brand', primary);
@@ -70,17 +119,17 @@ class FloorPage {
     this.bannerEl = h('div.floor-banner', { hidden: true });
     this.grip = h('button.panel-grip', { type: 'button', 'aria-label': 'Open or close this panel', onclick: () => this.setPanel(!this.panelOpen) }, h('i'));
     this.bindGrip();
-    const panel = h('aside.floor-panel.glass', {}, this.grip, h('button.panel-close', { type: 'button', 'aria-label': 'Close this panel', onclick: () => this.setPanel(false) }, '×'), this.staffEl, this.tabsEl, this.bannerEl, this.bodyEl);
+    const panel = h('aside.floor-panel', {}, this.grip, h('button.panel-close', { type: 'button', 'aria-label': 'Close this panel', onclick: () => this.setPanel(false) }, icon('x')), this.staffEl, this.tabsEl, this.bannerEl, this.bodyEl);
     this.panel = panel;
     this.cardEl = h('div.card-more');
     this.logoEl = h('span.card-logo', { 'aria-hidden': 'true' });
-    this.pillEl = h('button.talk-pill.glass', { type: 'button', 'data-talk-pill': '', onclick: () => this.setTab(this.canSeeChat ? 'chat' : 'talk') });
+    this.pillEl = h('button.talk-pill', { type: 'button', 'data-talk-pill': '', onclick: () => this.setTab(this.canSeeChat ? 'chat' : 'talk') });
     this.pinsEl = buildPins(this);
     this.scrubberEl = buildScrubber(this);
     document.body.append(this.pinsEl);  // under the people's labels, so a pin never hides what someone is saying
     this.root.append(
-      h('header.floor-top.glass', {},
-        h('button.btn.chrome.back', { type: 'button', 'aria-label': 'Back to the lobby', onclick: () => window.officeGo('/') }, '←', h('span', {}, 'Lobby')),
+      h('header.floor-top', {},
+        h('div.plaque-top', {}, h('button.btn.chrome.back', { type: 'button', 'aria-label': 'Back to the lobby', onclick: () => window.officeGo('/') }, icon('elevator'), h('span', {}, 'Lobby')), muteButton()),
         h('div.floor-title', {}, h('span.floor-num', {}, `Floor ${s.floor.number}`), this.logoEl, this.titleEl, this.tagEl),
         h('div.floor-meta', {}, this.statusEl),
         this.cardEl),
@@ -107,7 +156,7 @@ class FloorPage {
     }
     document.body.dataset.sheet = this.panelOpen ? 'half' : 'peek';
     this.pillEl.hidden = phone || this.panelOpen;
-    if (!this.pillEl.hidden) this.pillEl.textContent = this.canSeeChat ? (this.owner ? `Talk to ${this.state.agents.find((a) => a.role === 'manager')?.name || 'your manager'}` : 'Read the chat') : 'See what they\'re saying';
+    if (!this.pillEl.hidden) this.pillEl.replaceChildren(icon(this.owner ? 'phone-call' : 'chats-teardrop'), this.canSeeChat ? (this.owner ? `Call ${this.manager?.name || 'your manager'}` : 'Read the chat') : 'See what they\'re saying');
     const w = window.innerWidth, h = window.innerHeight;
     if (!this.view) return;
     if (phone) {
@@ -136,12 +185,11 @@ class FloorPage {
   }
   renderHeader() {
     const s = this.state; const f = s.floor;
-    this.titleEl.textContent = f.name; this.tagEl.textContent = f.filler ? `${f.tagline} · A fictional demo company` : f.tagline;
+    this.titleEl.textContent = f.name || 'Moving in'; this.tagEl.textContent = f.filler ? `${f.tagline} · A fictional demo company` : f.tagline || (f.setup ? 'Your manager is sorting out the sign' : '');
     let label = 'Open', cls = 'ok';
     const working = s.agents.some((a) => a.state !== 'idle');
     if (working) { label = 'Working'; cls = 'busy'; }
-    if (f.outOfBudget) { label = 'Out of budget'; cls = 'warn'; }
-    if (f.budgetStopped) { label = 'Budget used, back tomorrow'; cls = 'warn'; }
+    if (f.outOfBudget || f.budgetStopped) { label = 'Back soon'; cls = 'warn'; }
     if (f.paused) { label = 'Paused'; cls = 'warn'; }
     if (f.globalPause) { label = 'Building paused'; cls = 'warn'; }
     if (f.status === 'suspended') { label = 'Closed'; cls = 'bad'; }
@@ -152,12 +200,12 @@ class FloorPage {
     const f = this.state.floor;
     if (this.owner) {
       const pause = f.paused
-        ? h('button.btn.chrome.resume', { type: 'button', onclick: () => this.control('resume') }, 'Resume')
-        : h('button.btn.chrome', { type: 'button', onclick: () => this.control('pause') }, 'Pause');
+        ? h('button.btn.chrome.resume', { type: 'button', onclick: () => this.control('resume') }, icon('play'), 'Resume')
+        : h('button.btn.chrome', { type: 'button', onclick: () => this.control('pause') }, icon('pause'), 'Pause');
       this.controlsEl.append(pause,
-        h('button.btn.chrome', { type: 'button', onclick: () => this.confirmStop() }, 'Stop all'),
-        h('button.btn.chrome', { type: 'button', onclick: () => this.openRedirect() }, 'Redirect'),
-        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, 'Customise'));
+        h('button.btn.chrome', { type: 'button', onclick: () => this.confirmStop() }, icon('stop'), 'Stop all'),
+        h('button.btn.chrome', { type: 'button', onclick: () => this.openRedirect() }, icon('arrow-bend-up-right'), 'Redirect'),
+        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'));
     } else {
       put(this.controlsEl,
         h('span.visitor-note', {}, f.filler ? 'A demo company: scripted and fictional. Watch all you like.' : 'You\'re visiting. Watch all you like.'),
@@ -192,18 +240,40 @@ class FloorPage {
       const busy = a.state !== 'idle';
       const waiting = !busy && a.role === 'manager' && this.state.helpWaiting > 0;
       this.staffEl.append(h(`button.staff-chip${busy ? '.busy' : ''}`, { type: 'button', role: 'listitem', 'data-agent': a.id, title: a.activity || STATE_LABEL[a.state] || '', onclick: () => this.openAgent(a) },
-        h('span.staff-dot', { css: { '--c': a.look.outfitColor } }, (a.name[0] || '?').toUpperCase()),
-        h('span.staff-text', {}, h('b', {}, a.name), h('small', {}, busy ? (STATE_LABEL[a.state] || a.state) : waiting ? 'Waiting on buddehbot' : a.title))));
+        this.face(a),
+        h('span.staff-text', {}, h('b', {}, a.name), h('small', {}, a.title), h('span.staff-state', {}, busy ? (STATE_LABEL[a.state] || a.state) : waiting ? 'Waiting on buddehbot' : 'At desk'))));
     }
   }
-  openAgent(a) {
-    if (!this.owner) {
-      modal(a.name, (body) => {
-        body.append(h('div.stack', {}, h('p.lede', {}, `${a.title}${a.vibe ? `, ${a.vibe.toLowerCase()} type` : ''}. ${a.activity || STATE_LABEL[a.state] || 'At desk'}.`)));
-      });
-      return;
-    }
-    this.openCustomise('staff', a.id);
+  /** A person's file: their badge, who they are, what they're on, and for the boss what they remember. Empty fields just aren't there. */
+  openAgent(person) {
+    if (this.profileOpen) return;
+    const a = this.state.agents.find((x) => x.id === person.id) || person;
+    const f = this.state.floor;
+    const busy = a.state !== 'idle';
+    const task = a.taskId ? this.state.tasks.find((t) => t.id === a.taskId) : null;
+    const now = task?.title || a.activity || '';
+    const room = (id) => (id === 'manager' ? 'The manager\'s office' : String(id).replace(/^office-/, '').replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase()) + (String(id).startsWith('office-') ? '\'s office' : ''));
+    const text = (v) => (typeof v === 'string' ? v.trim() : '');
+    const row = (ic, title, kid) => h('section.file-row', {}, h('h3', {}, icon(ic), title), kid);
+    const memory = Array.isArray(a.memory) ? a.memory.filter((m) => typeof m === 'string' && m.trim()) : [];
+    this.profileOpen = true;
+    modal(`${a.name}'s file`, (body, close) => {
+      const bio = text(a.bio) || text(a.persona);
+      body.append(h('div.profile', { 'data-profile': a.id },
+        h('div.id-badge', {},
+          h('div.id-band', { css: { '--brand': f.colors?.primary || 'var(--teal)' } }, `${f.name || 'The Office'} · Floor ${f.number}`),
+          this.face(a), h('div.id-name', {}, a.name), h('div.id-title', {}, a.title),
+          h(`div.id-state${busy ? '.busy' : ''}`, {}, busy ? (STATE_LABEL[a.state] || a.state) : 'At desk'),
+          h('div.id-bars', { 'aria-hidden': 'true' })),
+        h('div.file-rows', {},
+          bio ? row('identification-badge', 'About', h('p', {}, bio)) : h('section.file-row.dim', {}, h('p', {}, `${a.name} hasn't filled in the staff form yet.`)),
+          text(a.quirk) ? row('lightning', 'Quirk', h('p', {}, a.quirk)) : null,
+          text(a.mood) ? row('sparkle', 'Mood', h('p', {}, a.mood)) : null,
+          text(a.office) ? row('door-open', 'Office', h('p', {}, room(a.office))) : null,
+          row('wrench', 'Working on', h('p', {}, now || 'Nothing right now. Free to take something on.')),
+          this.owner && memory.length ? row('brain', 'What they remember', h('ul.memory-notes', {}, memory.slice(-12).reverse().map((m) => h('li', {}, m)))) : null,
+          this.owner ? h('button.btn.primary', { type: 'button', 'data-profile-edit': a.id, onclick: () => { close(); this.openCustomise('staff', a.id); } }, icon('pencil-simple'), 'Change their look and job') : null)));
+    }, { wide: true, onClose: () => { this.profileOpen = false; } });
   }
 
   tabsFor() {
@@ -222,8 +292,8 @@ class FloorPage {
   renderTabs() {
     clear(this.tabsEl);
     for (const [id, label] of this.tabsFor()) {
-      this.tabsEl.append(h(`button.tab${this.tab === id ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(this.tab === id), 'data-tab': id, onclick: () => this.setTab(id) }, label));
       const m = id === 'requests' && label.match(/\d+/);
+      this.tabsEl.append(h(`button.tab${this.tab === id ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(this.tab === id), 'data-tab': id, onclick: () => this.setTab(id) }, tabIcon(id), m ? 'Requests' : label, m ? h('i.tab-count', {}, ` ${m[0]}`) : null));
       if (id === 'requests' && this.pinEls?.requests) { this.pinEls.requests.badge.hidden = !m; this.pinEls.requests.badge.textContent = m ? m[0] : ''; }
     }
   }
@@ -235,6 +305,7 @@ class FloorPage {
   renderBody() {
     this.renderBanner();
     clear(this.bodyEl);
+    this.bodyEl.dataset.surface = this.tab;
     if (this.tab === 'chat') this.renderChat();
     if (this.tab === 'about') this.bodyEl.append(this.cardEl);
     if (this.tab === 'talk') this.renderTalk();
@@ -250,8 +321,8 @@ class FloorPage {
     if (f.status === 'suspended') text = 'The building manager has closed this floor for now.';
     else if (f.globalPause) text = 'The building manager has paused all work.';
     else if (f.paused) text = f.pauseReason || 'This floor is paused.';
-    else if (f.budgetStopped) text = 'Today\'s budget is used up. Work picks up again tomorrow.';
-    else if (f.outOfBudget) text = 'The building is out of budget, so work has stopped. Please ask the owner about it.';
+    else if (f.budgetStopped) text = 'Everyone has gone home for today. Work picks up again tomorrow.';
+    else if (f.outOfBudget) text = 'Work has stopped for now. The building manager knows.';
     else if (this.catchUp) text = this.catchUp;
     this.bannerEl.textContent = text; this.bannerEl.hidden = !text;
   }
@@ -264,11 +335,17 @@ class FloorPage {
     this.questionsEl = h('div.questions');
     this.renderQuestions();
     this.streamEl = h('div.msg.manager.streaming', { hidden: !this.streamBuf }, h('div.msg-body', {}, this.streamBuf));
-    this.bodyEl.append(this.chatList);
+    const mgr = this.manager;
+    this.intercomEl = h('div.intercom', {},
+      this.face(mgr),
+      h('div.intercom-who', {}, h('b', {}, mgr?.name || 'Office Manager'), h('small', {}, h('i'), this.streamBuf ? 'Talking…' : this.owner ? 'On the desk phone' : 'The boss\'s line')),
+      h('div.intercom-grille', { 'aria-hidden': 'true' }));
+    this.intercomEl.classList.toggle('on-air', !!this.streamBuf);
+    this.bodyEl.append(this.intercomEl, this.chatList);
     this.lanesEl = this.isNewFloor() ? this.lanePicker() : null;
     this.chatList.append(...(this.lanesEl ? [this.lanesEl] : []), this.questionsEl, this.streamEl);
     if (this.owner) {
-      const input = h('textarea', { rows: 1, maxlength: 4000, placeholder: 'Tell your office manager...', 'aria-label': 'Message your office manager', name: 'chat' });
+      const input = h('textarea', { rows: 1, maxlength: 4000, placeholder: s.floor.setup ? 'What should this company be?' : `Tell ${this.manager?.name || 'your manager'} what you want...`, 'aria-label': 'Message your office manager', name: 'chat' });
       const send = async () => {
         const text = input.value.trim();
         if (!text) return;
@@ -277,7 +354,7 @@ class FloorPage {
       };
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
       input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(120, input.scrollHeight)}px`; });
-      this.bodyEl.append(h('form.chat-input', { onsubmit: (e) => { e.preventDefault(); send(); } }, input, h('button.btn.primary.send', { type: 'submit', 'aria-label': 'Send' }, '↑')));
+      this.bodyEl.append(h('form.chat-input', { onsubmit: (e) => { e.preventDefault(); send(); } }, input, h('button.btn.primary.send', { type: 'submit', 'aria-label': 'Send' }, icon('paper-plane-tilt'))));
     } else {
       this.bodyEl.append(h('p.readonly-note', {}, 'Only the boss of this floor can talk to the manager.'));
     }
@@ -290,9 +367,11 @@ class FloorPage {
       for (const b of buttons) b.disabled = true;
       try { await api(`/floors/${this.slug}/chat`, { method: 'POST', body: { text } }); this.view?.bossTalks(); this.dropLanes(); } catch (e) { for (const b of buttons) b.disabled = false; toast(e.message, 'bad'); }
     } }, h('b', {}, title), h('span', {}, what)));
-    return h('div.lanes', { role: 'group', 'aria-label': 'What should we start on?' }, ...buttons,
+    return h('div.lanes', { role: 'group', 'aria-label': 'What should we start on?' },
+      this.state.floor.setup ? h('div.setup-note', { 'data-setup': '' }, h('b', {}, 'No forms, no paperwork.'), h('span', {}, `Just tell ${this.manager?.name || 'your manager'} what you want to make. They'll name the company and get everyone moving.`)) : null,
+      ...buttons,
       h('p.fineprint', {}, 'Your staff research, write, build and publish. Nobody here can send email, post, run ads or spend money, so they will tell you what only you can do.'),
-      h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => this.openCustomise('vibe') }, 'First, make this office yours'));
+      this.state.floor.setup ? null : h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => this.openCustomise('vibe') }, 'First, make this office yours'));
   }
   dropLanes() { this.lanesEl?.remove(); this.lanesEl = null; }
   messageEl(m) {
@@ -328,28 +407,36 @@ class FloorPage {
     const list = h('ol.talk-list', { role: 'log', 'aria-live': 'polite' });
     const lines = this.talkLines();
     if (!lines.length) list.append(h('li.empty', {}, 'Nobody has said anything yet. When work passes between people, their words show up here.'));
-    for (const l of lines) list.append(this.talkEl(l));
+    lines.forEach((l, i) => list.append(this.talkEl(l, lines[i - 1])));
+    this.talkLast = lines.at(-1);
     this.talkList = list;
     this.bodyEl.append(list);
     if (this.panelOpen) this.markTalkRead();
     list.scrollTop = list.scrollHeight;
   }
-  talkEl(l) {
-    const kind = TALK_KIND[l.kind] ?? '';
-    return h(`li.talk-line.${l.kind || 'line'}`, { 'data-kind': l.kind || '', 'data-talk': l.id || '' },
-      h('div.talk-who', {}, h('b', {}, l.fromName || 'Someone'), l.toName ? h('span.talk-to', {}, ` to ${l.toName}`) : null, kind ? h('span.talk-kind', {}, kind) : null),
-      h('p', {}, l.text),
-      h('time', {}, timeAgo(l.ts)));
+  /** One line of the group chat. The same speaker keeps talking without their face again, as in any office chat. */
+  talkEl(l, prev) {
+    const kind = TALK_KIND[l.beat || l.kind] ?? '';
+    const who = this.person(l.from, l.fromName);
+    const name = l.fromName || who?.name || 'Someone';
+    const cont = prev && (prev.from || prev.fromName) === (l.from || l.fromName) && prev.toName === l.toName && (l.ts || 0) - (prev.ts || 0) < 180000 && !kind;
+    return h(`li.talk-line.${l.kind || 'line'}${l.beat ? `.${l.beat}` : ''}${who?.boss ? '.boss' : ''}${cont ? '.cont' : ''}`, { 'data-kind': l.kind || '', 'data-talk': l.id || '' },
+      this.face(who),
+      h('div.talk-bubble', {},
+        h('div.talk-who', { css: { '--who': this.nameInk(name) } }, h('b', {}, name), l.toName ? h('span.talk-to', {}, `to ${l.toName}`) : null, kind ? h('span.talk-kind', {}, kind) : null),
+        h('p', {}, l.text),
+        h('time', {}, timeAgo(l.ts))));
   }
   addTalkLine(l) {
     if (this.tab === 'talk' && this.talkList) {
       const keep = this.talkList.scrollHeight - this.talkList.scrollTop - this.talkList.clientHeight < 60;
       this.talkList.querySelector('.empty')?.remove();
-      this.talkList.append(this.talkEl(l));
+      this.talkList.append(this.talkEl(l, this.talkLast));
+      this.talkLast = l;
       if (keep) this.talkList.scrollTop = this.talkList.scrollHeight;
     }
     if (this.tab === 'talk' && this.panelOpen) { this.markTalkRead(); return; }
-    if (l.kind === 'small') return;
+    if (l.kind === 'small' || l.kind === 'banter') return;
     this.talkUnread = (this.talkUnread || 0) + 1;
     const b = this.pinEls?.talk?.badge;
     if (b) { b.hidden = false; b.textContent = String(Math.min(this.talkUnread, 99)); }
@@ -367,7 +454,7 @@ class FloorPage {
     const list = h('ol.feed', { 'aria-live': 'polite' });
     const items = this.state.feed.slice(-120).reverse();
     for (const f of items) list.append(this.feedEl(f));
-    if (!items.length) list.append(h('li.empty', {}, this.owner ? 'Quiet so far. Tell your manager what to do.' : 'Quiet so far. Nobody has started anything yet.'));
+    if (!items.length) list.append(h('li.empty', {}, this.owner ? 'Nothing in the log yet. Call your manager and give them something to do.' : 'Nothing in the log yet. Nobody has started anything.'));
     this.feedList = list;
     this.bodyEl.append(list);
   }
@@ -386,28 +473,29 @@ class FloorPage {
       const shown = key === 'done' ? col.slice(-12).reverse() : col;
       board.append(h('section.col', {}, h('h3', {}, title, h('span', {}, String(col.length))),
         ...shown.map((x) => h(`article.card.${x.status}`, {}, h('b', {}, x.title),
-          h('small', {}, agents.find((a) => a.id === x.agentId)?.name || '', x.status === 'blocked' ? ' · waiting on the boss' : ''),
+          h('small', {}, x.agentId ? this.face(agents.find((a) => a.id === x.agentId)) : null, h('span', {}, agents.find((a) => a.id === x.agentId)?.name || '', x.status === 'blocked' ? ' · waiting on the boss' : '')),
           this.owner && x.result ? h('p', {}, x.result.slice(0, 180)) : null))));
     }
     const failed = t.filter((x) => x.status === 'failed' || x.status === 'cancelled');
     if (failed.length) board.append(h('section.col', {}, h('h3', {}, 'Dropped', h('span', {}, String(failed.length))), ...failed.slice(-6).reverse().map((x) => h(`article.card.${x.status}`, {}, h('b', {}, x.title), h('small', {}, x.status === 'failed' ? 'Could not finish' : 'Cancelled')))));
-    if (!t.length && !help) board.append(h('p.empty', {}, 'No tasks yet.'));
+    if (!t.length && !help) board.append(h('p.empty', {}, 'Nothing pinned up yet.'));
     this.bodyEl.append(board);
   }
   // The help line on the board. A visitor only learns that a question is out; the words are the boss's alone.
   helpSection() {
     const s = this.state;
-    if (!this.owner) return s.helpWaiting ? h('section.col.help-col', {}, h('h3', {}, 'Help line'), h('article.card.help.pending', {}, h('b', {}, '☎ Asked buddehbot for help'), h('small', {}, 'Waiting for an answer. The team carries on meanwhile.'))) : null;
+    if (!this.owner) return s.helpWaiting ? h('section.col.help-col', {}, h('h3', {}, 'Help line'), h('article.card.help.pending', {}, h('b', {}, 'Asked buddehbot for help'), h('small', {}, 'Waiting for an answer. The team carries on meanwhile.'))) : null;
     if (!s.help?.length) return null;
     return h('section.col.help-col', {}, h('h3', {}, 'Help line', h('span', {}, String(s.help.filter((x) => x.status === 'pending').length))),
-      ...s.help.map((x) => h(`article.card.help.${x.status}`, { 'data-help': x.id }, h('b', {}, '☎ Asked buddehbot for help'), h('p', {}, x.question), h('small', {}, HELP_STATUS[x.status] || x.status))));
+      ...s.help.map((x) => h(`article.card.help.${x.status}`, { 'data-help': x.id }, h('b', {}, 'Asked buddehbot for help'), h('p', {}, x.question), h('small', {}, HELP_STATUS[x.status] || x.status))));
   }
 
   // ---- projects ----
   renderProjects() {
     const s = this.state;
     const wrap = h('div.gallery');
-    if (!s.projects.length) wrap.append(h('p.empty', {}, 'Nothing published yet. When the staff ship something, it shows up here.'));
+    wrap.append(h('div.drawer-label', {}, `Projects · ${s.projects.length} ${s.projects.length === 1 ? 'folder' : 'folders'}`));
+    if (!s.projects.length) wrap.append(h('p.empty', {}, 'The drawer is empty. When the staff ship something, its folder lands here.'));
     for (const p of s.projects) wrap.append(this.projectCard(p));
     this.bodyEl.append(wrap);
     if (this.owner && s.files?.length) {
@@ -428,7 +516,7 @@ class FloorPage {
       p.sources?.length ? h('small', {}, `${p.sources.length} ${p.sources.length === 1 ? 'source' : 'sources'}`) : null,
       p.domain ? h('small.live-domain', {}, p.domain) : null,
       this.owner ? this.launchBits(p) : null,
-      h('div.row', {}, h('button.btn.primary', { type: 'button', onclick: open }, 'Open'), priv,
+      h('div.row', {}, h('button.btn.primary', { type: 'button', onclick: open }, icon('folder-open'), 'Open'), priv,
         this.owner && p.appUrl ? h('button.link', { type: 'button', onclick: async () => {
           if (!window.confirm(`Delete every save, leaderboard, shared value and sign-up for ${p.title}? This can't be undone. Download your sign-ups first if you want them.`)) return;
           try { const r = await api(`/floors/${this.slug}/projects/${p.slug}/clear-data`, { method: 'POST', body: {} }); toast(`Cleared ${r.removed} saved ${r.removed === 1 ? 'item' : 'items'}`); } catch (e) { toast(e.message, 'bad'); }
@@ -527,7 +615,7 @@ class FloorPage {
     for (const d of this.state.domains || []) {
       const waiting = d.status === 'awaiting_boss' && this.state.domainsOn;
       const buy = async () => {
-        try { await api(`/floors/${this.slug}/domains/${d.id}/buy`, { method: 'POST', body: { priceUsd: d.priceUsd } }); toast(`Buying ${d.domain}`); this.reload(); } catch (e) { toast(e.message, 'bad'); this.reload(); }
+        try { await api(`/floors/${this.slug}/domains/${d.id}/buy`, { method: 'POST', body: { priceUsd: d.priceUsd } }); sfx('stamp'); toast(`Buying ${d.domain}`); this.reload(); } catch (e) { toast(e.message, 'bad'); this.reload(); }
       };
       const no = async () => { try { await api(`/floors/${this.slug}/domains/${d.id}/decline`, { method: 'POST', body: {} }); this.reload(); } catch (e) { toast(e.message, 'bad'); } };
       list.append(h(`article.card.request.domain.${d.status}`, { 'data-domain': d.domain },
@@ -551,7 +639,7 @@ class FloorPage {
     this.renderDomains(list);
     if (!items.length && !(this.state.domains || []).length && !(this.state.ios || []).length) list.append(h('p.empty', {}, this.state.domainsOn ? 'No requests. Staff can ask, but only you can say yes.' : 'No requests. Staff can ask for things here, but they can\'t buy anything.'));
     for (const p of items) {
-      const setStatus = async (status) => { try { await api(`/floors/${this.slug}/purchases/${p.id}`, { method: 'POST', body: { status } }); p.status = status; this.renderTabs(); this.renderBody(); } catch (e) { toast(e.message, 'bad'); } };
+      const setStatus = async (status) => { try { await api(`/floors/${this.slug}/purchases/${p.id}`, { method: 'POST', body: { status } }); p.status = status; sfx('stamp'); this.renderTabs(); this.renderBody(); } catch (e) { toast(e.message, 'bad'); } };
       list.append(h(`article.card.request.${p.status}`, {},
         h('div.row.spread', {}, h('b', {}, p.item), h('span.price', {}, money(p.price))),
         h('p', {}, p.why), h('small', {}, `${p.agentName || 'Staff'} · ${{ pending: 'With the building manager', declined: 'Declined', 'bought-myself': 'You bought it yourself', bought: 'The building manager bought it', rejected: 'The building manager said no' }[p.status] || p.status}${p.adminNote ? `: ${p.adminNote}` : ''}`),
@@ -578,7 +666,7 @@ class FloorPage {
     if (!orders.length) wrap.append(h('p.empty', {}, 'No standing orders yet. Set one below, or ask your manager for something "every morning".'));
     for (const o of orders) wrap.append(this.orderCard(o));
     if (!lim.perFloor || orders.length < lim.perFloor) wrap.append(this.orderForm());
-    wrap.append(h('p.fineprint', {}, `An order waits while the floor is busy, paused or out of budget. It pauses itself ${lim.maxFails ? `after ${lim.maxFails} failed runs in a row, or ` : ''}if you haven't opened the floor in ${lim.idleDays ?? 14} days; opening it switches ${lim.maxFails ? 'those' : 'it'} back on.`));
+    wrap.append(h('p.fineprint', {}, `An order waits while the floor is busy or paused. It pauses itself ${lim.maxFails ? `after ${lim.maxFails} failed runs in a row, or ` : ''}if you haven't opened the floor in ${lim.idleDays ?? 14} days; opening it switches ${lim.maxFails ? 'those' : 'it'} back on.`));
     this.bodyEl.append(wrap);
   }
   orderCard(o) {
@@ -686,13 +774,13 @@ class FloorPage {
     });
     // The words themselves: the same line goes in the Talk tab and over the speaker's head.
     on('talk', (d) => {
-      const line = { id: d._id, from: d.from, to: d.to, fromName: d.fromName, toName: d.toName, text: d.text, kind: d.kind, ts: d._ts || d.ts };
+      const line = { id: d._id, from: d.from, to: d.to, fromName: d.fromName, toName: d.toName, text: d.text, kind: d.kind, beat: d.beat, ts: d._ts || d.ts };
       this.state.talk ||= [];
       if (line.id && this.state.talk.some((l) => l.id === line.id)) return;
       this.state.talk.push(line);
       if (this.state.talk.length > 200) this.state.talk.shift();
       this.addTalkLine(line);
-      if (fresh(d)) this.view?.life?.line(line);
+      if (fresh(d)) this.view?.life?.line({ ...line, kind: d.beat || (d.kind === 'banter' ? 'small' : d.kind) });
     });
     on('task', (d) => {
       const i = this.state.tasks.findIndex((t) => t.id === d.id);
@@ -731,9 +819,15 @@ class FloorPage {
     on('hired', () => this.reload());
     on('reload', () => this.reload());
     on('floor', (d) => {
-      Object.assign(this.state.floor, d);
       if (d.status === 'gone') { toast('This floor has been closed.'); window.officeGo('/'); return; }
-      this.renderHeader(); this.renderControls(); this.renderBanner();
+      // The manager has just named the company, or repainted it: the plaque, the signs and the room all follow, without leaving the conversation.
+      const f = this.state.floor;
+      const changed = ['name', 'tagline', 'colors', 'decor', 'logoUrl'].some((k) => k in d && JSON.stringify(d[k]) !== JSON.stringify(f[k]));
+      if (changed) { this.reload(); return; }
+      const wasSetup = f.setup;
+      Object.assign(f, d);
+      this.renderHeader(); this.renderControls(); this.renderBanner(); renderCard(this);
+      if (wasSetup && !f.setup && this.tab === 'chat') this.dropLanes();
     });
     // Replayed events are for the record. Only fresh ones get acted out by the characters.
     const fresh = (d) => Date.now() - (d._ts || 0) < 15000;
@@ -746,6 +840,8 @@ class FloorPage {
     this.es.onerror = () => { /* EventSource reconnects by itself, sending Last-Event-ID */ };
   }
   showStream() {
+    this.intercomEl?.classList.toggle('on-air', !!this.streamBuf);
+    const line = this.intercomEl?.querySelector('small'); if (line) line.lastChild.textContent = this.streamBuf ? 'Talking…' : this.owner ? 'On the desk phone' : 'The boss\'s line';
     if (!this.streamEl) return;
     this.streamEl.hidden = !this.streamBuf;
     this.streamEl.firstChild.textContent = this.streamBuf;
@@ -819,6 +915,8 @@ class FloorPage {
     this.dead = true;
     clearTimeout(this.cardTimer);
     if (this.onResize) window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('office:agent-tap', this.tapAgent);
+    this.unwireTaps?.();
     delete document.body.dataset.sheet;
     this.pinsEl?.remove();
     this.markSeen?.();
@@ -843,11 +941,11 @@ const safeHref = (u) => (/^https?:\/\//i.test(u) ? u : '#');
 export async function showFloor(root, slug) {
   const page = new FloorPage(root, slug);
   try { await page.load(); } catch (e) {
-    root.append(h('div.notfound.glass', {}, h('h1', {}, 'No such floor.'), h('p', {}, e.status === 404 ? 'That office isn\'t in the directory. It may never have opened, or it has closed.' : e.message), h('button.btn.primary', { type: 'button', onclick: () => window.officeGo('/') }, 'Back to the lobby')));
+    root.append(h('div.notfound', {}, h('h1', {}, 'No such floor.'), h('p', {}, e.status === 404 ? 'That office isn\'t in the directory. It may never have opened, or it has closed.' : e.message), h('button.btn.primary', { type: 'button', onclick: () => window.officeGo('/') }, 'Back to the lobby')));
     return;
   }
   const fade = $('#fade');
-  fade.dataset.title = `Floor ${page.state.floor.number} · ${page.state.floor.name}`;
+  fade.dataset.title = `Floor ${page.state.floor.number}${page.state.floor.name ? ` · ${page.state.floor.name}` : ''}`;
   fade.classList.add('in');
   F = page;
   page.mount();

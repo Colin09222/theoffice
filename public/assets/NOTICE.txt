@@ -1,0 +1,7 @@
+Assets in the interface, with their sources and licences.
+
+Fonts (public/assets/fonts), all SIL Open Font License 1.1, from Google Fonts:
+  Lilita One (Juan Montoreano), Barlow and Barlow Condensed (Jeremy Tribby), Patrick Hand (Patrick Wagesreiter).
+Icons (public/js/icons.js): Phosphor Icons, fill weight. MIT License, Copyright (c) 2023 Phosphor Icons. github.com/phosphor-icons/core
+Sounds (public/js/sfx-data.js): Interface Sounds 1.0 by Kenney (www.kenney.nl). CC0. Taken from Kenney's own upload at opengameart.org/content/interface-sounds, re-encoded as small mp3s.
+Textures (public/assets/tex): Cork001 and Wood051 from ambientCG.com. CC0. Resized and reduced to fit.

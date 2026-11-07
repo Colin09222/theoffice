@@ -1,4 +1,6 @@
 // Small DOM and API helpers. All text goes in through textContent, so names and agent output can never become markup.
+import { icon } from './icons.js';
+
 export const BASE = '/theoffice';
 
 export function h(tag, props = {}, ...kids) {
@@ -78,7 +80,7 @@ export function modal(title, build, { wide = false, onClose, locked = false } = 
   const onKey = (e) => { if (e.key === 'Escape' && !locked) close(); };
   document.addEventListener('keydown', onKey);
   if (!locked) back.addEventListener('pointerdown', (e) => { if (e.target === back) close(); });
-  card.append(h('header.modal-head', {}, h('h2', {}, title), !locked && h('button.icon-btn', { type: 'button', 'aria-label': 'Close', onclick: () => close() }, '×')));
+  card.append(h('header.modal-head', {}, h('h2', {}, title), !locked && h('button.icon-btn', { type: 'button', 'aria-label': 'Close', onclick: () => close() }, icon('x'))));
   const body = h('div.modal-body');
   card.append(body);
   build(body, close);

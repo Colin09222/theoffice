@@ -1,7 +1,9 @@
-// The lobby overlay: headline, floor directory with search, and the way in.
+// The lobby overlay: the sign out front, the felt directory board with its lift panel, the To Let board, and the news strip.
 import { stage } from './stage.js';
 import { h, api, session, isPhone, toast, clear, put } from './dom.js';
 import { LobbyView } from './lobby-scene.js';
+import { icon } from './icons.js';
+import { muteButton, sfx } from './sfx.js';
 
 // The claim wizard and its character builder are only fetched when someone opens them.
 const claimModule = () => import('./claim.js');
@@ -15,13 +17,13 @@ function tickerItem(it, fresh) {
   return h(`${it.url ? 'a' : 'button'}.ticker-item${fresh ? '.fresh' : ''}${it.kind === 'published' ? '.published' : ''}${it.filler ? '.chatter' : ''}`,
     it.url ? { href: it.url, target: '_blank', rel: 'noopener noreferrer', 'data-id': it.id, title: `Open ${it.text}` }
       : { type: 'button', 'data-id': it.id, title: `Walk into ${it.floor.name}`, onclick: () => window.officeGo(`/floor/${it.floor.slug}`) },
-    h('span.ticker-chip', { css: { '--brand': it.floor.colors.primary } }, h('b', {}, String(it.floor.number)), it.floor.name),
+    h('span.ticker-chip', {}, h('b', {}, String(it.floor.number)), it.floor.name || 'New company'),
     h('span.ticker-text', {}, it.text));
 }
 function buildTicker() {
   const rail = h('div.ticker-rail');
   const strip = h('section.ticker', { 'aria-label': 'The building, live', 'data-ticker': 'empty' },
-    h('span.ticker-label', {}, h('i.live-dot'), 'The building, live'),
+    h('span.ticker-label', {}, 'Live'),
     h('div.ticker-track', {}, rail));
   let items = []; let latest = 0;
   const paint = (freshIds) => {
@@ -53,7 +55,7 @@ function wallCard(pr, onFloor) {
   return h('article.wall-card', { 'data-project': pr.slug, 'data-floor': pr.floor.slug, css: { '--brand': pr.floor.colors.primary } },
     h('a.wall-thumb', { href: pr.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Open ${pr.title}` }, h('img', { src: pr.thumb, alt: '', loading: 'lazy', width: '480', height: '300' })),
     h('div.wall-body', {},
-      h('div.wall-meta', {}, h('span.wall-floor', {}, h('b', {}, String(pr.floor.number)), pr.floor.name), h('span.wall-kind', {}, pr.kind)),
+      h('div.wall-meta', {}, h('span.wall-floor', {}, h('b', {}, String(pr.floor.number)), pr.floor.name || 'New company'), h('span.wall-kind', {}, pr.kind)),
       h('h4', {}, pr.title),
       pr.description ? h('p', {}, pr.description) : null,
       h('div.wall-acts', {},
@@ -64,8 +66,8 @@ function wallCard(pr, onFloor) {
 function directoryRow(card, onEnter, onHover) {
   return h('button.dir-row', { type: 'button', 'data-floor': card.number, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => onHover(card.number) },
     h('span.dir-num', {}, String(card.number)),
-    h('span.dir-mark', { 'aria-hidden': 'true' }, (card.name.trim()[0] || '?').toUpperCase()),
-    h('span.dir-text', {}, h('b', {}, card.name), card.filler ? h('span.demo-tag', { title: 'A fictional demo company. Nothing here is real.' }, 'demo') : null, h('small', {}, card.status === 'suspended' ? 'Closed by the building manager' : card.tagline || 'A tiny company')),
+    h('span.dir-mark', { 'aria-hidden': 'true' }),
+    h('span.dir-text', {}, h('b', {}, card.name || 'Moving in'), card.filler ? h('span.demo-tag', { title: 'A fictional demo company. Nothing here is real.' }, 'demo') : null, h('small', {}, card.status === 'suspended' ? 'Closed by the building manager' : card.tagline || (card.name ? 'A tiny company' : 'Boxes still in the corridor'))),
     card.busy ? h('span.dir-busy', { title: `${card.busy} at work` }, h('i'), String(card.busy)) : null);
 }
 
@@ -75,6 +77,7 @@ export async function showLobby(root) {
   keepFloors = data.floors;
 
   const enterFloor = async (card) => {
+    sfx('press', { rate: 0.75 });
     if (view && stage.ok) {
       view.rideTo(card.number);
       document.body.classList.add('flying');
@@ -91,7 +94,7 @@ export async function showLobby(root) {
       onPick: (n) => {
         if (n < 1) return;
         const card = keepFloors.find((f) => f.number === n);
-        if (card) enterFloor(card); else { toast(`Floor ${n} is empty. Got a code?`); }
+        if (card) enterFloor(card); else { toast(`Floor ${n} is to let. Got a code?`); }
       },
     });
     view.setFloors(data.floors);
@@ -119,17 +122,17 @@ export async function showLobby(root) {
     const grid = h('div.lift', { role: 'group', 'aria-label': 'Lift buttons' });
     for (let n = data.towerFloors; n >= 1; n--) {
       const card = keepFloors.find((f) => f.number === n);
-      grid.append(h(`button.lift-btn${card ? '.lit' : ''}`, { type: 'button', 'data-lift': n, css: card ? { '--brand': card.colors.primary } : {}, 'aria-label': card ? `Floor ${n}, ${card.name}` : `Floor ${n}, empty`, onpointerenter: () => { view?.setHover(n); view?.rideTo(n); }, onclick: () => { if (card) enterFloor(card); else openClaim(); } }, String(n)));
+      grid.append(h(`button.lift-btn${card ? '.lit' : ''}`, { type: 'button', 'data-lift': n, css: card ? { '--brand': card.colors.primary } : {}, 'aria-label': card ? `Floor ${n}, ${card.name || 'moving in'}` : `Floor ${n}, empty`, onpointerenter: () => { view?.setHover(n); view?.rideTo(n); }, onclick: () => { if (card) enterFloor(card); else openClaim(); } }, String(n)));
     }
     const vacant = data.towerFloors - keepFloors.length;
-    return h('section.lift-wrap', {}, h('h3', {}, 'Lift', h('small', {}, `${vacant} empty ${vacant === 1 ? 'floor' : 'floors'}`)), grid);
+    return h('section.lift-wrap', {}, h('h3', {}, 'The lift', h('small', {}, `${vacant} ${vacant === 1 ? 'floor' : 'floors'} to let`)), grid);
   };
   renderList();
 
   // The launched wall shares the panel with the directory. The directory's own list is left exactly as it is.
   const wall = h('div.wall', { 'data-wall': 'grid', hidden: true });
   const wallCount = h('span.dir-count');
-  const wallHead = h('div.dir-head.wall-head', { hidden: true }, h('span', {}, h('i.live-dot'), 'Launched'), wallCount);
+  const wallHead = h('div.dir-head.wall-head', { hidden: true }, h('span', {}, 'Launched'), wallCount);
   let wallOn = false, wallItems = null;
   const renderWall = () => {
     const q = search.value.trim().toLowerCase();
@@ -145,7 +148,7 @@ export async function showLobby(root) {
     try { wallItems = (await api('/building/launched?limit=60')).projects; } catch { wallItems = wallItems || []; }
     if (wallOn) renderWall();
   };
-  const toggle = h('button.wall-toggle', { type: 'button', 'data-wall': 'toggle', 'aria-pressed': 'false', title: 'Everything the building has launched' }, h('i', { 'aria-hidden': 'true' }, '◆'), 'Launched');
+  const toggle = h('button.wall-toggle', { type: 'button', 'data-wall': 'toggle', 'aria-pressed': 'false', title: 'Everything the building has launched' }, icon('rocket-launch'), 'Launched');
   const setWall = (on) => {
     wallOn = on;
     toggle.setAttribute('aria-pressed', String(on));
@@ -159,8 +162,8 @@ export async function showLobby(root) {
   search.addEventListener('focus', () => { if (isPhone()) panel.classList.add('open'); });
   search.addEventListener('input', () => { if (wallOn) renderWall(); });
 
-  const head = h('div.dir-head', {}, h('span', {}, h('i.live-dot'), 'The Office'), count);
-  const panel = h('aside.directory.glass', { 'aria-label': 'Floor directory' },
+  const head = h('div.dir-head', {}, h('span', {}, 'Directory'), count);
+  const panel = h('aside.directory', { 'aria-label': 'Floor directory' },
     h('button.sheet-grip', { type: 'button', 'aria-label': 'Show or hide the directory', onclick: () => panel.classList.toggle('open') }, h('i'), h('span.grip-label', {}, 'Directory')),
     h('div.dir-search', {}, search, toggle),
     head, wallHead,
@@ -168,18 +171,18 @@ export async function showLobby(root) {
     h('p.dir-hint', {}, 'Anyone can walk in and watch'));
 
   const account = session.floor
-    ? h('button.btn.chrome', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, 'My floor')
-    : h('button.btn.chrome', { type: 'button', onclick: () => openLogin() }, 'Sign in');
+    ? h('button.btn.chrome', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, icon('elevator'), 'My floor')
+    : h('button.btn.chrome', { type: 'button', onclick: () => openLogin() }, icon('sign-in'), 'Sign in');
 
   put(root,
-    h('header.topbar', {}, h('span.wordmark', {}, 'The Office'), account),
+    h('header.topbar', {}, h('div.topbar-right', {}, account, muteButton())),
     h('section.hero', {},
-      h('h1', {}, 'Clock in. ', h('em', {}, 'Someone else'), ' does the work.'),
+      h('h1', {}, 'The Office', h('span', {}, 'Clock in. Someone else does the work.')),
       h('p', {}, 'Each floor belongs to one friend, with an office manager and a small staff of AI agents who plan, research, write and build while you watch. Spin the building, go up in the lift, and drop in on anyone.')),
     panel,
     h('button.open-pill', { type: 'button', onclick: () => openClaim() },
-      h('span.pill-status', {}, h('i.live-dot'), data.vacant ? `Floor ${data.vacant} is empty` : 'Building full'),
-      h('span.pill-go', {}, 'Open an office'), h('span.pill-arrow', { 'aria-hidden': 'true' }, '↗')),
+      h('span.pill-status', {}, data.vacant ? 'To let' : 'Full up', h('small', {}, data.vacant ? `Floor ${data.vacant} is empty` : 'Building full')),
+      h('span.pill-go', {}, 'Open an office'), h('span.pill-arrow', {}, icon('key'))),
     h('p.hints', {}, isPhone() ? 'Drag to look around. Tap a lit floor.' : 'Drag to spin. Wheel goes up and down. Any lit floor is open.'),
     buildTicker(),
     data.globalPause ? h('p.banner', {}, 'The building manager has paused all work for now.') : null,
@@ -201,7 +204,7 @@ function showTip(n, x, y) {
   if (n < 1) { tip.hidden = true; return; }
   const c = keepFloors.find((f) => f.number === n);
   tip.hidden = false;
-  tip.textContent = c ? `${n} · ${c.name}` : `${n} · Empty floor`;
+  tip.textContent = c ? `${n} · ${c.name || 'Moving in'}` : `${n} · To let`;
   tip.style.transform = `translate(${x + 16}px, ${y - 12}px)`;
 }
 

@@ -45,7 +45,7 @@ describe('stamping', () => {
     const page = statics.get('/index.html').body.toString('utf8');
     for (const m of page.matchAll(/(?:src|href)="(\/theoffice\/[^"]+)"/g)) assert.match(m[1], /\?v=[0-9a-f]{12}$/, m[1]);
     const css = statics.get('/css/app.css').body.toString('utf8');
-    assert.match(css, /url\(\/theoffice\/vendor\/fonts\/fraunces-latin-wght-normal\.woff2\?v=[0-9a-f]{12}\)/);
+    assert.match(css, /url\(\/theoffice\/assets\/fonts\/lilita-one-400\.woff2\?v=[0-9a-f]{12}\)/);
     const models = statics.get('/js/models.js').body.toString('utf8');
     assert.doesNotMatch(models, /__MODELS_V__/);
     assert.match(readFileSync(join(PUB, 'js/models.js'), 'utf8'), /__MODELS_V__/);
@@ -69,7 +69,7 @@ describe('compression', () => {
     assert.deepEqual(brotliDecompressSync(br.body), file.body);
   });
   test('fonts and images are never compressed again', () => {
-    assert.equal(pickEncoding(statics.get('/vendor/fonts/fraunces-latin-wght-normal.woff2'), 'br, gzip').encoding, null);
+    assert.equal(pickEncoding(statics.get('/assets/fonts/lilita-one-400.woff2'), 'br, gzip').encoding, null);
     assert.equal(pickEncoding(statics.get('/models/characters/Textures/colormap.png'), 'br, gzip').encoding, null);
   });
 });

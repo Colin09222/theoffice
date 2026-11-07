@@ -2,6 +2,7 @@
 import { stage } from './stage.js';
 import { BASE, refreshMe, clear, toast, $ } from './dom.js';
 import { showLobby, hideLobby } from './lobby-ui.js';
+import { wireSounds } from './sfx.js';
 
 const ui = $('#ui');
 let current = null;
@@ -15,7 +16,7 @@ window.officeGo = go;
 
 async function route() {
   const path = location.pathname.replace(/\/+$/, '').slice(BASE.length) || '/';
-  // Stepping out of an office goes through a short flash of light, the same one that opened it.
+  // Stepping out of an office goes through the lift doors, the same ones that opened it.
   const fade = $('#fade');
   const leavingFloor = document.body.dataset.page === 'floor' && !path.startsWith('/floor/');
   if (leavingFloor) { fade.dataset.title = 'The Office'; fade.classList.add('in'); await new Promise((r) => setTimeout(r, 240)); }
@@ -27,7 +28,7 @@ async function route() {
   try {
     if (path === '/admin') { const { showAdmin, hideAdmin } = await import('./admin-ui.js'); current = hideAdmin; await showAdmin(ui); return; }
     if (floorMatch) {
-      // Straight into the flash of light, so a slow line never holds up on a frozen close-up of the glass. The floor lifts it when its room is ready.
+      // The doors shut straight away, so a slow line never holds up on a frozen close-up of the glass. The floor opens them when its room is ready.
       fade.dataset.title = 'Going up'; fade.classList.add('in');
       const { showFloor, hideFloor } = await import('./floor-ui.js'); current = hideFloor; await showFloor(ui, floorMatch[1]);
       return;
@@ -66,8 +67,9 @@ async function boot() {
   stage.init($('#scene'));
   stage.notice = (m) => toast(m);
   trackKeyboard();
+  wireSounds();
   // Fonts first, because canvas signs draw with them and the headline shouldn't reflow in front of anyone.
-  await Promise.race([Promise.all([document.fonts?.load('600 64px Fraunces'), document.fonts?.load('italic 400 64px Fraunces')]).catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
+  await Promise.race([Promise.all([document.fonts?.load('400 64px "Lilita One"'), document.fonts?.load('600 64px Fraunces'), document.fonts?.load('500 16px Barlow')]).catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
   try { await refreshMe(); } catch { /* still browsable */ }
   window.addEventListener('popstate', route);
   try { await route(); } catch (e) { console.error(e); toast('Something broke on the way in. Try reloading.'); }
