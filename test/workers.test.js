@@ -264,6 +264,40 @@ describe('ending a job', () => {
   });
 });
 
+describe('when someone fails', () => {
+  test('whoever depends on them waits for the manager, who can cancel them; otherwise they go ahead with what was saved', async () => {
+    const gate = { release: null };
+    const llm = scripted({
+      staff: (a) => ({ content: `${a.meta.role} done` }),
+      manager: () => ({ content: 'Looking at it.' }),
+    });
+    const inner = llm.chat;
+    llm.chat = async (a) => { if (a.meta.kind === 'manager' && !gate.released) await new Promise((r) => { gate.release = r; }); return inner(a); };
+    const h = await start(llm);
+    const writer = get(h.t.db, "SELECT * FROM agents WHERE floor_id=? AND role='writer'", h.f.id);
+    const a = h.e.assignTask(h.f, h.mgr, { to: 'writer', title: 'W', brief: 'b', plan: '', project: 'p', dependsOn: [], afterPrevious: false });
+    const b = h.e.assignTask(h.f, h.mgr, { to: 'builder', title: 'B', brief: 'b', plan: '', project: 'p', dependsOn: [a.id], afterPrevious: false });
+    run(h.t.db, "UPDATE tasks SET status='doing' WHERE id=?", a.id);
+    h.e.finishTask(h.f, writer, a.id, 'failed', 'Ran out of steps before finishing.');
+    h.e.tick();
+    await until(() => gate.release, { what: 'the manager to be thinking' });
+    h.e.tick();
+    assert.equal(get(h.t.db, 'SELECT status FROM tasks WHERE id=?', b.id).status, 'todo', 'held while the manager decides');
+    gate.released = true; gate.release();
+    await until(() => ['review', 'done'].includes(get(h.t.db, 'SELECT status FROM tasks WHERE id=?', b.id).status), { what: 'it to go ahead' });
+    const builderCall = llm.calls.find((c) => c.meta.role === 'builder').messages[1].content;
+    assert.match(builderCall, /Ran out of steps before finishing/, 'and it knows how the last person got on');
+  });
+  test('the manager sees a Tester\'s whole report, because the verdict comes last', async () => {
+    const h = await start(scripted());
+    h.e.runManager = async () => {};
+    const { id } = h.e.assignTask(h.f, h.mgr, { to: 'writer', title: 'W', brief: 'b', plan: '', project: 'p', dependsOn: [], afterPrevious: false });
+    run(h.t.db, "UPDATE tasks SET status='review', result=? WHERE id=?", `${'details '.repeat(200)}PASS`, id);
+    const { messages } = h.e.managerContext(get(h.t.db, 'SELECT * FROM floors WHERE id=?', h.f.id), h.mgr);
+    assert.match(String(messages.at(-1).content), /PASS/);
+  });
+});
+
 describe('questions', () => {
   test('an answer typed in the chat unblocks whoever asked, and the manager hears it as well', async () => {
     const llm = scripted({ staff: (a) => (a.meta.step === 0 ? { toolCalls: [['ask_boss', { question: 'Silly or serious?' }]] } : { content: `Going with: ${a.messages.at(-1).content}` }), manager: () => ({ content: 'Noted.' }) });

@@ -120,6 +120,8 @@ export class Engine {
         const marks = deps.map(() => '?').join(',');
         const open = get(this.db, `SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND id IN (${marks}) AND status IN ('todo','doing','blocked')`, floor.id, ...deps).n;
         if (open) continue;
+        // The manager decides what happens after a failure before anyone builds on it. Whatever it leaves standing then goes ahead with what was saved.
+        if ((this.runs.has(mgr.id) || get(this.db, 'SELECT manager_wake w FROM floors WHERE id=?', floor.id).w) && get(this.db, `SELECT 1 x FROM tasks WHERE floor_id=? AND id IN (${marks}) AND status='failed'`, floor.id, ...deps)) continue;
       }
       const agent = agents.find((a) => a.id === t.agent_id);
       if (!agent) continue;
@@ -256,7 +258,7 @@ export class Engine {
     const state = [
       `STATE at ${new Date(this.now()).toISOString()}. Spent today $${this.spentToday(floor.id).toFixed(3)} ${Number.isFinite(this.cfg.floorDailyUsd) ? ` of $${this.cfg.floorDailyUsd}` : ''}.`,
       `Roster: ${staff.map((s) => `${s.name} (${s.role})`).join(', ')}. Staff limit ${this.cfg.maxStaff}. Hireable: ${Object.keys(this.models.hireable).join(', ')}.`,
-      `Open tasks: ${tasks.length ? tasks.map((t) => `#${t.id} [${t.status}] "${t.title}" (${name(t.agent_id)})${t.status === 'review' ? ` result: ${t.result.slice(0, 600)}` : ''}`).join(' | ') : 'none'}`,
+      `Open tasks: ${tasks.length ? tasks.map((t) => `#${t.id} [${t.status}] "${t.title}" (${name(t.agent_id)})${t.status === 'review' ? ` result: ${t.result.slice(0, 2200)}` : ''}`).join(' | ') : 'none'}`,
       `Recently finished: ${recent.length ? recent.map((t) => `#${t.id} [${t.status}] "${t.title}": ${t.result.slice(0, 200)}`).join(' | ') : 'none'}`,
       `Published: ${published.length ? published.map((p) => `${p.title} [slug ${p.slug}] (${p.kind}${p.private ? ', private' : ''}) ${p.url} checklist: ${p.checklist}; design review: ${p.reviewed ? 'done' : 'not done'}; Stripe link from the boss: ${p.payment ? 'yes' : 'no'}; sign-ups: ${p.signups}; launch report given: ${p.reported ? 'yes' : 'no'}`).join(' | ') : 'nothing yet'}`,
       ...(notLive.length ? [`Finished but not live: ${notLive.map((u) => `${u.slug} (${u.never ? 'never published' : 'changed since it was published'})`).join(' | ')}`] : []),
@@ -455,7 +457,7 @@ export class Engine {
     const mine = privateSlug(task.project);
     const allowed = (slug) => mine || !privateSlug(slug);
     const deps = JSON.parse(task.depends_on || '[]');
-    const before = all(this.db, "SELECT t.id,t.title,t.result,t.project,t.plan,a.name,a.title job FROM tasks t LEFT JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND t.id<? AND t.status IN ('done','review') ORDER BY t.id DESC LIMIT 20", floor.id, task.id)
+    const before = all(this.db, "SELECT t.id,t.title,t.result,t.project,t.plan,a.name,a.title job FROM tasks t LEFT JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND t.id<? AND t.status IN ('done','review','failed') ORDER BY t.id DESC LIMIT 20", floor.id, task.id)
       .filter((t) => deps.includes(t.id) || (task.plan && t.plan === task.plan) || (task.project && t.project === task.project)).slice(0, 6).reverse().filter((t) => allowed(t.project));
     if (!before.length) return '';
     const lines = before.map((t) => `- ${t.name} (${t.job}), "${t.title}"${t.project ? ` in ${t.project}` : ''}: ${t.result.slice(0, HANDOFF_RESULT_CHARS)}`);
