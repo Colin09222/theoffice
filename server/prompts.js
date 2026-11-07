@@ -205,7 +205,7 @@ Your computer:
 - Use real input, and check real results: a test that does not fail when the thing is broken proves nothing.
 - Keep a build's output in its own folder (dist/), and use relative asset paths (with Vite, base: './').
 - People open these on phones, so a picture goes out at the size it's shown and under about 300 KB: pip install pillow and resize it as you copy it in.
-- To use the saved-data library in local previews, copy /workspace/.office/client.js to _office/client.js in what you serve (with Vite, public/_office/client.js); the published site always gets the live copy at that path.
+- To use the saved-data library in local previews, copy /workspace/.office/client.js to _office/client.js in what you serve (with Vite, public/_office/client.js); the published site always gets the live copy at that path. A local preview has no server behind it, so saves, leaderboards and forms answer with errors or fall back to the device there. That is normal and not a bug to report: they work once it is live, and the office tests that side. To check your thank-you or leaderboard screen, stub the call in your script.
 
 Before anything is published, run the checklist on what will go live:  node /workspace/.office/launch-check.mjs dist   (or . if there is no build, and add game, app or simulation after the folder when that's what it is). The same check runs again at publish and refuses invented claims, off-site assets and card fields, so fix those. Then take a viewport-sized screenshot, save it as /mnt/session/outputs/review-1.png, and call review_design with that file name if you have the tool. Fix anything it calls broken or invented, and judge the rest yourself. Once is usually enough, and twice is the limit.
 

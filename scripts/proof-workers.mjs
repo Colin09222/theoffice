@@ -53,7 +53,8 @@ async function makeApp({ dry }) {
   if (dry) {
     // The manager is real. Staff don't run: their tasks are parked, so what's measured is the understanding and the plan.
     const park = async (floorId, agentId, taskId) => { run(db, "UPDATE tasks SET status='blocked', result='(dry run: staff did not work)' WHERE id=?", taskId); };
-    app.engine.runStaff = park;
+    // With PROOF_PLAIN_STAFF the people without computers work for real, which is a cheap look at the words and the design.
+    if (!process.env.PROOF_PLAIN_STAFF) app.engine.runStaff = park;
     if (app.engine.computer) app.engine.computer.run = park;
   }
   await new Promise((r) => app.server.listen(PORT, '127.0.0.1', r));
@@ -140,6 +141,7 @@ const SCENARIOS = {
   'plan-biz-dog': { plan: true, company: 'Good Boy', boss: 'Ana', steps: ['dog walking biz in austin, can u figure it out', 'sure'] },
   'plan-hi': { plan: true, company: 'Just Saying', boss: 'Lu', steps: ['hi'] },
   // The three buttons on a new floor.
+  'plan-web-staff': { plan: true, company: 'Rosa Sweets', boss: 'Tony', steps: ['need a website for my moms bakery. its called rosas, in queens. mostly cakes, birthdays and quinces'] },
   'plan-tap-game': { plan: true, company: 'Tap Games', boss: 'Sam', steps: ['Let\'s do a game. What could we build?', 'u pick'] },
   'plan-tap-web': { plan: true, company: 'Tap Sites', boss: 'Sam', steps: ['Let\'s do a website. What do you need from me?', 'its for my moms bakery'] },
   'plan-tap-biz': { plan: true, company: 'Tap Biz', boss: 'Sam', steps: ['Let\'s do a small business. Help me work it out.', 'idk u pick'] },
