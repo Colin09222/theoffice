@@ -1321,7 +1321,10 @@ export class OfficeView {
       else if (host && this.offices.has(host.id)) { const o = this.offices.get(host.id); o.shared = [...(o.shared || []), { info: a, desk: spot, seed: i + 7 }]; }
     }
     for (const a of staff) { const o = this.offices.get(this.actors.get(a.id)?.office); if (o?.info.id === a.id) o.info = a; }
-    if (fresh.length || !this.floorMat.map) { this.rebuildOffices(); this.bakeFloor(); this.loadFloorSets(); if (this.modelsOn) this.furnishOffices(); }
+    // The rooms nobody has yet are still furnished, and say so on the door, ready for the next hire.
+    const owned = new Set(this.owners.values()); let vacant = 0;
+    for (const r of this.plan.rooms) if (r.kind === 'staff' && !owned.has(r.id) && !this.offices.has(r.id)) { this.nav.block(...deskRect(r.desk)); this.addOffice(r, { id: `free-${r.id}`, role: 'vacant', name: null }, { own: true }); vacant++; }
+    if (fresh.length || vacant || !this.floorMat.map) { this.rebuildOffices(); this.bakeFloor(); this.loadFloorSets(); if (this.modelsOn) this.furnishOffices(); }
     const seen = new Set();
     const mgr = state.agents.find((a) => a.role === 'manager');
     if (mgr) {
@@ -1452,7 +1455,8 @@ export class OfficeView {
         x.fillStyle = '#1f2129'; x.fillRect(px, py, cw, ch);
         x.fillStyle = o.theme.wall; x.fillRect(px, py, 18, ch);
         x.strokeStyle = 'rgba(255,255,255,.25)'; x.lineWidth = 4; x.strokeRect(px + 2, py + 2, cw - 4, ch - 4);
-        const name = o.info.name || (o.room.id === 'boss' ? 'The boss' : 'Office'); const role = o.room.id === 'boss' ? 'Boss' : ROLE_TITLE[o.info.role] || o.info.title || o.info.role || '';
+        const free = o.info.role === 'vacant';
+        const name = free ? 'Free office' : o.info.name || (o.room.id === 'boss' ? 'The boss' : 'Office'); const role = free ? 'Ready for a hire' : o.room.id === 'boss' ? 'Boss' : ROLE_TITLE[o.info.role] || o.info.title || o.info.role || '';
         x.textBaseline = 'middle'; x.fillStyle = '#fff8e8';
         let size = 58; do { x.font = `700 ${size}px ui-sans-serif, system-ui, sans-serif`; size -= 4; } while (x.measureText(name).width > cw - 60 && size > 24);
         x.fillText(name, px + 36, py + ch * 0.4);

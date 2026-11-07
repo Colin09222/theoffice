@@ -12,6 +12,8 @@ const T = {
   marketer: { floor: 'terrazzo', wall: '#c96a4a', things: [{ m: 'televisionModern', slot: 'behindA', s: 0.8 }, { m: 'speakerSmall', slot: 'behindB', s: 1.4 }, { m: 'chairRounded', slot: 'sideA' }, { m: 'pottedPlant', slot: 'sideB', s: 1.3 }, { m: 'rugSquare', rug: true }, { p: 'posters' }] },
   tester: { floor: 'tile', wall: '#3f6b4f', things: [{ m: 'televisionVintage', slot: 'behindA', s: 0.9 }, { m: 'cardboardBoxClosed', slot: 'behindB', s: 1.1 }, { m: 'sideTableDrawers', slot: 'sideA' }, { m: 'bear', slot: 'nearA', s: 0.9 }, { p: 'bugboard' }] },
   illustrator: { floor: 'parquet', wall: '#5d4a7d', things: [{ p: 'easel', slot: 'behindA' }, { p: 'easel', slot: 'sideB' }, { m: 'tableRound', slot: 'sideA', s: 0.7 }, { m: 'plantSmall1', slot: 'nearA', s: 2 }, { m: 'rugRounded', rug: true }, { p: 'moodboard' }] },
+  // A room nobody has yet: a bare desk, a box of someone's things on the way, and a doormat.
+  vacant: { floor: 'carpet', wall: '#8d9299', things: [{ m: 'cardboardBoxClosed', slot: 'nearA', s: 1.1 }, { m: 'rugDoormat', rug: true }] },
 };
 const SPARE = ['researcher', 'analyst', 'designer', 'tester', 'marketer'];
 // Words in someone's persona or quirk that add one more thing to the room, in the first free slot.
@@ -39,7 +41,7 @@ export function officeTheme(info) {
 /** How someone moves, the same every time for the same person: a gait, a walking pace and a way of standing about. */
 export function manner(id) {
   const h = hash(id);
-  return { pace: 2.5 + ((h % 9) / 8) * 0.9, sway: (h >> 4) % 3, lean: (((h >> 7) % 5) - 2) * 0.012, shift: 0.6 + ((h >> 10) % 5) * 0.12, stance: (h >> 13) % 4 };
+  return { pace: 2.3 + ((h % 9) / 8) * 0.6, sway: (h >> 4) % 3, lean: (((h >> 7) % 5) - 2) * 0.012, shift: 0.6 + ((h >> 10) % 5) * 0.12, stance: (h >> 13) % 4 };
 }
 /**
  * Picks everyone's room. A person keeps the room the server names when this plan has it; otherwise rooms go out in order. The ids are the

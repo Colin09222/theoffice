@@ -33,7 +33,7 @@ Files kept (only the ones the app uses; the rest of each kit was not copied):
     plantSmall1, plantSmall2, plantSmall3, pottedPlant, speaker, stoolBar, tableCoffee, tableCross, trashcan,
     and, for the offices (added 7 November 2026 from the same zip, same sha256): bear, benchCushion, bookcaseClosed, bookcaseClosedWide,
     bookcaseOpenLow, cardboardBoxClosed, chairRounded, deskCorner, lampRoundTable, lampSquareFloor, lampSquareTable, loungeChairRelax,
-    loungeDesignChair, pillowLong, radio, rugRectangle, rugRound, rugRounded, rugSquare, sideTable, sideTableDrawers, speakerSmall, table,
+    loungeDesignChair, pillowLong, radio, rugDoormat, rugRectangle, rugRound, rugRounded, rugSquare, sideTable, sideTableDrawers, speakerSmall, table,
     tableCoffeeGlass, tableGlass, tableRound, televisionModern, televisionVintage
   characters/  from Mini Characters "Models/GLB format", unmodified .glb files and the shared texture:
     character-male-a .. character-male-f, character-female-a .. character-female-f, aid-glasses, aid-sunglasses,
