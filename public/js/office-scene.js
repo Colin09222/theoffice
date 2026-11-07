@@ -2,6 +2,7 @@
 import * as THREE from '../vendor/three/three.module.min.js';
 import { Character } from './character.js';
 import { stage } from './stage.js';
+import { mergeMeshes } from './batch.js';
 
 const ROOM_W = 22, ROOM_D = 13.6, WALL_H = 4.6;
 const DESKS = [[-6.6, 0.5], [-2.2, 0.5], [2.2, 0.5], [6.6, 0.5], [-6.6, 4.4], [-2.2, 4.4], [2.2, 4.4], [6.6, 4.4]];
@@ -336,6 +337,7 @@ export class OfficeView {
     this.pageTex = screenTexture('page', this.colors.primary);
     this.buildRoom();
     this.syncAgents(state);
+    mergeMeshes(this.room);
     this.bind();
   }
   buildRoom() {
@@ -439,10 +441,10 @@ export class OfficeView {
       this.nav.block(ARCADE[0], ARCADE[1], 1.1, 1.2);
     }
     if (d.rug) {
-      const rug = (x, z, w, dd, c) => piece(room, c, w, 0.03, dd, x, 0, z, { cast: false });
-      rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 5, 3.6, primary);
-      rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 4.6, 3.2, accent);
-      rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 4.3, 2.9, primary);
+      const rug = (x, z, w, dd, c, t) => piece(room, c, w, t, dd, x, 0, z, { cast: false });
+      rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 5, 3.6, primary, 0.03);
+      rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 4.6, 3.2, accent, 0.045);
+      rug(BOSS_DESK[0], BOSS_DESK[1] + 0.6, 4.3, 2.9, primary, 0.06);
     }
     // A lounge in the front corner, until a full staff needs that desk.
     if (this.staffCount < 8) {
@@ -478,7 +480,7 @@ export class OfficeView {
     if (d.pet !== 'none') {
       this.pet = buildPet(d.pet);
       this.pet.group.position.set(2, 0, -1.8);
-      room.add(this.pet.group); this.petTarget = [2, -1.8]; this.petWait = 3;
+      s.add(this.pet.group); this.petTarget = [2, -1.8]; this.petWait = 3;
     }
   }
   boardTexture(lines) {
@@ -613,8 +615,8 @@ export class OfficeView {
       window.removeEventListener('pointerup', this.onUp); window.removeEventListener('pointercancel', this.onUp); el.removeEventListener('wheel', this.onWheel);
     };
   }
-  enter() { const r = stage.renderer; r.shadowMap.enabled = true; r.shadowMap.needsUpdate = true; this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; }); }
-  leave() { stage.renderer.shadowMap.enabled = false; }
+  enter() { const r = stage.renderer; r.shadowMap.enabled = true; r.shadowMap.autoUpdate = !stage.lowEnd; r.shadowMap.needsUpdate = true; this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; }); }
+  leave() { const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; }
   destroy() {
     this.unbind();
     for (const a of this.actors.values()) a.destroy();
@@ -664,6 +666,8 @@ export class OfficeView {
   }
   update(dt) {
     this.time += dt; this.intro = Math.min(1, this.intro + dt / 1.35);
+    // On phones the shadows redraw every third frame. Nobody can tell, and it saves about a third of the draw calls.
+    if (stage.lowEnd && (this.frame = (this.frame || 0) + 1) % 3 === 0) stage.renderer.shadowMap.needsUpdate = true;
     const e = 1 - Math.pow(1 - this.intro, 3);
     const k = 1 - Math.exp(-dt * 6);
     this.yaw += (this.targetYaw - this.yaw) * k;

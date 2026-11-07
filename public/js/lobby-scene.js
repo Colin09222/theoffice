@@ -1,5 +1,6 @@
 // The lobby: a dusk harbour city built procedurally, with one tall tower you can turn and ride. No external models or textures.
 import * as THREE from '../vendor/three/three.module.min.js';
+import { mergeMeshes } from './batch.js';
 
 const FLOOR_H = 1.0, TOWER_W = 8.6, GROUND = 3.2;
 const SUN = new THREE.Vector3(-0.72, 0.13, -0.68).normalize();
@@ -346,6 +347,7 @@ function makeTower(floorCount) {
     s.rotation.y = ang;
     group.add(s);
   }
+  mergeMeshes(group, (o) => o === beacon);
   return { group, floors, state, beacon, glow, height: y + 7, signTex };
 }
 

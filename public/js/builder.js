@@ -3,7 +3,7 @@ import { h, clear } from './dom.js';
 import { createPreview } from './character.js';
 import { SKIN, HAIR, HAIR_COLOR, OUTFIT, OUTFIT_COLOR, HAT, GLASSES } from './looks.js';
 
-const LABEL = { none: 'None', short: 'Short', side: 'Swept', long: 'Long', bun: 'Bun', curly: 'Curls', mohawk: 'Mohawk', pigtails: 'Pigtails', suit: 'Suit', shirt: 'Shirt', hoodie: 'Hoodie', tee: 'Tee', dress: 'Dress', labcoat: 'Lab coat', overalls: 'Overalls', cap: 'Cap', beanie: 'Beanie', tophat: 'Top hat', crown: 'Crown', party: 'Party', hardhat: 'Hard hat', headphones: 'Headset', round: 'Round', shades: 'Shades' };
+const LABEL = { wood: 'Wood', carpet: 'Carpet', terrazzo: 'Terrazzo', concrete: 'Concrete', dog: 'Dog', cat: 'Cat', none: 'None', short: 'Short', side: 'Swept', long: 'Long', bun: 'Bun', curly: 'Curls', mohawk: 'Mohawk', pigtails: 'Pigtails', suit: 'Suit', shirt: 'Shirt', hoodie: 'Hoodie', tee: 'Tee', dress: 'Dress', labcoat: 'Lab coat', overalls: 'Overalls', cap: 'Cap', beanie: 'Beanie', tophat: 'Top hat', crown: 'Crown', party: 'Party', hardhat: 'Hard hat', headphones: 'Headset', round: 'Round', shades: 'Shades' };
 
 export function swatches(options, value, onPick, label) {
   const row = h('div.swatches', { role: 'radiogroup', 'aria-label': label });

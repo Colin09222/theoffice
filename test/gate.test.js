@@ -18,7 +18,7 @@ describe('the gate patch from docs/DEPLOY.md', () => {
     const proxyOffice = new Function('http', 'UPSTREAM', `${src}; return proxyOffice;`)(http, t.port);
     const route = new Function('p', 'proxyOffice', 'req', 'res', `${routeLine} return false;`);
     gate = http.createServer((req, res) => {
-      const p = new URL(req.url, 'http://x').pathname;
+      const p = req.url.split('?')[0]; // unnormalised, the harder case: /theoffice/../live is routed to the app
       if (route(p, proxyOffice, req, res) === false) { res.writeHead(200); res.end('private site'); }
     });
     await new Promise((r) => gate.listen(0, '127.0.0.1', r));
@@ -46,7 +46,7 @@ describe('the gate patch from docs/DEPLOY.md', () => {
   });
   test('a raw /theoffice/../live never reaches anything outside the app', async () => {
     const body = await new Promise((res, rej) => { const q = http.request({ host: '127.0.0.1', port: gate.address().port, path: '/theoffice/../live', method: 'GET' }, (r) => { let b = ''; r.on('data', (d) => { b += d; }); r.on('end', () => res({ s: r.statusCode, b })); }); q.on('error', rej); q.end(); });
-    assert.notEqual(body.b, 'private site');
+    assert.equal(body.s, 404); assert.notEqual(body.b, 'private site');
   });
   test('the site\'s password cookie is stripped, and The Office\'s own cookies pass', async () => {
     const f = await claim();
@@ -78,9 +78,9 @@ describe('the gate patch from docs/DEPLOY.md', () => {
     const evil = await fetch(`${origin}/theoffice/api/logout`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.test', cookie: f.cookie }, body: '{}' });
     assert.equal(evil.status, 403);
     // Caddy appends the real client IP, so the rightmost hop is what counts, whatever a client claims to the left of it.
-    const go = (xff) => fetch(`${origin}/theoffice/api/login`, { method: 'POST', headers: { 'content-type': 'application/json', origin, 'x-forwarded-for': xff }, body: JSON.stringify({ slug: 'nobody', recoveryCode: 'x' }) });
-    let last; for (let i = 0; i < 7; i++) last = await go(`8.8.8.${i}, 203.0.113.9`);
+    const go = (xff, slug) => fetch(`${origin}/theoffice/api/login`, { method: 'POST', headers: { 'content-type': 'application/json', origin, 'x-forwarded-for': xff }, body: JSON.stringify({ slug, recoveryCode: 'x' }) });
+    let last; for (let i = 0; i < 7; i++) last = await go(`8.8.8.${i}, 203.0.113.9`, `guess-${i}`);
     assert.equal(last.status, 429);
-    assert.equal((await go('203.0.113.10')).status, 401, 'a different real client is unaffected');
+    assert.equal((await go('203.0.113.10', 'guess-last')).status, 401, 'a different real client is unaffected');
   });
 });

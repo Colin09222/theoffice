@@ -1,5 +1,6 @@
 // The little people. Everything is built from a few low-poly shapes with shared geometry, so a floor stays cheap to draw.
 import * as THREE from '../vendor/three/three.module.min.js';
+import { mergeMeshes, disposeMerged } from './batch.js';
 
 const G = {
   head: new THREE.IcosahedronGeometry(0.34, 2),
@@ -123,6 +124,10 @@ export class Character {
     this.paper = new THREE.Mesh(G.paper, mat('#fbf7ea')); this.paper.visible = false; this.paper.position.set(0, 0.24, 0.31); this.paper.rotation.x = 0.3;
     root.add(this.paper);
     this.group.add(root);
+    // Each moving part keeps its pivot; everything rigid on it becomes one draw call.
+    mergeMeshes(head, (o) => o === eyeL || o === eyeR);
+    mergeMeshes(torso);
+    for (const pivot of [armL, armR, legL, legR]) mergeMeshes(pivot);
   }
   setAnim(name) { this.anim = name; }
   /** Advance the procedural animation. Named poses blend so nothing ever snaps. */
@@ -160,7 +165,7 @@ export class Character {
     const blink = (t % 3.7) < 0.1 ? 0.15 : 1;
     this.eyeL.scale.y = blink; this.eyeR.scale.y = blink;
   }
-  dispose() { this.group.removeFromParent(); }
+  dispose() { disposeMerged(this.group); this.group.removeFromParent(); }
 }
 
 /** A turntable preview for the character builder, with its own small renderer. */
