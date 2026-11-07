@@ -323,7 +323,7 @@ Fixed:
 - Sign-in wanted the floor's slug. It now also takes the company name or the floor's whole link.
 - There is now wording for having no code and for a lost recovery code.
 - The character builder showed the boss's back. It now faces you.
-- Dollar figures on the floor page are gone. The header's spend was public to every visitor. A boss now sees "12% of today's allowance" when a cap is set, and visitors see nothing. Task costs and standing-order costs are off the page.
+- Dollar figures on the floor page are gone. The header's spend was public to every visitor. A boss sees none either: the share of today's allowance this pass first showed them came out in the merge, under the owner's admin-only rule. Task costs and standing-order costs are off the page.
 - On a phone with the directory sheet open, the invisible "Open an office" pill and the ticker went on catching taps meant for the rows beneath them, so tapping a floor there could open the claim wizard. A CSS rule was losing on specificity. The e2e suite caught it, and it is fixed.
 - Tapping search on a phone now raises the sheet instead of leaving the field behind the keyboard.
 - The console is clean of the deprecated-clock and shadow-type warnings.
@@ -345,7 +345,7 @@ Fixed:
 
 The earlier e2e attempts in this session did not all pass. The first ones found one real bug (the invisible pill catching taps), and one failure came from a variable clash in a test I had edited. The other failures, which came and went between runs, did not reproduce on their own and don't look like app bugs: clicks landing on sheets still sliding into place, a guessed browser port, a mock job that had already finished before it could be redirected, and the admin table re-rendering during a click. I hardened the harness against the first two. The last two were not fixed; they simply didn't recur in the final run. All of the numbers above are from the final commit.
 
-Two test changes follow from the no-dollars rule: the spend label now expects a share of the allowance, and a standing order's card expects "Not run yet" and no dollar sign. `test/browser/cdp.mjs` gained optional launch flags, so the resilience test can start a browser with WebGL off. Its click now waits for a sliding sheet or dialog to come to rest, because under load a click could land on whatever had moved there. That is what opened the claim wizard by accident in one run.
+Two test changes follow from the no-dollars rule: the spend label is gone, and a standing order's card expects "Not run yet" and no dollar sign. `test/browser/cdp.mjs` gained optional launch flags, so the resilience test can start a browser with WebGL off. Its click now waits for a sliding sheet or dialog to come to rest, because under load a click could land on whatever had moved there. That is what opened the claim wizard by accident in one run.
 
 **Still weak or unproven.**
 - **Nothing here ran on a real phone or in Safari.** iOS is known-problems avoidance only: `dvh` with fallback, prefixed `backdrop-filter`, half-float check, no autoplay, `visualViewport` for the keyboard. The phone rows in the frame-rate table are the M4 drawing a phone's pixels, not a phone's GPU, so they say the look is cheap per pixel and nothing about an actual iPhone's frame rate or heat.

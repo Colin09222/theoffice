@@ -434,7 +434,8 @@ function scan(value, where, { owner = false, spentValues = [], itemPrices = [] }
     } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${path}[${i}]`));
     else if (v && typeof v === 'object') {
       for (const [k, x] of Object.entries(v)) {
-        assert.ok(!MONEY_KEY.test(k) || (owner && OWNER_KEYS.has(k)), `${where}${path}.${k}: a money field`);
+        // hiring.cap is a head count: how many staff a floor may have.
+        assert.ok(!MONEY_KEY.test(k) || (owner && OWNER_KEYS.has(k)) || `${path}.${k}` === '.hiring.cap', `${where}${path}.${k}: a money field`);
         walk(x, `${path}.${k}`);
       }
     }
@@ -548,14 +549,16 @@ describe('leak tests: what bosses and visitors can see', () => {
 });
 
 describe('leak tests: what bots can see', () => {
-  const floor = { number: 3, name: 'Tiny', tagline: 'x' };
+  const plain = { number: 3, name: 'Tiny', tagline: 'x' };
+  // A floor with its Customise settings filled in, because those add a block of their own to every prompt.
+  const customised = { ...plain, identity: JSON.stringify({ about: 'We make tea.', tone: 'silly', rules: 'Be kind.', avoid: 'Coffee.' }) };
   const cfgs = [
     loadConfig({}, CAPS),
     loadConfig({ APPS_BASE_DOMAIN: 'apps.example.com', COMPUTER_ENABLED: '1', OPENROUTER_API_KEY: 'x', ANTHROPIC_API_KEY: 'y', NAMECHEAP_API_USER: 'u', NAMECHEAP_API_KEY: 'k', NAMECHEAP_CLIENT_IP: '198.51.100.1', DOMAIN_CONTACT_SOURCE: 'source.com', SERVER_IP: '198.51.100.2' }, CAPS),
   ];
   test('no prompt, in any configuration, states a budget, a limit or what anything costs', () => {
     const roles = { ...loadModels().all };
-    for (const cfg of cfgs) {
+    for (const cfg of cfgs) for (const floor of [plain, customised]) {
       scanPrompt(managerPrompt(floor, { name: 'Boss' }, { manager: 'Mo' }, cfg), 'manager prompt');
       for (const [key, role] of Object.entries(roles)) {
         if (key === 'manager') continue;
