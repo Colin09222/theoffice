@@ -309,11 +309,21 @@ describe('questions', () => {
     const { id } = h.e.assignTask(h.f, h.mgr, { to: 'writer', title: 'W', brief: 'b', plan: '', project: 'p', dependsOn: [], afterPrevious: false });
     h.e.kick();
     await until(() => get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status === 'blocked' && !h.e.runs.size, { what: 'the question' });
-    h.e.bossMessage(h.f, 'silly obv');
+    await h.c.post(`/api/floors/${h.c.slug}/chat`, { text: 'silly obv' });
     await until(() => ['review', 'done'].includes(get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status), { what: 'the work to carry on' });
     assert.match(get(h.t.db, 'SELECT result FROM tasks WHERE id=?', id).result, /silly obv/);
     assert.equal(get(h.t.db, 'SELECT answer FROM questions WHERE task_id=?', id).answer, 'silly obv');
     assert.ok(said(h, 'manager').includes('Noted.'));
+  });
+  test('a standing order coming due doesn\'t count as the boss answering', async () => {
+    const h = await start(scripted({ staff: () => ({ toolCalls: [['ask_boss', { question: 'Silly or serious?' }]] }), manager: () => ({ content: 'On it.' }) }));
+    const { id } = h.e.assignTask(h.f, h.mgr, { to: 'writer', title: 'W', brief: 'b', plan: '', project: 'p', dependsOn: [], afterPrevious: false });
+    h.e.kick();
+    await until(() => get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status === 'blocked' && !h.e.runs.size, { what: 'the question' });
+    h.e.bossMessage(h.f, 'Standing order #1: tidy the drive');
+    await idle(h);
+    assert.equal(get(h.t.db, 'SELECT answer FROM questions WHERE task_id=?', id).answer, null);
+    assert.equal(get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status, 'blocked');
   });
 });
 

@@ -351,7 +351,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const text = clean2(b.text);
     if (!text) throw new HttpError(400, 'empty');
     if (text.length > MAX_CHAT) throw new HttpError(413, 'too_large', `Keep it under ${MAX_CHAT} characters.`);
-    engine.bossMessage(f, text);
+    engine.bossChat(f, text);
     json(res, 202, { ok: true });
   });
   const clean2 = (v) => String(v ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, '').trim();
