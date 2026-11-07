@@ -26,11 +26,17 @@ async function route() {
   const floorMatch = path.match(/^\/floor\/([a-z0-9-]+)$/);
   try {
     if (path === '/admin') { const { showAdmin, hideAdmin } = await import('./admin-ui.js'); current = hideAdmin; await showAdmin(ui); return; }
-    if (floorMatch) { const { showFloor, hideFloor } = await import('./floor-ui.js'); current = hideFloor; await showFloor(ui, floorMatch[1]); return; }
+    if (floorMatch) {
+      // Straight into the flash of light, so a slow line never holds up on a frozen close-up of the glass. The floor lifts it when its room is ready.
+      fade.dataset.title = 'Going up'; fade.classList.add('in');
+      const { showFloor, hideFloor } = await import('./floor-ui.js'); current = hideFloor; await showFloor(ui, floorMatch[1]);
+      return;
+    }
     current = hideLobby;
     await showLobby(ui);
   } finally {
     if (leavingFloor) requestAnimationFrame(() => fade.classList.remove('in'));
+    if (floorMatch && !window.__office) fade.classList.remove('in');  // no such floor: nothing else will lift it
   }
 }
 
@@ -48,6 +54,14 @@ function trackKeyboard() {
   document.addEventListener('focusout', () => setTimeout(() => { if (!/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '')) window.scrollTo(0, 0); }, 60));
 }
 
+/** The curtain lifts once, whatever happened on the way. */
+function lift() {
+  document.documentElement.classList.add('ready');
+  const curtain = $('#boot');
+  curtain?.classList.add('gone');
+  setTimeout(() => curtain?.remove(), 700);
+}
+
 async function boot() {
   stage.init($('#scene'));
   stage.notice = (m) => toast(m);
@@ -59,13 +73,10 @@ async function boot() {
   try { await route(); } catch (e) { console.error(e); toast('Something broke on the way in. Try reloading.'); }
   // One clean reveal: the curtain lifts on the finished picture, not on a half-built one that then changes.
   await Promise.race([Promise.all([window.__office?.ready, stage.ok ? stage.whenPainted(2600) : null]), new Promise((r) => setTimeout(r, 3400))]);
-  document.documentElement.classList.add('ready');
-  const curtain = $('#boot');
-  curtain?.classList.add('gone');
-  setTimeout(() => curtain?.remove(), 700);
+  lift();
   // Once things are quiet, fetch the floor's code in the background, so the first walk in is instant. Not on a data-saving connection.
   if (document.body.dataset.page === 'lobby' && !navigator.connection?.saveData) {
     setTimeout(() => (window.requestIdleCallback || setTimeout)(() => import('./floor-ui.js').catch(() => {}), { timeout: 4000 }), 2500);
   }
 }
-boot();
+boot().catch((e) => { console.error(e); toast('Something broke on the way in. Try reloading.'); lift(); });

@@ -47,7 +47,7 @@ body[data-page="admin"] #ui { position: static; pointer-events: auto; }
 #fade::after { content: attr(data-title); font: 400 clamp(24px, 4vw, 38px)/1.2 var(--serif); letter-spacing: -.01em; color: #5a3c2c; padding: 0 24px; text-align: center; }
 #fade.in { opacity: 1; transition: none; }
 body.flying #ui { opacity: 0; transition: opacity .45s; }
-.nojs { padding: 40px; font-family: var(--serif); }
+.nojs { position: fixed; z-index: 100; left: 0; right: 0; bottom: 18%; margin: 0; padding: 24px; text-align: center; font-family: var(--serif); font-size: 18px; color: #fff7ea; }
 button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--brand-2); outline-offset: 2px; }
 input, textarea { font: inherit; color: var(--ink); background: rgba(255, 255, 255, .07); border: 1px solid var(--glass-line); border-radius: 12px; padding: 10px 12px; width: 100%; }
@@ -392,9 +392,13 @@ body[data-page="floor"] #ui::before { content: ''; position: absolute; inset: 0;
 @media (max-height: 520px) and (min-width: 761px) {
   .hero { top: 58px; transform: none; width: min(40vw, 420px); }
   .hero h1 { font-size: 30px; }
-  .hero p, .hints, .ticker { display: none; }
-  .directory { top: 58px; max-height: calc(100% - 70px); width: 300px; right: max(12px, env(safe-area-inset-right)); }
-  .open-pill { left: calc(max(16px, env(safe-area-inset-left)) + 150px); bottom: max(10px, env(safe-area-inset-bottom)); }
+  .hero p, .hints { display: none; }
+  .directory { top: 58px; max-height: calc(100% - 70px); width: 320px; right: max(12px, env(safe-area-inset-right)); }
+  .dir-list { overflow-x: hidden; }
+  .open-pill, .open-pill:hover { left: max(16px, env(safe-area-inset-left)); transform: none; bottom: max(10px, env(safe-area-inset-bottom)); gap: 9px; padding: 4px 4px 4px 5px; }
+  .pill-status { font-size: 10.5px; padding: 6px 9px; letter-spacing: .06em; }
+  .pill-go { font-size: 16px; }
+  .pill-arrow { width: 36px; height: 36px; }
   .topbar { padding-top: 10px; }
   .floor-panel { width: 340px; top: 8px; bottom: 8px; right: max(8px, env(safe-area-inset-right)); }
   .floor-meta { right: 360px; top: 8px; }
