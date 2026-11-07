@@ -85,6 +85,29 @@ export const COMPANIES = [
   },
 ];
 const byKey = (key) => COMPANIES.find((c) => c.key === key);
+// The rest of what people say on these floors: scripted, as fictional as the companies, and never from a model.
+const SCRIPTS = {
+  'mildly-haunted-candles': {
+    asks: [['Did the lavender batch hum at you too?', 'Only when I turned my back. I logged it under "ambient".'], ['Which wick length stops the 3:07 thing?', 'None so far. A quarter inch at least makes it apologise.'], ['Is the attic still not answering?', 'It answered once. We agreed not to discuss it.']],
+    meetings: [['Right. The list. Nobody goes up to the attic alone.', 'I went alone last time. It was fine. It knew my name, but it was fine.', 'Noted, and I wish it weren\'t.'], ['Whoever has the cold spot, take a jumper.', 'That\'s me, and I am already wearing two.', 'Then the kiln notes can wait until you can feel your hands.']],
+    pairs: [['Did you move the candle on the shelf?', 'No. I thought you had.'], ['That cinnamon batch is just cinnamon, right?', 'Mostly. I wouldn\'t leave it alone with the pipes.']],
+  },
+  'soup-opinions-ltd': {
+    asks: [['Where do we stand on barley this quarter?', 'Firmly in favour, in small amounts, under protest.'], ['Is the crouton count still seven?', 'Seven. Any more and we would be a salad company.'], ['Did the minestrone people write back?', 'Twice, in capitals. They have a point about the beans.']],
+    meetings: [['We need a position by lunch, and I mean a position, not a mood.', 'Lunch is the problem. I can\'t judge while hungry.', 'You can\'t judge while full either. We\'ve seen the rankings.'], ['Who took the chowder question?', 'I did, and it\'s bigger than it looks.', 'That is what you said about the leek.']],
+    pairs: [['It needed salt.', 'It was a glass of water, Hal.'], ['I dreamt about bisque again.', 'Was it a good bisque?']],
+  },
+  'slightly-longer-weekends': {
+    asks: [['Does Friday Eve need a second vote?', 'Only if someone turns up to oppose it, and it\'s nearly two.'], ['What do we have on half days before 1900?', 'One petition, mostly about biscuits.'], ['Should the banner say "nearly"?', '"Nearly" tested well. "Almost" made people sad.']],
+    meetings: [['I call this meeting to order, briefly.', 'Seconded. Can it be briefer?', 'Motion to minute that it could not.'], ['Item one: Monday still hasn\'t replied.', 'I move we stop writing to it.', 'Carried, pending biscuits.']],
+    pairs: [['Is it Friday yet?', 'It\'s Tuesday, but I admire the question.'], ['I\'ve drafted a whereas about the kettle.', 'Whereas what?']],
+  },
+  'pigeon-logistics': {
+    asks: [['Is the river run open again?', 'Not while the hawk\'s there. Go over the bakery, not through it.'], ['What does a key weigh, for the 40g rule?', 'Depends on the key. Weigh it. Do not ask Gerald.'], ['Has Gerald said anything?', 'He looked at me and then at the sky. I took it as a no.']],
+    meetings: [['Morning. Twelve birds, eleven flying, one considering.', 'Is that Gerald again?', 'It is always Gerald.'], ['Who\'s got the 9:15?', 'Me, weather permitting.', 'The weather says no. The bird says maybe.']],
+    pairs: [['Someone left crumbs in petty cash.', 'That is petty cash.'], ['Drizzle but keen?', 'Keen but damp, I would call it.']],
+  },
+};
 
 // What a staff member looks like they are doing, by role. State names are the ones the office scene animates.
 const ACTIVITIES = {
@@ -224,6 +247,9 @@ export function installFiller(ext) {
     }
     return s;
   }
+  // One line after another from a list, so nobody says the same thing twice running.
+  const nextOf = (s, list, key) => { s[key] = ((s[key] ?? rnd(list.length)) + 1) % list.length; return list[s[key]]; };
+  function saySome(f, people, lines, kind) { lines.forEach((text, i) => engine.talk(f.id, people[i % people.length], people[(i + 1) % people.length], text, { kind })); }
   function nextTitle(s, c) { if (!s.queue.length) s.queue = shuffled(c.tasks); return s.queue.pop(); }
   const openTasks = (fid) => all(db, "SELECT * FROM tasks WHERE floor_id=? AND status IN ('todo','doing','review') ORDER BY id", fid);
 
@@ -253,6 +279,7 @@ export function installFiller(ext) {
           engine.talk(f.id, mgr, a, `${pick(GIVE)} ${title}.`, { kind: 'assign' });
         }
         if (Math.random() < 0.5) engine.emit(f.id, 'meeting', { manager: mgr.id, staff: crew.map((a) => a.id) });
+        { const script = SCRIPTS[s.key]; if (script) saySome(f, [mgr, ...crew], nextOf(s, script.meetings, 'meetingAt'), 'meeting'); }
         s.phase = 'start'; break;
       }
       case 'start': {
@@ -274,6 +301,11 @@ export function installFiller(ext) {
           const a = staff.find((x) => x.id === task.agent_id); if (!a) continue;
           if (Math.random() < 0.7) act(a, pick(ACTIVITIES[a.role] || ACTIVITIES.writer), task.id);
           if (Math.random() < 0.35) feed(f, a, pick(c.progress));
+        }
+        // Now and then someone stops by a colleague's desk.
+        if (staff.length > 1 && SCRIPTS[s.key] && Math.random() < 0.3) {
+          const [asker, other] = shuffled(staff); const [q, a] = nextOf(s, SCRIPTS[s.key].asks, 'askAt');
+          engine.talk(f.id, asker, other, q, { kind: 'ask' }); engine.talk(f.id, other, asker, a, { kind: 'answer' });
         }
         if (++s.step >= s.steps) s.phase = 'wrap';
         break;
@@ -327,6 +359,7 @@ export function installFiller(ext) {
       default: {
         for (const a of agents) idle(a);
         if (Math.random() < 0.5) feed(f, null, pick(QUIET));
+        if (staff.length > 1 && SCRIPTS[s.key]) saySome(f, shuffled(staff).slice(0, 2), nextOf(s, SCRIPTS[s.key].pairs, 'pairAt'), 'banter');
         s.phase = 'plan'; break;
       }
     }

@@ -110,6 +110,11 @@ export function loadConfig(env = process.env, overrides = {}) {
     // Filler companies (floors-plus): scripted floors that look busy and never call a model. Off unless asked for.
     fillerCompanies: env.FILLER_COMPANIES === '1',
     fillerTickMs: num(env.FILLER_TICK_MS, 9000),
+    // What people say to each other. Each of these is a real, cheap model call, so each has its limit. Work questions get a generous one, since they feed real work.
+    talkGapMs: num(env.TALK_GAP_MS, env.AI_MODE === 'mock' ? 1 : 2200),
+    meetingGapMs: num(env.MEETING_GAP_MS, env.AI_MODE === 'mock' ? 0 : 45000), meetingsPerFloorDay: num(env.MEETINGS_PER_FLOOR_DAY, 40),
+    banterEveryMs: num(env.BANTER_EVERY_MS, 180000), banterTickMs: num(env.BANTER_TICK_MS, 20000), banterPerFloorDay: num(env.BANTER_PER_FLOOR_DAY, 60),
+    asksPerTask: num(env.ASKS_PER_TASK, 4), asksPerFloorDay: num(env.ASKS_PER_FLOOR_DAY, 80),
     // The help line: a manager can ask the owner's assistant for guidance. No credential is involved: the assistant answers through scripts/admin.mjs or the admin view.
     helpEnabled: env.HELP_ENABLED !== '0',
     helpTimeoutMin: num(env.HELP_TIMEOUT_MIN, 30),

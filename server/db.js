@@ -145,6 +145,8 @@ Object.assign(ADDED.floors, { budget_out: "TEXT NOT NULL DEFAULT ''" });
 Object.assign(ADDED.purchases, { notify: 'INTEGER NOT NULL DEFAULT 0' });
 // A long task's early steps get dropped from its transcript. The links it saw go here, because publishing a doc checks that its sources were really opened.
 Object.assign(ADDED.tasks, { seen_links: "TEXT NOT NULL DEFAULT ''" });
+// Each person's own character, notebook and room. See server/people.js. A floor with an empty name is still being set up by chat.
+ADDED.agents = { character: "TEXT NOT NULL DEFAULT ''", memory: "TEXT NOT NULL DEFAULT '[]'", office: "TEXT NOT NULL DEFAULT ''" };
 
 export function openDb(dataDir) {
   let path = ':memory:';

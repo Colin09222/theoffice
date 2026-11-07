@@ -5,6 +5,10 @@ import { get, all, run, tx } from './db.js';
 import { TONES, PERSONALITIES, WORK_KINDS } from '../public/js/looks.js';
 import { BRIEF_LIMITS, settingText } from './brief.js';
 import { capOrNull } from './config.js';
+import { TONES as TONE_NAMES, VIBES } from '../public/js/looks.js';
+import { readCharacter, readMemory, CHARACTER_LIMITS } from './people.js';
+import { writeFile, publishSnapshot, WorkspaceError } from './workspace.js';
+import { redactor } from './engine.js';
 
 const IMAGE = /\.(png|jpe?g|webp|svg)$/i;
 const LOGOISH = /(^|[\/_.-])(logo|logomark|brandmark|wordmark)([\/_.-]|$)/i;
@@ -32,7 +36,7 @@ export function validPersona(input, base = {}) {
 }
 
 export function installCustomise(ext) {
-  const { db, cfg, engine, hooks, GET, POST, json, readJson, limit, requireOwner, HttpError, publicUrl, models, validLook, saveSettings } = ext;
+  const { db, cfg, engine, hooks, POST, json, readJson, limit, requireOwner, HttpError, publicUrl, models, validLook, saveSettings } = ext;
   // Columns live with the feature, so the rest of the schema doesn't need to know about them. Both default to empty, so a saved floor reads as untouched.
   for (const [table, col] of [['floors', 'identity'], ['floors', 'crew'], ['agents', 'persona']]) {
     const have = new Set(all(db, `PRAGMA table_info(${table})`).map((c) => c.name));
@@ -94,12 +98,16 @@ export function installCustomise(ext) {
       const logo = findLogo(f);
       if (logo) out.floor.logoUrl = `${publicUrl(f.slug, logo.project)}${logo.path.split('/').map(encodeURIComponent).join('/')}`;
     }
-    const rows = new Map(all(db, 'SELECT id,persona FROM agents WHERE floor_id=?', f.id).map((a) => [a.id, parse(a.persona, {})]));
+    const rows = new Map(all(db, 'SELECT id,persona,memory FROM agents WHERE floor_id=?', f.id).map((a) => [a.id, a]));
+    const hide = viewer.owner ? (s) => s : redactor(db, f.id);
     for (const a of out.agents) {
-      const p = rows.get(a.id) || {};
+      const row = rows.get(a.id);
+      const p = parse(row?.persona, {});
+      for (const k of ['persona', 'bio', 'quirk']) a[k] = hide(a[k]);
       // The personality's fixed label is part of how the floor looks to everyone. Everything the boss typed is the boss's.
       a.vibe = Object.hasOwn(PERSONALITIES, p.vibe || '') ? PERSONALITIES[p.vibe].label : '';
-      if (viewer.owner) a.persona = { vibe: p.vibe || '', notes: p.notes || '', focus: p.focus || '' };
+      // The panel's own settings and a person's notebook are the boss's. `persona` itself is who they are, and everyone can read that.
+      if (viewer.owner) { a.customise = { vibe: p.vibe || '', notes: p.notes || '', focus: p.focus || '' }; a.memory = readMemory(row).map((n) => n.t); }
     }
     if (!viewer.owner) return;
     out.identity = validIdentity({}, { about: '', tone: '', rules: '', avoid: '', routing: {}, ...parse(f.identity, {}) });
@@ -127,6 +135,8 @@ export function installCustomise(ext) {
       refreshCrew(f.id);
     });
     engine.emit(f.id, 'reload', {}, { persist: false });
+    engine.emitFloor(f.id);
+    engine.people.castFloor(f.id);
     json(res, 200, { ok: true });
   });
   // Hire from the panel: the same path, cap and one-of-each rule as the manager's hire_staff tool.
@@ -154,13 +164,84 @@ export function installCustomise(ext) {
     const a = get(db, 'SELECT * FROM agents WHERE id=? AND floor_id=?', Number(p.id), f.id);
     if (!a) throw new HttpError(404, 'not_found');
     if (a.role === 'manager') throw new HttpError(400, 'manager_stays', 'The office manager runs the floor, so they stay.');
+    letGo(f, a);
+    json(res, 200, { ok: true });
+  });
+  /** The same for the panel and the chat. */
+  function letGo(f, a) {
     const open = get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND agent_id=? AND status IN ('todo','doing','blocked','review')", f.id, a.id).n;
     if (open) throw new HttpError(409, 'still_working', `${a.name} still has ${open === 1 ? 'a task' : `${open} tasks`} open. Wait until it's done, or use Stop all first.`);
     tx(db, () => { run(db, 'DELETE FROM agents WHERE id=? AND floor_id=?', a.id, f.id); refreshCrew(f.id); });
     engine.feed(f.id, null, `${a.name} has left the company`, '');
     engine.emit(f.id, 'reload', {}, { persist: false });
-    json(res, 200, { ok: true });
-  });
+  }
   ext.refreshCrew = refreshCrew;
+
+  // ---- the manager's side: the same rules as the panel, reached through tools. Anything refused comes back as what the manager should tell the boss. ----
+  const told = (fn) => { try { return fn(); } catch (e) { if (e instanceof HttpError) throw new WorkspaceError(e.message); throw e; } };
+  const whoIs = (floorId, who) => {
+    const q = String(who).trim().toLowerCase();
+    const a = all(db, 'SELECT * FROM agents WHERE floor_id=? ORDER BY id', floorId).find((x) => x.name.toLowerCase() === q || x.role === q || x.title.toLowerCase() === q);
+    if (!a) throw new WorkspaceError(`nobody called ${String(who).slice(0, 40)} works here`);
+    return a;
+  };
+  engine.company = {
+    setCompany(floor, i) {
+      const f = get(db, 'SELECT * FROM floors WHERE id=?', floor.id);
+      const vibe = typeof i.vibe === 'string' && Object.hasOwn(VIBES, i.vibe) ? VIBES[i.vibe] : null;
+      if (typeof i.name === 'string' && i.name.trim() && i.name.trim().length < 2) throw new WorkspaceError('a name needs at least 2 characters');
+      const colors = { ...(vibe?.colors || {}), ...(typeof i.primary_color === 'string' ? { primary: i.primary_color } : {}), ...(typeof i.accent_color === 'string' ? { accent: i.accent_color } : {}) };
+      const decor = { ...(vibe?.decor || {}), ...(typeof i.layout === 'string' ? { layout: i.layout } : {}) };
+      const tone = typeof i.tone === 'string' && Object.hasOwn(TONE_NAMES, i.tone) ? i.tone : vibe?.tone;
+      const about = typeof i.what_it_does === 'string' ? i.what_it_does : undefined;
+      if (!i.name && typeof i.tagline !== 'string' && !Object.keys(colors).length && !Object.keys(decor).length && !tone && about === undefined) throw new WorkspaceError('say what to change');
+      tx(db, () => {
+        saveSettings(f, { name: i.name, ...(typeof i.tagline === 'string' ? { tagline: i.tagline } : {}), ...(Object.keys(colors).length ? { colors } : {}), ...(Object.keys(decor).length ? { decor } : {}) });
+        if (tone || about !== undefined) run(db, 'UPDATE floors SET identity=? WHERE id=?', JSON.stringify(validIdentity({ ...(tone ? { tone } : {}), ...(about !== undefined ? { about } : {}) }, parse(f.identity, {}))), f.id);
+      });
+      const now = get(db, 'SELECT name,tagline FROM floors WHERE id=?', f.id);
+      if (now.name !== f.name) engine.feed(f.id, null, f.name ? `The company is now called ${now.name}` : `${now.name} opened its doors`, '');
+      engine.emitFloor(f.id);
+      engine.emit(f.id, 'reload', {}, { persist: false });
+      engine.people.castFloor(f.id);
+      return now.name ? `Done. The company is ${now.name}${now.tagline ? `: "${now.tagline}"` : ''}. The floor changed as you said it.` : 'Saved, but the company still has no name. Name it with set_company as soon as you can.';
+    },
+    updateStaff(floor, who, i) {
+      const a = whoIs(floor.id, who);
+      return told(() => {
+        const look = i.look && typeof i.look === 'object' ? i.look : undefined;
+        tx(db, () => {
+          saveStaff(floor, a, { name: i.name, title: typeof i.title === 'string' ? i.title : undefined, look });
+          const c = readCharacter(a);
+          const text = (k) => (typeof i[k] === 'string' && settingText(i[k], CHARACTER_LIMITS[k])) || c[k];
+          // Written by the boss's say-so, so casting leaves it alone from here on.
+          if (['persona', 'bio', 'quirk'].some((k) => typeof i[k] === 'string')) run(db, 'UPDATE agents SET character=? WHERE id=?', JSON.stringify({ ...c, persona: text('persona'), bio: text('bio'), quirk: text('quirk'), cast: true }), a.id);
+          refreshCrew(floor.id);
+        });
+        const now = get(db, 'SELECT name,title FROM agents WHERE id=?', a.id);
+        engine.emit(floor.id, 'reload', {}, { persist: false });
+        return `Done: ${now.name}, ${now.title}.`;
+      });
+    },
+    letGo(floor, who) {
+      const a = whoIs(floor.id, who);
+      if (a.role === 'manager') throw new WorkspaceError('you run the floor, so you stay');
+      told(() => letGo(floor, a));
+      return `${a.name} has gone.`;
+    },
+    /** The logo goes up from a small public page of its own, which is the one place a floor's pictures reach visitors from. On a floor that keeps everything private, it stays with the boss. */
+    hangLogo(floor) {
+      const f = get(db, 'SELECT * FROM floors WHERE id=?', floor.id);
+      const file = all(db, "SELECT path FROM files WHERE floor_id=? AND path LIKE 'projects/brand/images/logo.%'", f.id).at(-1);
+      if (!file) return;
+      writeFile(db, f.id, 'projects/brand/index.md', `# ${f.name || 'Our'} logo\n\n![The company logo](${file.path.slice('projects/brand/'.length)})\n`, null, cfg.quotaBytes);
+      engine.upsertProject(f, 'brand', { title: 'Logo', description: 'The company logo.', kind: 'doc', sources: [], published: true });
+      publishSnapshot(db, f.id, 'brand', cfg.quotaBytes, '');
+      run(db, 'UPDATE floors SET decor=? WHERE id=?', JSON.stringify({ ...JSON.parse(f.decor), art: true, artStyle: 'logo' }), f.id);
+      engine.emitProject(f.id, 'brand');
+      engine.emitFloor(f.id);
+      engine.emit(f.id, 'reload', {}, { persist: false });
+    },
+  };
   return {};
 }

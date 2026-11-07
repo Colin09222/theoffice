@@ -1,6 +1,7 @@
 // AI_MODE=mock: deterministic scripted model. It speaks the same interface as the real client and returns real tool calls,
 // so every test drives the actual tool loop, ledger, limiter and SSE paths with no key and no spend.
-// Keywords in the boss's message pick scenarios: [ask] [mgrask] [buy] [hire] [fail] [private] [spendy] [slow] [ssrf] [traverse] [inject] [revise] [web] [standing] [cancelorder] [help] [lane:game].
+// Keywords in the boss's message pick scenarios: [ask] [mgrask] [buy] [hire] [fail] [private] [spendy] [slow] [ssrf] [traverse] [inject] [revise] [web] [standing] [cancelorder] [help] [lane:game] [colleague] [rename] [letgo] [logo].
+// A floor with no name yet is set up by chat: "called Something" or "you pick" makes the company.
 import { ProviderError } from './llm.js';
 import { voiced } from './mock-voice.js';
 
@@ -28,9 +29,38 @@ const LANE_OPENERS = {
   business: 'A small business! What is the idea, and who is it for? If you have none yet I can suggest three. Nobody here can send email, post, run ads or spend money, so you will get research, a plan and a page, plus a list of what only you can do.',
 };
 
+// The cheap model: what people say to each other, written from the facts it was handed, and always in the JSON the real one is asked for.
+const ACCENTS = ['short bursts', 'long loops', 'exact odds', 'gentle asides', 'sharp questions', 'old proverbs', 'lists of three', 'whispers'];
+function talkStep(meta) {
+  const [a, b] = meta.speakers || [];
+  switch (meta.purpose) {
+    case 'persona': return JSON.stringify({ people: meta.people.map((p, i) => ({ name: p.name, persona: `${p.name} talks in ${ACCENTS[i % ACCENTS.length]}.`, bio: `${p.name} came here from ${['a ferry', 'a bakery', 'a quarry', 'a theatre', 'a lighthouse'][i % 5]}.`, quirk: `${p.name} counts ${['stairs', 'pens', 'clouds', 'spoons', 'doors'][i % 5]}.`, mood: 'curious' })) });
+    case 'memory': return JSON.stringify({ note: `I ${meta.status === 'failed' ? 'could not finish' : 'finished'} "${meta.title}", and I'd start sooner next time.`, mood: meta.status === 'failed' ? 'frustrated' : 'proud' });
+    case 'answer': return `${meta.answerer} here. About that: ${meta.notes?.at(-1) || 'I have not done anything on that yet'}`;
+    case 'meeting': return JSON.stringify({ lines: meta.trigger === 'plan'
+      ? [{ who: a, text: `"${meta.titles[0]}" goes first. Who is nervous?` }, { who: b, text: `Not me. Ask me again once "${meta.titles.at(-1)}" is on my desk.` }]
+      : [{ who: b, text: `"${meta.titles.at(-1)}" is with you now.` }, { who: a, text: `Then I'll read the report before I say anything.` }] });
+    case 'banter': return JSON.stringify({ lines: [{ who: a, text: `I can't stop thinking about "${meta.title}" (${meta.said?.length ?? 0}).` }, { who: b, text: `You said that about the last one (${meta.said?.length ?? 0}).` }] });
+    default: return '';
+  }
+}
+
 function managerStep(meta, messages = []) {
   const boss = meta.lastBoss || '';
   const slug = meta.slugFor(boss);
+  // A company made by talking. It comes before everything else: nothing else makes sense until there is a company.
+  if (meta.setup && meta.isFreshBoss && !meta.toReview.length) {
+    const called = boss.match(/called ([A-Z][\w' -]{1,40}?)(?:[.,!]|$)/)?.[1];
+    if (meta.step > 0) return { content: 'There you go. What should we all start on?' };
+    if (called || /you pick/i.test(boss)) return { toolCalls: [call('set_company', { name: called || 'Tiny Soup Company', tagline: 'Strong views, served warm.', what_it_does: boss.slice(0, 200), tone: 'silly', vibe: 'silly', layout: 'pods', primary_color: '#123456' })] };
+    return { content: 'Good start. What should we call it, and who is it for? Say "you pick" and I will choose.' };
+  }
+  if (/\[(rename|letgo|logo)\]/.test(boss) && meta.isFreshBoss && !meta.toReview.length) {
+    if (meta.step > 0) return { content: `Done, boss.${/^Error/.test([...messages].reverse().find((m) => m.role === 'tool')?.content || '') ? ' Or rather, it did not work.' : ''}` };
+    if (/\[rename\]/.test(boss)) return { toolCalls: [call('update_staff', { who: 'writer', name: 'Crumb', title: 'Head of Buns', persona: 'Talks only about bread.', look: { hat: 'crown' } })] };
+    if (/\[letgo\]/.test(boss)) return { toolCalls: [call('let_go_staff', { who: 'designer' })] };
+    return { toolCalls: [call('make_logo', { prompt: 'A small round bowl of soup, in two colours.' })] };
+  }
   // The help line. An answer or an expiry is a turn of its own, whatever came before it.
   if (meta.guidance) return { content: 'Thanks to buddehbot, we can carry on, boss.' };
   if (meta.helpDeadEnd) return { content: 'I did not get an answer from buddehbot, boss, so I am using my best judgment and carrying on.' };
@@ -98,6 +128,7 @@ function staffStep(meta) {
   const list = [];
   if (role === 'researcher') {
     list.push(call('list_files', {}));
+    if (/\[colleague\]/.test(b)) list.push(call('ask_colleague', { who: 'writer', question: 'What should I know from your last job?' }));
     if (/\[ssrf\]/.test(b)) list.push(call('fetch_url', { url: 'http://169.254.169.254/latest/meta-data/' }));
     if (/\[web\]/.test(b)) list.push(call('web_search', { query: 'tiny companies' }));
     if (/\[buy\]/.test(b)) list.push(call('file_purchase_request', { item: 'A domain name', price: 12, why: 'So the launch has its own address.', link: 'https://example.com/domain' }));
@@ -128,6 +159,12 @@ export function createMockClient(cfg) {
   return {
     failed,
     async chat({ messages, onToken, onToolCall, signal, pricing, meta }) {
+      if (meta?.kind === 'talk') {
+        await sleep(cfg.mockDelayMs, signal);
+        const content = talkStep(meta);
+        const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
+        return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
+      }
       const boss = meta.lastBoss || meta.task?.brief || '';
       const delay = /\[slow\]/.test(boss) || /\[slow\]/.test(meta.allBoss || '') ? Math.max(cfg.mockDelayMs, 120) * 4 : cfg.mockDelayMs;
       await sleep(delay / 2, signal);

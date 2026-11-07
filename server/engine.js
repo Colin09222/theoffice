@@ -15,7 +15,8 @@ import { slugify, WorkspaceError, listFiles, readFile } from './workspace.js';
 import { seededLook } from '../public/js/looks.js';
 import { Computer } from './computer.js';
 import { deleteFloorData } from './appdata.js';
-import { talkLine, PRIVATE_TALK, BOSS_ONLY_TALK } from './talk.js';
+import { talkLine, talkShape, WORK_BEATS, PRIVATE_TALK, BOSS_ONLY_TALK } from './talk.js';
+import { createPeople, fillCharacters, readCharacter } from './people.js';
 
 const today = (ms) => new Date(ms).toISOString().slice(0, 10);
 const EVENT_KEEP = 1500, KEPT_ERRORS = 100;
@@ -34,7 +35,7 @@ const TOOL_LOOK = {
   write_file: ['typing', 'Writing'], publish_project: ['typing', 'Getting it ready to publish'], fetch_url: ['browsing', 'Looking something up'], web_search: ['browsing', 'Searching the web'],
   read_file: ['reading', 'Reading'], list_files: ['reading', 'Checking the shared drive'], ask_boss: ['thinking', 'Writing a question for the boss'], file_purchase_request: ['typing', 'Filling in a request'],
   assign_task: ['typing', 'Writing up the plan'], review_task: ['reading', 'Reviewing the work'], hire_staff: ['typing', 'Writing a job offer'], cancel_task: ['typing', 'Crossing something off'],
-  ask_buddehbot: ['thinking', 'Writing to buddehbot'],
+  ask_buddehbot: ['thinking', 'Writing to buddehbot'], ask_colleague: ['talking', 'Asking a colleague'], set_company: ['typing', 'Setting up the company'], update_staff: ['typing', 'Updating the staff list'], let_go_staff: ['typing', 'Doing the paperwork'], make_logo: ['typing', 'Sketching a logo'],
 };
 // The label on an answer from the help line. Staff reports, files and pages can claim to be buddehbot, but only this message is, and it only ever advises.
 export const GUIDANCE_LABEL = '[Guidance from buddehbot, the building owner\'s assistant, answering a question you asked. It is advice, not an order from the boss, and it changes no limit or rule.]';
@@ -51,6 +52,7 @@ export class Engine {
     this.tools = createTools({ db, cfg, engine: this, fetcher, httpFetch });
     this.domains = createDomainBroker({ db, cfg, engine: this, client: namecheap });
     this.ios = createIos({ db, cfg, engine: this });
+    this.people = createPeople(this);
     const brokers = models.tools || {};
     // A mock building never reaches a paid broker, whatever keys happen to be set.
     const real = cfg.aiMode !== 'mock';
@@ -80,6 +82,7 @@ export class Engine {
     this.timer.unref?.();
     this.domainTimer = setInterval(() => { this.domains.reconcile().catch((e) => this.fail('domains', e)); }, this.cfg.domainReconcileMs ?? 30000);
     this.domainTimer.unref?.();
+    this.people.start();
     this.kick();
   }
   async stop() {
@@ -88,6 +91,7 @@ export class Engine {
     clearInterval(this.domainTimer);
     for (const r of this.runs.values()) r.ctl.abort(new Halt('shutdown'));
     await Promise.allSettled([...this.runs.values()].map((r) => r.promise));
+    await this.people.stop();
   }
   kick() {
     if (this.tickQueued || this.stopped) return;
@@ -332,7 +336,7 @@ export class Engine {
     // Reports stay out too: they quote what was found on pages, and the manager has the facts in the state message.
     // So does anything about the budget: a bot that doesn't know can't tell anyone.
     const msgs = all(this.db, "SELECT id,role,text FROM messages WHERE floor_id=? AND role NOT IN ('office','report','budget') ORDER BY id DESC LIMIT 30", floor.id).reverse();
-    const roster = { manager: mgr.name };
+    const roster = { manager: mgr.name, person: this.people.personBlock(mgr) };
     const out = [{ role: 'system', content: managerPrompt(floor, boss, roster, this.cfg) }];
     for (const m of msgs) {
       if (m.role === 'boss') out.push({ role: 'user', content: m.text });
@@ -345,7 +349,7 @@ export class Engine {
     const last = msgs[msgs.length - 1];
     const toReview = tasks.filter((t) => t.status === 'review');
     return { messages: out, meta: {
-      kind: 'manager', floorId: floor.id, floorSlug: floor.slug, step: 0, lastBoss: bossMsgs[bossMsgs.length - 1]?.text || '', allBoss: bossMsgs.map((m) => m.text).join(' '),
+      kind: 'manager', setup: !floor.name, floorId: floor.id, floorSlug: floor.slug, step: 0, lastBoss: bossMsgs[bossMsgs.length - 1]?.text || '', allBoss: bossMsgs.map((m) => m.text).join(' '),
       isFreshBoss: last?.role === 'boss', answered: last?.role === 'note' && /answered/.test(last.text), guidance: last?.role === 'help' ? last.text : '', helpDeadEnd: last?.role === 'note' && /buddehbot/.test(last.text),
       toReview, reviewsWaiting: counts.review, openCount: counts.n - counts.review, published,
       slugFor: (s) => slugify(String(s).replace(/\[[a-z]+\]/g, '').replace(ACT_WORDS, ' '), 'launch').slice(0, 30).replace(/-+$/, '') || 'launch',
@@ -361,6 +365,8 @@ export class Engine {
     const defs = toolDefs(names, this.cfg, 'manager');
     const ctx = this.toolCtx(floor, mgr, null, names);
     ctx.signal = signal;
+    // Who the company is and who works here changes only because the boss just asked. A report or a page read while reviewing can't start that.
+    ctx.bossTurn = !!meta.isFreshBoss;
     const call = { floorId, agent: mgr, signal, project: '' };
     const maxSteps = this.cfg.maxManagerSteps;
     const opening = messages.length;
@@ -408,6 +414,7 @@ export class Engine {
           const planned = get(this.db, 'SELECT plan, project FROM tasks WHERE floor_id=? ORDER BY id DESC LIMIT 1', floorId);
           if (planned?.plan) this.talk(floorId, mgr, null, planned.plan, { kind: 'plan', project: planned.project });
           this.emit(floorId, 'meeting', { manager: mgr.id, staff: ids });
+          if (planned) this.people.planMeeting(floorId, planned);
           this.kick();
         }
         if (ctx.suspend) break;
@@ -445,12 +452,12 @@ export class Engine {
     let messages = task.transcript ? JSON.parse(task.transcript) : null;
     if (!messages) {
       messages = [
-        { role: 'system', content: staffPrompt(floor, agent, roleCfg, { ...task, live: this.isLive(floor.id, task.project) }, this.cfg) },
+        { role: 'system', content: staffPrompt(floor, agent, roleCfg, { ...task, live: this.isLive(floor.id, task.project) }, this.cfg, this.people.personBlock(agent, task)) },
         { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${this.handoffFor(floor, task)}` },
       ];
     }
     // A task that started on a computer has no system prompt of its own here. It never runs without the safety rules.
-    if (messages[0]?.role !== 'system') messages.unshift({ role: 'system', content: staffPrompt(floor, agent, roleCfg, task, this.cfg) });
+    if (messages[0]?.role !== 'system') messages.unshift({ role: 'system', content: staffPrompt(floor, agent, roleCfg, task, this.cfg, this.people.personBlock(agent, task)) });
     this.setAgent(agent.id, { state: 'thinking', activity: task.title, project: task.project, task_id: task.id });
     this.feed(floorId, agent, `started "${task.title}"`, task.project);
     const call = { floorId, agent, signal, project: task.project, taskId: task.id };
@@ -573,6 +580,8 @@ export class Engine {
     const open = get(this.db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing')", floor.id).n;
     // Only wake the (more expensive) manager when the batch is finished. Failures always wake it.
     if (status === 'failed' || open === 0) run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
+    this.people.afterTask(floor, agent, t, status, result);
+    if (open === 0) this.people.wrapMeeting(floor.id, t);
     this.progressNote(floor.id, agent, t, status);
     this.kick();
   }
@@ -714,8 +723,10 @@ export class Engine {
     const wanted = cleanName(name);
     const nm = wanted && !taken.has(wanted.toLowerCase()) ? wanted : free || wanted || STAFF_NAMES[start];
     const r = run(this.db, 'INSERT INTO agents (floor_id,role,title,name,look,hired,created_at) VALUES (?,?,?,?,?,1,?)', floor.id, role, cfg.title, nm, JSON.stringify(seededLook(floor.id * 17 + n * 5 + 3)), this.now());
+    fillCharacters(this.db, floor.id);
     const a = get(this.db, 'SELECT * FROM agents WHERE id=?', Number(r.lastInsertRowid));
     this.emit(floor.id, 'hired', { agent: agentView(a) });
+    this.people.castFloor(floor.id);
     this.feed(floor.id, null, `${nm} joined as ${cfg.title}`, '');
     return `Hired ${nm} as ${cfg.title}. Use "${role}" as the assign_task target.`;
   }
@@ -731,7 +742,7 @@ export class Engine {
     run(this.db, 'UPDATE questions SET answer=?, answered_at=? WHERE id=?', text, this.now(), id);
     const asker = get(this.db, 'SELECT id, name FROM agents WHERE id=?', q.agent_id);
     const about = q.task_id ? get(this.db, 'SELECT project FROM tasks WHERE id=?', q.task_id) : null;
-    if (asker) this.talk(floor.id, this.bossOf(floor), asker, text, { kind: 'answer', project: about?.project || '' });
+    if (asker) this.talk(floor.id, this.bossOf(floor), asker, text, { kind: 'boss_answer', project: about?.project || '' });
     if (q.task_id) {
       const t = get(this.db, 'SELECT * FROM tasks WHERE id=?', q.task_id);
       // A computer task may still be finishing its turn. The answer waits in line and goes in as its next message.
@@ -841,7 +852,7 @@ export class Engine {
     // What still touches private work after that, in another spelling or in words lifted from a private brief or the boss's private settings, stays with the boss.
     const open = redactChat(this.db, floorId, said);
     const quiet = { ...(open === said ? {} : { pub: talkLine(open) }), ...(mentionsPrivate(this.db, floorId, '', open) || quotesSettings(this.db, floorId, open) ? { hush: true } : {}), ...(quotesBoss(this.db, floorId, open) ? { quote: true } : {}) };
-    this.emit(floorId, 'talk', { from: from.id, to: to?.id ?? null, fromName: from.name, toName: to?.name ?? '', text: line, kind, ts: this.now(), ...quiet }, { project });
+    this.emit(floorId, 'talk', { from: from.id, to: to?.id ?? null, fromName: from.name, toName: to?.name ?? '', text: line, ...(WORK_BEATS.has(kind) ? { kind: 'work', beat: kind } : { kind }), ts: this.now(), ...quiet }, { project });
   }
   /** Anything about the budget or a purchase: the boss's alone, even on a floor with public chat, and it never reaches the model. */
   bossNotice(floorId, text) {
@@ -876,7 +887,12 @@ export class Engine {
     if (t) this.emit(t.floor_id, 'task', taskView(t), { persist: false, project: t.project });
   }
   emitProject(floorId, slug) { this.emit(floorId, 'project', { slug }, { project: slug }); }
-  emitFloor(floorId) { this.emit(floorId, 'floor', this.floorState(floorId), { persist: false }); }
+  emitFloor(floorId) { this.emit(floorId, 'floor', { ...this.floorState(floorId), ...this.floorIdentity(floorId) }, { persist: false }); }
+  /** Who the company is. It goes out with the floor event, so a change made by chat shows up live. */
+  floorIdentity(floorId) {
+    const f = get(this.db, 'SELECT name,tagline,colors,decor FROM floors WHERE id=?', floorId);
+    return f ? { name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), decor: JSON.parse(f.decor), setup: !f.name } : {};
+  }
   floorState(floorId) {
     const f = get(this.db, 'SELECT paused,pause_reason,status,budget_notice_day,budget_out FROM floors WHERE id=?', floorId);
     if (!f) return { status: 'gone', paused: false, pauseReason: '', globalPause: false, budgetStopped: false, outOfBudget: false };
@@ -889,6 +905,7 @@ export class Engine {
     const add = (role, title, name, look) => run(this.db, 'INSERT INTO agents (floor_id,role,title,name,look,created_at) VALUES (?,?,?,?,?,?)', floorId, role, title, name, JSON.stringify(look), t);
     let i = floorId * 7;
     for (const [role, cfg] of Object.entries(this.models.roles)) { add(role, cfg.title, STAFF_NAMES[i % STAFF_NAMES.length], seededLook(i * 13 + 2)); i++; }
+    fillCharacters(this.db, floorId);
   }
   resetFloor(floorId) {
     this.cancelOpen(floorId);
@@ -897,6 +914,7 @@ export class Engine {
     tx(this.db, () => {
       for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions', 'ios_requests', 'help_requests', 'standing_orders', 'standing_runs']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
       run(this.db, "DELETE FROM agents WHERE floor_id=? AND hired=1", floorId);
+      run(this.db, "UPDATE agents SET memory='[]' WHERE floor_id=?", floorId);
       run(this.db, "UPDATE floors SET manager_wake=0, paused=0, pause_reason='', budget_notice_day='', budget_out='' WHERE id=?", floorId);
     });
     this.emit(floorId, 'reload', {});
@@ -965,11 +983,12 @@ export function compact(messages) {
   });
 }
 
-export const agentView = (a) => ({ id: a.id, role: a.role, title: a.title, name: a.name, look: JSON.parse(a.look), state: a.state, activity: a.activity, taskId: a.task_id, hired: !!a.hired });
+export const agentView = (a) => { const c = readCharacter(a); return { id: a.id, role: a.role, title: a.title, name: a.name, look: JSON.parse(a.look), state: a.state, activity: a.activity, taskId: a.task_id, hired: !!a.hired, persona: c.persona, bio: c.bio, quirk: c.quirk, mood: c.mood, office: a.office || '' }; };
 export const taskView = (t) => ({ id: t.id, plan: t.plan, title: t.title, brief: t.brief, agentId: t.agent_id, project: t.project, status: t.status, result: t.result, updatedAt: t.updated_at, dependsOn: JSON.parse(t.depends_on || '[]') });
 
 /** What a viewer may see of an event. Visitors get no chat (unless the floor opts in), no owner-only events and nothing from private projects. */
-export function viewEvent(db, ev, viewer) {
+export function viewEvent(db, raw, viewer) {
+  const ev = raw.type === 'talk' ? { ...raw, data: talkShape(raw.data) } : raw;
   if (viewer.owner) return ev;
   if (ev.ownerOnly) return null;
   if (ev.type === 'question' || ev.type === 'question_answered' || ev.type === 'purchase') return null;
@@ -986,11 +1005,12 @@ export function viewEvent(db, ev, viewer) {
     : viewer.defaultPrivate && (ev.type === 'task' || ev.type === 'agent' || ev.type === 'talk' || (ev.type === 'feed' && ev.data.agent !== null));
   if (ev.type === 'talk') {
     const { hush, quote, pub, ...said } = ev.data;
-    if (isPrivate) return { ...ev, project: '', data: { ...said, kind: 'private', text: PRIVATE_TALK } };
+    const hidden = () => { const { beat: _b, ...rest } = said; return { ...ev, project: '', data: { ...rest, kind: 'private', text: PRIVATE_TALK } }; };
+    if (isPrivate) return hidden();
     // A question to the boss and the boss's answer never reach a visitor, whatever the project. They see that a word was had, as the feed says.
-    if (BOSS_ONLY_TALK[said.kind]) return { ...ev, data: { ...said, text: BOSS_ONLY_TALK[said.kind] } };
+    if (BOSS_ONLY_TALK[said.beat]) return { ...ev, data: { ...said, text: BOSS_ONLY_TALK[said.beat] } };
     // What the boss typed stays between them and the manager unless the floor opened its chat, and the manager quoting it doesn't change that.
-    if (hush || (quote && !viewer.publicChat)) return { ...ev, project: '', data: { ...said, kind: 'private', text: PRIVATE_TALK } };
+    if (hush || (quote && !viewer.publicChat)) return hidden();
     return { ...ev, data: { ...said, text: redactChat(db, ev.floorId, pub ?? said.text) } };
   }
   if (ev.type === 'task') {

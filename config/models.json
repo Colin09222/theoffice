@@ -132,6 +132,16 @@
     }
   },
   "tools": {
+    "talk": {
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5",
+      "effort": "low",
+      "pricing": {
+        "prompt": 0.1,
+        "completion": 0.5,
+        "cacheRead": 0.01
+      }
+    },
     "image": {
       "model": "google/gemini-nano-banana-2.1",
       "estimateUsd": 0.08

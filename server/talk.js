@@ -27,4 +27,12 @@ export function talkLine(raw, max = MAX) {
 
 // What a visitor reads in place of words that aren't theirs to read. The people still walk over; only the words change.
 export const PRIVATE_TALK = 'Talking about something private.';
-export const BOSS_ONLY_TALK = { question: 'I have a question for the boss.', answer: 'The boss has answered.' };
+export const BOSS_ONLY_TALK = { question: 'I have a question for the boss.', boss_answer: 'The boss has answered.' };
+// Every line on a floor has one of the contract's kinds: work, ask, answer, meeting, banter. Lines about the work keep what they were as their beat, because the room acts each one out differently.
+export const WORK_BEATS = new Set(['assign', 'plan', 'handoff', 'findings', 'review', 'question', 'boss_answer']);
+/** The same for a line stored before kinds changed, which still has its beat as its kind. A boss's answer is told from a colleague's by who gave it. */
+export function talkShape(d) {
+  if (d.beat || d.kind === 'private') return d;
+  if (d.kind === 'answer' && d.from === 'boss') return { ...d, kind: 'work', beat: 'boss_answer' };
+  return WORK_BEATS.has(d.kind) ? { ...d, kind: 'work', beat: d.kind } : d;
+}

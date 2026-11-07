@@ -161,7 +161,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- views ----
   const floorCard = (f) => {
     const busy = get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status='doing'", f.id).n;
-    const card = { number: f.number, slug: f.slug, name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), status: f.status, busy };
+    const card = { number: f.number, slug: f.slug, name: f.name || 'New company', tagline: f.tagline, colors: JSON.parse(f.colors), status: f.status, busy, ...(f.name ? {} : { setup: true }) };
     applyHooks(hooks.floorCard, f, card);
     return card;
   };
@@ -200,7 +200,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       .map((e) => engine.publicView({ floorId: f.id, type: 'talk', project: e.project, data: JSON.parse(e.data), id: e.id, ts: e.created_at }, viewer)).filter(Boolean)
       .map((v) => ({ id: v.id, ...v.data }));
     const out = {
-      viewer: { owner: viewer.owner }, floor: { number: f.number, slug: f.slug, name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), boss: JSON.parse(f.boss), decor: JSON.parse(f.decor), publicChat: !!f.public_chat, defaultPrivate: !!f.default_private, ...engine.floorState(f.id) },
+      viewer: { owner: viewer.owner }, floor: { number: f.number, slug: f.slug, name: f.name, setup: !f.name, tagline: f.tagline, colors: JSON.parse(f.colors), boss: JSON.parse(f.boss), decor: JSON.parse(f.decor), publicChat: !!f.public_chat, defaultPrivate: !!f.default_private, ...engine.floorState(f.id) },
       agents, tasks, projects, feed, talk, lastEventId: get(db, 'SELECT COALESCE(MAX(id),0) n FROM events WHERE floor_id=?', f.id).n,
     };
     // Whether the money has run out is between the boss and the owner.
@@ -260,16 +260,18 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const b = await readJson(req, 8192);
     const code = A.normalizeCode(b.code); const hash = A.sha256(code);
     const name = clean(b.name, 60); const tagline = clean(b.tagline, 120); const bossName = clean(b.bossName, 30);
-    if (name.length < 2) throw new HttpError(400, 'bad_name', 'Give your company a name.');
+    // A name is optional now: without one the manager works out the company with the boss in the chat. One letter is still a typo.
+    if (name.length === 1) throw new HttpError(400, 'bad_name', 'Give your company a name.');
     if (!bossName) throw new HttpError(400, 'bad_boss', 'What should the staff call you?');
     const colors = validColors(b.colors); const look = validLook(b.look); const decor = validDecor({});
-    const base = slugify(name, 'floor');
+    const given = slugify(name, 'floor');
     const recovery = A.newRecoveryCode(); const recoveryHash = A.hashSecret(recovery);
     const floorId = tx(db, () => {
       const row = get(db, 'SELECT * FROM codes WHERE hash=?', hash);
       if (!row || row.claimed_at) throw new HttpError(404, 'bad_code', 'That code isn\'t valid, or it has already opened an office.');
       const number = nextFreeFloor(row.floor_number);
       if (!number) throw new HttpError(409, 'no_floors', 'The building is full, or that floor is taken.');
+      const base = name ? given : `floor-${number}`;
       let slug = RESERVED.has(base) || !slugPattern.test(base) ? `${base}-co`.replace(/^-+/, '') : base;
       for (let i = 2; get(db, 'SELECT 1 x FROM floors WHERE slug=?', slug); i++) slug = `${base.slice(0, 34)}-${i}`;
       const r = run(db, 'INSERT INTO floors (slug,number,name,tagline,colors,boss,decor,recovery_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?)', slug, number, name, tagline, JSON.stringify(colors), JSON.stringify({ name: bossName, look }), JSON.stringify(decor), recoveryHash, now());
@@ -280,7 +282,11 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     });
     const f = get(db, 'SELECT * FROM floors WHERE id=?', floorId);
     const s = A.createSession(db, 'owner', floorId, A.OWNER_MAX_AGE, now());
-    engine.managerSays(floorId, `Welcome to the building, ${bossName}. I'm your office manager and everyone's at their desks. What should ${name} start on? Tap one below, or just tell me what's on your mind.`);
+    const mgrName = get(db, "SELECT name FROM agents WHERE floor_id=? AND role='manager'", floorId)?.name || 'your office manager';
+    engine.managerSays(floorId, name
+      ? `Welcome to the building, ${bossName}. I'm your office manager and everyone's at their desks. What should ${name} start on? Tap one below, or just tell me what's on your mind.`
+      : `${bossName}, hi. I'm ${mgrName}, your office manager. The staff are at their desks and nobody knows what company this is yet, so that's our first job. What should it do? A rough idea is plenty, or say "you pick" and I'll pitch you one.`);
+    engine.people.castFloor(floorId);
     log('info', 'floor claimed', { floor: f.number });
     json(res, 201, { slug: f.slug, number: f.number, recoveryCode: recovery, csrf: s.csrf }, { 'set-cookie': A.cookieHeader(A.COOKIE, s.token, A.OWNER_MAX_AGE) });
   });
