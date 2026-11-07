@@ -25,8 +25,9 @@ describe('1. agents have no shell, no code execution, no real filesystem', () =>
     }
   });
   test('the tool list is exactly the permitted set', () => {
+    // view_file and copy_file only reach this floor's own drive: they show a picture to the model, or copy one into a project, and nothing under uploads/ can be changed.
     // ask_colleague reaches only a colleague on the same floor, through the cheap model, and its answer comes back fenced as data.
-    assert.deepEqual([...STAFF_TOOLS].sort(), ['ask_boss', 'ask_colleague', 'fetch_url', 'file_purchase_request', 'list_files', 'publish_project', 'read_file', 'web_search', 'write_file'].sort());
+    assert.deepEqual([...STAFF_TOOLS].sort(), ['ask_boss', 'ask_colleague', 'copy_file', 'fetch_url', 'file_purchase_request', 'list_files', 'publish_project', 'read_file', 'view_file', 'web_search', 'write_file'].sort());
     // Manager extras only touch this floor's own rows.
     assert.deepEqual(MANAGER_TOOLS.filter((x) => !STAFF_TOOLS.includes(x)).sort(), ['assign_task', 'cancel_task', 'hire_staff', 'review_task']);
   });

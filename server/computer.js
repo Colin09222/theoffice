@@ -209,7 +209,7 @@ export class Computer {
       }
       task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       if (!task.transcript) {
-        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, person: e.people.personBlock(agent, task), live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }) }, e.cfg) }]), task.id);
+        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, person: e.people.personBlock(agent, task), live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }), uploads: e.taskFiles(task) }, e.cfg) }]), task.id);
         task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       }
       st = this.newState(floor, agent, task, signal);
@@ -335,6 +335,8 @@ export class Computer {
         { path: '.office/launch-check.mjs', data: Buffer.from(LAUNCH_CHECK) },
         { path: '.office/three.module.min.js', data: THREE_JS },
         ...files.map((f) => ({ path: `project/${f.path}`, data: f.data })),
+        // The boss's files for this task, beside the project rather than in it: only what the agent copies in is saved back.
+        ...e.taskFiles(task).map((a) => ({ path: a.path, data: Buffer.from(get(e.db, 'SELECT content FROM files WHERE floor_id=? AND path=?', floor.id, a.path)?.content ?? '') })),
       ]);
       baseline = baselineOf(files);
       e.checkpoint(floor.id, signal);
@@ -577,7 +579,8 @@ export class Computer {
     const e = this.engine;
     const name = computerToolName(ev.name);
     if (name === 'publish_project') { try { return this.declarePublish(st, ev.input || {}); } catch (err) { if (err instanceof WorkspaceError) return `Error: ${err.message}`; throw err; } }
-    return e.tools.exec(st.ctx, name, JSON.stringify(ev.input ?? {}));
+    const out = await e.tools.exec(st.ctx, name, JSON.stringify(ev.input ?? {}));
+    return out && typeof out === 'object' ? out.text : out;
   }
   // Files in a container can't be read from here until the turn ends, so publishing is recorded now and happens then.
   declarePublish(st, a) {

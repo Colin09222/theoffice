@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS events (
   data TEXT NOT NULL, created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_floor ON events(floor_id, id);
+CREATE TABLE IF NOT EXISTS attachments (
+  id TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL,
+  path TEXT NOT NULL, message_id INTEGER, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS attachments_floor ON attachments(floor_id);
 CREATE TABLE IF NOT EXISTS files (
   floor_id INTEGER NOT NULL, path TEXT NOT NULL, content TEXT NOT NULL, size INTEGER NOT NULL,
   agent_id INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY (floor_id, path)
@@ -146,6 +151,9 @@ Object.assign(ADDED.purchases, { notify: 'INTEGER NOT NULL DEFAULT 0' });
 // A long task's early steps get dropped from its transcript. The links it saw go here, because publishing a doc checks that its sources were really opened.
 Object.assign(ADDED.tasks, { seen_links: "TEXT NOT NULL DEFAULT ''" });
 // Each person's own character, notebook and room. See server/people.js. A floor with an empty name is still being set up by chat.
+// The boss's uploads: which of them came with a chat message, and which the manager handed to a task.
+Object.assign(ADDED.messages ||= {}, { files: "TEXT NOT NULL DEFAULT ''" });
+Object.assign(ADDED.tasks, { files: "TEXT NOT NULL DEFAULT '[]'" });
 ADDED.agents = { character: "TEXT NOT NULL DEFAULT ''", memory: "TEXT NOT NULL DEFAULT '[]'", office: "TEXT NOT NULL DEFAULT ''" };
 
 export function openDb(dataDir) {

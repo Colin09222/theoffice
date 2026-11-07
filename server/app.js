@@ -8,7 +8,7 @@ import { ROOT } from './config.js';
 import * as A from './auth.js';
 import { Bus } from './bus.js';
 import { Engine, agentView, taskView, PRIVATE_TEXT, redactChat, redactor, viewEvent } from './engine.js';
-import { slugify, slugPattern, cleanPath, mimeOf, listFiles, readFile, floorBytes, WorkspaceError } from './workspace.js';
+import { slugify, slugPattern, cleanPath, mimeOf, listFiles, readFile, floorBytes, WorkspaceError, saveUpload, attachmentsOf, isImageType, MAX_UPLOAD_BYTES } from './workspace.js';
 import { publicUrl } from './tools.js';
 import { embeddedV4, expandV6 } from './safefetch.js';
 import { isIP } from 'node:net';
@@ -39,7 +39,7 @@ const BASE_HEADERS = {
   'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex, nofollow, noarchive',
   'referrer-policy': 'same-origin', 'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
 };
-const LIMITS = { form: [8, 60000], buy: [10, 60000], dataRead: [600, 60000], dataWrite: [90, 60000], dataIp: [300, 60000], dataProject: [1500, 60000], code: [8, 60000], login: [6, 60000], admin: [5, 60000], adminAll: [60, 60000], chat: [20, 60000], mutate: [90, 60000], read: [900, 60000], publicSite: [600, 60000], sse: [40, 60000] };
+const LIMITS = { form: [8, 60000], buy: [10, 60000], dataRead: [600, 60000], dataWrite: [90, 60000], dataIp: [300, 60000], dataProject: [1500, 60000], code: [8, 60000], login: [6, 60000], admin: [5, 60000], adminAll: [60, 60000], chat: [20, 60000], upload: [30, 60000], mutate: [90, 60000], read: [900, 60000], publicSite: [600, 60000], sse: [40, 60000] };
 const MAX_CHAT = 4000;
 // Unsent bytes one live view may build up. A long job never goes quiet, and a phone that fell asleep shouldn't be able to pile that up here. It reconnects and catches up from its last event.
 const STREAM_BACKLOG = 256 * 1024;
@@ -205,7 +205,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     };
     // Whether the money has run out is between the boss and the owner.
     if (!viewer.owner) { delete out.floor.budgetStopped; delete out.floor.outOfBudget; }
-    if (viewer.owner || viewer.publicChat) out.messages = all(db, "SELECT id,role,agent_id agentId,text,created_at createdAt FROM messages WHERE floor_id=? AND role!='note' ORDER BY id DESC LIMIT 120", f.id).reverse().filter((m) => viewer.owner || !['report', 'help', 'budget'].includes(m.role)).map((m) => (viewer.owner ? m : { ...m, text: redactChat(db, f.id, m.text) }));
+    if (viewer.owner || viewer.publicChat) out.messages = all(db, "SELECT id,role,agent_id agentId,text,files,created_at createdAt FROM messages WHERE floor_id=? AND role!='note' ORDER BY id DESC LIMIT 120", f.id).reverse().filter((m) => viewer.owner || !['report', 'help', 'budget'].includes(m.role)).map(({ files, ...m }) => (viewer.owner ? { ...m, ...(files ? { attachments: attachmentsOf(db, f.id, JSON.parse(files)).map(({ path: _p, ...x }) => x) } : {}) } : { ...m, text: redactChat(db, f.id, m.text) }));
     if (viewer.owner) {
       out.questions = all(db, 'SELECT q.id,q.text,a.name agentName FROM questions q LEFT JOIN agents a ON a.id=q.agent_id WHERE q.floor_id=? AND q.answer IS NULL ORDER BY q.id', f.id);
       out.purchases = all(db, 'SELECT p.id,p.item,p.price,p.why,p.link,p.status,p.admin_note adminNote,p.created_at createdAt,a.name agentName FROM purchases p LEFT JOIN agents a ON a.id=p.agent_id WHERE p.floor_id=? ORDER BY p.id DESC LIMIT 50', f.id);
@@ -357,11 +357,56 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const f = requireOwner(req, p.slug);
     limit('chat', `floor:${f.id}`); limit('chat', ip);
     const b = await readJson(req, 16 * 1024);
-    const text = clean2(b.text);
+    let text = clean2(b.text);
+    if (b.attachments !== undefined && (!Array.isArray(b.attachments) || b.attachments.length > MAX_ATTACH)) throw new HttpError(400, 'bad_attachments', `Attach up to ${MAX_ATTACH} files.`);
+    // Only this floor's own uploads. An id from anywhere else is as good as none.
+    const files = attachmentsOf(db, f.id, b.attachments);
+    if (files.length !== new Set(b.attachments || []).size) throw new HttpError(404, 'attachment_not_found', 'One of those files is gone. Attach it again.');
+    if (!text && files.length) text = files.length === 1 ? 'I attached a file.' : 'I attached some files.';
     if (!text) throw new HttpError(400, 'empty');
     if (text.length > MAX_CHAT) throw new HttpError(413, 'too_large', `Keep it under ${MAX_CHAT} characters.`);
-    engine.bossChat(f, text);
+    engine.bossChat(f, text, files);
     json(res, 202, { ok: true });
+  });
+  // ---- the boss's files: in through a raw body, out only to the boss, as a download ----
+  const MAX_ATTACH = 10;
+  async function readRaw(req, maxBytes) {
+    const declared = Number(req.headers['content-length']);
+    if (Number.isFinite(declared) && declared > maxBytes) throw new HttpError(413, 'too_large', `Files can be up to ${maxBytes / 1048576} MB.`);
+    const chunks = []; let size = 0;
+    for await (const c of req) {
+      size += c.length;
+      if (size > maxBytes) { req.resume(); throw new HttpError(413, 'too_large', `Files can be up to ${maxBytes / 1048576} MB.`); }
+      chunks.push(c);
+    }
+    return Buffer.concat(chunks);
+  }
+  POST('/api/floors/:slug/attachments', async ({ req, res, p, ip }) => {
+    const f = requireOwner(req, p.slug);
+    limit('upload', ip); limit('upload', `floor:${f.id}`);
+    const name = String(req.headers['x-filename'] ?? '').slice(0, 600);
+    if (!name.trim()) throw new HttpError(400, 'bad_filename', 'Say what the file is called.');
+    const bytes = await readRaw(req, MAX_UPLOAD_BYTES);
+    let r;
+    try { r = saveUpload(db, f.id, name, bytes, cfg.quotaBytes, now()); } catch (e) {
+      if (!(e instanceof WorkspaceError)) throw e;
+      throw new HttpError(/quota|too many/i.test(e.message) ? 507 : /over \d+ MB/.test(e.message) ? 413 : 415, /quota|too many/i.test(e.message) ? 'quota' : /over \d+ MB/.test(e.message) ? 'too_large' : 'bad_type', e.message);
+    }
+    json(res, 201, { id: r.id, name: r.name, type: r.type, size: r.size });
+  });
+  GET('/api/floors/:slug/attachments', async ({ req, res, p }) => {
+    const f = requireOwner(req, p.slug);
+    json(res, 200, { attachments: all(db, 'SELECT id,name,type,size,created_at createdAt FROM attachments WHERE floor_id=? ORDER BY created_at DESC LIMIT 200', f.id) });
+  });
+  GET('/api/floors/:slug/attachments/:id', async ({ req, res, p }) => {
+    const f = requireOwner(req, p.slug);
+    const a = attachmentsOf(db, f.id, [p.id])[0];
+    const file = a && readFile(db, f.id, a.path);
+    if (!file) throw new HttpError(404, 'not_found');
+    const body = typeof file.content === 'string' ? Buffer.from(file.content) : Buffer.from(file.content);
+    const ascii = a.name.replace(/[^A-Za-z0-9._ -]/g, '_');
+    // A download, never a page: nothing in it runs here, whatever it holds. Pictures keep their type so the boss's own page can show a preview.
+    send(res, 200, body, { 'content-type': isImageType(a.type) ? a.type : 'application/octet-stream', 'content-disposition': `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(a.name)}`, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'content-length': String(body.length) });
   });
   const clean2 = (v) => String(v ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, '').trim();
   POST('/api/floors/:slug/control', async ({ req, res, p, ip }) => {
