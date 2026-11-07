@@ -1419,11 +1419,13 @@ export class OfficeView {
   async furnishOffices() {
     if (!this.kit) return;
     const token = this.furnishToken = (this.furnishToken || 0) + 1;
+    this.furnishing = (this.furnishing || 0) + 1;
     const names = new Set();
     for (const o of this.offices.values()) for (const t of o.theme.things) if (t.m) { names.add(t.m); if (ON_TABLE.has(t.m)) names.add('sideTableDrawers'); }
     const missing = [...names].filter((n) => !this.kit[n]);
     // Each piece on its own: one that fails to load is just left out.
     const got = await Promise.allSettled(missing.map((n) => furniture(n)));
+    this.furnishing--;
     missing.forEach((n, i) => { if (got[i].status === 'fulfilled') this.kit[n] = got[i].value; });
     // Whichever pass finishes builds from the offices as they are now, so a slow earlier pass can't put back an old room.
     if (this.dead || (token < this.furnishedToken)) return;
@@ -1735,7 +1737,10 @@ export class OfficeView {
     this.life.update(dt);
     for (const a of this.actors.values()) { a.update(dt); this.placeTag(a); }
     // On a slow device the first furnishing pass can stall behind the frame loop; another pass picks it up.
-    if (this.modelsOn && !this.officeModels && this.time - (this.lastFurnish ?? 0) > 5) { this.lastFurnish = this.time; this.furnishOffices(); }
+    // Paced on the wall clock and one at a time, since a test or a slow frame can run room time far ahead of real time.
+    const now = performance.now();
+    if (this.modelsOn && !this.officeModels && !this.furnishing && now - (this.lastFurnish ?? now) > 8000) { this.lastFurnish = now; this.furnishOffices(); }
+    this.lastFurnish ??= now;
     if (this.ring?.visible) { const a = this.actors.get(this.selected); if (!a) this.ring.visible = false; else { this.ring.position.set(a.group.position.x, 0.04, a.group.position.z); this.ring.scale.setScalar(1 + Math.sin(this.time * 4) * 0.06); } }
     this.placePins();
     tidyLabels(this.actors, this.w);
