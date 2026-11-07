@@ -363,7 +363,8 @@ export class OfficeView {
   buildWorld() {
     this.world = getWorld();
     const n = this.floorNumber;
-    const lift = -(GROUND + (n - 1) * FLOOR_H) * WORLD_SCALE;
+    // A little lower than exact, so the tower's own slab sits just under our plate instead of fighting it for the same plane.
+    const lift = -(GROUND + (n - 1) * FLOOR_H) * WORLD_SCALE - 0.35;
     this.worldLift = lift;
     this.stub = makeTower(Math.max(0, n - 1), { stub: true, env: this.world.environment() });
     this.stub.group.scale.setScalar(WORLD_SCALE); this.stub.group.position.y = lift;
@@ -387,9 +388,9 @@ export class OfficeView {
 
     // The floor plate is the top of the tower: a stone slab the size of the shaft, with a glass rail around the terrace left over.
     const plate = TOWER_W * WORLD_SCALE + 1.2;
-    piece(room, '#e9dfcf', plate, 0.42, plate, 0, -0.42, 0);
-    piece(room, '#d4c8b6', plate + 0.3, 0.12, plate + 0.3, 0, -0.54, 0, { cast: false });
-    piece(room, primary, ROOM_W + 1.1, 0.08, ROOM_D + 1.1, 0, -0.08, 0, { recv: false, cast: false });
+    piece(room, '#e9dfcf', plate, 0.42, plate, 0, -0.48, 0);
+    piece(room, '#d4c8b6', plate + 0.3, 0.12, plate + 0.3, 0, -0.6, 0, { cast: false });
+    piece(room, primary, ROOM_W + 1.1, 0.05, ROOM_D + 1.1, 0, -0.06, 0, { recv: false, cast: false });
     const rail = new THREE.MeshStandardMaterial({ color: '#cfe0ec', roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false, envMap: getWorld().environment() });
     for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(room, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
     for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { piece(room, '#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); piece(room, '#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
