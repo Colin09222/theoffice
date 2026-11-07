@@ -1,8 +1,8 @@
 FROM node:22-bookworm-slim
 ENV NODE_ENV=production NODE_NO_WARNINGS=1 NODE_OPTIONS=--max-old-space-size=480 HOST=0.0.0.0 PORT=8083 DATA_DIR=/data
 WORKDIR /app
-# No npm install: the app has zero runtime dependencies.
-COPY package.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 COPY config ./config
 COPY public ./public
 COPY scripts ./scripts

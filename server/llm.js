@@ -6,8 +6,9 @@ export class ProviderError extends Error {
 }
 
 export const scrub = (s, cfg) => {
-  let out = String(s ?? '').replace(/sk-or-[A-Za-z0-9_-]+/g, '[redacted]').replace(/Bearer\s+\S+/gi, 'Bearer [redacted]');
+  let out = String(s ?? '').replace(/sk-(or|ant)-[A-Za-z0-9_-]+/g, '[redacted]').replace(/Bearer\s+\S+/gi, 'Bearer [redacted]');
   if (cfg?.openrouterKey) out = out.split(cfg.openrouterKey).join('[redacted]');
+  if (cfg?.anthropicKey) out = out.split(cfg.anthropicKey).join('[redacted]');
   if (cfg?.webSearchKey) out = out.split(cfg.webSearchKey).join('[redacted]');
   return out.slice(0, 300);
 };

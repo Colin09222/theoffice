@@ -7,6 +7,7 @@ const live = new Map((await res.json()).data.map((m) => [m.id, m]));
 const { all } = loadModels(); let bad = 0;
 const money = (v) => `$${(Number(v) * 1e6).toFixed(2)}`;
 for (const [role, c] of Object.entries(all)) {
+  if (c.provider === 'anthropic') { console.log(`ok   ${role.padEnd(12)} ${c.model} (Claude API)`); continue; }
   const m = live.get(c.model);
   if (!m) { console.log(`FAIL ${role}: ${c.model} not on OpenRouter`); bad++; continue; }
   if (!(m.supported_parameters || []).includes('tools')) { console.log(`FAIL ${role}: ${c.model} has no tool support`); bad++; continue; }

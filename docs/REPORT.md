@@ -13,7 +13,7 @@ The code is finished and passes every gate that could run on the build machine. 
 - **Purchase requests:** recorded only; no payment code exists.
 - **Admin:** all floors and spend, issue codes, suspend, reset, kill, global pause.
 
-Stack: Node 22, zero npm dependencies, `node:sqlite`. Agent workspaces are database rows, so agent paths never touch the real filesystem.
+Stack: Node 22, `@anthropic-ai/sdk` as the only dependency, `node:sqlite`. Agent workspaces are database rows, so agent paths never touch the real filesystem.
 
 ## Tests
 Node 22.23.4, mock mode. Run with `npm test` and `npm run e2e`.
@@ -37,15 +37,9 @@ Node 22.23.4, mock mode. Run with `npm test` and `npm run e2e`.
 - Public chat hides private names and titles, but not paraphrases.
 - A prompt-injected agent on a public task can still damage that floor's public projects, but can't escape the sandbox, spend past the caps, or read private projects or other floors.
 
-## Models and live prices
-From OpenRouter `GET /models` on 2026-11-06; all support tools. Prices are per million tokens.
+## Models
+Most roles run on Claude Opus 5.5 through the Claude API (`$4` in, `$20` out, `$0.20` cache reads per million tokens), with effort set per role in `config/models.json`: manager high, researcher/writer/analyst/marketer medium, builder xhigh, designer/illustrator high. The hireable Tester runs on `google/gemini-3.1-pro-preview` through OpenRouter (`$2`/`$12`) for a second opinion from another lab. Assistant turns replay Claude's own content verbatim so history stays append-only; prompt caching and server-side refusal fallbacks are on.
 
-| Role | Model | In | Out |
-|---|---|---|---|
-| Office Manager | `anthropic/claude-sonnet-5.5` | $2.00 | $10.00 |
-| Researcher, Writer, Analyst, Marketer | `anthropic/claude-haiku-5.5` | $0.10 | $0.50 |
-| Builder, Tester | `qwen/qwen3.7-plus` | $0.32 | $1.28 |
-| Designer, Illustrator | `google/gemini-3.1-flash-lite` | $0.25 | $1.50 |
+Floor agents must not use the Claude CLI or a Claude subscription.
 
-## Cost per typical task
-Estimated from token arithmetic, not measured. "Make a small site about X" with four staff tasks comes to about $0.09; plan on $0.10 to $0.25. The $2 floor cap buys roughly 8 to 20 such tasks a day. Each task also stops at $0.60 or 14 steps, and a floor can create at most 60 tasks a day.
+Caps: `FLOOR_DAILY_USD=10`, `GLOBAL_DAILY_USD=25`, `TASK_MAX_USD=3`, 14 steps per staff task, 60 tasks per floor per day.

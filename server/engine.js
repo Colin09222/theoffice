@@ -141,7 +141,7 @@ export class Engine {
   async callLLM(ctx, { messages, tools, onToken, onToolCall, onReset, meta }) {
     const { floorId, agent, signal } = ctx;
     const role = this.models.all[agent.role] || this.models.all.researcher;
-    const pricing = { prompt: role.pricing?.prompt || 0, completion: role.pricing?.completion || 0 };
+    const pricing = { prompt: role.pricing?.prompt || 0, completion: role.pricing?.completion || 0, cacheRead: role.pricing?.cacheRead };
     let attempt = 0;
     for (;;) {
       this.setAgent(agent.id, { state: 'queued' });
@@ -155,7 +155,7 @@ export class Engine {
         this.setAgent(agent.id, { state: 'thinking' });
         const chars = { n: 0 };
         const res = await this.llm.chat({
-          model: role.model, messages, tools, maxTokens: role.maxTokens || 2000, signal, pricing, meta,
+          model: role.model, provider: role.provider, effort: role.effort, messages, tools, maxTokens: role.maxTokens || 2000, signal, pricing, meta,
           onToken: (t) => { chars.n += t.length; onToken?.(t); },
           onToolCall: (name) => {
             const show = TOOL_LOOK[name];
@@ -255,6 +255,7 @@ export class Engine {
         const text = res.content.trim();
         const assistant = { role: 'assistant', content: res.content || null };
         if (res.toolCalls.length) assistant.tool_calls = res.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args } }));
+        if (res.rawContent) assistant.anthropic_content = res.rawContent;
         messages.push(assistant);
         if (text) this.managerSays(floorId, text);
         if (!res.toolCalls.length) break;
@@ -320,6 +321,7 @@ export class Engine {
         step++;
         const assistant = { role: 'assistant', content: res.content || null };
         if (res.toolCalls.length) assistant.tool_calls = res.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args } }));
+        if (res.rawContent) assistant.anthropic_content = res.rawContent;
         messages.push(assistant);
         if (!res.toolCalls.length) {
           this.saveTranscript(task.id, messages);

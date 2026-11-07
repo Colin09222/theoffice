@@ -15,6 +15,7 @@ import { isIP } from 'node:net';
 import { renderMarkdown, esc } from '../public/js/markdown.js';
 import { LOOK_FIELDS, DEFAULT_LOOK, DEFAULT_DECOR, DEFAULT_COLORS, FLOOR_STYLES, PETS } from '../public/js/looks.js';
 import { createOpenRouterClient, scrub } from './llm.js';
+import { createAnthropicClient, createRouter } from './anthropic.js';
 import { createMockClient } from './mock.js';
 
 const BASE = '/theoffice';
@@ -67,7 +68,7 @@ function buildStatic() {
 
 export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm, fetcher, httpFetch }) {
   const bus = new Bus();
-  const client = llm || (cfg.aiMode === 'mock' ? createMockClient(cfg) : createOpenRouterClient(cfg));
+  const client = llm || (cfg.aiMode === 'mock' ? createMockClient(cfg) : createRouter({ anthropic: createAnthropicClient(cfg), openrouter: createOpenRouterClient(cfg) }));
   const engine = new Engine({ db, cfg, models, llm: client, bus, log, now, fetcher, httpFetch });
   const rates = new A.RateLimiter(cfg.rateScale, now);
   const statics = buildStatic();

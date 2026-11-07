@@ -27,12 +27,14 @@ Fill in `.env`:
 | Key | Value |
 |---|---|
 | `AI_MODE` | `live` |
-| `OPENROUTER_API_KEY` | Your OpenRouter key |
+| `ANTHROPIC_API_KEY` | Your Claude API key, for the Claude roles |
+| `OPENROUTER_API_KEY` | Your OpenRouter key, for the rest |
 | `ADMIN_PASSWORD` | A long password for `/theoffice/admin` |
 | `PUBLIC_ORIGIN` | `https://iscolinfree.com`. Required: CSRF checks compare against it, and `fetch_url` refuses this domain because of it |
 | `TRUST_PROXY` | `1`. Caddy appends the real client IP to `X-Forwarded-For` and the app reads the rightmost hop. Don't set it if anything other than the gate can reach the port |
-| `FLOOR_DAILY_USD` | `2` |
-| `GLOBAL_DAILY_USD` | `20` |
+| `FLOOR_DAILY_USD` | `10` |
+| `GLOBAL_DAILY_USD` | `25` |
+| `TASK_MAX_USD` | `3` |
 | `WEB_SEARCH_API_KEY` | Optional Brave Search key. If empty, agents have no `web_search` tool and can only `fetch_url` |
 
 ## 3. Start it

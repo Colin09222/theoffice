@@ -113,9 +113,9 @@ test('scrub removes keys from provider errors', () => {
   const s = scrub('bad key sk-or-v1-abc123 Bearer xyz MYSECRET', { openrouterKey: 'MYSECRET' });
   assert.doesNotMatch(s, /sk-or|xyz|MYSECRET/);
 });
-test('models config has a Sonnet-class manager and all four staff', () => {
+test('models config has a Claude manager and all four staff', () => {
   const m = loadModels();
-  assert.match(m.roles.manager.model, /sonnet/); for (const r of ['researcher', 'writer', 'builder', 'designer']) assert.ok(m.roles[r].model, r);
+  assert.match(m.roles.manager.model, /^claude-/); assert.equal(m.roles.manager.provider, 'anthropic'); for (const r of ['researcher', 'writer', 'builder', 'designer']) assert.ok(m.roles[r].model, r);
   for (const c of Object.values(m.all)) assert.ok(!/claude-cli|subscription/.test(c.model));
 });
 test('validLook keeps only allowed values', () => {

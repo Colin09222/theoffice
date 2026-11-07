@@ -125,7 +125,7 @@ describe('the real tool loop, end to end against the stub', () => {
     const n = stub.reqs.length;
     assert.ok(Math.abs(s.spend.today - n * 0.01) < 1e-6, `spend ${s.spend.today} over ${n} calls`);
     const rows = t.db.prepare('SELECT DISTINCT model FROM ledger').all().map((r) => r.model);
-    assert.ok(rows.includes('anthropic/claude-sonnet-5.5')); assert.ok(rows.includes('qwen/qwen3.7-plus'));
+    assert.ok(rows.includes('claude-opus-5-5'));
     assert.ok(stub.reqs.every((r) => r.body.tools.length > 0));
     assert.ok(!stub.reqs.some((r) => r.body.tools.some((d) => d.function.name === 'web_search')), 'no web_search without a key');
     await t.close(); await stub.close();
