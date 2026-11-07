@@ -49,6 +49,16 @@ describe('uploading', () => {
     assert.equal((await c.get(`/api/floors/${c.slug}/attachments`)).data.attachments.length, kinds.length);
   });
 
+  test('the name comes URI-encoded, the way the page sends it, and a broken escape is taken as sent', async () => {
+    const t = await start(); const c = await claim(t);
+    const r = await upload(c, encodeURIComponent('shop front.png'), PNG);
+    assert.equal(r.status, 201, JSON.stringify(r.data));
+    assert.equal(r.data.name, 'shop front.png');
+    const bad = await upload(c, '%E0%A4%A.png', PNG);
+    assert.equal(bad.status, 201, JSON.stringify(bad.data));
+    assert.ok(!bad.data.name.includes('%'), bad.data.name);
+  });
+
   test('the name has to agree with the bytes, and nothing else is taken', async () => {
     const t = await start(); const c = await claim(t);
     const refused = [
