@@ -105,7 +105,8 @@
   body[data-sheet="peek"] .controls { bottom: 112px; }
   body[data-sheet="peek"] #toasts { bottom: 112px; }
   .floor-scrubber { display: flex; position: absolute; right: 8px; top: 72px; flex-direction: column; gap: 4px; padding: 3px; border-radius: 999px; background: rgba(24, 26, 38, .62); border: 1px solid rgba(255, 255, 255, .16); box-shadow: none; }
-  .scrub-btn { width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .1); color: #fff; }
+  .scrub-btn { position: relative; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .1); color: #fff; }
+  .scrub-btn::before { content: ''; position: absolute; inset: -4px; }
   .scrub-btn:disabled { opacity: .3; }
   .scrub-track, .scrub-name { display: none; }
   .pin { height: 28px; min-width: 28px; padding: 0 5px; justify-content: center; }

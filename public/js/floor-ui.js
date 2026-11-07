@@ -105,7 +105,7 @@ class FloorPage {
     const w = window.innerWidth, h = window.innerHeight;
     if (!this.view) return;
     if (phone) {
-      const sheet = this.panelOpen ? h * 0.54 : this.panel.getBoundingClientRect().height || 104;
+      const sheet = this.panelOpen ? h * 0.54 : 104;  // not measured: mid-slide the panel is still its old height
       this.view.setInsets({ left: 0, right: 0, top: 58, bottom: sheet + 44 });
     } else {
       const card = this.root.querySelector('.floor-top').getBoundingClientRect();
