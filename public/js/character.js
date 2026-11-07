@@ -448,6 +448,8 @@ export class ModelCharacter {
     if (this.hat) disposeMerged(this.hat);
     if (this.chest) disposeMerged(this.chest);
     this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.model);
+    // Each person's cloned skeleton has its own bone texture on the GPU, and it stays there until told otherwise.
+    this.model.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.dispose(); });
     this.group.removeFromParent();
   }
 }
