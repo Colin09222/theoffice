@@ -23,6 +23,8 @@ const STALL_MS = 90_000;
 const STOP_GRACE_MS = 120_000;
 const MAX_FIX_TURNS = 2, MAX_LOST = 2, MAX_STREAM_FAILURES = 5;
 const WARN_STEPS_LEFT = 5, SPEND_WARN = 0.8;
+// A small job told to aim for 15 steps will still polish for 40 if nothing says stop. The hard limits stay for the jobs that really need them.
+const WRAP_UP = { change: 12, tester: 16, default: 22 };
 const MAX_ARCHIVE_BYTES = 40 * 1024 * 1024, MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hash = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16);
@@ -196,7 +198,7 @@ export class Computer {
     return {
       id: task.session_id || '', floorId: floor.id, floor, agent, taskId: task.id, project: task.project, signal, room: null,
       // History counts towards the steps, so a restart can't reset them. A round of fixes the manager asked for gets its own, or the fix never fits; the dollar caps still hold.
-      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), warned: false, limit: '', lastText: '', lastFeed: '',
+      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), wrapUpAt: task.lane || e.isLive(floor.id, task.project) ? (e.isLive(floor.id, task.project) && agent.role !== 'tester' ? WRAP_UP.change : WRAP_UP[agent.role] || WRAP_UP.default) * (1 + (task.revisions || 0)) : 0, warned: false, limit: '', lastText: '', lastFeed: '',
       pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
       publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
       ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design')]), signal },
@@ -388,6 +390,10 @@ export class Computer {
             this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: `You have ${WARN_STEPS_LEFT} steps left on this computer. Finish up now: save your work with .office/save.sh, publish if you are going to, and reply with your summary.` }] }]).catch(() => {});
           }
           if (left <= 0) this.stopFor(st, 'steps');
+          if (st.wrapUpAt && st.steps >= st.wrapUpAt && !st.wrappedUp) {
+            st.wrappedUp = true;
+            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: `That is ${st.wrapUpAt} steps, which is what this job should take. Stop polishing and finish now: leave it working, run .office/save.sh, publish if you are going to, and reply with your summary, including anything still rough.` }] }]).catch(() => {});
+          }
         }
         return null;
       case 'span.model_request_end':

@@ -374,6 +374,32 @@ describe('never going quiet', () => {
   });
 });
 
+describe('small jobs stay small', () => {
+  async function steps(n, setup) {
+    const seen = [];
+    const sessions = createMockSessions({}, { onTurn: async (api) => { for (let i = 0; i < n; i++) await api.step(); await api.save([{ path: 'index.html', data: Buffer.from('<h1>x</h1>') }]); await api.message('Done.'); } });
+    const send = sessions.send.bind(sessions);
+    sessions.send = (id, evs) => { seen.push(...evs); return send(id, evs); };
+    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0 }, { sessions });
+    h.e.runManager = async () => {};
+    const { id } = setup(h);
+    h.e.kick();
+    await until(() => get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status !== 'todo' && get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status !== 'doing' && !h.e.runs.size, { what: 'it to end', timeout: 20000 });
+    return seen.filter((ev) => ev.type === 'system.message').map((ev) => ev.content[0].text);
+  }
+  const task = (h, extra = {}) => h.e.assignTask(h.f, h.mgr, { to: 'builder', title: 'B', brief: 'b', plan: '', project: 'g', dependsOn: [], afterPrevious: false, lane: 'game', ...extra });
+  test('a playbook job is told to finish at about the size it should be', async () => {
+    assert.match((await steps(23, (h) => task(h))).join(' '), /That is 22 steps, which is what this job should take/);
+    assert.deepEqual(await steps(20, (h) => task(h)), []);
+  });
+  test('a change to something live is told sooner', async () => {
+    assert.match((await steps(13, (h) => { h.e.upsertProject(h.f, 'g', { title: 'G', kind: 'game', published: true }); return task(h); })).join(' '), /That is 12 steps/);
+  });
+  test('a job outside the playbooks only has the hard limits', async () => {
+    assert.deepEqual(await steps(25, (h) => task(h, { lane: '' })), []);
+  });
+});
+
 describe('one computer at a time on a project', () => {
   test('a second task on the same project waits, even if nobody set the order', async () => {
     const order = [];
