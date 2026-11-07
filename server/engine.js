@@ -678,7 +678,7 @@ export class Engine {
     return `Cancelled #${t.id}.`;
   }
   hireStaff(floor, role, name) {
-    const cfg = this.models.hireable[role] || this.models.roles[role];
+    const cfg = Object.hasOwn(this.models.hireable, role) ? this.models.hireable[role] : Object.hasOwn(this.models.roles, role) ? this.models.roles[role] : null;
     if (!cfg || role === 'manager') throw new ToolError(`can't hire "${role.slice(0, 30)}". Hireable: ${Object.keys(this.models.hireable).join(', ')}`);
     if (get(this.db, 'SELECT 1 x FROM agents WHERE floor_id=? AND role=?', floor.id, role)) return `You already have a ${cfg.title}.`;
     const n = get(this.db, "SELECT COUNT(*) n FROM agents WHERE floor_id=? AND role!='manager'", floor.id).n;

@@ -139,9 +139,11 @@ export function mentionsPrivate(db, floorId, exceptProject, text) {
     if (s.length >= 6 && packed.includes(s)) return true;
   }
   // A run of words lifted from a private brief says as much as the name does.
+  // Most of a brief's words aren't in a short line at all, and every line said on the floor comes through here.
+  const present = new Set(hay.trim().split(' '));
   for (const t of tasks) {
     const words = norm(t.brief).trim().split(' ');
-    for (let i = 0; i + 5 <= words.length; i++) if (hay.includes(` ${words.slice(i, i + 5).join(' ')} `)) return true;
+    for (let i = 0; i + 5 <= words.length; i++) if (present.has(words[i]) && hay.includes(` ${words.slice(i, i + 5).join(' ')} `)) return true;
   }
   return false;
 }

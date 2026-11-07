@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { boot, claim, Client, until, sleep } from './helpers.js';
 import { get, all, run, openDb } from '../server/db.js';
 import { talkLine, PRIVATE_TALK } from '../server/talk.js';
+import { createApp } from '../server/app.js';
+import { loadConfig, loadModels } from '../server/config.js';
 import { bossText } from '../server/launch.js';
 import { startNamecheapStub } from './stubs/namecheap.mjs';
 
@@ -288,6 +290,38 @@ describe('what a hijacked member of staff can put in front of the manager', () =
     run(t.db, 'UPDATE floors SET manager_wake=0 WHERE id=?', f.id);
     t.app.engine.orders.runNow(f, o.id);
     assert.ok(bossText(t.db, f.id).includes(`${claim_} indeed`));
+  });
+  test('a building from before this knows its old orders as the boss\'s', async () => {
+    const db = openDb(':memory:');
+    db.exec("CREATE TABLE standing_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, text TEXT NOT NULL, schedule TEXT NOT NULL, next_run_at INTEGER NOT NULL, last_run_at INTEGER, status TEXT NOT NULL DEFAULT 'active', pause_reason TEXT NOT NULL DEFAULT '', fail_streak INTEGER NOT NULL DEFAULT 0, runs INTEGER NOT NULL DEFAULT 0, est_usd REAL NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)");
+    run(db, "INSERT INTO standing_orders (floor_id,text,schedule,next_run_at,created_at,updated_at) VALUES (1,'old one','{}',1,1,1)");
+    const app = createApp({ db, cfg: loadConfig({ AI_MODE: 'mock', ADMIN_PASSWORD: 'x' }), models: loadModels() });
+    assert.equal(get(db, 'SELECT set_by s FROM standing_orders').s, 'boss');
+    await app.close(); db.close();
+  });
+});
+
+describe('what a bot can do to its own run', () => {
+  test('a job named after something every object has is refused like any other, rather than stopping the floor', async () => {
+    const t = await start();
+    const c = await claim(t, 'Proto Co');
+    const f = floorRow(t, c.slug);
+    const ctx = t.app.engine.toolCtx(f, agentOf(t, f.id, 'manager'), null, ['hire_staff']);
+    for (const role of ['constructor', '__proto__', 'tostring', 'manager']) assert.match(await t.app.engine.tools.exec(ctx, 'hire_staff', JSON.stringify({ role })), /^Error: can't hire/, role);
+  });
+  test('saying a line stays cheap on a floor with plenty of long private briefs', async () => {
+    const t = await start();
+    t.app.engine.tickFloor = () => {};
+    const c = await claim(t, 'Long Briefs');
+    const f = floorRow(t, c.slug); const mgr = agentOf(t, f.id, 'manager'); const wr = agentOf(t, f.id, 'writer');
+    t.app.engine.upsertProject(f, 'secret', { title: 'Very Secret Thing', makePrivate: true });
+    const brief = Array.from({ length: 1000 }, (_, i) => `word${i}`).join(' ');
+    for (let i = 0; i < 200; i++) run(t.db, "INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,created_at,updated_at,status) VALUES (?,?,?,?,?,?,1,1,'done')", f.id, 'p', `Private job ${i}`, brief, wr.id, 'secret');
+    const t0 = Date.now();
+    for (let i = 0; i < 40; i++) t.app.engine.talk(f.id, mgr, wr, 'A perfectly ordinary line about the soup page and nothing else whatsoever.', { kind: 'assign' });
+    assert.ok(Date.now() - t0 < 2000, `took ${Date.now() - t0} ms`);
+    t.app.engine.talk(f.id, mgr, wr, 'Note that word500 word501 word502 word503 word504 is the plan.', { kind: 'assign' });
+    assert.equal((await new Client(t).get(`/api/floors/${c.slug}`)).data.talk.at(-1).text, PRIVATE_TALK, 'and it still catches a lifted run');
   });
 });
 
