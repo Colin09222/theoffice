@@ -13,14 +13,45 @@ const TIERS = {
 };
 const AO_STEPS = ['full', 'half', 'off'];
 
+/**
+ * A tilt-shift lens: sharp across most of the picture, softening toward the bottom. It is what makes a city read as a model
+ * on a table, and the softer foreground also sits quietly behind the interface. A single 12-tap disc, so it costs little.
+ */
+const TiltShader = {
+  uniforms: { tDiffuse: { value: null }, uCenter: { value: 0.55 }, uWidth: { value: 0.3 }, uAmount: { value: 0.005 }, uAspect: { value: 1.6 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uCenter; uniform float uWidth; uniform float uAmount; uniform float uAspect;
+    const vec2 DISC[12] = vec2[12](vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457), vec2(-0.203, 0.621), vec2(0.962, -0.195), vec2(0.473, -0.480), vec2(0.519, 0.767), vec2(0.185, -0.893), vec2(0.507, 0.064), vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
+    void main(){
+      // Only below the band: the crown of the tower up against the sky stays crisp.
+      float off = uCenter - vUv.y;
+      float k = smoothstep(uWidth * 0.5, uWidth * 0.5 + 0.34, off);
+      vec4 c = texture2D(tDiffuse, vUv);
+      if (k > 0.004) {
+        vec3 sum = c.rgb;
+        vec2 r = vec2(uAmount * k / uAspect, uAmount * k);
+        for (int i = 0; i < 12; i++) sum += texture2D(tDiffuse, vUv + DISC[i] * r).rgb;
+        c.rgb = sum / 13.0;
+      }
+      gl_FragColor = c;
+    }`,
+};
+
 /** The final grade, after tone mapping: a soft vignette and fine grain, so the image reads as a photograph rather than a render. */
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, uVignette: { value: 0.3 }, uGrain: { value: 0.024 }, uTime: { value: 0 } },
+  uniforms: { tDiffuse: { value: null }, uVignette: { value: 0.3 }, uGrain: { value: 0.024 }, uTime: { value: 0 }, uWarm: { value: 0 } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-  fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uVignette; uniform float uGrain; uniform float uTime;
+  fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uVignette; uniform float uGrain; uniform float uTime; uniform float uWarm;
     float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7)) + uTime) * 43758.5453); }
     void main(){
       vec4 c = texture2D(tDiffuse, vUv);
+      // Golden hour: gold into the highlights, a little violet-teal into the shadows, then a gentle contrast curve and a touch of saturation.
+      float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+      vec3 graded = c.rgb * mix(vec3(0.97, 0.985, 1.03), vec3(1.035, 1.0, 0.945), smoothstep(0.08, 0.72, l));
+      graded = mix(graded, graded * graded * (3.0 - 2.0 * graded), 0.34);
+      float l2 = dot(graded, vec3(0.2126, 0.7152, 0.0722));
+      graded = clamp(mix(vec3(l2), graded, 1.1), 0.0, 1.0);
+      c.rgb = mix(c.rgb, graded, uWarm);
       vec2 q = vUv - 0.5;
       float v = 1.0 - uVignette * smoothstep(0.25, 1.1, dot(q, q) * 2.2);
       c.rgb *= v;
@@ -45,11 +76,13 @@ class Post {
     this.output = new A.OutputPass();
     this.fxaa = new A.FXAAPass();
     this.grade = new A.ShaderPass(GradeShader);
-    for (const p of [this.ao, this.bloom, this.output, this.fxaa, this.grade]) this.composer.addPass(p);
+    this.tilt = new A.ShaderPass(TiltShader);
+    for (const p of [this.ao, this.tilt, this.bloom, this.output, this.fxaa, this.grade]) this.composer.addPass(p);
   }
   setSize(w, h, dpr) {
     this.composer.setPixelRatio(dpr);
     this.composer.setSize(w, h);
+    this.tilt.uniforms.uAspect.value = w / Math.max(1, h);
     this.fxaa.enabled = this.fxaaWanted && dpr < 1.75;
   }
   /** Point every pass at the view's scene and camera, and take the view's occlusion and grade settings. */
@@ -66,6 +99,9 @@ class Post {
     this.bloom.enabled = this.bloom.strength > 0.001;
     this.grade.uniforms.uVignette.value = view.grade?.vignette ?? 0.3;
     this.grade.uniforms.uGrain.value = view.grade?.grain ?? 0.024;
+    this.grade.uniforms.uWarm.value = view.grade?.warm ?? 0;
+    this.tilt.enabled = !!view.tilt && q.tilt !== false;
+    if (view.tilt) { this.tilt.uniforms.uCenter.value = view.tilt.center; this.tilt.uniforms.uWidth.value = view.tilt.width; this.tilt.uniforms.uAmount.value = view.tilt.amount; }
     this.fxaaWanted = view.fxaa !== false;
   }
   setAO(level) {
@@ -80,7 +116,7 @@ class Post {
     this.grade.uniforms.uTime.value = time % 100;
     this.composer.render(dt);
   }
-  dispose() { this.composer.dispose(); this.ao.dispose?.(); this.bloom.dispose(); this.output.dispose(); this.fxaa.dispose(); this.grade.dispose(); }
+  dispose() { this.composer.dispose(); this.ao.dispose?.(); this.bloom.dispose(); this.output.dispose(); this.fxaa.dispose(); this.grade.dispose(); this.tilt.dispose(); }
 }
 
 class Stage {
@@ -97,7 +133,7 @@ class Stage {
     this.renderer.toneMapping = THREE.NeutralToneMapping;
     this.renderer.toneMappingExposure = 0.84;
     this.renderer.shadowMap.enabled = false;
-    this.renderer.shadowMap.type = this.q.soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;  // r186 made this the soft one
     this.resize();
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => { if (!document.hidden) { this.clock.getDelta(); this.loop(); } });
@@ -169,9 +205,9 @@ class Stage {
       this.renderer.info.reset();
       if (this.view?.scene) {
         this.view.update?.(dt);
-        // The sun's shadow map is big, so it redraws every other frame, or every third on a phone. Nobody can tell.
+        // The sun's shadow map is big, so it redraws every other frame, or every third on a phone. Nobody can tell. A view where nothing that casts moves draws it once.
         const r = this.renderer;
-        if (r.shadowMap.enabled && !r.shadowMap.autoUpdate) r.shadowMap.needsUpdate = r.shadowMap.needsUpdate || this.frame % (this.lowEnd ? 3 : 2) === 0;
+        if (r.shadowMap.enabled && !r.shadowMap.autoUpdate && !this.view.staticShadows) r.shadowMap.needsUpdate = r.shadowMap.needsUpdate || this.frame % (this.lowEnd ? 3 : 2) === 0;
         if (this.post && this.post.level && this.view.post !== false) this.post.render(dt, this.time);
         else r.render(this.view.scene, this.view.camera);
       }
@@ -194,7 +230,6 @@ class Stage {
   setTier(tier) {
     this.tier = tier; this.q = { ...TIERS[tier] }; this.dprCap = Math.min(this.dprCap, this.q.dpr);
     if (this.mobile && this.q.ao === 'full') this.q.ao = 'half';
-    this.renderer.shadowMap.type = this.q.soft ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     this.applyPost();
     this.resize();
     this.view?.setTier?.(this.q);

@@ -471,7 +471,7 @@ export class OfficeView {
     this.staffCount = state.agents.filter((a) => a.role !== 'manager').length;
     this.scene = new THREE.Scene();
     // Linear fog with a long start: the room and the near city keep their full colour, only the far shore softens.
-    this.scene.fog = new THREE.Fog('#d7e1ea', 140 * WORLD_SCALE, 620 * WORLD_SCALE);
+    this.scene.fog = new THREE.Fog('#ffffff', 140 * WORLD_SCALE, 620 * WORLD_SCALE);
     this.grade = { vignette: 0.22, grain: 0.016 };
     this.ao = { radius: 0.9, intensity: 1.9, color: '#2b1b10', falloff: 1 };
     this.bloom = 0.1;
