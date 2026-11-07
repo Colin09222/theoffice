@@ -2,6 +2,7 @@
 // An order fires as a boss message ("Standing order #N: ..."), so the manager plans it through the same tool loop, limits and caps as
 // anything typed in chat. Nothing here can spend beyond those rules, and a domain still needs the boss's own click.
 import { get, all, run, tx } from './db.js';
+import { capOrNull } from './config.js';
 
 const DAY = 86400000, HOUR = 3600000;
 // A due order whose floor is busy waits this long for a gap before that occurrence is written off.
@@ -112,7 +113,7 @@ export function installOrders(ext) {
     history: all(db, 'SELECT * FROM standing_runs WHERE order_id=? ORDER BY id DESC LIMIT 10', o.id).map(runView),
   });
   const list = (floorId) => all(db, 'SELECT * FROM standing_orders WHERE floor_id=? ORDER BY id', floorId).map(view);
-  const limits = () => ({ perFloor: cfg.ordersPerFloor, minHours: cfg.ordersMinHours, idleDays: cfg.ordersIdleDays, maxFails: cfg.ordersMaxFails });
+  const limits = () => ({ perFloor: capOrNull(cfg.ordersPerFloor), minHours: cfg.ordersMinHours, idleDays: cfg.ordersIdleDays, maxFails: capOrNull(cfg.ordersMaxFails) });
 
   // The boss is here. Orders that were only waiting for that carry on, from the next slot rather than the one they missed.
   function touch(floorId) {

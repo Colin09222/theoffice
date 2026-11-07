@@ -248,8 +248,8 @@ describe('ending a job', () => {
     writeFile(h.t.db, h.f.id, 'projects/built/dist/index.html', '<h1>three</h1>', null, 1e7);
     assert.deepEqual(h.e.unpublishedWork(h.f.id), [], 'someone is still on it');
   });
-  test('fix rounds end, and the manager is told so rather than told it was approved', async () => {
-    const h = await start(scripted());
+  test('fix rounds end when a limit is set, and the manager is told so rather than told it was approved', async () => {
+    const h = await start(scripted(), { maxRevisions: 2 });
     h.e.runManager = async () => {};
     const { id } = h.e.assignTask(h.f, h.mgr, { to: 'writer', title: 'W', brief: 'b', plan: '', project: 'p', dependsOn: [], afterPrevious: false });
     run(h.t.db, "UPDATE tasks SET status='review', revisions=2 WHERE id=?", id);
@@ -330,7 +330,7 @@ describe('questions', () => {
 describe('never going quiet', () => {
   test('a turn that runs out of steps tells the boss, and is warned before it does', async () => {
     const llm = scripted({ manager: () => ({ toolCalls: [['list_files', {}]] }) });
-    const h = await start(llm);
+    const h = await start(llm, { maxManagerSteps: 8 });
     h.e.bossMessage(h.f, 'do lots');
     await until(() => said(h, 'office').length, { what: 'the notice' });
     await idle(h);
@@ -358,7 +358,7 @@ describe('never going quiet', () => {
   });
   test('running short of steps warns the staff member, and running out says the work is safe', async () => {
     const llm = scripted({ staff: (a) => (a.meta.step === 0 ? { toolCalls: [['write_file', { path: 'projects/long/a.md', content: 'x' }]] } : { toolCalls: [['list_files', {}]] }), manager: () => ({ content: 'ok' }) });
-    const h = await start(llm);
+    const h = await start(llm, { maxStaffSteps: 14 });
     const { id } = h.e.assignTask(h.f, h.mgr, { to: 'writer', title: 'W', brief: 'b', plan: '', project: 'long', dependsOn: [], afterPrevious: false });
     h.e.kick();
     await until(() => get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status === 'failed', { what: 'it to stop' });
@@ -394,7 +394,7 @@ describe('small jobs stay small', () => {
     const sessions = createMockSessions({}, { onTurn: async (api) => { for (let i = 0; i < n; i++) await api.step(); await api.save([{ path: 'index.html', data: Buffer.from('<h1>x</h1>') }]); await api.message('Done.'); } });
     const send = sessions.send.bind(sessions);
     sessions.send = (id, evs) => { seen.push(...evs); return send(id, evs); };
-    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0 }, { sessions });
+    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0, sessionWrapUp: true }, { sessions });
     h.e.runManager = async () => {};
     const { id } = setup(h);
     h.e.kick();

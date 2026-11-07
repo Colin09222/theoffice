@@ -457,15 +457,15 @@ Walking tests step the room's clock by hand. In this environment the software re
 
 ## Known limits
 - An interrupted task resumes from its last completed step, and the aborted call is charged as an estimate.
-- Spend caps reset at midnight UTC.
+- Daily spend caps, when set, reset at midnight UTC.
 - Rate limits and SSE are in-process, so a restart resets limits and drops streams; browsers reconnect.
 - Signed links to private projects work for anyone holding them, for up to an hour.
 - Public chat hides private names and titles, but not paraphrases.
-- A prompt-injected agent on a public task can still damage that floor's public projects, but can't escape the sandbox, spend past the caps, or read private projects or other floors.
+- A prompt-injected agent on a public task can still damage that floor's public projects, but can't escape the sandbox, spend past the building's limits, or read private projects or other floors.
 
 ## Models
 Most roles run on Claude Opus 5.5 through the Claude API (`$4` in, `$20` out, `$0.20` cache reads per million tokens), with effort set per role in `config/models.json`: manager and designer medium, researcher/writer/analyst/marketer medium, builder xhigh without a computer and medium on one, tester low on a computer, illustrator high. The search summary runs on Claude Sonnet 5.5. See `docs/WORKERS.md`. The hireable Tester runs on `google/gemini-3.1-pro-preview` through OpenRouter (`$2`/`$12`) for a second opinion from another lab. Assistant turns replay Claude's own content verbatim so history stays append-only; prompt caching and server-side refusal fallbacks are on.
 
 Floor agents must not use the Claude CLI or a Claude subscription.
 
-Spending caps are off on the live server at the owner's request (`FLOOR_DAILY_USD`, `GLOBAL_DAILY_USD` and `TASK_MAX_USD` set to `off`; defaults are 10, 25 and 3). The limits of 14 steps per staff task and 60 tasks per floor per day still apply.
+Work caps are off by default from `office-next` on, at the owner's request: see "Work caps" in `docs/DEPLOY-NEXT.md`. What stops the money is the building's lifetime limit per provider.

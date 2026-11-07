@@ -55,7 +55,7 @@ describe('schedule maths', () => {
 
 describe('owner routes', () => {
   let t, a, b;
-  before(async () => { t = await mk(); a = await claim(t, 'Clockwork'); b = await claim(t, 'Neighbour'); });
+  before(async () => { t = await mk({ ordersPerFloor: 3, ordersMaxFails: 3 }); a = await claim(t, 'Clockwork'); b = await claim(t, 'Neighbour'); });
   after(() => t.close());
   test('create, list, update, pause, resume and delete', async () => {
     const o = await create(a, 'Every morning write a short post about yesterday');
@@ -274,7 +274,7 @@ describe('the runner', () => {
 describe('failures', () => {
   test('three failed runs in a row pause the order with a reason and a notice to the boss', async () => {
     // Staff can spend nothing, so every task fails at its first step: a real engine failure, not a scripted one.
-    const t = await mk({ taskMaxUsd: 0 });
+    const t = await mk({ taskMaxUsd: 0, ordersMaxFails: 3 });
     try {
       const a = await claim(t, 'Doomed Co');
       await floorState(a);

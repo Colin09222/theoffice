@@ -33,7 +33,18 @@ export function createManagedClient(cfg) {
     send: wrap((id, events) => sdk.beta.sessions.events.send(id, { events })),
     // A long timeout: a quiet stream is normal while a build runs. The runner has its own stall detector.
     stream: wrap((id, signal) => sdk.beta.sessions.events.stream(id, {}, { signal, timeout: 3 * 3600 * 1000 })),
-    listEvents: async function* (id) { need(); for await (const ev of sdk.beta.sessions.events.list(id)) yield ev; },
+    // From a moment on, when given one: a long session's whole history is a lot to page through on every reconnect. This only saves that paging, because the runner
+    // checks the dates itself, so a platform that won't take the filter can still be read from the start.
+    listEvents: async function* (id, fromMs) {
+      need();
+      let got = 0;
+      try {
+        for await (const ev of sdk.beta.sessions.events.list(id, fromMs ? { 'created_at[gte]': new Date(fromMs).toISOString() } : {})) { got++; yield ev; }
+      } catch (e) {
+        if (!fromMs || got || !(e instanceof Anthropic.APIError) || e.status < 400 || e.status >= 500 || e.status === 429) throw e;
+        for await (const ev of sdk.beta.sessions.events.list(id)) yield ev;
+      }
+    },
     listOutputs: wrap(async (id) => {
       const out = [];
       for await (const f of sdk.beta.files.list({ scope_id: id, betas: [BETA] })) out.push({ id: f.id, filename: f.filename, size: f.size_bytes, createdAt: f.created_at });

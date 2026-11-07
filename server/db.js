@@ -143,6 +143,8 @@ Object.assign(ADDED.tasks, { lane: "TEXT NOT NULL DEFAULT ''" });
 Object.assign(ADDED.ledger, { provider: "TEXT NOT NULL DEFAULT ''" });
 Object.assign(ADDED.floors, { budget_out: "TEXT NOT NULL DEFAULT ''" });
 Object.assign(ADDED.purchases, { notify: 'INTEGER NOT NULL DEFAULT 0' });
+// A long task's early steps get dropped from its transcript. The links it saw go here, because publishing a doc checks that its sources were really opened.
+Object.assign(ADDED.tasks, { seen_links: "TEXT NOT NULL DEFAULT ''" });
 
 export function openDb(dataDir) {
   let path = ':memory:';
@@ -165,8 +167,6 @@ export function openDb(dataDir) {
 export const get = (db, sql, ...a) => db.prepare(sql).get(...a);
 export const all = (db, sql, ...a) => db.prepare(sql).all(...a);
 export const run = (db, sql, ...a) => db.prepare(sql).run(...a);
-/** One row at a time, for what could be too big to hold all at once. */
-export const each = (db, sql, ...a) => db.prepare(sql).iterate(...a);
 export function tx(db, fn) {
   db.exec('BEGIN IMMEDIATE');
   try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }

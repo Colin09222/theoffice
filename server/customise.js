@@ -4,6 +4,7 @@
 import { get, all, run, tx } from './db.js';
 import { TONES, PERSONALITIES, WORK_KINDS } from '../public/js/looks.js';
 import { BRIEF_LIMITS, settingText } from './brief.js';
+import { capOrNull } from './config.js';
 
 const IMAGE = /\.(png|jpe?g|webp|svg)$/i;
 const LOGOISH = /(^|[\/_.-])(logo|logomark|brandmark|wordmark)([\/_.-]|$)/i;
@@ -103,7 +104,7 @@ export function installCustomise(ext) {
     if (!viewer.owner) return;
     out.identity = validIdentity({}, { about: '', tone: '', rules: '', avoid: '', routing: {}, ...parse(f.identity, {}) });
     out.hiring = {
-      cap: cfg.maxStaff,
+      cap: capOrNull(cfg.maxStaff),
       roles: Object.entries(models.all).filter(([k]) => k !== 'manager').map(([role, r]) => ({ role, title: r.title, hired: out.agents.some((a) => a.role === role) })),
     };
   });

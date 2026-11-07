@@ -322,7 +322,7 @@ describe('computer sessions', () => {
     assert.equal(h.sessions.calls.sessions[0].budget.max_list_cost.amount, '125');
   });
   test('it is left alone when plenty remains, and a Tester on a computer counts as Anthropic', async () => {
-    const h = await computer(quick, { budgetAnthropicUsd: 100, sessionMaxUsd: 5, budgetOpenrouterUsd: 0 });
+    const h = await computer(quick, { budgetAnthropicUsd: 100, sessionMaxUsd: 5, sessionSliceUsd: 5, budgetOpenrouterUsd: 0 });
     hire(h.t, h.floor, 'tester');
     const { id } = assign(h.t, h.floor, 'tester');
     await settled(h, id, ['review']);

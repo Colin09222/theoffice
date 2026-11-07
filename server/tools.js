@@ -1,7 +1,7 @@
 // The complete set of things an agent can do. There is no shell, no code execution and no real filesystem here.
 import { writeFile, writeBinaryFile, readFile, listFiles, publishSnapshot, WorkspaceError, slugify, slugPattern } from './workspace.js';
 import { safeFetch, FetchBlocked } from './safefetch.js';
-import { get, all, run, each } from './db.js';
+import { get, all, run } from './db.js';
 import { DomainRefused, domainsConfigured } from './domains.js';
 import { ProviderError, plainProviderText, scrub } from './llm.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './media.js';
@@ -11,7 +11,7 @@ import { LANES } from './prompts.js';
 import { OrderError } from './orders.js';
 import { HelpError, HELP_LIMITS, flatText } from './help.js';
 
-const LINK_SCAN_CHARS = 8 * 1024 * 1024, MAX_LINKS_CHECKED = 100;
+const LINK_SCAN_CHARS = 24 * 1000 * 1000, MAX_LINKS_CHECKED = 100;
 
 const str = (o, k, max, req = true) => {
   const v = o?.[k];
@@ -50,7 +50,7 @@ const DEFS = {
     after_previous: { type: 'boolean', description: 'True to start only after the task you assigned just before this one finishes' },
     lane: { type: 'string', enum: ['game', 'website', 'business'], description: 'Which lane this plan is in. The person doing the task gets their part of that playbook.' },
   }, ['to', 'title', 'brief']),
-  review_task: fn('review_task', 'Approve finished work or send it back once with notes.', { task_id: { type: 'integer', description: 'Task id' }, verdict: { type: 'string', enum: ['approve', 'revise'] }, notes: S('Feedback for the staff member') }, ['task_id', 'verdict']),
+  review_task: fn('review_task', 'Approve finished work or send it back with notes.', { task_id: { type: 'integer', description: 'Task id' }, verdict: { type: 'string', enum: ['approve', 'revise'] }, notes: S('Feedback for the staff member') }, ['task_id', 'verdict']),
   cancel_task: fn('cancel_task', 'Cancel a task that is no longer needed.', { task_id: { type: 'integer', description: 'Task id' } }),
   check_domain: fn('check_domain', 'Check whether domain names can be bought and what they cost for a year. Checking costs nothing.', { names: { type: 'array', items: { type: 'string' }, description: 'Up to 10 names, such as tinyteacups.com' } }),
   request_domain: fn('request_domain', 'Ask the boss to buy a domain for a project. This does not buy anything: it puts a Buy button in front of the boss, and only their click spends money. Ordinary names only, within the price limit.', { domain: S('The name, such as tinyteacups.com'), project: S('Project slug it will serve'), why: S('One sentence for the boss') }),
@@ -63,7 +63,7 @@ const DEFS = {
   launch_report: fn('launch_report', 'Give the boss the launch report for a published project. The office fills in the live link, checklist, domain, visitors and sign-ups from its own records; you add the headline and what comes next.', { project: S('Project slug'), headline: S('A sentence or two on what launched and for whom'), next_steps: S('What you suggest next, and anything the boss must do') }, ['project', 'headline']),
   ios_start: fn('ios_start', 'Put the Expo iPhone app template into a project. Free.', { project: S('Project slug'), app_name: S('The name on the home screen') }),
   ios_request: fn('ios_request', 'Ask the boss to allow an iPhone build, or to send a finished build to TestFlight. Nothing happens until they click.', { project: S('Project slug'), kind: { type: 'string', enum: ['build', 'submit'] }, build_id: S('For submit: the EAS build id') }, ['project', 'kind']),
-  hire_staff: fn('hire_staff', 'Hire another staff member, within this floor\'s limit.', { role: S('Role to hire'), name: S('Optional first name') }, ['role']),
+  hire_staff: fn('hire_staff', 'Hire another staff member.', { role: S('Role to hire'), name: S('Optional first name') }, ['role']),
   // Standing orders (floors-plus). An order fires as an ordinary boss message on its schedule; it can't spend beyond the floor's normal caps.
   set_standing_order: fn('set_standing_order', 'Set a recurring job for the floor: the instruction is handed to you again on a schedule, every day or every week, when the floor is quiet. Use it when the boss asks for something regular ("every morning", "weekly"). It shows to the boss under Orders, where they can edit, pause or delete it.', {
     instruction: S('What to do each time, written as the boss would say it'), every: { type: 'string', enum: ['day', 'week'] }, at: S('Time of day as HH:MM, 24-hour'),
@@ -74,6 +74,8 @@ const DEFS = {
   ask_buddehbot: fn('ask_buddehbot', 'Ask buddehbot, the building owner\'s assistant, for guidance when you or your staff are truly blocked and the boss can\'t settle it. Don\'t wait for the answer: carry on with anything else you can do. Your own words only: no pasted pages, files or private details.', { question: S(`What you need to know, up to ${HELP_LIMITS.question} characters`), what_was_tried: S(`What you already tried, up to ${HELP_LIMITS.tried} characters`) }),
 };
 
+// A refusal quotes the link, and reading a draft back shows it again. Neither means anyone has seen the page.
+export const NOT_SEEN_AS_LINK = /^Error:|^<untrusted_data source="workspace:/;
 export const STAFF_TOOLS = ['write_file', 'read_file', 'list_files', 'publish_project', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request'];
 // The manager has no web tools. It reads every staff result and knows private titles, so it must have no way to send anything out.
 export const MANAGER_TOOLS = ['write_file', 'read_file', 'list_files', 'publish_project', 'ask_boss', 'file_purchase_request', 'assign_task', 'review_task', 'cancel_task', 'hire_staff'];
@@ -189,27 +191,30 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
   };
   const brokerError = (e) => { if (e instanceof ProviderError) { engine.log('warn', 'tool provider failed', { status: e.status, err: scrub(e.message, cfg) }); return new WorkspaceError(`that did not work: ${plainProviderText(e)}`); } return e; };
   // A link nobody here ever opened is what an invented source looks like from outside. Publishing a doc checks each one against what searches returned and pages opened on this floor, against what teammates handed over, and against what the boss said.
-  // A drive can hold a hundred megabytes of markdown, and one publish must not need all of that in memory. So each place is read once and let go, newest first, and only until the links are found or the allowance runs out.
-  const unseenOnFloor = (floorId, exceptPrefix, keys) => {
+  // One task at a time, newest first, stopping once every link has turned up or the allowance runs out. A floor can have any number of tasks behind it, a drive can hold a hundred megabytes of markdown, and this process has a fixed amount of memory and one thread.
+  const stillUnseen = (floorId, exceptPrefix, keys) => {
     const left = new Set(keys);
     let room = LINK_SCAN_CHARS;
     const look = (text) => {
-      const part = text.length > room ? text.slice(0, room) : text;
+      const part = String(text).slice(0, room);
       room -= part.length;
-      const hay = part.toLowerCase().replaceAll('://www.', '://');
-      for (const k of left) if (hay.includes(k)) left.delete(k);
+      const low = part.toLowerCase().replaceAll('://www.', '://');
+      for (const k of left) if (low.includes(k)) left.delete(k);
     };
-    const done = () => !left.size || room <= 0;
     look(bossText(db, floorId));
-    for (const t of each(db, "SELECT transcript FROM tasks WHERE floor_id=? AND transcript!='' ORDER BY id DESC", floorId)) {
-      if (done()) break;
-      let msgs; try { msgs = JSON.parse(t.transcript); } catch { continue; }
-      // A refusal quotes the link, and reading a draft back shows it again. Neither means anyone has seen the page.
-      for (const m of msgs) if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string' && !/^Error:|^<untrusted_data source="workspace:/.test(m.content)) look(m.content);
+    for (let before = Number.MAX_SAFE_INTEGER, rows = []; left.size && room > 0; before = rows.at(-1).id) {
+      rows = all(db, "SELECT id,transcript,seen_links FROM tasks WHERE floor_id=? AND id<? AND (transcript!='' OR seen_links!='') ORDER BY id DESC LIMIT 25", floorId, before);
+      if (!rows.length) break;
+      for (const t of rows) {
+        look(t.seen_links);
+        let msgs; try { msgs = JSON.parse(t.transcript); } catch { continue; }
+        for (const m of msgs) if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string' && !NOT_SEEN_AS_LINK.test(m.content)) look(m.content);
+      }
     }
-    for (const f of each(db, "SELECT path,content FROM files WHERE floor_id=? AND path LIKE 'projects/%.md' ORDER BY updated_at DESC", floorId)) {
-      if (done()) break;
-      if (!f.path.startsWith(exceptPrefix) && typeof f.content === 'string') look(f.content);
+    for (let before = Number.MAX_SAFE_INTEGER, rows = []; left.size && room > 0; before = rows.at(-1).rowid) {
+      rows = all(db, "SELECT rowid,path,content FROM files WHERE floor_id=? AND rowid<? AND path LIKE 'projects/%.md' ORDER BY rowid DESC LIMIT 25", floorId, before);
+      if (!rows.length) break;
+      for (const f of rows) if (!f.path.startsWith(exceptPrefix) && typeof f.content === 'string') look(f.content);
     }
     return left;
   };
@@ -218,10 +223,10 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     const urls = new Set([...sources.map((s) => s.url), ...(typeof doc === 'string' ? [...doc.matchAll(/https?:\/\/[^\s)\]>"'`]+/gi)].map((m) => m[0].replace(/[.,;:!?*_]+$/, '')) : [])]);
     const key = (u) => u.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
     // The first hundred say whether links were made up. A doc of nothing but links can't hold up the whole building.
-    const checked = [...urls].filter((u) => !/^https?:\/\/([a-z0-9-]+\.)?(example\.(com|org|net)|localhost)([/:]|$)/i.test(u)).slice(0, MAX_LINKS_CHECKED);
-    if (!checked.length) return [];
-    const unseen = unseenOnFloor(c.floor.id, prefix, new Set(checked.map(key)));
-    return checked.filter((u) => unseen.has(key(u))).slice(0, 12)
+    const wanted = [...urls].filter((u) => !/^https?:\/\/([a-z0-9-]+\.)?(example\.(com|org|net)|localhost)([/:]|$)/i.test(u)).slice(0, MAX_LINKS_CHECKED);
+    if (!wanted.length) return [];
+    const left = stillUnseen(c.floor.id, prefix, wanted.map(key));
+    return wanted.filter((u) => left.has(key(u))).slice(0, 12)
       .map((u) => `a link nobody here opened or found in a search (open it with fetch_url, or take it out along with whatever rests on it): "${u}"`);
   };
   const handlers = {
