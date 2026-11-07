@@ -104,7 +104,8 @@ describe('a viewer who stops reading', () => {
     reader.write(request);
     await until(() => t.app.bus.total === 2);
     const text = 'x'.repeat(16000);
-    for (let i = 0; i < 4000 && t.app.bus.total === 2; i++) { t.app.engine.emit(f.id, 'feed', { agent: null, name: 'Office', text, ts: 1 }, { persist: false }); if (i % 20 === 0) await sleep(2); }
+    // Slow enough for the one who is reading to keep up: this is about falling behind for good, not about a burst.
+    for (let i = 0; i < 6000 && t.app.bus.total === 2; i++) { t.app.engine.emit(f.id, 'feed', { agent: null, name: 'Office', text, ts: 1 }, { persist: false }); if (i % 4 === 0) await sleep(1); }
     await until(() => t.app.bus.total === 1, { what: 'the stalled viewer to be dropped', timeout: 5000 });
     assert.ok(got > 0);
     assert.ok(!reader.destroyed, 'the one who kept up is still connected');
