@@ -26,7 +26,6 @@ const STEPS_KEEP_CHARS = 240000, STEPS_CUT_TO_CHARS = 150000, NOTES_KEPT = 12, L
 const OPEN_TASKS_SHOWN = 40;
 const TRIM_NOTE = '[Office note, not from the boss] Earlier steps of this job were dropped to make room. Anything written or published is still on the shared drive, so check there rather than redoing it.';
 const HANDOFF_FILE_CHARS = 14000, HANDOFF_TOTAL_CHARS = 30000, HANDOFF_RESULT_CHARS = 600;
-const TALK_READ_CHARS = 8000, TALK_JUDGED_CHARS = 600;
 const STAFF_NAMES = ['Margot', 'Wren', 'Otis', 'Juno', 'Felix', 'Ines', 'Hugo', 'Tess', 'Nico', 'Bea', 'Arlo', 'Mina'];
 const BACKOFF = [1, 3, 8];
 const PRIVATE_TEXT = 'Working on something private';
@@ -835,14 +834,13 @@ export class Engine {
   /** Words passing between two people, cut down from the real thing. The room acts it out and the Talk tab keeps it, under the same privacy rules as the feed. */
   talk(floorId, from, to, text, { kind, project = '' }) {
     if (!from) return;
-    const said = scrub(text, this.cfg).slice(0, TALK_READ_CHARS);
+    const said = scrub(text, this.cfg);
     const line = talkLine(said);
     if (!line) return;
     // Only the cut is kept, and the cut can fall inside a private name, so what a visitor gets is worked out here. A name goes before cutting.
     // What still touches private work after that, in another spelling or in words lifted from a private brief or the boss's private settings, stays with the boss.
     const open = redactChat(this.db, floorId, said);
-    const judged = talkLine(open, TALK_JUDGED_CHARS);
-    const quiet = { ...(open === said ? {} : { pub: talkLine(open) }), ...(mentionsPrivate(this.db, floorId, '', judged) || quotesSettings(this.db, floorId, judged) ? { hush: true } : {}), ...(quotesBoss(this.db, floorId, judged) ? { quote: true } : {}) };
+    const quiet = { ...(open === said ? {} : { pub: talkLine(open) }), ...(mentionsPrivate(this.db, floorId, '', open) || quotesSettings(this.db, floorId, open) ? { hush: true } : {}), ...(quotesBoss(this.db, floorId, open) ? { quote: true } : {}) };
     this.emit(floorId, 'talk', { from: from.id, to: to?.id ?? null, fromName: from.name, toName: to?.name ?? '', text: line, kind, ts: this.now(), ...quiet }, { project });
   }
   /** Anything about the budget or a purchase: the boss's alone, even on a floor with public chat, and it never reaches the model. */

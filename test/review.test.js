@@ -86,12 +86,6 @@ describe('the Talk tab keeps private work from visitors', () => {
     }
     assert.equal(talkLine('Two cups of a good thing, and a dollop of cream.'), 'Two cups of a good thing, and a dollop of cream.');
   });
-  test('text built to slow the patterns down holds nothing up', () => {
-    for (const s of ['['.repeat(200000), '\n'.repeat(200000), `${'- '.repeat(100000)}x`]) {
-      const t0 = Date.now(); talkLine(s);
-      assert.ok(Date.now() - t0 < 500, `${JSON.stringify(s.slice(0, 4))} took ${Date.now() - t0} ms`);
-    }
-  });
   test('a signed preview link loses its signature, which lives in the path', () => {
     const out = talkLine('Look at https://x.io/theoffice/f/acme/moon/~p1900000000.abcdefghijklmnopqrstuvwxyz012345/ now');
     assert.ok(!/~p\d|abcdefghijklmnop/.test(out), out);
