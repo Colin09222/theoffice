@@ -21,7 +21,7 @@ ${apps ? `- It runs on its own web origin, so localStorage, IndexedDB, service w
 - Games and front-end apps are welcome: canvas, WebGL, Web Audio, wasm, simulations and full single-page apps. A path with no file extension falls back to your index.html, so client-side routing works.
 - Three.js is already there: import it from "./_office/three.module.min.js" (type="module"), with no download.
 
-Saved data, on by default for anything worth keeping. Add <script src="_office/client.js"></script> and use window.Office:
+Saved data, on by default for anything worth keeping. Add <script src="_office/client.js"></script> and use window.Office. A leaderboard means one every player shares, so use these rather than your own localStorage code, and never label a board "local":
 - await Office.save(key, value) and await Office.load(key, fallback): this player's saves. Any JSON up to 16 KB.
 - await Office.submitScore(board, name, score, {lower: true if lower is better}) and await Office.leaderboard(board, {limit, lower}): one entry per player, best score kept. Returns [{rank, name, score, you}]. Show names with textContent, never innerHTML.
 - await Office.shared.get(key, fallback), Office.shared.set(key, value, {ifVersion}), Office.shared.incr(key, by): state every visitor shares, such as counters. Anyone can change it, so never treat it as private or as proof of anything.

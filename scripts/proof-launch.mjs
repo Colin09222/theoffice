@@ -221,12 +221,12 @@ async function qa() {
   process.exitCode = fail ? 1 : 0;
 }
 async function simAgain() {
-  const report = JSON.parse(readFileSync(join(DIR, 'report.json'), 'utf8'));
+  const report = existsSync(join(DIR, 'report.json')) ? JSON.parse(readFileSync(join(DIR, 'report.json'), 'utf8')) : { floors: {} };
   const { db, app, stub } = await makeApp(true);
-  const boss = new Boss(); const made = await boss.claim(db, 'Flock Two', 'Noor');
+  const boss = new Boss(); const made = await boss.claim(db, process.env.PROOF_FLOOR || 'Flock Two', 'Noor');
   const floorId = get(db, 'SELECT id FROM floors WHERE slug=?', boss.slug).id;
   app.bus.subscribe(floorId, { ip: 'proof', send: (ev) => { if (ev.type === 'feed') log(ev.data.name, ev.data.text); }, close() {} });
-  await boss.say('Go: build a small interactive flocking simulation on a canvas, with sliders for cohesion and speed, that runs well on a phone. Just the Builder, one task. Keep it small and cheap.');
+  await boss.say(process.env.PROOF_BRIEF || 'Go: build a small interactive flocking simulation on a canvas, with sliders for cohesion and speed, that runs well on a phone. Just the Builder, one task. Keep it small and cheap.');
   const end = Date.now() + 15 * 60000;
   let s;
   for (;;) { await sleep(4000); s = await boss.state(); if ((s.projects.length && !s.agents.some((a) => a.state !== 'idle')) || Date.now() > end) break; }
@@ -234,6 +234,7 @@ async function simAgain() {
   report.simCost = all(db, "SELECT ROUND(SUM(cost_usd),3) usd FROM ledger WHERE floor_id=? AND kind!='domain'", floorId)[0].usd;
   writeFileSync(join(DIR, 'report.json'), JSON.stringify(report, null, 1));
   log('sim', JSON.stringify(report.sim), 'cost', report.simCost);
+  for (const p of report.sim) { const files = all(db, 'SELECT path,content FROM published_files WHERE floor_id=? AND project=?', floorId, p).filter((f) => /\.(html|js)$/.test(f.path)).map((f) => String(f.content)).join(''); log('uses', p, JSON.stringify({ submitScore: /submitScore/.test(files), leaderboard: /Office\.leaderboard|\.leaderboard\(/.test(files), local: /local top|local leaderboard/i.test(files) })); }
   await stub.close(); await app.close(); db.close();
 }
 (process.argv[2] === 'browser' ? browser : process.argv[2] === 'qa' ? qa : process.argv[2] === 'sim' ? simAgain : run)().catch((e) => { console.error(e); process.exit(1); });

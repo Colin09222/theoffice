@@ -166,10 +166,14 @@ curl -s -b /tmp/oa $B/admin/purchases                       # pending, as JSON
 curl -s -b /tmp/oa -H "Origin: $O" -H "X-Office-Csrf: $CSRF" -H 'Content-Type: application/json' -d '{"status":"bought","note":"Done, $29"}' $B/admin/purchases/<id>
 curl -s -b /tmp/oa -H "Origin: $O" -H "X-Office-Csrf: $CSRF" -H 'Content-Type: application/json' -d '{"status":"rejected","note":"Not this month"}' $B/admin/purchases/<id>
 curl -s -b /tmp/oa $B/admin/domains                         # every domain order, charges, order numbers
+# Only for an order showing status "uncertain", after checking the Namecheap account by hand:
+curl -s -b /tmp/oa -H "Origin: $O" -H "X-Office-Csrf: $CSRF" -H 'Content-Type: application/json' -d '{"outcome":"bought","chargedUsd":11.46}' $B/admin/domains/<id>/resolve   # or {"outcome":"not_bought"}
 rm -f /tmp/oa
 ```
 
 A row can be decided once. The boss sees the answer and the manager is told. `?status=bought`, `rejected` or `all` lists the others.
+
+**An `uncertain` domain order needs a person.** It means the registrar never gave a clear answer and the name didn't appear on the account within 15 minutes. The name stays blocked, nothing retries, and an error is logged. Look at the Namecheap account's domain list and order history, then settle it with the resolve call above. It should be rare.
 
 ## 10. iOS, later
 
@@ -201,7 +205,7 @@ Each one undoes alone. Domains already bought stay bought and stay in the accoun
 - **The only path to a purchase is `POST /api/floors/<slug>/domains/<id>/buy`,** which needs that floor's session cookie and CSRF token. Agents have no tool that approves, and nothing in chat, files or pages can do it. Published code runs on another host and can't reach this route.
 - **The button states the price,** and that price is sent back. If it has gone up by buying time, nothing is bought and the boss gets a fresh button.
 - **Rechecked at purchase:** availability, premium status (and `IsPremiumDomain=False`, so the registrar itself refuses a premium name), ceiling, balance.
-- **It can't buy twice.** The order is marked `sent` in the database before the create call goes out, and no code path sends a create for an order already `sent`. A timeout or unclear answer is settled only by reading the account's own domain list. A partial unique index refuses a second live order for one name. The registrar also can't sell one name twice.
+- **It can't buy twice.** The order is marked `sent` and flushed to disk before the create call goes out, and no code path sends a create for an order already `sent`. A timeout or unclear answer is settled only by reading the account's own domain list; if that never settles it, the order becomes `uncertain`, which keeps the name blocked until a person has looked. Only a reply of `Registered="true"` for that exact name counts as bought, and only documented error numbers count as a clean refusal, whatever the words say. A partial unique index refuses a second active order for one name. The registrar also can't sell one name twice.
 - **The registrant** is read from the registrar for each purchase, held in memory for that call and never stored. Registrar error text is never passed on, because it can echo what was sent. Only numbers and fixed phrases are.
 - **The card number isn't involved anywhere.** Nothing here reads it, and purchases come from the Namecheap balance.
 

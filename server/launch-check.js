@@ -2,7 +2,8 @@
 const HTML = /\.html?$/i, TEXTY = /\.(html?|js|mjs|css|json|webmanifest|svg|txt|md)$/i;
 const text = (d) => (typeof d === 'string' ? d : Buffer.from(d).toString('utf8'));
 const squeeze = (s) => String(s).toLowerCase().replace(/[^a-z0-9@+]+/g, ' ').trim();
-const MAX_PAGE = 1024 * 1024;
+// Hard limits on what gets read. This runs on the server's only thread, and agents write these pages.
+const MAX_PAGE = 512 * 1024, MAX_PAGES_TOTAL = 1536 * 1024, MAX_SCAN = 2 * 1024 * 1024;
 // A single forward walk. Regexes that look for a closing tag from every opening one take quadratic time on a page written to exploit that.
 function stripTags(h) {
   const low = h.toLowerCase(); const out = []; let i = 0;
@@ -20,20 +21,20 @@ function stripTags(h) {
   return out.join('').replace(/&[a-z#0-9]{1,12};/gi, ' ');
 }
 const hostOf = (u) => u.replace(/^https?:\/\//i, '').split(/[/:?#]/)[0];
-const metaOf = (h, attr, name) => new RegExp(`<meta\\b[^>]{0,2000}\\b${attr}\\s*=\\s*["']${name}["'][^>]{0,2000}>`, 'i').exec(h)?.[0]?.match(/\bcontent\s*=\s*["']([^"']{0,2000})["']/i)?.[1] ?? '';
+const metaOf = (h, attr, name) => new RegExp(`<meta\\b[^>]{0,600}\\b${attr}\\s*=\\s*["']${name}["'][^>]{0,600}>`, 'i').exec(h)?.[0]?.match(/\bcontent\s*=\s*["']([^"']{0,2000})["']/i)?.[1] ?? '';
 
 const CLAIMS = [
   [/testimonial|what\s+(our\s+)?(people|customers|clients|users|parents|guests|members|readers)\s+(say|are\s+saying|think)|customer\s+(stories|reviews)|success\s+stories|hear\s+from\s+our/i, 'testimonials or customer quotes'],
-  [/★{3,}|⭐{3,}|\b[1-5](\.\d)?\s*(\/\s*5|out\s+of\s+5)\b|\b[1-5](\.\d)?[- ]stars?\b/i, 'a star rating'],
-  [/\b(trusted|loved|used|chosen)\s+by\s+(over\s+|more\s+than\s+)?[\d,.]+\s*k?\+?/i, 'a customer count'],
-  [/\b[\d,.]+\s*k?\+?\s+(happy|satisfied|delighted|paying)\s+\w+|\b[\d,.]+\s*k?\+?\s+(reviews|customers|clients|subscribers)\b/i, 'a customer count'],
+  [/★{3,}|⭐{3,}|\b[1-5](\.\d)?\s{0,3}(\/\s{0,3}5|out\s{1,3}of\s{1,3}5)\b|\b[1-5](\.\d)?[- ]stars?\b/i, 'a star rating'],
+  [/\b(trusted|loved|used|chosen)\s+by\s+(over\s{1,3}|more\s{1,3}than\s{1,3})?[\d,.]{1,15}\s{0,3}k?\+?/i, 'a customer count'],
+  [/\b[\d,.]{1,15}\s{0,3}k?\+?\s{1,3}(happy|satisfied|delighted|paying)\s{1,3}\w{1,30}|\b[\d,.]{1,15}\s{0,3}k?\+?\s{1,3}(reviews|customers|clients|subscribers)\b/i, 'a customer count'],
   [/\bas\s+(seen|featured)\s+(in|on)\b|\baward[- ]winning\b|#\s*1\s+rated|\bindustry[- ]leading\b|\bguaranteed\s+results\b/i, 'a press mention or award'],
-  [/["“][^"”\n]{20,220}["”]\s*(<[^>]{1,500}>\s*){0,6}[—–-]\s*[A-Z][a-z]+(\s+[A-Z][a-z.]*)?/, 'a quote attributed to a person'],
+  [/["“][^"”\n]{20,220}["”]\s{0,3}(<[^>]{1,300}>\s{0,3}){0,4}[—–-]\s{0,3}[A-Z][a-z]+(\s+[A-Z][a-z.]*)?/, 'a quote attributed to a person'],
 ];
 const CONTACT = [
-  [/[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}/gi, 'an email address'],
+  [/[a-z0-9._%+-]{1,64}@[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63}){0,4}\.[a-z]{2,24}/gi, 'an email address'],
   [/(?<![\d.-])(\+?\d{1,3}[ .-]?)?\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}(?![\d-])/g, 'a phone number'],
-  [/\b\d{1,5}\s+[A-Z][a-z]+(\s+[A-Z][a-z]+){0,3}\s+(Street|St\.|Avenue|Ave\.|Road|Rd\.|Boulevard|Blvd\.?|Lane|Drive|Suite)\b/g, 'a street address'],
+  [/\b\d{1,5}\s{1,3}[A-Z][a-z]{1,30}(\s{1,3}[A-Z][a-z]{1,30}){0,3}\s{1,3}(Street|St\.|Avenue|Ave\.|Road|Rd\.|Boulevard|Blvd\.?|Lane|Drive|Suite)\b/g, 'a street address'],
 ];
 const PAYMENT_HOSTS = /https?:\/\/(buy\.stripe\.com|donate\.stripe\.com|checkout\.stripe\.com|paypal\.me|www\.paypal\.com|paypal\.com|venmo\.com|cash\.app|ko-fi\.com|buymeacoffee\.com|www\.buymeacoffee\.com|gumroad\.com|[a-z0-9-]+\.gumroad\.com)[^\s"'<>)]{0,500}/gi;
 const SECRETS = /\b(sk_live_[A-Za-z0-9]{8,}|rk_live_[A-Za-z0-9]{8,}|whsec_[A-Za-z0-9]{8,}|sk-ant-[A-Za-z0-9_-]{8,}|sk-or-[A-Za-z0-9_-]{8,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,})\b/;
@@ -54,8 +55,12 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
   const seen = new Set();
   const flag = (what, where, sample) => { const k = `${what}|${sample}`; if (seen.has(k)) return; seen.add(k); claims.push(`${where}: ${what}: "${String(sample).replace(/\s+/g, ' ').trim().slice(0, 90)}"`); };
 
+  let scanned = 0;
   for (const f of files) {
-    if (!TEXTY.test(f.path) || (f.data?.length ?? 0) > 3 * 1024 * 1024) continue;
+    const size = f.data?.length ?? 0;
+    if (!TEXTY.test(f.path) || !size) continue;
+    if (scanned + size > MAX_SCAN) { warnings.push(`${f.path}: past what the checklist reads for secrets and payment links.`); continue; }
+    scanned += size;
     const t = text(f.data);
     if (SECRETS.test(t)) errors.push(`${f.path}: holds what looks like a secret key. Remove it; nothing published may carry one.`);
     if (HTML.test(f.path) && CARD_FIELD.test(t)) errors.push(`${f.path}: has card-number fields. Never collect card details on a site; link to the boss's Stripe Payment Link with _office/pay.`);
@@ -63,21 +68,24 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
   }
   if (!isDoc && !map.has('index.html')) errors.push('index.html is missing.');
   // Every page counts, whatever the project calls itself: a "doc" with an index.html is still a web page.
+  let pageBytes = 0;
   {
     for (const f of pages) {
-      if ((f.data?.length ?? 0) > MAX_PAGE) { warnings.push(`${f.path}: too large for the full check. Keep a page under 1 MB, and put big things in their own files.`); continue; }
+      pageBytes += f.data?.length ?? 0;
+      if (pageBytes > MAX_PAGES_TOTAL) { warnings.push(`${f.path}: past how much the checklist reads in one go, so it was not checked.`); continue; }
+      if ((f.data?.length ?? 0) > MAX_PAGE) { warnings.push(`${f.path}: too large for the full check. Keep a page under 512 KB, and put big things in their own files.`); continue; }
       const h = text(f.data); const visible = stripTags(h);
       for (const [re, what] of CLAIMS) { const m = visible.match(re) || (what.startsWith('a quote') ? h.match(re) : null); if (m && !fromBoss(m[0])) flag(what, f.path, m[0]); }
       for (const [re, what] of CONTACT) for (const m of visible.matchAll(re)) if (!fromBoss(m[0])) flag(what, f.path, m[0]);
       if (/"@type"\s*:\s*"(AggregateRating|Review)"|aggregateRating/i.test(h)) flag('review data for search engines', f.path, 'aggregateRating');
       if (PLACEHOLDER.test(visible)) warnings.push(`${f.path}: still has placeholder text.`);
       // The page can only load from itself, so anything off-site is simply broken once published.
-      for (const m of h.matchAll(/<(script|link|img|iframe|video|audio|source)\b[^>]{0,2000}\b(?:src|href)\s*=\s*["'](?:https?:)?\/\/([^"'/]+)[^"']{0,2000}["'][^>]{0,2000}>/gi)) {
+      for (const m of h.matchAll(/<(script|link|img|iframe|video|audio|source)\b[^>]{0,600}\b(?:src|href)\s*=\s*["'](?:https?:)?\/\/([^"'/]+)[^"']{0,2000}["'][^>]{0,600}>/gi)) {
         if (m[1].toLowerCase() === 'link' && !/rel\s*=\s*["'](stylesheet|preload|modulepreload|icon)/i.test(m[0])) continue;
         errors.push(`${f.path}: loads ${m[1]} from ${m[2]}. Published pages can only load from their own origin; bundle it.`);
       }
-      if (/<form\b[^>]{0,2000}\baction\s*=\s*["'](https?:)?\/\//i.test(h)) errors.push(`${f.path}: a form posts off-site, which the browser will block. Use Office.submitForm.`);
-      for (const m of h.matchAll(/<(?:script|img|link|source|a|iframe)\b[^>]{0,2000}\b(?:src|href)\s*=\s*["']([^"'#?]+)/gi)) {
+      if (/<form\b[^>]{0,600}\baction\s*=\s*["'](https?:)?\/\//i.test(h)) errors.push(`${f.path}: a form posts off-site, which the browser will block. Use Office.submitForm.`);
+      for (const m of h.matchAll(/<(?:script|img|link|source|a|iframe)\b[^>]{0,600}\b(?:src|href)\s*=\s*["']([^"'#?]+)/gi)) {
         const ref = m[1];
         if (/^(https?:|mailto:|tel:|data:|blob:|javascript:|\/\/|_office\/)/i.test(ref)) continue;
         const dir = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/') + 1) : '';
@@ -86,7 +94,7 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
         if (!target || map.has(target) || map.has(`${target}/index.html`) || !target.includes('.')) continue;
         errors.push(`${f.path}: points at ${ref}, which isn't in what's being published.`);
       }
-      for (const m of h.matchAll(/<img\b[^>]{0,2000}>/gi)) if (!/\balt\s*=/i.test(m[0])) { warnings.push(`${f.path}: an image has no alt text.`); break; }
+      for (const m of h.matchAll(/<img\b[^>]{0,600}>/gi)) if (!/\balt\s*=/i.test(m[0])) { warnings.push(`${f.path}: an image has no alt text.`); break; }
     }
     for (const f of files) {
       if (!/\.m?js$/i.test(f.path) || /three\.|vendor|chunk-vendors/i.test(f.path) || (f.data?.length ?? 0) > 400 * 1024) continue;
@@ -98,12 +106,12 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
     need(/<title>[^<]{3,}<\/title>/i.test(home), 'page title', 'index.html has no real <title>.');
     const desc = metaOf(home, 'name', 'description');
     need(desc.length >= 30, 'search description', 'index.html needs a <meta name="description"> of a sentence or two.');
-    need(/<meta\b[^>]{0,2000}name\s*=\s*["']viewport["']/i.test(home), 'works on phones (viewport)', 'index.html has no viewport tag, so phones will show it zoomed out.');
-    need(/<html\b[^>]{0,2000}\blang\s*=/i.test(home), 'language set', '<html> has no lang.');
+    need(/<meta\b[^>]{0,600}name\s*=\s*["']viewport["']/i.test(home), 'works on phones (viewport)', 'index.html has no viewport tag, so phones will show it zoomed out.');
+    need(/<html\b[^>]{0,600}\blang\s*=/i.test(home), 'language set', '<html> has no lang.');
     need(!!metaOf(home, 'property', 'og:title') && !!metaOf(home, 'property', 'og:description'), 'social preview text', 'index.html needs og:title and og:description for link previews.');
     const og = metaOf(home, 'property', 'og:image');
     need(!!og, 'social preview image', 'index.html needs an og:image for link previews.');
-    need(/<link\b[^>]{0,2000}rel\s*=\s*["'][^"']{0,2000}icon[^"']{0,2000}["']/i.test(home) || map.has('favicon.ico'), 'favicon', 'index.html has no favicon.');
+    need(/<link\b[^>]{0,600}rel\s*=\s*["'][^"']{0,2000}icon[^"']{0,2000}["']/i.test(home) || map.has('favicon.ico'), 'favicon', 'index.html has no favicon.');
     if (/_office\/pay/.test(home) && !paymentLink) warnings.push('A button goes to _office/pay, but the boss has not pasted a Stripe Payment Link yet, so it leads nowhere.');
     if (!errors.length && !claims.length) passed.push('no invented claims or contact details found');
   }

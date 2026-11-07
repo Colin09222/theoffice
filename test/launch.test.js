@@ -70,8 +70,8 @@ describe('the pre-publish checklist', () => {
   test('stripping is linear on pages built to be slow', () => {
     for (const unit of ['<', '<script ', '<!-- ', '<style ', '<img ', '<a href="', '"x']) {
       const t0 = performance.now();
-      checkSite({ files: [{ path: 'index.html', data: `<html>${unit.repeat(Math.floor(900000 / unit.length))}` }] });
-      assert.ok(performance.now() - t0 < 3000, `${unit} took ${Math.round(performance.now() - t0)}ms`);
+      checkSite({ files: [{ path: 'index.html', data: `<html>${unit.repeat(Math.floor(500000 / unit.length))}` }] });
+      assert.ok(performance.now() - t0 < 1500, `${unit} took ${Math.round(performance.now() - t0)}ms`);
     }
   });
 });
@@ -89,7 +89,7 @@ describe('publishing goes through the gate', () => {
     const lines = (await floorState(h.c)).feed.map((f) => f.text).join(' ');
     assert.match(lines, /possible invented claims/);
   });
-  test('a page written to stall the checklist can\'t stop the building: it fails closed on its own thread', async () => {
+  test('a page written to stall the checklist can\'t stop the building for long', async () => {
     const h = await start();
     const evil = `<html>${'<img '.repeat(200000)}`;
     const ticks = []; const timer = setInterval(() => ticks.push(Date.now()), 20);
@@ -98,7 +98,7 @@ describe('publishing goes through the gate', () => {
     clearInterval(timer);
     assert.match(out, /Published|Error:/);
     const gaps = ticks.slice(1).map((x, i) => x - ticks[i]);
-    assert.ok(Math.max(0, ...gaps) < 3000, `main thread stalled ${Math.max(...gaps)}ms over ${Date.now() - t0}ms`);
+    assert.ok(Math.max(0, ...gaps) < 1500, `main thread stalled ${Math.max(...gaps)}ms over ${Date.now() - t0}ms`);
   });
   test('launch_check can\'t wipe what publishing recorded', async () => {
     const h = await start();
