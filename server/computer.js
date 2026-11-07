@@ -11,7 +11,7 @@ import { ProviderError, scrub } from './llm.js';
 import { costOf } from './anthropic.js';
 import { packTgz, unpackTgz, TarError } from './tarball.js';
 import { applySync, baselineOf, projectFiles, publishSnapshot, WorkspaceError } from './workspace.js';
-import { COMPUTER_TOOL_DEFS, computerToolName, publicUrl, toolsForRole } from './tools.js';
+import { COMPUTER_TOOL_DEFS, computerToolName, toolsForRole } from './tools.js';
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { IOS_HOSTS } from './ios.js';
 import { computerPrompt, computerBriefing } from './prompts.js';
@@ -22,7 +22,7 @@ const MIN_ROOM_USD = 0.1;
 const STALL_MS = 90_000;
 const STOP_GRACE_MS = 120_000;
 const MAX_FIX_TURNS = 2, MAX_LOST = 2, MAX_STREAM_FAILURES = 5;
-const WARN_STEPS_LEFT = 5;
+const WARN_STEPS_LEFT = 5, SPEND_WARN = 0.8;
 const MAX_ARCHIVE_BYTES = 40 * 1024 * 1024, MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hash = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16);
@@ -161,7 +161,7 @@ export class Computer {
       }
       task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       if (!task.transcript) {
-        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], task, e.cfg) }]), task.id);
+        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }) }, e.cfg) }]), task.id);
         task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       }
       st = this.newState(floor, agent, task, signal);
@@ -395,6 +395,11 @@ export class Computer {
         if (live && ev.model_usage) {
           const u = costOf(ev.model_usage, st.pricing);
           this.charge(st, st.model, u.prompt, u.completion, u.cost);
+          // A session stopped by its budget keeps only what was saved, and the platform gives no warning.
+          if (!st.warnedSpend && st.room && st.charged >= st.room.usd * SPEND_WARN) {
+            st.warnedSpend = true;
+            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: 'This task is nearly out of budget. Save your work now with .office/save.sh, publish if you are going to, and reply with your summary.' }] }] ).catch(() => {});
+          }
         }
         return null;
       case 'agent.thinking':
@@ -484,7 +489,7 @@ export class Computer {
     const entry = { project: slug, title: String(a.title || slug).slice(0, 120), description: String(a.description || '').slice(0, 300), kind, directory, reason: String(a.claims_ok_because || '').slice(0, 300) };
     st.publish = [...st.publish.filter((p) => p.project !== slug), entry];
     run(this.engine.db, 'UPDATE tasks SET session_publish=? WHERE id=?', JSON.stringify(st.publish), st.taskId);
-    return `Noted. ${directory ? `${directory}/` : 'The project folder'} goes live at ${publicUrl(st.floor.slug, slug)} once you have run .office/save.sh and ended your turn. Save first, and do it last, so the newest files are the ones published.`;
+    return `Noted. ${directory ? `${directory}/` : 'The project folder'} goes live at ${this.engine.liveUrl(st.floor, slug)} once you have run .office/save.sh and ended your turn. Save first, and do it last, so the newest files are the ones published.`;
   }
   /** Sends user messages the session hasn't had yet: the first briefing, the manager's notes, the boss's answers, or a fix request. */
   async sendPending(st) {
@@ -526,13 +531,15 @@ export class Computer {
     }
     await this.reconcile(st);
     const links = result.published?.length ? `\n\nPublished: ${result.published.join(', ')}` : '';
+    // The manager decides what to do about a stopped task, and can't without this: what was being said when it stopped, and whether the work survived.
+    const soFar = `${st.lastText ? `\n\nLast thing it said: ${st.lastText.slice(0, 800)}` : ''}${result.ok ? e.savedSoFar(floor.id, { project: st.project }) : ' Its last save could not be read, so anything since the task began may be lost.'}`;
     if (outcome === 'budget') {
       // Stopped by what was left of the day. Over for today if the money is really gone; otherwise it goes back in line for what other sessions give back.
       if (st.room.daily) throw new e.Halt(e.spentOver(floor.id, MIN_ROOM_USD) ? 'budget' : 'wait');
-      return e.finishTask(floor, agent, taskId, 'failed', `Stopped: this task hit its spending limit.${links}`);
+      return e.finishTask(floor, agent, taskId, 'failed', `Stopped: this task hit its spending limit.${links}${soFar}`);
     }
-    if (st.limit === 'steps') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of steps before finishing.${links}`);
-    if (st.limit === 'time') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of time before finishing.${links}`);
+    if (st.limit === 'steps') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of steps before finishing.${links}${soFar}`);
+    if (st.limit === 'time') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of time before finishing.${links}${soFar}`);
     if (!result.ok) return e.finishTask(floor, agent, taskId, 'failed', `The work could not be saved: ${result.problem}`);
     return e.finishTask(floor, agent, taskId, 'review', `${(st.lastText || 'Finished.').slice(0, 1800)}${links}`);
   }
@@ -596,7 +603,7 @@ export class Computer {
       try {
         const n = publishSnapshot(e.db, floor.id, p.project, e.cfg.quotaBytes, p.directory);
         e.upsertProject(floor, p.project, { title: p.title, description: p.description, kind: p.kind, sources: [], published: true });
-        published.push(publicUrl(floor.slug, p.project));
+        published.push(e.liveUrl(floor, p.project));
         e.feed(floor.id, agent, `published ${p.project} (${n} files)`, p.project);
         e.emitProject(floor.id, p.project);
       } catch (err) {

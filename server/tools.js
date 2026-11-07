@@ -5,7 +5,7 @@ import { get, all, run } from './db.js';
 import { DomainRefused, domainsConfigured } from './domains.js';
 import { ProviderError } from './llm.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './media.js';
-import { runCheck, saveCheck, gateProblem, launchFacts, composeReport } from './launch.js';
+import { runCheck, saveCheck, gateProblem, launchFacts, composeReport, chatReport, bossText } from './launch.js';
 import { formatReport } from './launch-check.js';
 import { LANES } from './prompts.js';
 import { OrderError } from './orders.js';
@@ -183,6 +183,25 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     if (c.task && (get(db, 'SELECT cost_usd n FROM tasks WHERE id=?', c.task.id)?.n ?? 0) + usd > cfg.taskMaxUsd) throw new WorkspaceError('this task\'s budget would not cover that');
   };
   const brokerError = (e) => { if (e instanceof ProviderError) { engine.log('warn', 'tool provider failed', { status: e.status }); return new WorkspaceError(`that did not work: ${e.message}`); } return e; };
+  // A link nobody here ever opened is what an invented source looks like from outside. Publishing a doc checks each one against what searches returned and pages opened on this floor, against what teammates handed over, and against what the boss said.
+  const seenOnFloor = (floorId, exceptPrefix) => {
+    const parts = [bossText(db, floorId)];
+    for (const t of all(db, "SELECT transcript FROM tasks WHERE floor_id=? AND transcript!=''", floorId)) {
+      let msgs; try { msgs = JSON.parse(t.transcript); } catch { continue; }
+      for (const m of msgs) if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string') parts.push(m.content);
+    }
+    for (const f of all(db, "SELECT path,content FROM files WHERE floor_id=? AND path LIKE 'projects/%.md'", floorId)) if (!f.path.startsWith(exceptPrefix) && typeof f.content === 'string') parts.push(f.content);
+    return parts.join('\n').toLowerCase().replaceAll('://www.', '://');
+  };
+  const unseenLinks = (c, prefix, sources) => {
+    const doc = get(db, 'SELECT content FROM files WHERE floor_id=? AND path=?', c.floor.id, `${prefix}index.md`)?.content;
+    const urls = new Set([...sources.map((s) => s.url), ...(typeof doc === 'string' ? [...doc.matchAll(/https?:\/\/[^\s)\]>"'`]+/gi)].map((m) => m[0].replace(/[.,;:!?*_]+$/, '')) : [])]);
+    if (!urls.size) return [];
+    const seen = seenOnFloor(c.floor.id, prefix);
+    const key = (u) => u.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
+    return [...urls].filter((u) => !/^https?:\/\/([a-z0-9-]+\.)?(example\.(com|org|net)|localhost)([/:]|$)/i.test(u) && !seen.includes(key(u))).slice(0, 12)
+      .map((u) => `a link nobody here opened or found in a search (open it with fetch_url, or take it out along with whatever rests on it): "${u}"`);
+  };
   const handlers = {
     write_file(c, a) {
       const content = typeof a.content === 'string' ? a.content : '';
@@ -222,6 +241,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
         .filter((s) => /^https?:\/\//i.test(s.url));
       const reason = str(a, 'claims_ok_because', 300, false);
       const check = await runCheck(db, c.floor, slug, directory, kind);
+      if (isDoc && c.task) check.claims.push(...unseenLinks(c, prefix, sources));
       const problem = gateProblem(check, reason);
       if (problem) { saveCheck(db, c.floor.id, slug, check, reason, engine.now()); throw new WorkspaceError(problem); }
       const n = publishSnapshot(db, c.floor.id, slug, cfg.quotaBytes, directory);
@@ -232,7 +252,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (check.claims.length) engine.feed(c.floor.id, c.agent, `published ${slug} with possible invented claims for the boss to check`, slug);
       c.say('typing', `Publishing ${slug}`, `published ${slug}`, { project: slug });
       engine.emitProject(c.floor.id, slug);
-      return `Published ${n} files at ${publicUrl(c.floor.slug, slug)}.${check.warnings.length ? ` Still rough: ${check.warnings.slice(0, 6).join(' ')}` : ''} ${cfg.appsBaseDomain ? 'It runs on its own origin, with real localStorage and service workers.' : 'Note: the site runs in a sandbox, so it cannot use cookies or localStorage without catching the error.'}`;
+      return `Published ${n} files at ${engine.liveUrl(c.floor, slug)}.${check.warnings.length ? ` Still rough: ${check.warnings.slice(0, 6).join(' ')}` : ''} ${cfg.appsBaseDomain ? 'It runs on its own origin, with real localStorage and service workers.' : 'Note: the site runs in a sandbox, so it cannot use cookies or localStorage without catching the error.'}`;
     },
     async fetch_url(c, a) {
       const url = str(a, 'url', 2000);
@@ -384,7 +404,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const facts = launchFacts(db, cfg, c.floor, slug, engine.domains, engine.liveUrl(c.floor, slug));
       const text = composeReport(facts, str(a, 'headline', 600), str(a, 'next_steps', 1500, false));
       run(db, 'UPDATE projects SET launch_report=? WHERE floor_id=? AND slug=?', text, c.floor.id, slug);
-      engine.reportToBoss(c.floor.id, text);
+      // The whole report sits on the project card. The chat gets what the boss needs now.
+      engine.reportToBoss(c.floor.id, chatReport(facts, str(a, 'headline', 600), str(a, 'next_steps', 1500, false)));
       engine.emitProject(c.floor.id, slug);
       return 'Sent to the boss. Do not repeat it; a line of your own is plenty.';
     },

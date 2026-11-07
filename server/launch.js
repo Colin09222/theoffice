@@ -86,6 +86,16 @@ export function launchFacts(db, cfg, floor, slug, domains, liveUrl) {
   const stats = projectStats(db, floor.id, slug, Date.now());
   return { project: p, url: liveUrl, domain: domains?.liveFor(floor.id, slug) || '', check, review, stats, signups: formCount(db, floor.id, slug), hasPayment: !!p.payment_link, friendly: publicUrl(floor.slug, slug) };
 }
+/** What goes in the chat. The link comes first, the words are the manager's, and anything the boss has to check themselves stays in. The rest is one click away under Report. */
+export function chatReport(f, headline, nextSteps) {
+  const c = f.check;
+  const lines = [`**${f.project.title} is live:** ${f.url}`];
+  if (String(headline || '').trim()) lines.push('', String(headline).trim());
+  if (c?.claims?.length) lines.push('', '**Please check these yourself. They look like claims nobody gave us:**', ...c.claims.slice(0, 8).map((w) => `- ${w}`), ...(c.reason ? [`The team's reason for keeping them: ${c.reason}`] : []));
+  if (String(nextSteps || '').trim()) lines.push('', '**Next:**', String(nextSteps).trim());
+  lines.push('', 'The full checklist is under Report on the project card.');
+  return lines.join('\n');
+}
 /** Built by the server from what is really on record, so a report can't claim a check that never ran. The manager only adds its own words at the top and bottom. */
 export function composeReport(f, headline, nextSteps) {
   const c = f.check;

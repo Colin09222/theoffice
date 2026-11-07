@@ -5,7 +5,7 @@
       "title": "Office Manager",
       "provider": "anthropic",
       "model": "claude-opus-5-5",
-      "effort": "high",
+      "effort": "medium",
       "maxTokens": 16000,
       "pricing": {
         "prompt": 4,
@@ -52,7 +52,7 @@
       },
       "brief": "You build working sites, games, simulations and apps, then publish them. Plain HTML, CSS and JavaScript unless the job calls for more.",
       "computer": {
-        "effort": "high"
+        "effort": "medium"
       },
       "computerBrief": "You are the Builder. You build real things: websites, playable games (canvas, WebGL, Three.js), simulations, installable PWAs and front-end apps with real build tooling, then publish them. Prefer the simplest stack that does the job. When a product needs a real picture, make it with generate_image rather than drawing placeholder boxes."
     },
@@ -108,7 +108,7 @@
       "brief": "You read what the team made, look for mistakes and write up fixes.",
       "computer": {
         "model": "claude-opus-5-5",
-        "effort": "medium",
+        "effort": "low",
         "pricing": {
           "prompt": 4,
           "completion": 20,
@@ -142,13 +142,13 @@
       "estimateUsd": 0.1
     },
     "search": {
-      "model": "claude-opus-5-5",
+      "model": "claude-sonnet-5-5",
       "effort": "low",
       "maxTokens": 8000,
       "maxUses": 3,
       "pricing": {
-        "prompt": 4,
-        "completion": 20,
+        "prompt": 2,
+        "completion": 10,
         "cacheRead": 0.2
       }
     }
