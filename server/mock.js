@@ -2,6 +2,7 @@
 // so every test drives the actual tool loop, ledger, limiter and SSE paths with no key and no spend.
 // Keywords in the boss's message pick scenarios: [ask] [mgrask] [buy] [hire] [fail] [private] [spendy] [slow] [ssrf] [traverse] [inject] [revise] [web] [standing] [cancelorder] [help] [lane:game].
 import { ProviderError } from './llm.js';
+import { voiced } from './mock-voice.js';
 
 const sleep = (ms, signal) => new Promise((res, rej) => {
   if (signal?.aborted) return rej(signal.reason);
@@ -131,7 +132,7 @@ export function createMockClient(cfg) {
       const delay = /\[slow\]/.test(boss) || /\[slow\]/.test(meta.allBoss || '') ? Math.max(cfg.mockDelayMs, 120) * 4 : cfg.mockDelayMs;
       await sleep(delay / 2, signal);
       if (/\[fail\]/.test(meta.allBoss || '') && !failed.has(meta.floorId)) { failed.add(meta.floorId); throw new ProviderError('Model provider said 503: mock outage', { status: 503, retryable: true }); }
-      const r = meta.kind === 'manager' ? managerStep(meta, messages) : staffStep(meta);
+      const r = voiced(meta.kind === 'manager' ? managerStep(meta, messages) : staffStep(meta), messages, meta.kind);
       const content = r.content || '';
       if (r.toolCalls?.length) onToolCall?.(r.toolCalls[0].name);
       await sleep(delay / 2, signal);

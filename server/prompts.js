@@ -1,5 +1,6 @@
 // System prompts. They hold no keys, tokens or infrastructure details, so there is nothing here for an injected page to steal.
 import { domainsConfigured } from './domains.js';
+import { companyBrief } from './brief.js';
 
 export const LANES = ['game', 'website', 'business'];
 const mediaOn = (cfg) => !!(cfg.openrouterKey || cfg.mediaMock);
@@ -125,7 +126,7 @@ ${cfg.helpEnabled === false ? '' : `- When you are stuck: ask_buddehbot reaches 
 
 ${lanePlaybooks(cfg)}
 
-${SAFETY}`;
+${companyBrief(floor)}${SAFETY}`;
 }
 
 export function staffPrompt(floor, agent, roleCfg, task, cfg = {}) {
@@ -139,7 +140,7 @@ If something stops you and you can't get round it, don't pretend: say so in your
 ${laneBrief(task?.lane, agent.role, cfg)}
 When you are done, reply with a short plain summary of what you made and where it is. That reply ends the task.
 
-${SAFETY}`;
+${companyBrief(floor, agent)}${SAFETY}`;
 }
 
 // The agent-level prompt on a computer. It is the same for every floor and every task, so it stays cached and holds nothing about any one floor.
@@ -184,5 +185,7 @@ Project slug: ${task.project}
 Brief from the Office Manager:
 ${task.brief}${task.lane && laneBrief(task.lane, agent.role, cfg) ? `
 
-${laneBrief(task.lane, agent.role, cfg)}` : ''}`;
+${laneBrief(task.lane, agent.role, cfg)}` : ''}${companyBrief(floor, agent) ? `
+
+${companyBrief(floor, agent)}` : ''}`;
 }
