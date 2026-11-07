@@ -74,7 +74,7 @@ body.flying .ticker { opacity: 0; transition: opacity .2s; }
   .wall-body { padding: 8px 10px 10px; gap: 5px; }
   .wall-acts .btn.small { padding: 3px 8px; font-size: 12.5px; min-height: 36px; }
   .wall-floor { max-width: 100%; }
-  .directory.open .ticker, .directory.open ~ .ticker { opacity: 0; pointer-events: none; }
+  #ui .directory.open ~ .ticker { opacity: 0; pointer-events: none; }
 }
 
 /* ---- a phone on its side: no room for the ticker ---- */

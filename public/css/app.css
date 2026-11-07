@@ -326,7 +326,8 @@ body[data-page="floor"] #ui::before { content: ''; position: absolute; inset: 0;
   .pill-go { font-size: 17px; }
   .pill-arrow { width: 40px; height: 40px; }
   .hints, .floor-tip { display: none; }
-  .directory.open ~ .open-pill { opacity: 0; pointer-events: none; }
+  /* The #ui prefix matters: without it `#ui > *` wins, and the invisible pill goes on catching taps meant for the open sheet beneath it. */
+  #ui .directory.open ~ .open-pill { opacity: 0; pointer-events: none; }
   .modal-back { padding: 0 0 var(--kb, 0px); place-items: end stretch; }
   .modal, .modal.wide { width: 100%; max-height: 92vh; max-height: calc(92dvh - var(--kb, 0px)); border-radius: 22px 22px 0 0; border-width: 1px 0 0; }
   .modal-body { padding: 6px 16px calc(20px + env(safe-area-inset-bottom)); }

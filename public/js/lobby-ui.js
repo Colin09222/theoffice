@@ -155,6 +155,8 @@ export async function showLobby(root) {
     if (on) { if (isPhone()) panel.classList.add('open'); renderWall(); loadWall(); } else renderList();
   };
   toggle.addEventListener('click', () => setWall(!wallOn));
+  // On a phone the sheet is mostly tucked away. Tapping search brings it up, so the results and the field aren't left behind the keyboard.
+  search.addEventListener('focus', () => { if (isPhone()) panel.classList.add('open'); });
   search.addEventListener('input', () => { if (wallOn) renderWall(); });
 
   const head = h('div.dir-head', {}, h('span', {}, h('i.live-dot'), 'The Office'), count);
