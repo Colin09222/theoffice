@@ -135,7 +135,8 @@ for (const [label, opts, q] of [['desktop', { width: 1440, height: 900 }, 'low']
     await p.until('document.querySelector("[data-hire-role=tester]") !== null', 'hire list');
     if (await p.ev('document.querySelector("[data-let-go]") !== null && document.querySelector(".staff-pick [aria-checked=true]").textContent === window.__office.state.agents.find((a) => a.role === "manager").name')) throw new Error('the manager can be let go');
     const box = await p.ev('document.querySelector("[data-hire] h3").textContent');
-    if (!/4 of 8/.test(box)) throw new Error(box);
+    // No cap on staff by default, so the box doesn't compare it with one: the browser would otherwise read a null cap as "every desk is taken".
+    if (!/4 desks taken/.test(box) || /\bof\b/.test(box)) throw new Error(box);
     await p.click('[data-hire-role=tester]');
     await p.until(`window.__office.state.agents.length === ${before + 1}`, 'hired');
     await p.until('[...document.querySelectorAll(".staff-pick .chip")].length === window.__office.state.agents.length', 'new person listed');
