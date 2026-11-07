@@ -3,6 +3,7 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import { Character } from './character.js';
 import { stage } from './stage.js';
 import { mergeMeshes } from './batch.js';
+import { getWorld, makeTower, GROUND, FLOOR_H, TOWER_W } from './lobby-scene.js';
 
 const ROOM_W = 22, ROOM_D = 13.6, WALL_H = 4.6;
 const DESKS = [[-6.6, 0.5], [-2.2, 0.5], [2.2, 0.5], [6.6, 0.5], [-6.6, 4.4], [-2.2, 4.4], [2.2, 4.4], [6.6, 4.4]];
@@ -10,6 +11,8 @@ const MANAGER_DESK = [-6.6, -3.9], BOSS_DESK = [6.8, -3.9];
 const BOARD = [-0.4, -6.25];
 const SHELF = [-10.2, 2.4], COFFEE = [10.1, 2.4], ARCADE = [10.1, -1.4], SOFA = [6.9, 5.1];
 const CELL = 0.5;
+const WORLD_SCALE = ROOM_W / TOWER_W;  // the room is one tower floor, blown up to walk around in
+const SUN_DIR = new THREE.Vector3(0.78, 0.58, -0.26).normalize();
 
 const box = new THREE.BoxGeometry(1, 1, 1);
 const cyl = new THREE.CylinderGeometry(1, 1, 1, 14);
@@ -65,22 +68,6 @@ function floorTexture(style) {
     x.strokeStyle = 'rgba(40,40,40,.22)'; x.lineWidth = 2; x.strokeRect(1, 1, w - 2, h - 2);
   }, [3, 2]);
 }
-
-const WINDOW_TEX = () => canvasTex(512, 256, (x, w, h) => {
-  const g = x.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, '#2c2f58'); g.addColorStop(0.45, '#8c5a7a'); g.addColorStop(0.72, '#f0946a'); g.addColorStop(1, '#ffc78a');
-  x.fillStyle = g; x.fillRect(0, 0, w, h);
-  const r = seeded(21);
-  for (let layer = 0; layer < 2; layer++) {
-    let px = 0;
-    while (px < w) {
-      const bw = 18 + r() * 30, bh = (layer ? 44 : 80) + r() * 60;
-      x.fillStyle = layer ? '#2b2740' : '#5a4560'; x.fillRect(px, h - bh, bw, bh);
-      if (layer) for (let wy = h - bh + 6; wy < h - 5; wy += 10) for (let wx = px + 4; wx < px + bw - 4; wx += 8) if (r() > 0.6) { x.fillStyle = '#ffd690'; x.fillRect(wx, wy, 3, 5); }
-      px += bw + r() * 4;
-    }
-  }
-});
 
 function screenTexture(kind, brand) {
   return canvasTex(128, 96, (x, w, h) => {
@@ -328,35 +315,55 @@ export class OfficeView {
     this.colors = state.floor.colors; this.decor = state.floor.decor;
     this.staffCount = state.agents.filter((a) => a.role !== 'manager').length;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#16172a');
-    this.camera = new THREE.PerspectiveCamera(24, 1, 1, 200);
+    this.scene.fog = new THREE.FogExp2('#c9d8e4', 0.0024 / WORLD_SCALE);
+    this.grade = { vignette: 0.26, grain: 0.02 };
+    this.floorNumber = state.floor.number;
+    this.camera = new THREE.PerspectiveCamera(24, 1, 1, 2600);
     this.time = 0; this.yaw = 0.5; this.targetYaw = 0.5; this.pitch = 0.86; this.zoom = 1; this.targetZoom = 1; this.intro = 0;
     this.actors = new Map(); this.nav = makeNav(); this.deskSlots = [];
     this.tv = new THREE.Vector3();
     this.codeTex = screenTexture('code', this.colors.primary);
     this.pageTex = screenTexture('page', this.colors.primary);
     this.buildRoom();
+    this.buildWorld();
     this.syncAgents(state);
     mergeMeshes(this.room);
     this.bind();
   }
+  /** The city below and the tower under our feet: the same world the lobby orbits, scaled so one tower floor is this room. */
+  buildWorld() {
+    this.world = getWorld();
+    const n = this.floorNumber;
+    const lift = -(GROUND + (n - 1) * FLOOR_H) * WORLD_SCALE;
+    this.worldLift = lift;
+    this.stub = makeTower(Math.max(0, n - 1), { stub: true, env: this.world.environment() });
+    this.stub.group.scale.setScalar(WORLD_SCALE); this.stub.group.position.y = lift;
+    this.scene.add(this.stub.group);
+  }
   buildRoom() {
     const s = this.scene; const { primary, accent } = this.colors; const d = this.decor;
-    s.add(new THREE.HemisphereLight('#fff4e4', '#7a7088', 1.95));
-    const sun = new THREE.DirectionalLight('#ffd9b0', 1.75);
-    sun.position.set(10, 20, 11); sun.target.position.set(0, 0, 0);
-    sun.castShadow = true;
-    const size = stage.lowEnd ? 1024 : 2048;
-    sun.shadow.mapSize.set(size, size);
-    Object.assign(sun.shadow.camera, { left: -18, right: 18, top: 16, bottom: -16, near: 1, far: 60 });
-    sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.02;
+    s.add(new THREE.HemisphereLight('#c4daf2', '#b5a690', 0.62));
+    const sun = new THREE.DirectionalLight('#fff0d8', 2.3);
+    sun.position.copy(SUN_DIR).multiplyScalar(44); sun.target.position.set(0, 0, 0);
+    const size = stage.q?.shadow || 0;
+    sun.castShadow = size > 0;
+    sun.shadow.mapSize.set(size || 512, size || 512);
+    Object.assign(sun.shadow.camera, { left: -19, right: 19, top: 17, bottom: -17, near: 4, far: 100 });
+    sun.shadow.camera.updateProjectionMatrix();
+    sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.03;
+    this.sun = sun;
     s.add(sun, sun.target);
-    const fill = new THREE.DirectionalLight('#ffe9d2', 0.55); fill.position.set(-8, 8, 14); s.add(fill);
+    const fill = new THREE.DirectionalLight('#e8f0ff', 0.35); fill.position.set(-12, 9, 16); s.add(fill);
     const room = new THREE.Group(); s.add(room); this.room = room;
 
-    // Slab, floor, skirting: a slice cut out of the tower.
-    piece(room, '#2a2833', ROOM_W + 1.1, 0.9, ROOM_D + 1.1, 0, -0.95, 0, { recv: false });
-    piece(room, primary, ROOM_W + 1.1, 0.08, ROOM_D + 1.1, 0, -0.1, 0, { recv: false, cast: false });
+    // The floor plate is the top of the tower: a stone slab the size of the shaft, with a glass rail around the terrace left over.
+    const plate = TOWER_W * WORLD_SCALE + 1.2;
+    piece(room, '#e9dfcf', plate, 0.42, plate, 0, -0.42, 0);
+    piece(room, '#d4c8b6', plate + 0.3, 0.12, plate + 0.3, 0, -0.54, 0, { cast: false });
+    piece(room, primary, ROOM_W + 1.1, 0.08, ROOM_D + 1.1, 0, -0.08, 0, { recv: false, cast: false });
+    const rail = new THREE.MeshStandardMaterial({ color: '#cfe0ec', roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false, envMap: getWorld().environment() });
+    for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(room, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
+    for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { piece(room, '#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); piece(room, '#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
     const tex = floorTexture(d.floor);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), new THREE.MeshLambertMaterial({ map: tex }));
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; room.add(floor);
@@ -366,12 +373,14 @@ export class OfficeView {
     const wallZ = -ROOM_D / 2, wallX = -ROOM_W / 2;
     const backParts = [[-ROOM_W / 2, -7.6], [-3.1, 3.5], [8.7, ROOM_W / 2]];
     for (const [a, b] of backParts) piece(room, wall, b - a, WALL_H, 0.3, (a + b) / 2, 0, wallZ - 0.15);
-    const winMat = new THREE.MeshBasicMaterial({ map: WINDOW_TEX() });
+    const winMat = new THREE.MeshStandardMaterial({ color: '#9dbdd6', roughness: 0.06, metalness: 0.3, transparent: true, opacity: 0.42, depthWrite: false, envMapIntensity: 1.3, envMap: getWorld().environment() });
     for (const [a, b] of [[-7.6, -3.1], [3.5, 8.7]]) {
       piece(room, wall, b - a, 1.0, 0.3, (a + b) / 2, 0, wallZ - 0.15);
       piece(room, wall, b - a, 0.36, 0.3, (a + b) / 2, WALL_H - 0.36, wallZ - 0.15);
-      const w = new THREE.Mesh(new THREE.PlaneGeometry(b - a, WALL_H - 1.36), winMat); w.position.set((a + b) / 2, 1 + (WALL_H - 1.36) / 2, wallZ - 0.25); room.add(w);
-      for (let mx = a; mx <= b + 0.01; mx += (b - a) / 3) piece(room, '#3a3640', 0.07, WALL_H - 1.36, 0.08, mx, 1, wallZ - 0.1, { cast: false });
+      const w = new THREE.Mesh(new THREE.PlaneGeometry(b - a, WALL_H - 1.36), winMat); w.position.set((a + b) / 2, 1 + (WALL_H - 1.36) / 2, wallZ - 0.15); room.add(w);
+      piece(room, '#2f343d', b - a, 0.08, 0.34, (a + b) / 2, 0.96, wallZ - 0.15, { cast: false });
+      piece(room, '#2f343d', b - a, 0.08, 0.34, (a + b) / 2, WALL_H - 0.4, wallZ - 0.15, { cast: false });
+      for (let mx = a; mx <= b + 0.01; mx += (b - a) / 3) piece(room, '#2f343d', 0.09, WALL_H - 1.36, 0.12, mx, 1, wallZ - 0.15, { cast: false });
     }
     piece(room, wall, 0.3, WALL_H, ROOM_D + 0.3, wallX - 0.15, 0, -0.0);
     piece(room, '#f7f1e4', ROOM_W + 0.6, 0.1, 0.42, 0, WALL_H, wallZ - 0.15, { cast: false });
@@ -615,13 +624,26 @@ export class OfficeView {
       window.removeEventListener('pointerup', this.onUp); window.removeEventListener('pointercancel', this.onUp); el.removeEventListener('wheel', this.onWheel);
     };
   }
-  enter() { const r = stage.renderer; r.shadowMap.enabled = true; r.shadowMap.autoUpdate = !stage.lowEnd; r.shadowMap.needsUpdate = true; this.scene.traverse((o) => { if (o.material) o.material.needsUpdate = true; }); }
-  leave() { const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; }
+  enter() {
+    const r = stage.renderer;
+    r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = !stage.lowEnd; r.shadowMap.needsUpdate = true;
+    r.toneMappingExposure = 0.98;
+    const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WORLD_SCALE); w.group.position.set(0, this.worldLift, 0);
+    w.setDetail((stage.q?.density ?? 1) >= 0.6);
+  }
+  leave() { const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; r.toneMappingExposure = 1.0; }
+  setTier(q) {
+    this.sun.castShadow = q.shadow > 0;
+    if (q.shadow > 0) { this.sun.shadow.mapSize.set(q.shadow, q.shadow); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null; }
+    stage.renderer.shadowMap.enabled = this.sun.castShadow;
+    this.world.setDetail(q.density >= 0.6);
+  }
   destroy() {
     this.unbind();
     for (const a of this.actors.values()) a.destroy();
     this.actors.clear();
-    this.scene.traverse((o) => {
+    this.scene.remove(this.world.group);  // shared with the lobby, so never disposed here
+    for (const root of [this.room, this.stub.group]) root.traverse((o) => {
       if (o.geometry && o.geometry !== box && o.geometry !== cyl && !o.geometry.parameters?.shared) o.geometry.dispose?.();
       if (o.material?.map) o.material.map.dispose();
     });
@@ -666,6 +688,7 @@ export class OfficeView {
   }
   update(dt) {
     this.time += dt; this.intro = Math.min(1, this.intro + dt / 1.35);
+    this.world.update(dt, this.time);
     // On phones the shadows redraw every third frame. Nobody can tell, and it saves about a third of the draw calls.
     if (stage.lowEnd && (this.frame = (this.frame || 0) + 1) % 3 === 0) stage.renderer.shadowMap.needsUpdate = true;
     const e = 1 - Math.pow(1 - this.intro, 3);

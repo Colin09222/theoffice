@@ -24,7 +24,7 @@ body:not([data-page="floor"]) #labels { display: none; }
 body[data-page="admin"] #ui { position: static; pointer-events: auto; }
 #ui > * { pointer-events: auto; }
 #ui .hero, #ui .hints { pointer-events: none; }
-#fade { position: fixed; inset: 0; background: #0e0e1c; opacity: 0; pointer-events: none; transition: opacity .55s ease; z-index: 30; }
+#fade { position: fixed; inset: 0; background: #e9eff4; opacity: 0; pointer-events: none; transition: opacity .55s ease; z-index: 30; }
 #fade.in { opacity: 1; transition: none; }
 body.flying #ui { opacity: 0; transition: opacity .45s; }
 .nojs { padding: 40px; font-family: var(--serif); }
@@ -100,7 +100,7 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; }
 .pill-go { font-family: var(--serif); font-size: 20px; }
 .pill-arrow { width: 42px; height: 42px; border-radius: 50%; background: var(--ink); color: #1d1b2c; display: grid; place-items: center; font-size: 19px; }
 .hints { position: absolute; left: 28px; bottom: 22px; margin: 0; font: 10.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: rgba(255, 247, 235, .82); text-shadow: 0 1px 8px rgba(10, 8, 30, .9); max-width: 250px; }
-body[data-page="lobby"] #ui::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(20, 16, 44, .62), rgba(20, 16, 44, .3) 32%, rgba(20, 16, 44, 0) 52%); }
+body[data-page="lobby"] #ui::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(14, 22, 38, .55), rgba(14, 22, 38, .22) 30%, rgba(14, 22, 38, 0) 50%), linear-gradient(0deg, rgba(14, 22, 38, .35), rgba(14, 22, 38, 0) 24%); }
 .banner { position: absolute; top: 70px; left: 28px; margin: 0; padding: 8px 14px; border-radius: 999px; background: rgba(242, 189, 93, .2); border: 1px solid rgba(242, 189, 93, .5); }
 .floor-tip { position: fixed; top: 0; left: 0; padding: 6px 11px; border-radius: 9px; background: rgba(20, 18, 34, .88); font: 12px var(--mono); pointer-events: none !important; white-space: nowrap; z-index: 6; }
 
