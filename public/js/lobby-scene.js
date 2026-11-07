@@ -41,7 +41,12 @@ THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
     float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
   #endif
   fogFactor *= mix(1.0, 0.78, smoothstep(14.0, 70.0, cameraPosition.y + vFogDir.y));
-  gl_FragColor.rgb = mix(gl_FragColor.rgb, hazeTint(normalize(vFogDir)) * fogColor, fogFactor);
+  vec3 hazeNow = hazeTint(normalize(vFogDir));
+  // Drawing straight to the screen, built-in materials reach this point already tone mapped and encoded, so the haze has to be too. In a render target, or in our own shaders, everything here is still linear.
+  #if defined(TONE_MAPPING) && !defined(FOG_IN_LINEAR)
+    hazeNow = linearToOutputTexel(vec4(toneMapping(hazeNow), 1.0)).rgb;
+  #endif
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, hazeNow * fogColor, fogFactor);
   #endif`;
 
 const GLSL_COMMON = `
@@ -133,6 +138,7 @@ function makeSky() {
 
 function makeWater() {
   const mat = new THREE.ShaderMaterial({
+    defines: { FOG_IN_LINEAR: 1 },
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }]), fog: true,
     vertexShader: `varying vec3 vW;
       #include <fog_pars_vertex>
@@ -245,13 +251,40 @@ function cellMap(spots) {
   return t;
 }
 
+/**
+ * For the tier with no shadow map: every block's long shadow, and the tower's, drawn once onto a canvas and laid over the ground. Sampled
+ * once per ground pixel, so it costs a weak phone almost nothing, and the streets still get the evening's long shadows.
+ */
+const BAKE_SPAN = 150;
+function bakeGroundShadows(blocks) {
+  const size = 1024, c = document.createElement('canvas'); c.width = c.height = size;
+  const x = c.getContext('2d'); x.fillStyle = '#000'; x.fillRect(0, 0, size, size);
+  x.fillStyle = '#fff';
+  const px = (v) => ((v + BAKE_SPAN) / (BAKE_SPAN * 2)) * size;
+  const drop = (cx, cz, w, d, h) => {
+    const ox = -(SUN.x / SUN.y) * h, oz = -(SUN.z / SUN.y) * h;
+    const corners = [[cx - w / 2, cz - d / 2], [cx + w / 2, cz - d / 2], [cx + w / 2, cz + d / 2], [cx - w / 2, cz + d / 2]];
+    x.beginPath();
+    for (let i = 0; i < 4; i++) {
+      const [ax, az] = corners[i], [bx, bz] = corners[(i + 1) % 4];
+      x.moveTo(px(ax), px(az)); x.lineTo(px(bx), px(bz)); x.lineTo(px(bx + ox), px(bz + oz)); x.lineTo(px(ax + ox), px(az + oz)); x.closePath();
+    }
+    x.fill('nonzero');
+    x.fillRect(px(cx - w / 2 + ox), px(cz - d / 2 + oz), (w / (BAKE_SPAN * 2)) * size, (d / (BAKE_SPAN * 2)) * size);
+  };
+  for (const b of blocks) drop(b.x, b.z, b.w, b.d, b.height);
+  drop(0, 0, TOWER_W + 1, TOWER_W + 1, GROUND + 40 * FLOOR_H);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.NoColorSpace; t.magFilter = t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; t.flipY = false;
+  return t;
+}
+
 function makeLand(cells) {
   const shape = new THREE.Shape();
   const n = 160;
   for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI * 2; const r = coast(a); const x = Math.cos(a) * r, y = -Math.sin(a) * r; if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y); }
   const geo = new THREE.ExtrudeGeometry(shape, { depth: 1.4, bevelEnabled: false, curveSegments: 1 });
   const mat = patch(new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.96, metalness: 0 }), {
-    fragmentHead: 'uniform sampler2D uCells;',
+    fragmentHead: 'uniform sampler2D uCells; uniform sampler2D uBaked; uniform float uBakedOn;',
     color: `
       vec3 base; vec3 wp = vec3(vMp.x, vMp.z - 1.4, -vMp.y);
       if (wp.y < -0.05) {
@@ -292,11 +325,15 @@ function makeLand(cells) {
         base = mix(base, s2l(vec3(0.85, 0.80, 0.55)), line * 0.7);
         base = mix(base, s2l(vec3(0.86, 0.86, 0.84)), zebra * road * 0.75);
         base *= 0.96 + 0.08 * vnoise(wp.xz * 0.35);
+        // No shadow map on this tier: the long shadows come from the baked sheet, soft by its own low resolution, cool against the warm stone.
+        if (uBakedOn > 0.5) base *= mix(vec3(1.0), vec3(0.42, 0.44, 0.56), texture2D(uBaked, wp.xz / ${(BAKE_SPAN * 2).toFixed(1)} + 0.5).r);
       }
       diffuseColor.rgb = base;`,
   });
-  mat.onBeforeCompile = ((orig) => (shader) => { shader.uniforms.uCells = { value: cells }; orig(shader); })(mat.onBeforeCompile);
+  const baked = { uBaked: { value: null }, uBakedOn: { value: 0 } };
+  mat.onBeforeCompile = ((orig) => (shader) => { Object.assign(shader.uniforms, { uCells: { value: cells } }, baked); orig(shader); })(mat.onBeforeCompile);
   const m = new THREE.Mesh(geo, mat);
+  m.userData.baked = baked;
   // The extrusion runs along +z, which the rotation turns into +y, so the cap lands at y=0 and the quay wall drops to the water.
   m.rotation.x = -Math.PI / 2; m.position.y = -1.4; m.receiveShadow = true;
   return m;
@@ -500,7 +537,7 @@ function makeCity(density) {
   for (const t of [trunks, canopies, pineTrunks, pineCanopies]) { t.frustumCulled = false; t.castShadow = true; t.receiveShadow = true; }
 
   const group = new THREE.Group().add(mesh, roofs, unitMesh, balMesh, railMesh, trunks, canopies, pineTrunks, pineCanopies, poolMesh, terraceMesh, craneGroup);
-  return { group, city: mesh, cells: cellMap(spots), detail: [balMesh, railMesh, unitMesh, poolMesh, terraceMesh, craneGroup], stats: { buildings: blocks.length, trees: trees.length, balconies: balconies.length, pools: pools.length, cranes: tallest.length } };
+  return { group, city: mesh, blocks, cells: cellMap(spots), detail: [balMesh, railMesh, unitMesh, poolMesh, terraceMesh, craneGroup], stats: { buildings: blocks.length, trees: trees.length, balconies: balconies.length, pools: pools.length, cranes: tallest.length } };
 }
 
 function makeTraffic(count) {
@@ -524,6 +561,7 @@ function makeTraffic(count) {
   geo.setAttribute('aRange', new THREE.InstancedBufferAttribute(range, 2));
   geo.setAttribute('aCol', new THREE.InstancedBufferAttribute(cols, 3));
   const mat = new THREE.ShaderMaterial({
+    defines: { FOG_IN_LINEAR: 1 },
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }]), fog: true,
     vertexShader: `attribute vec4 aCar; attribute vec2 aRange; attribute vec3 aCol; uniform float uTime; varying vec3 vCol; varying vec3 vN; varying float vFront;
       #include <fog_pars_vertex>
@@ -802,7 +840,13 @@ export function getWorld() {
         b.mesh.position.set(x, -0.75 + Math.sin(time * 1.3 + b.r) * 0.04, z); b.mesh.rotation.y = -b.a + Math.PI / 2; b.mesh.rotation.z = Math.sin(time * 0.9 + b.r) * 0.02;
       }
     },
-    setDetail(on) { for (const d of city.detail) d.visible = on; },
+    setDetail(on) {
+      for (const d of city.detail) d.visible = on;
+      // Detail goes with the tier that also loses its shadow map, so that is when the baked shadows come in.
+      const baked = land.userData.baked;
+      if (!on && !baked.uBaked.value) baked.uBaked.value = bakeGroundShadows(city.blocks);
+      baked.uBakedOn.value = on ? 0 : 1;
+    },
     /** Reflections for glass come from the sky itself, baked once into a small environment map. Null where half-float targets can't be drawn into. */
     environment() {
       if (this.env || !stage.renderer || !stage.floatTargets) return this.env;
