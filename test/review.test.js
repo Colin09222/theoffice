@@ -68,6 +68,14 @@ describe('the Talk tab keeps private work from visitors', () => {
     run(t.db, 'UPDATE floors SET public_chat=1 WHERE id=?', f.id);
     assert.match((await lines(v))[0], /divorce lawyer/, 'an open chat already shows those words');
   });
+  test('the manager repeating a house rule or a personality note doesn\'t show it to a visitor', async () => {
+    const { t, c, f, mgr, wr } = await setup();
+    const saved = await c.post(`/api/floors/${c.slug}/customise`, { identity: { rules: 'Never mention the Acme lawsuit in anything we write.', avoid: 'the old logo' }, staff: [{ id: wr.id, persona: { notes: 'Secretly terrified of spreadsheets, so go gently with numbers.' } }] });
+    assert.equal(saved.status, 200, JSON.stringify(saved.data));
+    for (const said of ['Write the post. Remember: never mention the Acme lawsuit in anything.', 'Drop the old logo everywhere.', 'She is secretly terrified of spreadsheets, so go gently.', 'Write the launch post in a warm voice.']) t.app.engine.talk(f.id, mgr, wr, said, { kind: 'assign' });
+    const lines = (await new Client(t).get(`/api/floors/${c.slug}`)).data.talk.filter((l) => l.fromName === mgr.name).map((l) => l.text);
+    assert.deepEqual(lines, [PRIVATE_TALK, PRIVATE_TALK, PRIVATE_TALK, 'Write the launch post in a warm voice.']);
+  });
   test('money said any other way goes the same way as a figure', () => {
     for (const s of ['It costs $.50 a go', 'about ten dollars so far', 'a few cents each', 'only 5¢', '12$ in all', 'twenty bucks', 'half a dollar', '1.2k USD', 'a couple of bucks']) {
       const out = talkLine(s);

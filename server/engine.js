@@ -814,10 +814,10 @@ export class Engine {
     const line = talkLine(said);
     if (!line) return;
     // Only the cut is kept, and the cut can fall inside a private name, so what a visitor gets is worked out here. A name goes before cutting.
-    // What still touches private work after that, in another spelling or in words lifted from a private brief, stays with the boss.
+    // What still touches private work after that, in another spelling or in words lifted from a private brief or the boss's private settings, stays with the boss.
     const open = redactChat(this.db, floorId, said);
     const judged = talkLine(open, TALK_JUDGED_CHARS);
-    const quiet = { ...(open === said ? {} : { pub: talkLine(open) }), ...(mentionsPrivate(this.db, floorId, '', judged) ? { hush: true } : {}), ...(quotesBoss(this.db, floorId, judged) ? { quote: true } : {}) };
+    const quiet = { ...(open === said ? {} : { pub: talkLine(open) }), ...(mentionsPrivate(this.db, floorId, '', judged) || quotesSettings(this.db, floorId, judged) ? { hush: true } : {}), ...(quotesBoss(this.db, floorId, judged) ? { quote: true } : {}) };
     this.emit(floorId, 'talk', { from: from.id, to: to?.id ?? null, fromName: from.name, toName: to?.name ?? '', text: line, kind, ts: this.now(), ...quiet }, { project });
   }
   /** Anything about the budget or a purchase: the boss's alone, even on a floor with public chat, and it never reaches the model. */
@@ -962,16 +962,24 @@ export function viewEvent(db, ev, viewer) {
 }
 
 /** Takes private project names and task titles out of chat that visitors can read. It can't catch a paraphrase, and the setting says so. */
-/** Does this line lift a run of the boss's own words? A paraphrase gets through, as it does with a private brief. */
-function quotesBoss(db, floorId, text) {
-  const norm = (s) => ` ${String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
-  const hay = norm(text);
-  const said = [...all(db, "SELECT text FROM messages WHERE floor_id=? AND role='boss' ORDER BY id DESC LIMIT 30", floorId), ...all(db, 'SELECT answer text FROM questions WHERE floor_id=? AND answer IS NOT NULL ORDER BY id DESC LIMIT 30', floorId)];
-  for (const m of said) {
-    const words = norm(m.text).trim().split(' ');
-    for (let i = 0; i + 5 <= words.length; i++) if (hay.includes(` ${words.slice(i, i + 5).join(' ')} `)) return true;
-  }
+const plainWords = (s) => ` ${String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
+/** Does this line lift a run of these words? A paraphrase gets through, as it does with a private brief. */
+function liftsWords(line, source, run) {
+  const hay = plainWords(line); const words = plainWords(source).trim().split(' ');
+  for (let i = 0; i + run <= words.length; i++) if (hay.includes(` ${words.slice(i, i + run).join(' ')} `)) return true;
   return false;
+}
+function quotesBoss(db, floorId, text) {
+  const said = [...all(db, "SELECT text FROM messages WHERE floor_id=? AND role='boss' ORDER BY id DESC LIMIT 30", floorId), ...all(db, 'SELECT answer text FROM questions WHERE floor_id=? AND answer IS NOT NULL ORDER BY id DESC LIMIT 30', floorId)];
+  return said.some((m) => liftsWords(text, m.text, 5));
+}
+/** The Customise panel's words are never a visitor's to read. A short house rule counts whole, as its few words are the point of it. */
+function quotesSettings(db, floorId, text) {
+  const read = (raw) => { try { return JSON.parse(raw) || {}; } catch { return {}; } };
+  const id = read(get(db, 'SELECT identity FROM floors WHERE id=?', floorId)?.identity);
+  const typed = [id.about, id.rules, id.avoid];
+  for (const a of all(db, "SELECT persona FROM agents WHERE floor_id=? AND persona!=''", floorId)) { const p = read(a.persona); typed.push(p.notes, p.focus); }
+  return typed.filter(Boolean).some((s) => { const n = plainWords(s).trim().split(' ').length; return n >= 3 && liftsWords(text, s, Math.min(n, 5)); });
 }
 export function redactChat(db, floorId, text) { return redactor(db, floorId)(text); }
 /** The same thing for a page that has many lines to go through. */
