@@ -11,6 +11,8 @@ COPY server ./server
 # Skip with --build-arg SKIP_MODEL_CHECK=1 if the build host has no outbound network.
 ARG SKIP_MODEL_CHECK=0
 RUN if [ "$SKIP_MODEL_CHECK" != "1" ]; then node scripts/validate-models.mjs; fi
+# rsync keeps source modes, which may be owner-only; the app must stay root-owned and read-only to the node user.
+RUN chown -R root:root /app && chmod -R a+rX,go-w /app
 RUN mkdir -p /data && chown node:node /data
 USER node
 HEALTHCHECK --interval=30s --timeout=4s --retries=3 CMD ["node", "-e", "fetch('http://127.0.0.1:8083/theoffice/robots.txt').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
