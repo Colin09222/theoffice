@@ -370,6 +370,15 @@ body[data-page="floor"] #ui::before { content: ''; position: absolute; inset: 0;
   .admin { padding: 18px 14px 40px; }
   .admin-head h1 { font-size: 28px; }
 }
+/* Blurring what lies behind a panel is redone every frame over a moving 3D scene, and it is one of the heaviest things a phone can be asked to do. On a phone the panels are simply more solid. */
+@media (max-width: 760px) {
+  .glass, .btn.chrome, .open-pill, .status-pill, .visitor-note, .modal-back, .ticker, #labels .char-name { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .directory { background: rgba(38, 30, 34, .95); }
+  .btn.chrome { background: rgba(32, 26, 32, .9); }
+  .open-pill { background: rgba(32, 26, 32, .94); }
+  .ticker { background: rgba(32, 26, 32, .88); }
+  .modal-back { background: rgba(14, 10, 16, .72); }
+}
 /* Fingers, on any size of screen: every control gets a target of about 44 points, by size where there is room and by an invisible margin where there isn't. */
 @media (pointer: coarse) {
   .btn { min-height: 44px; }
