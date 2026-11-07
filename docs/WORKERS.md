@@ -47,10 +47,10 @@ All costs are from the office's own ledger. "Before" is `lanes` at d4fd32c; the 
 | Job | Before | After | What improved |
 |---|---|---|---|
 | Vague request, until work starts | 2 turns, first reply 122 to 224 words, $0.12 to $0.13 | 1 turn, 59 to 93 words, $0.07 to $0.08 | Every "make me X" starts at once. Only "ideas?" takes two turns, and the buttons on a new floor do too (three ideas or one question, then "u pick" starts). |
-| Game | $3.11, 27 min. Builder $1.97 and it ran out of steps; Tester $0.83 reported bugs instead of fixing | **$0.99, 9 min** (Floppy Ears, final prompts). Builder $0.63, Tester $0.22, manager $0.15. The first run this session, before the wrap-up rule: $1.94, 32 min (Snack Stack) | Real art, sound and feedback where there was a line on a black screen. The Tester played 5 full runs, 2 on a touch-only phone context. |
+| Game | $3.11, 27 min. Builder $1.97 and it ran out of steps; Tester $0.83 reported bugs instead of fixing | **$0.99, 9 min** (Floppy Ears, final prompts). Builder $0.63, Tester $0.22, manager $0.15. The first run this session, before the wrap-up rule and the line against long bot runs: $1.94, 32 min (Snack Stack) | Real art, sound and feedback where there was a line on a black screen. The Tester played 5 full runs, 2 on a touch-only phone context. |
 | Website | about $2 (an earlier launch run, not the same job) | **$0.91** (Rosa's, final prompts). Builder $0.50, Designer $0.18, manager $0.14, Writer $0.09. First pass: $1.31 | A designed page rather than the cream template. No invented backstory in the words. |
 | Business | $2.00. Researcher $1.00 (searches $0.41) | **$1.62, 10 min** (Good Boy Walks). Researcher $0.60 (searches $0.16), Builder $0.68, Writer $0.18, manager $0.15 | Local competitors with prices from their own pages, a named gap, honest "Unverified" marks. 13 sources, no false refusals from the link check. |
-| Change after publish | not measured; the Builder would have got the game brief, which says not to publish | $0.24 (rename, location, focus on cakes; 1 file; 1.5 min). $0.41 on a game | Edits one file, goes live at the same link. |
+| Change after publish | not measured; the Builder would have got the game brief, which says not to publish | $0.41 all in, Builder $0.24 (rename, location, focus on cakes; 1 file; under 2 min). $0.52 all in on a game, Builder $0.41 (1 file) | Edits one file, goes live at the same link. |
 | "u pick" on a finished job | started $0.47 of work nobody asked for (seen during this work, on earlier prompts) | $0.05, asks what's next | |
 | Pause, resume, add-on, redirect, stop on a live computer | | $0.25, 7 of 7 checks pass (`docs/workers-evidence/midjob.txt`) | Spending stops; same computer resumes; redirect makes a new plan. |
 
@@ -60,11 +60,16 @@ Screenshots: `media/workers-*.jpg`, with `workers-before-*.jpg` for comparison. 
 
 ## Still weak
 
-- **One sample each.** Costs vary from run to run. The final-prompt game is one run, and the final-prompt website is one run with its Builder started later. The business job ran on prompts slightly older than the final ones and was not rerun, so its landing page has an AI photo that the newer picture rule should now prevent.
+- **One sample each.** Costs vary from run to run, and Floppy Ears is a simpler game than Snack Stack, so not all of that drop is the prompts. The wrap-up nudge never fired in a real run: Floppy Ears stopped at 8 steps by itself, so it is proven with mocks only. The final-prompt game is one run, and the final-prompt website is one run with its Builder started later. The business job ran on prompts slightly older than the final ones and was not rerun, so its landing page has an AI photo that the newer picture rule should now prevent.
 - **"10 to 20 minutes"** is what the manager promises. Three first jobs took about 10 minutes and one took 32, before the wrap-up rule. The "few minutes for a small change" wording was added after the last change test, so it has not been seen in a run.
 - **Fun is judged by a Tester and by me playing briefly.** No person has played these, and the Tester's bot isn't a person. Phone checks are emulated touch in Chrome, not a real phone.
 - **The live leaderboard:** the Tester can't reach it from a computer, so the manager tells the boss to try it. It does work: I posted a score through the live page on both games.
 - **Follow-up tasks aren't replayed** unless the change is big, and the manager says so. A follow-up that breaks something reaches the boss first.
 - **A late add-on starts a second computer** after the first finishes, because a running computer can't be handed a new instruction. It works, but costs more than it needs to.
 - **The link check only proves a page was seen,** not that the fact is on it.
+- **The browser e2e did not finish.** Two attempts on a machine at load 60 to 97, with other workers' browsers running, stopped silently after 8 and 7 passing steps, with no failure line, before the step that runs a whole job. So the progress lines and the short report have not been looked at in the real floor UI. Rerun `npm run e2e` on a quiet machine.
 - **Not run for real:** a building with computers off, sandbox mode with no apps domain, and anything on the production server. Those paths are covered by mock tests only.
+
+## Tests
+
+`npm test` on Node 22: 543 of 543, including `test/workers.test.js`, new here, with 43 tests. Old tests that asserted the old manager wording, the old report in the chat and the old search price were changed on purpose. One filler test failed twice in full runs at load above 60 because it depended on when its stream connected, and it passed alone; it now reads the saved feed as well.
