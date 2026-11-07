@@ -30,8 +30,8 @@ function renderLogin(wrap) {
 }
 
 async function renderDash(wrap) {
-  const metrics = h('section.metrics'); const floors = h('div.table-wrap'); const buys = h('section.buys'); const head = h('div.admin-actions'); const doms = h('section.buys');
-  clear(wrap).append(h('header.admin-head', {}, h('h1', {}, 'Building manager'), head), metrics, h('h2', {}, 'Floors'), floors, h('h2', {}, 'Pending purchase requests'), buys, h('h2', {}, 'Domains'), doms);
+  const metrics = h('section.metrics'); const floors = h('div.table-wrap'); const buys = h('section.buys'); const head = h('div.admin-actions'); const doms = h('section.buys'); const helpLine = h('section.buys.help-line');
+  clear(wrap).append(h('header.admin-head', {}, h('h1', {}, 'Building manager'), head), metrics, h('h2', {}, 'Floors'), floors, h('h2', {}, 'Help line'), helpLine, h('h2', {}, 'Pending purchase requests'), buys, h('h2', {}, 'Domains'), doms);
   const post = async (path, body) => { try { const r = await api(path, { method: 'POST', body, admin: true }); await draw(); return r; } catch (e) { toast(e.message, 'bad'); return null; } };
   const confirm = (title, text, go) => modal(title, (b, close) => b.append(h('div.stack', {}, h('p.lede', {}, text), h('div.row', {}, h('button.btn.ghost.grow', { type: 'button', onclick: () => close() }, 'Cancel'), h('button.btn.danger.grow', { type: 'button', 'data-confirm': true, onclick: () => { close(); go(); } }, title)))));
   async function draw() {
@@ -53,8 +53,18 @@ async function renderDash(wrap) {
           h('button.btn.ghost.small', { type: 'button', onclick: () => confirm('Reset', `Wipe all work on ${f.name}, keeping the owner and their look?`, () => post(`/admin/floors/${f.id}/reset`)) }, 'Reset'),
           h('button.btn.danger.small', { type: 'button', onclick: () => confirm('Kill', `Delete ${f.name} and everything on it? This can't be undone, and the floor goes back on the market.`, () => post(`/admin/floors/${f.id}/kill`)) }, 'Kill'))));
     clear(floors).append(h('table.admin-table', {}, h('thead', {}, h('tr', {}, ...['#', 'Company', 'Status', 'Today', 'Total', 'Running', 'Projects', 'Storage', ''].map((t) => h('th', {}, t)))), h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: 9 }, 'No floors yet. Issue a code to get someone started.')))));
+    // Written by a bot or a friend, so it stays fenced exactly as the server sent it, and only ever as text.
+    const hl = await api('/admin/help').catch(() => null);
+    if (hl) clear(helpLine).append(...(hl.requests.length ? [h('p.fineprint', {}, hl.notice), ...hl.requests.map((r) => h('article.card.request', { 'data-help': r.id }, h('small', {}, `#${r.id} · Floor ${r.floorNumber} · expires ${new Date(r.expiresAt).toLocaleTimeString()}`), h('p.untrusted', {}, r.floorName), h('p.untrusted', {}, r.question), h('p.untrusted', {}, r.whatWasTried), h('div.row', {}, h('button.btn.primary.small', { type: 'button', 'data-answer': r.id, onclick: () => answerHelp(r.id) }, 'Answer'), h('button.btn.ghost.small', { type: 'button', 'data-decline': r.id, onclick: () => post(`/admin/help/${r.id}`, { decline: true }) }, 'Decline'))))] : [h('p.empty', {}, 'Nobody is waiting on buddehbot.')]));
     clear(buys).append(...(d.purchases.length ? d.purchases.map((p) => h('article.card.request', {}, h('div.row.spread', {}, h('b', {}, `${p.item}`), h('span.price', {}, money(p.price))), h('p', {}, p.why), h('small', {}, p.floor))) : [h('p.empty', {}, 'Nothing pending. Agents can only ask.')]));
     clear(doms).append(...(d.domainOrders?.length ? d.domainOrders.map((o) => h('article.card.request', {}, h('div.row.spread', {}, h('b', {}, o.domain), h('span.price', {}, money(o.chargedUsd ?? o.priceUsd))), h('small', {}, `${o.floor} · ${o.status}${o.estimated ? ' · amount estimated' : ''}${o.orderId ? ` · order ${o.orderId}` : ''}`), o.note ? h('p', {}, o.note) : null)) : [h('p.empty', {}, d.domainsOn ? 'No domains asked for yet.' : 'Domain buying is not set up.')]));
+  }
+  // In a dialog, because the dashboard redraws itself every few seconds and would eat a half-written answer.
+  function answerHelp(id) {
+    modal(`Answer request #${id}`, (body, close) => {
+      const text = h('textarea', { rows: 6, maxlength: 4000, required: true, autofocus: true, 'aria-label': 'Your answer', placeholder: 'Advice for that floor\'s manager. It gets no new powers from this.' });
+      body.append(h('form.stack', { onsubmit: async (e) => { e.preventDefault(); if (!text.value.trim()) return; if (await post(`/admin/help/${id}`, { text: text.value })) close(); } }, text, h('button.btn.primary.wide', { type: 'submit' }, 'Send to the manager')));
+    });
   }
   function issue() {
     modal('Issue an office code', (body) => {

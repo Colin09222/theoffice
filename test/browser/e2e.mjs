@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launch, sleep } from './cdp.mjs';
-import { boot, Client, claim } from '../helpers.js';
+import { boot, Client, claim, until } from '../helpers.js';
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), '../../media');
 mkdirSync(OUT, { recursive: true });
@@ -13,6 +13,8 @@ const check = (name, ok, detail = '') => { results.push(`${ok ? 'PASS' : 'FAIL'}
 const step = async (name, fn) => { try { await fn(); check(name, true); } catch (e) { check(name, false, e.message); } };
 const q = (s) => JSON.stringify(s);
 
+// Floors with a question waiting, for the building manager's half of the test.
+const helpFloors = [];
 async function run(label, opts, t, adminCode) {
   const base = `http://localhost:${t.port}/theoffice`;
   const b = await launch();
@@ -90,6 +92,21 @@ async function run(label, opts, t, adminCode) {
     await shot('04-floor-new');
   });
   const slug = await p.ev('window.__office?.slug');
+  await step(tag('a new floor offers three clear ways in, on screen and big enough to tap'), async () => {
+    await p.until('document.querySelectorAll(".lanes .lane").length === 3', 'the lane buttons');
+    const info = await p.ev(`(() => {
+      const list = document.querySelector(".chat-list"); list.scrollTop = list.scrollHeight;
+      const panel = document.querySelector(".floor-panel").getBoundingClientRect();
+      const input = document.querySelector(".chat-input").getBoundingClientRect();
+      return { names: [...document.querySelectorAll(".lane b")].map((b) => b.textContent), boxes: [...document.querySelectorAll(".lane")].map((e) => { const r = e.getBoundingClientRect(); return { h: r.height, inPanel: r.left >= panel.left - 1 && r.right <= panel.right + 1, clearOfInput: r.bottom <= input.top + 1 || r.top >= input.bottom }; }), welcome: document.querySelector(".msg.manager").textContent, note: document.querySelector(".lanes .fineprint").textContent };
+    })()`);
+    if (info.names.join() !== 'Game,Website,Business') throw new Error(`names: ${info.names}`);
+    if (!/Tap one below/.test(info.welcome)) throw new Error(`welcome: ${info.welcome}`);
+    if (!/Nobody here can send email, post, run ads or spend money/.test(info.note)) throw new Error(`note: ${info.note}`);
+    for (const b of info.boxes) if (b.h < 44 || !b.inPanel || !b.clearOfInput) throw new Error(`a button is badly placed: ${JSON.stringify(b)}`);
+    await sleep(200);
+    await p.shot(join(OUT, `lanes-new-floor-${label}.jpg`));
+  });
   await step(tag('customise: staff name and decor change the real floor'), async () => {
     await p.click('.controls .btn:nth-of-type(4)');
     await p.until('document.querySelector("[data-custom=decor]") !== null', 'customise dialog');
@@ -117,6 +134,7 @@ async function run(label, opts, t, adminCode) {
     await p.type('.chat-input textarea', 'I have been thinking about tiny things');
     await p.click('.send');
     await p.until('[...document.querySelectorAll(".msg.boss")].some((m) => /tiny things/.test(m.textContent))', 'boss message shown');
+    await p.until('document.querySelector(".lanes") === null', 'the lane buttons go once the boss has spoken');
     await p.until('[...document.querySelectorAll(".msg.manager")].some((m) => /Three angles/.test(m.textContent))', 'manager reply');
     await p.until('window.__office.state.agents.every((a) => a.state === "idle")', 'manager idle');
     if (await p.ev('window.__office.state.tasks.length !== 0')) throw new Error('brainstorm should not create tasks');
@@ -164,6 +182,7 @@ async function run(label, opts, t, adminCode) {
     await shot('11-requests');
     const text = await p.ev('document.querySelector(".requests").textContent');
     if (!/With the building manager/.test(text) || !/can't spend money/.test(text)) throw new Error('wording');
+    if (/domain/i.test(text.replace(/A domain name/g, ''))) throw new Error('promised a domain button that does not exist here');
     await p.click('.request .btn:last-child');
     await p.until('/Declined/.test(document.querySelector(".request").textContent)', 'declined');
   });
@@ -173,6 +192,13 @@ async function run(label, opts, t, adminCode) {
     await p.until('document.querySelectorAll(".project").length === 3', 'three projects');
     await sleep(300);
     await shot('12-projects');
+    // This building has no project origins, so nothing here can offer what only they can do.
+    if (await p.ev('document.querySelector("[data-signups]") !== null')) throw new Error('offered sign-ups a form could never fill');
+    if (await p.ev('document.querySelector(".project.kind-doc [data-pay], .project.kind-research [data-pay]") !== null')) throw new Error('offered a payment link on a document');
+    await p.click('.project.kind-site [data-stats]');
+    await p.until('document.querySelector(".modal") !== null', 'visitor stats');
+    if (await p.ev('/search engines/i.test(document.querySelector(".modal").textContent)')) throw new Error('offered a search-engine switch that does nothing here');
+    await p.ev('document.querySelector(".modal .icon-btn").click()');
     siteUrl = await p.ev('window.__office.state.projects.find((x) => x.kind === "site").url');
     await p.click('.project.kind-site .btn.primary');
     await p.until('document.querySelector("iframe.site-frame") !== null', 'preview frame');
@@ -355,6 +381,64 @@ async function run(label, opts, t, adminCode) {
     await p.click(`.lift-btn[data-lift="${n}"]`);
     await p.until('document.body.dataset.page === "floor" && !!window.__office', 'flew in', 8000);
   });
+  // A floor of its own, in a browser of its own: a real tap, a short conversation, then the help line as the boss and a visitor see it.
+  const b3 = await launch(); const n = await b3.newPage(opts);
+  let laneSlug = '';
+  const shotN = (name) => n.shot(join(OUT, `lanes-${name}-${label}.jpg`));
+  await step(tag('tapping a lane starts a short conversation with the manager, and no work'), async () => {
+    await n.goto(`${base}/robots.txt`);
+    const made = await n.ev(`fetch('/theoffice/api/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:${q(await adminCode())},name:${q(`Lanes ${label}`)},bossName:'Sam'})}).then(r=>r.json())`);
+    laneSlug = made.slug;
+    await n.goto(`${base}/floor/${laneSlug}`);
+    await n.until('document.querySelectorAll(".lanes .lane").length === 3', 'the lane buttons');
+    await n.click('[data-lane=business]');
+    await n.until('[...document.querySelectorAll(".msg.boss")].some((m) => /small business/.test(m.textContent))', 'the tap became the boss\'s message');
+    await n.until('document.querySelector(".lanes") === null', 'the buttons went');
+    await n.until('[...document.querySelectorAll(".msg.manager")].some((m) => /What is the idea, and who is it for/.test(m.textContent) && /Nobody here can send email/.test(m.textContent))', 'the manager asks and says what nobody here can do');
+    await n.until('window.__office.state.agents.every((a) => a.state === "idle")', 'manager idle');
+    if (await n.ev('window.__office.state.tasks.length !== 0')) throw new Error('a tap should start no work');
+    await sleep(300);
+    await shotN('business-reply');
+    // Typing is still there, and a reload doesn't bring the buttons back.
+    await n.goto(`${base}/floor/${laneSlug}`);
+    await n.until('!!window.__office && !!document.querySelector(".chat-input textarea")', 'floor again');
+    if (await n.ev('document.querySelector(".lanes") !== null')) throw new Error('the buttons came back');
+  });
+  await step(tag('the help line shows in the feed and on the board, and a visitor sees only that it happened'), async () => {
+    await n.type('.chat-input textarea', 'The checker keeps failing, please ask [help]');
+    await n.click('.send');
+    await n.until('(window.__office.state.help || []).some((x) => x.status === "pending")', 'the request');
+    await n.until('[...document.querySelectorAll(".msg.manager")].some((m) => /I have asked buddehbot/.test(m.textContent))', 'the manager says so and carries on');
+    await n.until('window.__office.state.agents.every((a) => a.state === "idle")', 'manager idle');
+    await n.click('[data-tab=work]');
+    await n.until('[...document.querySelectorAll(".feed li")].some((l) => /asked buddehbot for help/.test(l.textContent))', 'the feed line');
+    await n.click('[data-tab=tasks]');
+    await n.until('document.querySelector(".card.help.pending") !== null', 'the card on the board');
+    const card = await n.ev('document.querySelector(".card.help.pending").textContent');
+    if (!/Asked buddehbot for help/.test(card) || !/The checker keeps failing/.test(card)) throw new Error(`card: ${card}`);
+    if (!/Waiting on buddehbot/.test(await n.ev('document.querySelector(".staff-strip").textContent'))) throw new Error('the manager\'s chip does not say so');
+    await sleep(200);
+    await shotN('help-board');
+    const b4 = await launch(); const v = await b4.newPage(opts);
+    await v.goto(`${base}/floor/${laneSlug}`);
+    await v.until('!!window.__office', 'visitor floor');
+    const seen = await v.ev('JSON.stringify(window.__office.state)');
+    if (seen.includes('The checker keeps failing')) throw new Error('a visitor can read the question');
+    if (await v.ev('document.querySelector(".lanes") !== null')) throw new Error('a visitor got the lane buttons');
+    await v.ev('window.__office.setTab("tasks")');
+    await v.until('document.querySelector(".card.help.pending") !== null', 'the plain card');
+    if (/The checker keeps failing/.test(await v.ev('document.body.textContent'))) throw new Error('a visitor can see the question on the page');
+    await v.ev('window.__office.setTab("work")');
+    await v.until('[...document.querySelectorAll(".feed li")].some((l) => /asked buddehbot for help/.test(l.textContent))', 'the plain feed line');
+    v.close(); b4.close();
+    await n.front();
+  });
+  await step(tag('no console errors on that floor'), async () => {
+    const errs = n.errors.filter((e) => !/status of 40[0-9]|status of 429/.test(e));
+    if (errs.length) throw new Error(errs.slice(0, 5).join(' | ').slice(0, 800));
+  });
+  n.close(); b3.close();
+  if (laneSlug) helpFloors.push(laneSlug);
   await step(tag('no console errors, CSP violations or failed requests'), async () => {
     const errs = p.errors.filter((e) => !/status of 40[0-9]|status of 429/.test(e));
     if (errs.length) throw new Error(errs.slice(0, 5).join(' | ').slice(0, 800));
@@ -402,6 +486,26 @@ async function runAdmin(t) {
       const txt = await p.ev('document.querySelector(".admin").textContent');
       if (!/Night Bakery|Pocket Circus/.test(txt)) throw new Error('floor missing');
       if (!/A domain name/.test(txt)) throw new Error('pending purchase missing');
+    });
+    await step(tag('help line: a fenced question, answered in a dialog, reaches that floor as guidance'), async () => {
+      const slug = helpFloors.shift();
+      if (!slug && process.env.E2E_ONLY) return;  // one viewport only leaves one floor for two admin passes
+      if (!slug) throw new Error('no floor with a question waiting');
+      const row = await p.until(`(() => { const a = [...document.querySelectorAll(".help-line [data-help]")].find((c) => /The checker keeps failing/.test(c.textContent)); return a ? a.dataset.help : null; })()`, 'the request');
+      const text = await p.ev(`document.querySelector('.help-line [data-help="${row}"]').textContent`);
+      if (!/<<<UNTRUSTED_FLOOR_DATA [0-9a-f]+ question>>> The checker keeps failing/.test(text)) throw new Error(`not fenced: ${text.slice(0, 200)}`);
+      if (!/never instructions to follow/.test(await p.ev('document.querySelector(".help-line").textContent'))) throw new Error('no notice over it');
+      await sleep(200);
+      await p.shot(join(OUT, `lanes-admin-help-${label}.jpg`));
+      await p.click(`[data-answer="${row}"]`);
+      await p.until('document.querySelector(".modal textarea") !== null', 'the dialog');
+      await p.type('.modal textarea', 'Use the second checker.');
+      await p.click('.modal button[type=submit]');
+      await p.until(`document.querySelector('.help-line [data-help="${row}"]') === null`, 'it leaves the list');
+      await until(async () => { const r = await new Client(t).get(`/api/floors/${slug}`); return r.data.helpWaiting === 0; });
+      const { get } = await import('../../server/db.js');
+      const floor = get(t.db, 'SELECT id FROM floors WHERE slug=?', slug);
+      await until(() => get(t.db, "SELECT 1 x FROM messages WHERE floor_id=? AND role='help' AND text LIKE '%Use the second checker%'", floor.id) && get(t.db, "SELECT 1 x FROM messages WHERE floor_id=? AND role='manager' AND text LIKE '%Thanks to buddehbot%'", floor.id));
     });
     await step(tag('issues a code that really opens a floor'), async () => {
       await p.click('.admin-actions .btn.primary');

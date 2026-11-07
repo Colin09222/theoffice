@@ -1,6 +1,6 @@
 // AI_MODE=mock: deterministic scripted model. It speaks the same interface as the real client and returns real tool calls,
 // so every test drives the actual tool loop, ledger, limiter and SSE paths with no key and no spend.
-// Keywords in the boss's message pick scenarios: [ask] [mgrask] [buy] [hire] [fail] [private] [spendy] [slow] [ssrf] [traverse] [inject] [revise] [web] [standing] [cancelorder].
+// Keywords in the boss's message pick scenarios: [ask] [mgrask] [buy] [hire] [fail] [private] [spendy] [slow] [ssrf] [traverse] [inject] [revise] [web] [standing] [cancelorder] [help] [lane:game].
 import { ProviderError } from './llm.js';
 
 const sleep = (ms, signal) => new Promise((res, rej) => {
@@ -21,9 +21,24 @@ const CSS = `:root{--ink:#1d2433;--paper:#f7f1e3;--hot:#d9774a}*{box-sizing:bord
 const JS = `let n=0;const o=document.getElementById('o');document.getElementById('b').addEventListener('click',()=>{n++;o.textContent=n+(n===1?' clap':' claps')});`;
 const EVIL = `<!doctype html><title>probe</title><h1 id="r">probe</h1><script>let c='none';try{c=document.cookie}catch(e){c='blocked:'+e.name}document.getElementById('r').textContent=c</script>`;
 
+const LANE_OPENERS = {
+  game: 'A game! Three small ideas, boss:\n\n1. **Pigeon Post:** dodge the wind.\n2. **Night Bakery:** catch falling buns.\n3. **Tiny Tide:** outrun the sea.\n\nPick one, or tell me to choose.',
+  website: 'A website! Two quick questions, boss: what is it for, and what should a visitor do when they get there?',
+  business: 'A small business! What is the idea, and who is it for? If you have none yet I can suggest three. Nobody here can send email, post, run ads or spend money, so you will get research, a plan and a page, plus a list of what only you can do.',
+};
+
 function managerStep(meta, messages = []) {
   const boss = meta.lastBoss || '';
   const slug = meta.slugFor(boss);
+  // The help line. An answer or an expiry is a turn of its own, whatever came before it.
+  if (meta.guidance) return { content: 'Thanks to buddehbot, we can carry on, boss.' };
+  if (meta.helpDeadEnd) return { content: 'I did not get an answer from buddehbot, boss, so I am using my best judgment and carrying on.' };
+  if (/\[help\]/.test(boss) && meta.isFreshBoss && !meta.toReview.length) {
+    if (meta.step === 0) return { toolCalls: [call('ask_buddehbot', { question: boss.replace(/\[help\]/g, '').trim() || 'How do I get round a tool that keeps failing?', what_was_tried: 'I tried the obvious thing twice.' })] };
+    return { content: `I have asked buddehbot and I am carrying on meanwhile, boss.${/^Error/.test([...messages].reverse().find((m) => m.role === 'tool')?.content || '') ? ' It did not go through.' : ''}` };
+  }
+  const lane = boss.match(/^Let's do a (game|website|small business)\b/i)?.[1]?.toLowerCase().replace('small ', '');
+  if (lane && meta.isFreshBoss && !meta.toReview.length) return { content: LANE_OPENERS[lane] };
   // Standing orders (floors-plus). These come before everything else: the boss's words may also hold an action word.
   if (/\[standing\]/.test(boss) && meta.isFreshBoss && !meta.toReview.length) {
     if (meta.step === 0) return { toolCalls: [call('set_standing_order', { instruction: boss.replace(/\[standing\]/g, '').trim() || 'Tidy the drive', every: 'day', at: '09:00' })] };
@@ -58,7 +73,7 @@ function managerStep(meta, messages = []) {
   if (/\[mgrask\]/.test(boss) && meta.step === 0) return { toolCalls: [call('ask_boss', { question: 'Is the budget for this real or imaginary?' })] };
   if (ACT.test(boss)) {
     if (meta.step === 0 && meta.openCount === 0) {
-      const p = { plan: `Launch ${slug}`, project: slug, ...(/\[private\]/.test(boss) ? { private: true } : {}) };
+      const p = { plan: `Launch ${slug}`, project: slug, ...(/\[private\]/.test(boss) ? { private: true } : {}), ...(boss.match(/\[lane:(\w+)\]/) ? { lane: boss.match(/\[lane:(\w+)\]/)[1] } : {}) };
       const flag = (re, s) => (re.test(boss) ? ` ${s}` : '');
       const calls = [];
       if (/\[hire\]/.test(boss)) calls.push(call('hire_staff', { role: 'analyst', name: 'Quill' }, 90));

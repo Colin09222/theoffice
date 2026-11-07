@@ -113,6 +113,13 @@ CREATE TABLE IF NOT EXISTS ios_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, agent_id INTEGER, project TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'awaiting_boss', build_id TEXT NOT NULL DEFAULT '', task_id INTEGER, note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ios_requests_floor ON ios_requests(floor_id, id);
+-- The help line to the owner's assistant. It holds only what a manager typed; the floor's name and number come from the floors table when it is listed.
+CREATE TABLE IF NOT EXISTS help_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, agent_id INTEGER, question TEXT NOT NULL, tried TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending', answer TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decided_at INTEGER, delivered_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS help_requests_floor ON help_requests(floor_id, id);
+CREATE INDEX IF NOT EXISTS help_requests_open ON help_requests(status, expires_at);
 `;
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS.
 const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: 'INTEGER NOT NULL DEFAULT 0', session_charged: 'REAL NOT NULL DEFAULT 0', session_baseline: "TEXT NOT NULL DEFAULT ''", session_publish: "TEXT NOT NULL DEFAULT '[]'", session_tries: 'INTEGER NOT NULL DEFAULT 0' }, app_scores: { lower: 'INTEGER NOT NULL DEFAULT 0' },
@@ -124,6 +131,8 @@ const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: '
 Object.assign(ADDED.tasks, { vault: 'INTEGER NOT NULL DEFAULT 0' });
 // floors-plus: filler companies are flagged in the row itself, and the last time the boss opened the floor decides whether standing orders keep running.
 ADDED.floors = { filler: 'INTEGER NOT NULL DEFAULT 0', last_opened_at: 'INTEGER NOT NULL DEFAULT 0' };
+// lanes: which playbook a task belongs to (game, website or business), so the person doing it gets their part of that playbook.
+Object.assign(ADDED.tasks, { lane: "TEXT NOT NULL DEFAULT ''" });
 
 export function openDb(dataDir) {
   let path = ':memory:';

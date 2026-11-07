@@ -985,6 +985,13 @@ export class OfficeView {
       a.perform([{ walk: sp }, { anim: 'listen', hold: 5.2 - i * 0.2, face }]);
     });
   }
+  /** The manager rings buddehbot. Purely for show: a seated manager stands up, takes the call, and gets back to work. */
+  phoneCall(managerId) {
+    const m = this.actors.get(managerId);
+    if (!m || m.action) return;
+    if (m.seated) { m.seated = false; m.group.position.y = 0; m.group.position.z += 0.3; }
+    m.perform([{ anim: 'phone', hold: 3.2 }]);
+  }
   /** Finished work is physically carried over to the manager. */
   handoff(fromId, toId) {
     const a = this.actors.get(fromId), b = this.actors.get(toId);

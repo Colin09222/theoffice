@@ -7,7 +7,9 @@ import { ProviderError } from './llm.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './media.js';
 import { runCheck, saveCheck, gateProblem, launchFacts, composeReport } from './launch.js';
 import { formatReport } from './launch-check.js';
+import { LANES } from './prompts.js';
 import { OrderError } from './orders.js';
+import { HelpError, HELP_LIMITS } from './help.js';
 
 const str = (o, k, max, req = true) => {
   const v = o?.[k];
@@ -44,6 +46,7 @@ const DEFS = {
     project: S('Project slug this task works on'), private: { type: 'boolean', description: 'True to keep this project hidden from visitors' },
     depends_on: { type: 'array', items: { type: 'integer' }, description: 'Task ids that must finish first' },
     after_previous: { type: 'boolean', description: 'True to start only after the task you assigned just before this one finishes' },
+    lane: { type: 'string', enum: ['game', 'website', 'business'], description: 'Which lane this plan is in. The person doing the task gets their part of that playbook.' },
   }, ['to', 'title', 'brief']),
   review_task: fn('review_task', 'Approve finished work or send it back once with notes.', { task_id: { type: 'integer', description: 'Task id' }, verdict: { type: 'string', enum: ['approve', 'revise'] }, notes: S('Feedback for the staff member') }, ['task_id', 'verdict']),
   cancel_task: fn('cancel_task', 'Cancel a task that is no longer needed.', { task_id: { type: 'integer', description: 'Task id' } }),
@@ -66,6 +69,7 @@ const DEFS = {
   }, ['instruction', 'every', 'at']),
   list_standing_orders: fn('list_standing_orders', 'List this floor\'s standing orders with their ids, schedules and next run.', {}, []),
   cancel_standing_order: fn('cancel_standing_order', 'Delete a standing order the boss no longer wants.', { id: { type: 'integer', description: 'Order id from list_standing_orders' } }),
+  ask_buddehbot: fn('ask_buddehbot', 'Ask buddehbot, the building owner\'s assistant, for guidance when you or your staff are truly blocked and the boss can\'t settle it. Don\'t wait for the answer: carry on with anything else you can do. Your own words only: no pasted pages, files or private details.', { question: S(`What you need to know, up to ${HELP_LIMITS.question} characters`), what_was_tried: S(`What you already tried, up to ${HELP_LIMITS.tried} characters`) }),
 };
 
 export const STAFF_TOOLS = ['write_file', 'read_file', 'list_files', 'publish_project', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request'];
@@ -74,7 +78,7 @@ export const MANAGER_TOOLS = ['write_file', 'read_file', 'list_files', 'publish_
 
 // Beyond the common set, by job. A tool nobody needs is a tool a hijacked agent can't use. Approving a purchase is not on this list for anyone: it isn't a tool at all.
 const ROLE_EXTRAS = {
-  manager: ['web_search', 'check_domain', 'request_domain', 'launch_check', 'launch_report', 'ios_start', 'ios_request', 'set_standing_order', 'list_standing_orders', 'cancel_standing_order'],
+  manager: ['web_search', 'check_domain', 'request_domain', 'launch_check', 'launch_report', 'ios_start', 'ios_request', 'set_standing_order', 'list_standing_orders', 'cancel_standing_order', 'ask_buddehbot'],
   builder: ['generate_image', 'review_design', 'launch_check'], designer: ['generate_image', 'review_design'], illustrator: ['generate_image', 'review_design'],
   tester: ['review_design', 'launch_check'], marketer: ['check_domain'],
 };
@@ -87,6 +91,8 @@ export function toolAvailable(name, cfg, role) {
   if (name === 'generate_image' || name === 'review_design') return mediaOn(cfg);
   if (name === 'check_domain' || name === 'request_domain') return domainsConfigured(cfg);
   if (name === 'ios_start' || name === 'ios_request') return !!cfg.iosEnabled;
+  // Only ever the manager: anyone else who is stuck says so in their report, and the manager decides whether to ask.
+  if (name === 'ask_buddehbot') return role === 'manager' && cfg.helpEnabled !== false;
   return true;
 }
 export const toolDefs = (names, cfg, role) => [...new Set(names)].filter((n) => toolAvailable(n, cfg, role)).map((n) => DEFS[n]);
@@ -376,7 +382,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const p = get(db, 'SELECT published_at FROM projects WHERE floor_id=? AND slug=?', c.floor.id, slug);
       if (!p?.published_at) throw new WorkspaceError('that project has not been published, so there is nothing to report yet');
       const facts = launchFacts(db, cfg, c.floor, slug, engine.domains, engine.liveUrl(c.floor, slug));
-      const text = composeReport(facts, str(a, 'headline', 600), str(a, 'next_steps', 800, false));
+      const text = composeReport(facts, str(a, 'headline', 600), str(a, 'next_steps', 1500, false));
       run(db, 'UPDATE projects SET launch_report=? WHERE floor_id=? AND slug=?', text, c.floor.id, slug);
       engine.reportToBoss(c.floor.id, text);
       engine.emitProject(c.floor.id, slug);
@@ -385,7 +391,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     ios_start(c, a) { return engine.ios.start(c, projectFor(c, a), str(a, 'app_name', 40)); },
     ios_request(c, a) { return engine.ios.request(c, projectFor(c, a), a.kind === 'submit' ? 'submit' : 'build', str(a, 'build_id', 80, false)); },
     assign_task(c, a) {
-      const t = engine.assignTask(c.floor, c.agent, { to: str(a, 'to', 60), title: str(a, 'title', 160), brief: str(a, 'brief', 6000), plan: str(a, 'plan', 120, false), project: slugify(str(a, 'project', 60, false), ''), private: a.private === true, dependsOn: Array.isArray(a.depends_on) ? a.depends_on : [], afterPrevious: a.after_previous === true });
+      const t = engine.assignTask(c.floor, c.agent, { to: str(a, 'to', 60), title: str(a, 'title', 160), brief: str(a, 'brief', 6000), plan: str(a, 'plan', 120, false), project: slugify(str(a, 'project', 60, false), ''), private: a.private === true, dependsOn: Array.isArray(a.depends_on) ? a.depends_on : [], afterPrevious: a.after_previous === true, lane: LANES.includes(a.lane) ? a.lane : '' });
       c.assigned.push(t.agentId);
       return `Task #${t.id} assigned to ${t.assignee}.`;
     },
@@ -412,6 +418,17 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (!Number.isInteger(id) || id <= 0) throw new WorkspaceError('id must be a standing order id from list_standing_orders');
       try { engine.orders.remove(c.floor, id); } catch (e) { if (e instanceof OrderError) throw new WorkspaceError(e.message); throw e; }
       return `Standing order #${id} cancelled.`;
+    },
+    // The one way a floor can reach the owner's assistant. Everything it stores is untrusted, and it gets fenced every time it is listed.
+    ask_buddehbot(c, a) {
+      if (!engine.help) throw new WorkspaceError('the help line is not available');
+      if (typeof a.question !== 'string' || typeof a.what_was_tried !== 'string') throw new WorkspaceError('question and what_was_tried are both required, as text');
+      outbound(c, `${a.question} ${a.what_was_tried}`, 'question');
+      let r;
+      try { r = engine.help.ask(c.floor, c.agent, { question: a.question, tried: a.what_was_tried }); } catch (e) { if (e instanceof HelpError) throw new WorkspaceError(e.message); throw e; }
+      if (r.already) return `You already asked that (#${r.id}) and it is still waiting. Asking again changes nothing, so carry on with anything else you can do.`;
+      c.say('thinking', 'Waiting to hear from buddehbot', 'asked buddehbot for help');
+      return `Sent to buddehbot as #${r.id} (${r.used} of ${cfg.helpPerFloorDay} today). Do not wait for it: carry on with anything else you can do, and tell the boss you have asked. An answer arrives as a new message labelled as guidance from buddehbot. If nothing comes within ${cfg.helpTimeoutMin} minutes it expires and you will be told.`;
     },
   };
 

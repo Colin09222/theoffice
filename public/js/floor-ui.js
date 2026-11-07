@@ -9,6 +9,13 @@ import { openLogin } from './claim.js';
 
 const COLUMNS = [['todo', 'To do'], ['doing', 'Doing'], ['review', 'With manager'], ['done', 'Done']];
 const STATE_LABEL = { idle: 'At desk', thinking: 'Thinking', typing: 'Writing', browsing: 'On the web', reading: 'Reading', talking: 'Talking', queued: 'Waiting for a line' };
+// Three ways in for a new floor. Tapping one is simply the boss's first message, so typing anything else works just as well.
+const LANES = [
+  ['game', 'Game', 'A small browser game people can play right away', 'Let\'s do a game. What could we build?'],
+  ['website', 'Website', 'A real site with real words, live at a link', 'Let\'s do a website. What do you need from me?'],
+  ['business', 'Business', 'Market research, a plan and a landing page', 'Let\'s do a small business. Help me work it out.'],
+];
+const HELP_STATUS = { pending: 'Waiting for an answer. The team carries on meanwhile.', answered: 'Buddehbot answered. It is in the chat.', declined: 'Buddehbot passed on this one, so the manager is using their judgment.', expired: 'No answer came in time, so the manager is using their judgment.' };
 
 let F = null; // the active floor page
 
@@ -129,9 +136,10 @@ class FloorPage {
     clear(this.staffEl);
     for (const a of this.state.agents) {
       const busy = a.state !== 'idle';
+      const waiting = !busy && a.role === 'manager' && this.state.helpWaiting > 0;
       this.staffEl.append(h(`button.staff-chip${busy ? '.busy' : ''}`, { type: 'button', role: 'listitem', 'data-agent': a.id, title: a.activity || STATE_LABEL[a.state] || '', onclick: () => this.openAgent(a) },
         h('span.staff-dot', { css: { '--c': a.look.outfitColor } }, (a.name[0] || '?').toUpperCase()),
-        h('span.staff-text', {}, h('b', {}, a.name), h('small', {}, busy ? (STATE_LABEL[a.state] || a.state) : a.title))));
+        h('span.staff-text', {}, h('b', {}, a.name), h('small', {}, busy ? (STATE_LABEL[a.state] || a.state) : waiting ? 'Waiting on buddehbot' : a.title))));
     }
   }
   openAgent(a) {
@@ -150,7 +158,7 @@ class FloorPage {
     if (this.canSeeChat) tabs.push(['chat', this.owner ? 'Manager' : 'Chat']);
     tabs.push(['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
     if (this.owner) {
-      const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domains || []).filter((d) => d.status === 'awaiting_boss').length + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length;
+      const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length;
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
       tabs.push(['orders', 'Orders']);  // floors-plus: standing orders, after every existing tab
     }
@@ -193,7 +201,8 @@ class FloorPage {
     this.renderQuestions();
     this.streamEl = h('div.msg.manager.streaming', { hidden: !this.streamBuf }, h('div.msg-body', {}, this.streamBuf));
     this.bodyEl.append(this.chatList);
-    this.chatList.append(this.questionsEl, this.streamEl);
+    this.lanesEl = this.isNewFloor() ? this.lanePicker() : null;
+    this.chatList.append(...(this.lanesEl ? [this.lanesEl] : []), this.questionsEl, this.streamEl);
     if (this.owner) {
       const input = h('textarea', { rows: 1, maxlength: 4000, placeholder: 'Tell your office manager...', 'aria-label': 'Message your office manager', name: 'chat' });
       const send = async () => {
@@ -210,12 +219,23 @@ class FloorPage {
     }
     this.scrollChat();
   }
+  // ---- the three ways in ----
+  isNewFloor() { return this.owner && !(this.state.messages || []).some((m) => m.role === 'boss') && !this.state.tasks.length; }
+  lanePicker() {
+    const buttons = LANES.map(([id, title, what, text]) => h('button.lane', { type: 'button', 'data-lane': id, onclick: async () => {
+      for (const b of buttons) b.disabled = true;
+      try { await api(`/floors/${this.slug}/chat`, { method: 'POST', body: { text } }); this.view?.bossTalks(); this.dropLanes(); } catch (e) { for (const b of buttons) b.disabled = false; toast(e.message, 'bad'); }
+    } }, h('b', {}, title), h('span', {}, what)));
+    return h('div.lanes', { role: 'group', 'aria-label': 'What should we start on?' }, ...buttons,
+      h('p.fineprint', {}, 'Your staff research, write, build and publish. Nobody here can send email, post, run ads or spend money, so they will tell you what only you can do.'));
+  }
+  dropLanes() { this.lanesEl?.remove(); this.lanesEl = null; }
   messageEl(m) {
-    const who = m.role === 'boss' ? this.state.floor.boss.name : this.state.agents.find((a) => a.id === m.agentId)?.name || 'Office Manager';
+    const who = m.role === 'boss' ? this.state.floor.boss.name : m.role === 'help' ? 'buddehbot' : this.state.agents.find((a) => a.id === m.agentId)?.name || 'Office Manager';
     const body = h('div.msg-body');
     body.innerHTML = renderMarkdown(m.text); // renderMarkdown escapes all input first, and the CSP forbids inline script regardless
-    // A report (launch report, standing-order report) is the manager's, for the boss alone, and gets its own look.
-    const cls = m.role === 'boss' ? 'boss' : m.role === 'office' ? 'manager.notice' : m.role === 'report' ? 'manager.report' : 'manager';
+    // A report (launch report, standing-order report) or an answer from the help line is for the boss alone, and gets its own look.
+    const cls = m.role === 'boss' ? 'boss' : m.role === 'office' ? 'manager.notice' : m.role === 'report' ? 'manager.report' : m.role === 'help' ? 'manager.help' : 'manager';
     return h(`div.msg.${cls}`, { 'data-id': m.id, 'data-role': m.role }, h('span.msg-who', {}, who), body);
   }
   renderQuestions() {
@@ -249,6 +269,8 @@ class FloorPage {
     const t = this.state.tasks;
     const board = h('div.board');
     const agents = this.state.agents;
+    const help = this.helpSection();
+    if (help) board.append(help);
     const norm = (x) => (x.status === 'blocked' ? 'doing' : x.status);
     for (const [key, title] of COLUMNS) {
       const col = t.filter((x) => norm(x) === key);
@@ -260,8 +282,16 @@ class FloorPage {
     }
     const failed = t.filter((x) => x.status === 'failed' || x.status === 'cancelled');
     if (failed.length) board.append(h('section.col', {}, h('h3', {}, 'Dropped', h('span', {}, String(failed.length))), ...failed.slice(-6).reverse().map((x) => h(`article.card.${x.status}`, {}, h('b', {}, x.title), h('small', {}, x.status === 'failed' ? 'Could not finish' : 'Cancelled')))));
-    if (!t.length) board.append(h('p.empty', {}, 'No tasks yet.'));
+    if (!t.length && !help) board.append(h('p.empty', {}, 'No tasks yet.'));
     this.bodyEl.append(board);
+  }
+  // The help line on the board. A visitor only learns that a question is out; the words are the boss's alone.
+  helpSection() {
+    const s = this.state;
+    if (!this.owner) return s.helpWaiting ? h('section.col.help-col', {}, h('h3', {}, 'Help line'), h('article.card.help.pending', {}, h('b', {}, '☎ Asked buddehbot for help'), h('small', {}, 'Waiting for an answer. The team carries on meanwhile.'))) : null;
+    if (!s.help?.length) return null;
+    return h('section.col.help-col', {}, h('h3', {}, 'Help line', h('span', {}, String(s.help.filter((x) => x.status === 'pending').length))),
+      ...s.help.map((x) => h(`article.card.help.${x.status}`, { 'data-help': x.id }, h('b', {}, '☎ Asked buddehbot for help'), h('p', {}, x.question), h('small', {}, HELP_STATUS[x.status] || x.status))));
   }
 
   // ---- projects ----
@@ -310,8 +340,9 @@ class FloorPage {
     if (p.designReview) box.append(h('small', {}, `Design review: ${p.designReview.verdict}`));
     box.append(h('div.row', {},
       h('button.link', { type: 'button', 'data-stats': p.slug, onclick: () => this.openStats(p) }, 'Visitors'),
-      h('button.link', { type: 'button', 'data-signups': p.slug, onclick: () => this.openSignups(p) }, `Sign-ups${p.signups ? ` (${p.signups})` : ''}`),
-      h('button.link', { type: 'button', 'data-pay': p.slug, onclick: () => this.openPayment(p) }, p.hasPayment ? 'Payment link: on' : 'Add payment link'),
+      // Forms need the project's own web address, and a document has nowhere to put a Buy button. Neither gets a button that goes nowhere.
+      p.appUrl || p.signups ? h('button.link', { type: 'button', 'data-signups': p.slug, onclick: () => this.openSignups(p) }, `Sign-ups${p.signups ? ` (${p.signups})` : ''}`) : null,
+      p.kind !== 'doc' && p.kind !== 'research' ? h('button.link', { type: 'button', 'data-pay': p.slug, onclick: () => this.openPayment(p) }, p.hasPayment ? 'Payment link: on' : 'Add payment link') : null,
       c || p.launchReport ? h('button.link', { type: 'button', onclick: () => this.openChecklist(p) }, 'Report') : null));
     return box;
   }
@@ -325,7 +356,7 @@ class FloorPage {
           s.byDay.length ? h('div.bars', { role: 'img', 'aria-label': 'Page views by day' }, ...s.byDay.map((d) => h('i', { title: `${d.day}: ${d.views}`, css: { height: `${Math.max(4, (d.views / max) * 100)}%` } }))) : null,
           s.pages.length ? h('div', {}, h('h3', {}, 'Pages'), ...s.pages.map((x) => h('p.kv', {}, h('span', {}, x.path), h('b', {}, String(x.views))))) : null,
           s.refs.length ? h('div', {}, h('h3', {}, 'Came from'), ...s.refs.map((x) => h('p.kv', {}, h('span', {}, x.ref), h('b', {}, String(x.n))))) : null,
-          h('label.toggle', {}, h('input', { type: 'checkbox', checked: p.indexable || !!p.domain, disabled: !!p.domain, onchange: async (e) => { try { await api(`/floors/${this.slug}/projects/${p.slug}/indexable`, { method: 'POST', body: { on: e.target.checked } }); p.indexable = e.target.checked; } catch (x) { e.target.checked = !e.target.checked; toast(x.message, 'bad'); } } }), h('span', {}, p.domain ? 'Search engines can find it, because it has its own domain' : 'Let search engines find it'))));
+          p.appUrl ? h('label.toggle', {}, h('input', { type: 'checkbox', checked: p.indexable || !!p.domain, disabled: !!p.domain, onchange: async (e) => { try { await api(`/floors/${this.slug}/projects/${p.slug}/indexable`, { method: 'POST', body: { on: e.target.checked } }); p.indexable = e.target.checked; } catch (x) { e.target.checked = !e.target.checked; toast(x.message, 'bad'); } } }), h('span', {}, p.domain ? 'Search engines can find it, because it has its own domain' : 'Let search engines find it')) : null));
       });
     } catch (e) { toast(e.message, 'bad'); }
   }
@@ -348,7 +379,7 @@ class FloorPage {
       body.append(h('form.stack', { onsubmit: async (e) => {
         e.preventDefault();
         try { await api(`/floors/${this.slug}/projects/${p.slug}/payment`, { method: 'POST', body: { link: input.value.trim() } }); toast(input.value.trim() ? 'Payment link saved' : 'Payment link removed'); close(); this.reload(); } catch (x) { toast(x.message, 'bad'); }
-      } }, h('p.lede', {}, 'Make a Payment Link in your own Stripe account and paste it here. Customers pay on Stripe\'s page and the money goes to you. The staff only get a button that points at it. No keys and no card numbers ever come through here.'),
+      } }, h('p.lede', {}, 'Make a Payment Link in your own Stripe account and paste it here. Customers pay on Stripe\'s page and the money goes to you. The staff only get a button that points at it, so ask your manager to add one once this is saved. No keys and no card numbers ever come through here.'),
       p.hasPayment ? h('p', {}, 'A link is set. Paste a new one to replace it, or save this empty to remove it.') : null, input,
       h('button.btn.primary.wide', { type: 'submit' }, 'Save')));
     });
@@ -384,7 +415,7 @@ class FloorPage {
   renderDomains(list) {
     const DOMAIN_STATUS = { awaiting_boss: 'Waiting for you', buying: 'Buying now', sent: 'Confirming with the registrar', uncertain: 'The building manager is checking', bought: 'Bought, setting its address', live: 'Live', declined: 'You said no', failed: 'Not bought' };
     for (const d of this.state.domains || []) {
-      const waiting = d.status === 'awaiting_boss';
+      const waiting = d.status === 'awaiting_boss' && this.state.domainsOn;
       const buy = async () => {
         try { await api(`/floors/${this.slug}/domains/${d.id}/buy`, { method: 'POST', body: { priceUsd: d.priceUsd } }); toast(`Buying ${d.domain}`); this.reload(); } catch (e) { toast(e.message, 'bad'); this.reload(); }
       };
@@ -408,7 +439,7 @@ class FloorPage {
     const list = h('div.requests');
     const items = this.state.purchases || [];
     this.renderDomains(list);
-    if (!items.length && !(this.state.domains || []).length && !(this.state.ios || []).length) list.append(h('p.empty', {}, 'No requests. Staff can ask, but only you can say yes.'));
+    if (!items.length && !(this.state.domains || []).length && !(this.state.ios || []).length) list.append(h('p.empty', {}, this.state.domainsOn ? 'No requests. Staff can ask, but only you can say yes.' : 'No requests. Staff can ask for things here, but they can\'t buy anything.'));
     for (const p of items) {
       const setStatus = async (status) => { try { await api(`/floors/${this.slug}/purchases/${p.id}`, { method: 'POST', body: { status } }); p.status = status; this.renderTabs(); this.renderBody(); } catch (e) { toast(e.message, 'bad'); } };
       list.append(h(`article.card.request.${p.status}`, {},
@@ -417,7 +448,7 @@ class FloorPage {
         p.link ? h('p', {}, h('a', { href: safeHref(p.link), target: '_blank', rel: 'noopener noreferrer nofollow' }, 'See the link')) : null,
         p.status === 'pending' ? h('div.row', {}, h('button.btn.ghost', { type: 'button', onclick: () => setStatus('bought-myself') }, 'I bought it myself'), h('button.btn.ghost', { type: 'button', onclick: () => setStatus('declined') }, 'Decline')) : null));
     }
-    list.append(h('p.fineprint', {}, 'Staff can\'t spend money. A domain needs your click. Anything else goes to the building manager to decide.'));
+    list.append(h('p.fineprint', {}, this.state.domainsOn ? 'Staff can\'t spend money. A domain needs your click. Anything else goes to the building manager to decide.' : 'Staff can\'t spend money. Anything they ask for goes to the building manager to decide.'));
     this.bodyEl.append(list);
   }
 
@@ -615,11 +646,19 @@ class FloorPage {
       const m = { id: d.id, role: d.role, agentId: d.agentId, text: d.text, createdAt: d.createdAt };
       this.state.messages.push(m);
       if (d.role === 'manager') { this.streamBuf = ''; this.showStream(); }
-      if (this.tab === 'chat' && this.chatList) { this.chatList.insertBefore(this.messageEl(m), this.questionsEl); this.scrollChat(); }
+      if (d.role === 'boss') this.dropLanes();
+      if (this.tab === 'chat' && this.chatList) { this.chatList.insertBefore(this.messageEl(m), this.lanesEl || this.questionsEl); this.scrollChat(); }
       // floors-plus: a report means an order ran, so the Orders tab and its history are stale.
       if (d.role === 'report') { if (this.tab !== 'chat') toast('A report from your manager is in the chat'); if (this.owner) this.refreshOrders(); }
     });
     on('orders', () => { if (this.owner) this.refreshOrders(); });
+    on('help_state', (d) => {
+      this.state.helpWaiting = d.waiting;
+      // A small touch: the manager picks up the phone. The boss's page reloads for the words, and a visitor only ever has the count.
+      if (d.call && fresh(d)) this.view?.phoneCall(d.call);
+      if (this.owner) this.reload();
+      else { this.renderStaff(); if (this.tab === 'tasks') this.renderBody(); }
+    });
     on('question', () => this.reload());
     on('question_answered', () => this.reload());
     on('purchase', () => { this.reload(); toast('A purchase request has gone to the building manager'); });

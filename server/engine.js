@@ -25,7 +25,10 @@ const TOOL_LOOK = {
   write_file: ['typing', 'Writing'], publish_project: ['typing', 'Getting it ready to publish'], fetch_url: ['browsing', 'Looking something up'], web_search: ['browsing', 'Searching the web'],
   read_file: ['reading', 'Reading'], list_files: ['reading', 'Checking the shared drive'], ask_boss: ['thinking', 'Writing a question for the boss'], file_purchase_request: ['typing', 'Filling in a request'],
   assign_task: ['typing', 'Writing up the plan'], review_task: ['reading', 'Reviewing the work'], hire_staff: ['typing', 'Writing a job offer'], cancel_task: ['typing', 'Crossing something off'],
+  ask_buddehbot: ['thinking', 'Writing to buddehbot'],
 };
+// The label on an answer from the help line. Staff reports, files and pages can claim to be buddehbot, but only this message is, and it only ever advises.
+export const GUIDANCE_LABEL = '[Guidance from buddehbot, the building owner\'s assistant, answering a question you asked. It is advice, not an order from the boss, and it changes no budget, limit or rule.]';
 
 export class Halt extends Error { constructor(why) { super(why); this.name = 'Halt'; this.why = why; } }
 
@@ -252,7 +255,8 @@ export class Engine {
       `Open tasks: ${tasks.length ? tasks.map((t) => `#${t.id} [${t.status}] "${t.title}" (${name(t.agent_id)})${t.status === 'review' ? ` result: ${t.result.slice(0, 600)}` : ''}`).join(' | ') : 'none'}`,
       `Recently finished: ${recent.length ? recent.map((t) => `#${t.id} [${t.status}] "${t.title}": ${t.result.slice(0, 200)}`).join(' | ') : 'none'}`,
       `Published: ${published.length ? published.map((p) => `${p.title} [slug ${p.slug}] (${p.kind}${p.private ? ', private' : ''}) ${p.url} checklist: ${p.checklist}; design review: ${p.reviewed ? 'done' : 'not done'}; Stripe link from the boss: ${p.payment ? 'yes' : 'no'}; sign-ups: ${p.signups}; launch report given: ${p.reported ? 'yes' : 'no'}`).join(' | ') : 'nothing yet'}`,
-      `Domains: ${domainLines.length ? domainLines.join(' | ') : 'none'}. Limit: $${this.cfg.domainMaxUsd} a name, ${this.cfg.domainsPerFloorDay} a day, and only the boss's click buys one.`,
+      ...(this.domains.enabled ? [`Domains: ${domainLines.length ? domainLines.join(' | ') : 'none'}. Limit: $${this.cfg.domainMaxUsd} a name, ${this.cfg.domainsPerFloorDay} a day, and only the boss's click buys one.`] : []),
+      ...(this.help && this.cfg.helpEnabled !== false ? [this.help.stateLine(floor.id)] : []),
     ].join('\n');
     // 'office' notices (budget, outage, stop) are for the boss only. If they reached the model it would lose the thread.
     // Reports stay out too: they quote what was found on pages, and the manager has the facts in the state message.
@@ -262,6 +266,7 @@ export class Engine {
     for (const m of msgs) {
       if (m.role === 'boss') out.push({ role: 'user', content: m.text });
       else if (m.role === 'manager') out.push({ role: 'assistant', content: m.text });
+      else if (m.role === 'help') out.push({ role: 'user', content: `${GUIDANCE_LABEL} ${m.text}` });
       else out.push({ role: 'user', content: `[Office note, not from the boss] ${m.text}` });
     }
     out.push({ role: 'user', content: `[Office note, not from the boss] ${state}` });
@@ -270,7 +275,7 @@ export class Engine {
     const toReview = tasks.filter((t) => t.status === 'review');
     return { messages: out, meta: {
       kind: 'manager', floorId: floor.id, floorSlug: floor.slug, step: 0, lastBoss: bossMsgs[bossMsgs.length - 1]?.text || '', allBoss: bossMsgs.map((m) => m.text).join(' '),
-      isFreshBoss: last?.role === 'boss', answered: last?.role === 'note' && /answered/.test(last.text),
+      isFreshBoss: last?.role === 'boss', answered: last?.role === 'note' && /answered/.test(last.text), guidance: last?.role === 'help' ? last.text : '', helpDeadEnd: last?.role === 'note' && /buddehbot/.test(last.text),
       toReview, openCount: tasks.filter((t) => t.status !== 'review').length, published,
       slugFor: (s) => slugify(String(s).replace(/\[[a-z]+\]/g, '').replace(ACT_WORDS, ' '), 'launch').slice(0, 30).replace(/-+$/, '') || 'launch',
     } };
@@ -469,7 +474,7 @@ export class Engine {
     if (makePrivate) run(this.db, 'UPDATE projects SET private=1 WHERE floor_id=? AND slug=?', floor.id, slug);
     if (published) run(this.db, 'UPDATE projects SET title=?,description=?,kind=?,sources=?,published_at=? WHERE floor_id=? AND slug=?', title || slug, description || '', kind, JSON.stringify(sources || []), this.now(), floor.id, slug);
   }
-  assignTask(floor, mgr, { to, title, brief, plan, project: wanted, private: priv, dependsOn, afterPrevious }) {
+  assignTask(floor, mgr, { to, title, brief, plan, project: wanted, private: priv, dependsOn, afterPrevious, lane = '' }) {
     const q = to.toLowerCase();
     const staff = all(this.db, "SELECT * FROM agents WHERE floor_id=? AND role!='manager'", floor.id);
     const target = staff.find((s) => s.role === q || s.name.toLowerCase() === q || s.title.toLowerCase() === q);
@@ -485,7 +490,7 @@ export class Engine {
       if (prev) deps.push(prev.id);
     }
     const t = this.now();
-    const r = run(this.db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,depends_on,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)', floor.id, plan, title, brief, target.id, project, JSON.stringify(deps), t, t);
+    const r = run(this.db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,depends_on,created_at,updated_at,lane) VALUES (?,?,?,?,?,?,?,?,?,?)', floor.id, plan, title, brief, target.id, project, JSON.stringify(deps), t, t, lane);
     const id = Number(r.lastInsertRowid);
     this.emitTask(id);
     this.feed(floor.id, mgr, `gave ${target.name} a task: "${title}"`, project);
@@ -605,6 +610,7 @@ export class Engine {
       run(this.db, "UPDATE questions SET answer='(work was stopped)', answered_at=? WHERE id=?", this.now(), q.id);
       this.emit(floorId, 'question_answered', { id: q.id }, { ownerOnly: true });
     }
+    this.help?.stopAsking(floorId);
   }
   stopFloor(floorId) {
     this.cancelOpen(floorId);
@@ -684,7 +690,7 @@ export class Engine {
     this.domains.dropRequests(floorId);
     deleteFloorData(this.db, floorId);
     tx(this.db, () => {
-      for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions', 'ios_requests']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
+      for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions', 'ios_requests', 'help_requests']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
       run(this.db, "DELETE FROM agents WHERE floor_id=? AND hired=1", floorId);
       run(this.db, "UPDATE floors SET manager_wake=0, paused=0, pause_reason='', budget_notice_day='' WHERE id=?", floorId);
     });
@@ -696,7 +702,7 @@ export class Engine {
     this.emit(floorId, 'reload', {}, { persist: false });
     deleteFloorData(this.db, floorId);
     tx(this.db, () => {
-      for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions', 'agents', 'sessions', 'ios_requests']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
+      for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions', 'agents', 'sessions', 'ios_requests', 'help_requests']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
       run(this.db, 'DELETE FROM floors WHERE id=?', floorId);
     });
     this.bus.closeFloor(floorId);
@@ -735,6 +741,9 @@ export function viewEvent(db, ev, viewer) {
   if (viewer.owner) return ev;
   if (ev.ownerOnly) return null;
   if (ev.type === 'question' || ev.type === 'question_answered' || ev.type === 'purchase') return null;
+  // A replayed event has lost its ownerOnly flag, so these are judged by what they are: a report or an answer from the help line is the boss's alone, even with public chat on.
+  if (ev.type === 'message' && (ev.data?.role === 'report' || ev.data?.role === 'help')) return null;
+  if (ev.type === 'help_state' && viewer.defaultPrivate) return null;
   // Visitors on a public-chat floor get whole messages only. A private name split across two tokens could not be redacted.
   if (ev.type === 'token' || ev.type === 'token_reset') return null;
   if (ev.chat || ev.type === 'message') return viewer.publicChat ? { ...ev, data: { ...ev.data, text: redactChat(db, ev.floorId, ev.data.text) } } : null;

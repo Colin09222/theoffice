@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { get, all, run } from './db.js';
 import { checkSite } from './launch-check.js';
 import { publicUrl } from './tools.js';
+import { goesLive } from './workspace.js';
 
 const BOT = /bot|crawl|spider|slurp|preview|facebookexternalhit|embedly|headless|lighthouse|curl|wget|python-requests|node-fetch|axios|go-http/i;
 const MAX_PATHS = 50, MAX_REFS = 50;
@@ -53,7 +54,7 @@ export function bossText(db, floorId) {
 }
 export function filesToPublish(db, floorId, slug, directory = '') {
   const prefix = `projects/${slug}/${directory ? `${directory}/` : ''}`;
-  return all(db, 'SELECT path,content FROM files WHERE floor_id=? ORDER BY path', floorId).filter((f) => f.path.startsWith(prefix)).map((f) => ({ path: f.path.slice(prefix.length), data: f.content }));
+  return all(db, 'SELECT path,content FROM files WHERE floor_id=? ORDER BY path', floorId).filter((f) => f.path.startsWith(prefix) && goesLive(f.path.slice(prefix.length))).map((f) => ({ path: f.path.slice(prefix.length), data: f.content }));
 }
 const TEXTY = /\.(html?|js|mjs|css|json|webmanifest|svg|txt|md)$/i;
 // One at a time, with the event loop let through first. The checker's own size limits and bounded patterns are what keep a hostile page from stalling the building.

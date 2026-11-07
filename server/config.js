@@ -90,6 +90,11 @@ export function loadConfig(env = process.env, overrides = {}) {
     // Filler companies (floors-plus): scripted floors that look busy and never call a model. Off unless asked for.
     fillerCompanies: env.FILLER_COMPANIES === '1',
     fillerTickMs: num(env.FILLER_TICK_MS, 9000),
+    // The help line: a manager can ask the owner's assistant for guidance. No credential is involved: the assistant answers through scripts/admin.mjs or the admin view.
+    helpEnabled: env.HELP_ENABLED !== '0',
+    helpTimeoutMin: num(env.HELP_TIMEOUT_MIN, 30),
+    helpPerFloorDay: num(env.HELP_PER_FLOOR_DAY, 5),
+    helpTickMs: num(env.HELP_TICK_MS, 5000),
     ...overrides,
   };
 }

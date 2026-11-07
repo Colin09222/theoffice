@@ -26,6 +26,7 @@ import { DomainRefused } from './domains.js';
 import { installOrders } from './orders.js';
 import { installFiller } from './filler.js';
 import { installBuilding } from './building.js';
+import { installHelp } from './help.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any iscolinfree.com cookie, page or API.
@@ -205,7 +206,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       viewer: { owner: viewer.owner }, floor: { number: f.number, slug: f.slug, name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), boss: JSON.parse(f.boss), decor: JSON.parse(f.decor), publicChat: !!f.public_chat, defaultPrivate: !!f.default_private, ...engine.floorState(f.id) },
       agents, tasks, projects, feed, spend: { today: engine.spentToday(f.id), cap: cfg.floorDailyUsd }, lastEventId: get(db, 'SELECT COALESCE(MAX(id),0) n FROM events WHERE floor_id=?', f.id).n,
     };
-    if (viewer.owner || viewer.publicChat) out.messages = all(db, "SELECT id,role,agent_id agentId,text,created_at createdAt FROM messages WHERE floor_id=? AND role!='note' ORDER BY id DESC LIMIT 120", f.id).reverse().map((m) => (viewer.owner ? m : { ...m, text: redactChat(db, f.id, m.text) })).filter((m) => viewer.owner || m.role !== 'report');
+    if (viewer.owner || viewer.publicChat) out.messages = all(db, "SELECT id,role,agent_id agentId,text,created_at createdAt FROM messages WHERE floor_id=? AND role!='note' ORDER BY id DESC LIMIT 120", f.id).reverse().filter((m) => viewer.owner || (m.role !== 'report' && m.role !== 'help')).map((m) => (viewer.owner ? m : { ...m, text: redactChat(db, f.id, m.text) }));
     if (viewer.owner) {
       out.questions = all(db, 'SELECT q.id,q.text,a.name agentName FROM questions q LEFT JOIN agents a ON a.id=q.agent_id WHERE q.floor_id=? AND q.answer IS NULL ORDER BY q.id', f.id);
       out.purchases = all(db, 'SELECT p.id,p.item,p.price,p.why,p.link,p.status,p.admin_note adminNote,p.created_at createdAt,a.name agentName FROM purchases p LEFT JOIN agents a ON a.id=p.agent_id WHERE p.floor_id=? ORDER BY p.id DESC LIMIT 50', f.id);
@@ -280,7 +281,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     });
     const f = get(db, 'SELECT * FROM floors WHERE id=?', floorId);
     const s = A.createSession(db, 'owner', floorId, A.OWNER_MAX_AGE, now());
-    engine.managerSays(floorId, `Welcome to the building, ${bossName}. I'm your office manager and everyone's at their desks. Tell me what ${name} should make first, or just think out loud with me.`);
+    engine.managerSays(floorId, `Welcome to the building, ${bossName}. I'm your office manager and everyone's at their desks. What should ${name} start on? Tap one below, or just tell me what's on your mind.`);
     log('info', 'floor claimed', { floor: f.number });
     json(res, 201, { slug: f.slug, number: f.number, recoveryCode: recovery, csrf: s.csrf }, { 'set-cookie': A.cookieHeader(A.COOKIE, s.token, A.OWNER_MAX_AGE) });
   });
@@ -634,7 +635,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext)].filter(Boolean);
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext)].filter(Boolean);
   // Their timers run with the engine's: started by whoever starts the engine, stopped on close.
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
