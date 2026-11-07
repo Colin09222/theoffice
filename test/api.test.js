@@ -225,8 +225,8 @@ describe('budget, concurrency and provider failure', () => {
     const a = await claim(t, 'Spender'); const b = await claim(t, 'Saver');
     await a.post(`/api/floors/${a.slug}/chat`, { text: 'go build thing [spendy]' });
     const stopped = await until(async () => { const s = await floorState(a); return s.floor.budgetStopped && s.agents.every((x) => x.state === 'idle') ? s : null; }, { what: 'budget stop' });
-    assert.ok(stopped.messages.some((m) => /budget for today/.test(m.text)));
-    assert.equal(stopped.messages.filter((m) => /budget for today/.test(m.text)).length, 1);
+    assert.ok(stopped.messages.some((m) => /it for today/.test(m.text)));
+    assert.equal(stopped.messages.filter((m) => /it for today/.test(m.text)).length, 1);
     assert.ok(spentToday(t, a) >= 2 && spentToday(t, a) < 2 + 3 * 0.5 + 0.01, `spent ${spentToday(t, a)}`);
     assert.ok(stopped.tasks.some((x) => x.status === 'todo'), 'unfinished work is kept for tomorrow');
     const spent = spentToday(t, a); await sleep(1200);

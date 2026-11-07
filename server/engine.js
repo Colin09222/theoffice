@@ -196,7 +196,7 @@ export class Engine {
     const f = get(this.db, 'SELECT budget_notice_day d FROM floors WHERE id=?', floor.id);
     if (f.d === day) return;
     run(this.db, 'UPDATE floors SET budget_notice_day=? WHERE id=?', day, floor.id);
-    this.bossNotice(floor.id, 'That\'s the budget for today, boss. The staff have downed tools and everything is saved. We\'ll pick it back up tomorrow.');
+    this.bossNotice(floor.id, 'That\'s it for today, boss. Everyone has gone home and everything is saved. We\'ll pick it back up tomorrow.');
     this.feed(floor.id, null, 'The staff have stopped for today. Back tomorrow.', '');
     this.emitFloor(floor.id);
   }
@@ -209,8 +209,8 @@ export class Engine {
     const out = [...stopped].sort();
     if (was.join() === out.join()) return;
     run(this.db, 'UPDATE floors SET budget_out=? WHERE id=?', out.join(','), floor.id);
-    if (!was.length) this.bossNotice(floor.id, 'Boss, the building is out of budget, so work has stopped and everything is saved. Please ask the owner about it. We\'ll carry on by ourselves as soon as that is sorted.');
-    else if (!out.length && was.every((p) => !this.budget.out(p))) this.bossNotice(floor.id, 'Good news, boss: the building has budget again, so we\'re back at work.');
+    if (!was.length) this.bossNotice(floor.id, 'Boss, work has stopped for now and everything is saved. The building manager knows. We\'ll carry on by ourselves as soon as that is sorted.');
+    else if (!out.length && was.every((p) => !this.budget.out(p))) this.bossNotice(floor.id, 'Good news, boss: we\'re back at work.');
     this.emitFloor(floor.id);
   }
   /** A call that was in flight when the process died has no ledger row and never will. It may well have cost what it held, so that is what goes down. */
@@ -795,8 +795,8 @@ export class Engine {
     this.addMessage(floor.id, 'boss', null, text, files);
     run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
     const state = this.floorState(floor.id);
-    if (state.budgetStopped) this.bossNotice(floor.id, 'Noted, boss. Today\'s budget is used up, so I\'ll pick this up first thing tomorrow.');
-    else if (state.outOfBudget && this.budget.out(this.agentProvider({ role: 'manager' }))) this.bossNotice(floor.id, 'Noted, boss. The building is still out of budget, so I\'ll pick this up once the owner has sorted that out.');
+    if (state.budgetStopped) this.bossNotice(floor.id, 'Noted, boss. Everyone has gone home for today, so I\'ll pick this up first thing tomorrow.');
+    else if (state.outOfBudget && this.budget.out(this.agentProvider({ role: 'manager' }))) this.bossNotice(floor.id, 'Noted, boss. Work is still stopped for now, so I\'ll pick this up once the building manager has sorted that out.');
     this.kick();
   }
   pauseFloor(floorId, reason = 'Paused by the boss') {

@@ -103,7 +103,7 @@ describe('when a provider reaches its total', () => {
     assert.equal(t.app.engine.runs.size, 0);
     const told = notices(t, floor);
     assert.equal(told.length, 1, 'told once');
-    assert.match(told[0], /building is out of budget/); assert.match(told[0], /ask the owner/);
+    assert.match(told[0], /work has stopped for now/); assert.match(told[0], /building manager knows/); assert.doesNotMatch(told[0], /budget/i);
     assert.doesNotMatch(told[0], /\d/, 'no figures at all');
     const s = await floorState(c);
     assert.equal(s.floor.paused, false, 'nothing for the boss to resume: it is not theirs to fix');
@@ -198,7 +198,7 @@ describe('when a provider reaches its total', () => {
     const o = (await c.post(`/api/floors/${c.slug}/orders`, { text: 'Tidy the drive', schedule: { every: 'day', at: '09:00' } })).data.order;
     spend(t.db, 'anthropic', 1);
     const r = await c.post(`/api/floors/${c.slug}/orders/${o.id}/run`, {});
-    assert.equal(r.status, 409); assert.match(r.data.message, /out of budget/); assert.doesNotMatch(r.data.message, /\d/);
+    assert.equal(r.status, 409); assert.match(r.data.message, /work has stopped for now/); assert.doesNotMatch(r.data.message, /budget/i); assert.doesNotMatch(r.data.message, /\d/);
     assert.equal(notices(t, floor).length, 0);
   });
 });

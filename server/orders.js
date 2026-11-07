@@ -183,8 +183,8 @@ export function installOrders(ext) {
     if (floor.filler) return 'this is a scripted floor';
     if (engine.globalPaused()) return 'the building is paused';
     if (floor.paused) return 'the floor is paused';
-    if (engine.floorState(floor.id).budgetStopped) return 'today\'s budget is used up';
-    if (engine.budget.out(engine.agentProvider({ role: 'manager' }))) return 'the building is out of budget';
+    if (engine.floorState(floor.id).budgetStopped) return 'everyone has gone home for today';
+    if (engine.budget.out(engine.agentProvider({ role: 'manager' }))) return 'work has stopped for now';
     if (busy(floor.id)) return 'the floor was busy';
     return null;
   }
