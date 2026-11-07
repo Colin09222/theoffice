@@ -44,6 +44,9 @@ describe('claiming and sessions', () => {
     assert.equal((await new Client(t).post('/api/claim', { code: t.code(), name: 'x', bossName: 'B' })).status, 400);
     assert.equal((await new Client(t).post('/api/claim', { code: t.code(), name: 'Good', bossName: '' })).status, 400);
   });
+  test('app pages answer with or without a trailing slash', async () => {
+    for (const p of ['', '/', '/admin', '/admin/', '/floor/x', '/floor/x/']) assert.equal((await new Client(t).raw('GET', p)).status, 200, p);
+  });
   test('logout ends the session', async () => {
     const a = await claim(t, 'Leaver');
     assert.equal((await a.post('/api/logout', {})).status, 200);

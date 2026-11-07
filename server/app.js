@@ -562,7 +562,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' });
       limit('read', ip);
       // App pages are all the one shell. Anything else must be an exact known asset.
-      if (rest === '/' || rest === '/admin' || /^\/floor\/[a-z0-9-]+$/.test(rest)) return serveStatic(req, res, INDEX);
+      if (rest === '/' || /^\/admin\/?$/.test(rest) || /^\/floor\/[a-z0-9-]+\/?$/.test(rest)) return serveStatic(req, res, INDEX);
       return serveStatic(req, res, rest);
     } catch (e) {
       if (e instanceof HttpError) { if (e.status >= 500) log('error', 'http', { code: e.code }); return json(res, e.status, { error: e.code, message: e.message }, e.status === 429 ? { 'retry-after': '30' } : {}); }
