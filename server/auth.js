@@ -52,6 +52,8 @@ export function parseCookies(header) {
   return out;
 }
 
+export const cookieCount = (header, name) => String(header || '').split(';').filter((p) => p.split('=')[0].trim() === name).length;
+
 export function createSession(db, kind, floorId, maxAgeSec, now = Date.now()) {
   const token = randomBytes(32).toString('base64url');
   const csrf = randomBytes(24).toString('base64url');

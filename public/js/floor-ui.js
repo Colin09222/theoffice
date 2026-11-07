@@ -276,9 +276,9 @@ class FloorPage {
     }
   }
   projectCard(p) {
-    const KIND = { site: 'Site', doc: 'Doc', research: 'Research' };
+    const KIND = { site: 'Site', doc: 'Doc', research: 'Research', app: 'App', game: 'Game', simulation: 'Simulation' };
     const open = async () => {
-      let url = p.url;
+      let url = p.appUrl || p.url;
       if (p.private) { try { url = (await api(`/floors/${this.slug}/projects/${p.slug}/preview`)).url; } catch (e) { toast(e.message, 'bad'); return; } }
       this.previewProject(p, url);
     };
@@ -292,8 +292,10 @@ class FloorPage {
   }
   previewProject(p, url) {
     modal(p.title, (body) => {
-      // The server's sandbox CSP is the real boundary. The attribute is a second lock on the same door.
-      body.append(h('iframe.site-frame', { src: url, title: p.title, sandbox: 'allow-scripts allow-forms allow-popups', referrerpolicy: 'no-referrer' }),
+      // In sandbox mode the server's CSP is the real boundary and this attribute is a second lock on the same door.
+      // A project on its own origin needs allow-same-origin to keep its saves; that origin is already separate from this page.
+      const own = !!p.appUrl;
+      body.append(h('iframe.site-frame', { src: url, title: p.title, sandbox: own ? 'allow-scripts allow-forms allow-popups allow-same-origin allow-pointer-lock allow-modals' : 'allow-scripts allow-forms allow-popups', referrerpolicy: 'no-referrer' }),
         h('p.frame-foot', {}, h('a', { href: url, target: '_blank', rel: 'noopener noreferrer' }, 'Open in a new tab')));
     }, { wide: true });
   }

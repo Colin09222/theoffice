@@ -8,7 +8,7 @@ import { ROOT } from './config.js';
 import * as A from './auth.js';
 import { Bus } from './bus.js';
 import { Engine, agentView, taskView, PRIVATE_TEXT, redactChat } from './engine.js';
-import { slugify, slugPattern, cleanPath, TEXT_EXT, listFiles, readFile, floorBytes, WorkspaceError } from './workspace.js';
+import { slugify, slugPattern, cleanPath, mimeOf, listFiles, readFile, floorBytes, WorkspaceError } from './workspace.js';
 import { publicUrl } from './tools.js';
 import { embeddedV4, expandV6 } from './safefetch.js';
 import { isIP } from 'node:net';
@@ -17,6 +17,10 @@ import { LOOK_FIELDS, DEFAULT_LOOK, DEFAULT_DECOR, DEFAULT_COLORS, FLOOR_STYLES,
 import { createOpenRouterClient, scrub } from './llm.js';
 import { createAnthropicClient, createRouter } from './anthropic.js';
 import { createMockClient } from './mock.js';
+import { createManagedClient } from './sessions.js';
+import { createMockSessions } from './mock-sessions.js';
+import { appLabel, appOrigin, appHostLabel, lookupLabel, appHeaders, previewCookie, previewCookieName } from './apps.js';
+import { handleData, DataError, DATA_LIMITS } from './appdata.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any iscolinfree.com cookie, page or API.
@@ -26,7 +30,7 @@ const BASE_HEADERS = {
   'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex, nofollow, noarchive',
   'referrer-policy': 'same-origin', 'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
 };
-const LIMITS = { code: [8, 60000], login: [6, 60000], admin: [5, 60000], adminAll: [60, 60000], chat: [20, 60000], mutate: [90, 60000], read: [900, 60000], publicSite: [600, 60000], sse: [40, 60000] };
+const LIMITS = { dataRead: [600, 60000], dataWrite: [90, 60000], dataProject: [1500, 60000], tlsCheck: [120, 60000], code: [8, 60000], login: [6, 60000], admin: [5, 60000], adminAll: [60, 60000], chat: [20, 60000], mutate: [90, 60000], read: [900, 60000], publicSite: [600, 60000], sse: [40, 60000] };
 const MAX_CHAT = 4000;
 const RESERVED = new Set(['api', 'admin', 'f', 'floor', 'js', 'css', 'vendor', 'robots', 'www', 'static', 'assets']);
 
@@ -66,12 +70,17 @@ function buildStatic() {
   return map;
 }
 
-export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm, fetcher, httpFetch }) {
+export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm, fetcher, httpFetch, sessions }) {
   const bus = new Bus();
+  const sessionClient = !cfg.computerEnabled ? null : sessions || (cfg.aiMode === 'mock' ? createMockSessions(cfg) : createManagedClient(cfg));
   const client = llm || (cfg.aiMode === 'mock' ? createMockClient(cfg) : createRouter({ anthropic: createAnthropicClient(cfg), openrouter: createOpenRouterClient(cfg) }));
-  const engine = new Engine({ db, cfg, models, llm: client, bus, log, now, fetcher, httpFetch });
+  const engine = new Engine({ db, cfg, models, llm: client, bus, log, now, fetcher, httpFetch, sessions: sessionClient });
   const rates = new A.RateLimiter(cfg.rateScale, now);
   const statics = buildStatic();
+  // Same-origin copies every project can load, so nothing published needs a CDN or a shared host.
+  const clientLib = readFileSync(join(ROOT, 'server/app-client/office.js'));
+  const threeLib = statics.get('/vendor/three/three.module.min.js');
+  const mainCsp = cfg.appsBaseDomain ? APP_CSP.replace("frame-src 'self'", `frame-src 'self' ${cfg.appsScheme}://*.${cfg.appsBaseDomain}`) : APP_CSP;
   const secret = A.serverSecret(db);
   const adminHash = cfg.adminPassword ? A.hashSecret(cfg.adminPassword) : '';
 
@@ -93,7 +102,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   };
   const send = (res, status, body, headers = {}) => {
     if (res.headersSent) return;
-    res.writeHead(status, { ...BASE_HEADERS, 'content-security-policy': APP_CSP, 'x-frame-options': 'DENY', 'cross-origin-resource-policy': 'same-origin', 'cache-control': 'no-store', ...headers });
+    res.writeHead(status, { ...BASE_HEADERS, 'content-security-policy': mainCsp, 'x-frame-options': 'DENY', 'cross-origin-resource-policy': 'same-origin', 'cache-control': 'no-store', ...headers });
     res.end(body);
   };
   const json = (res, status, obj, headers = {}) => send(res, status, JSON.stringify(obj), { 'content-type': 'application/json; charset=utf-8', ...headers });
@@ -118,8 +127,9 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const site = req.headers['sec-fetch-site'];
     if (site && site !== 'same-origin') throw new HttpError(403, 'bad_origin', 'Cross-site request refused.');
   }
-  const sessionOf = (req) => A.loadSession(db, A.parseCookies(req.headers.cookie)[A.COOKIE], 'owner', now());
-  const adminOf = (req) => A.loadSession(db, A.parseCookies(req.headers.cookie)[A.ADMIN_COOKIE], 'admin', now());
+  // A published site on a sibling subdomain can plant a cookie for the parent domain. Two of ours at once means one is planted, so neither is believed.
+  const sessionOf = (req) => (A.cookieCount(req.headers.cookie, A.COOKIE) > 1 ? null : A.loadSession(db, A.parseCookies(req.headers.cookie)[A.COOKIE], 'owner', now()));
+  const adminOf = (req) => (A.cookieCount(req.headers.cookie, A.ADMIN_COOKIE) > 1 ? null : A.loadSession(db, A.parseCookies(req.headers.cookie)[A.ADMIN_COOKIE], 'admin', now()));
   const floorBySlug = (slug) => {
     if (typeof slug !== 'string' || !slugPattern.test(slug)) throw new HttpError(404, 'not_found');
     const f = get(db, 'SELECT * FROM floors WHERE slug=?', slug);
@@ -150,7 +160,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const busy = get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status='doing'", f.id).n;
     return { number: f.number, slug: f.slug, name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), status: f.status, busy };
   };
-  const projectView = (f, p) => ({ slug: p.slug, title: p.title, description: p.description, kind: p.kind, private: !!p.private, publishedAt: p.published_at, sources: JSON.parse(p.sources), url: publicUrl(f.slug, p.slug) });
+  const projectView = (f, p) => ({ slug: p.slug, title: p.title, description: p.description, kind: p.kind, private: !!p.private, publishedAt: p.published_at, sources: JSON.parse(p.sources), url: publicUrl(f.slug, p.slug), appUrl: cfg.appsBaseDomain ? `${appOrigin(cfg, appLabel(db, f, p.slug))}/` : null });
   const privateSet = (f) => new Set(all(db, 'SELECT slug FROM projects WHERE floor_id=? AND private=1', f.id).map((p) => p.slug));
   function snapshot(f, viewer) {
     const hidden = viewer.owner ? new Set() : privateSet(f);
@@ -282,7 +292,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     limit('sse', ip);
     if (bus.countIp(ip) >= 10 * cfg.rateScale || bus.total >= 400) throw new HttpError(429, 'too_many_streams', 'Too many open views.');
     const viewer = viewerFor(req, f);
-    res.writeHead(200, { ...BASE_HEADERS, 'content-security-policy': APP_CSP, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+    res.writeHead(200, { ...BASE_HEADERS, 'content-security-policy': mainCsp, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     res.socket?.setNoDelay?.(true);
     const write = (ev) => {
       // A revoked or expired session stops being the owner at once. The browser reconnects as a visitor.
@@ -378,7 +388,9 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   });
   const previewUrl = (f, slug) => {
     const exp = Math.floor(now() / 1000) + 3600;
-    return `${BASE}/f/${f.slug}/${slug}/~p${exp}.${A.signPreview(secret, f.id, slug, exp)}/`;
+    const token = `~p${exp}.${A.signPreview(secret, f.id, slug, exp)}`;
+    if (cfg.appsBaseDomain) return `${appOrigin(cfg, appLabel(db, f, slug))}/${token}/`;
+    return `${BASE}/f/${f.slug}/${slug}/${token}/`;
   };
   GET('/api/floors/:slug/files/:encoded', async ({ req, res, p }) => {
     const f = requireOwner(req, p.slug);
@@ -386,6 +398,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const file = readFile(db, f.id, path);
     if (!file) throw new HttpError(404, 'not_found');
     // Never served as a page: the app shows this as text, or as sanitised markdown.
+    if (typeof file.content !== 'string') return json(res, 200, { path: file.path, size: file.size, text: `(a binary file, ${file.size} bytes)`, html: null });
     json(res, 200, { path: file.path, size: file.size, text: file.content, html: /\.md$/i.test(file.path) ? renderMarkdown(file.content) : null });
   });
   POST('/api/floors/:slug/questions/:id/answer', async ({ req, res, p, ip }) => {
@@ -406,6 +419,14 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const r = run(db, 'UPDATE purchases SET status=? WHERE id=? AND floor_id=?', b.status, Number(p.id), f.id);
     if (!r.changes) throw new HttpError(404, 'not_found');
     engine.emit(f.id, 'reload', {}, { persist: false });
+    json(res, 200, { ok: true });
+  });
+
+  // Caddy's on-demand TLS asks here before it requests a certificate, so only real project origins can ever get one.
+  GET('/api/apps/tls-check', async ({ res, url, ip }) => {
+    limit('tlsCheck', ip);
+    const label = appHostLabel(cfg, url.searchParams.get('domain'));
+    if (!label || !lookupLabel(db, label)) throw new HttpError(404, 'not_found');
     json(res, 200, { ok: true });
   });
 
@@ -476,6 +497,26 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
 h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f0ebdd;padding:14px;overflow:auto;border-radius:8px}code{font-size:.88em}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd5c3;padding:6px 9px;text-align:left}blockquote{margin-left:0;padding-left:16px;border-left:3px solid var(--a);color:#555}.by{font:12px ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7b7464}
 .sources{margin-top:3em;border-top:1px solid #ddd5c3;font-size:.9em}</style></head><body><main><p class="by">${esc(f.name)} · Floor ${f.number}</p>${renderMarkdown(md)}${src}</main></body></html>`;
   }
+  // The bytes of one published path. Shared by sandbox mode and app-origin mode; only the headers around it differ.
+  function publishedFile(f, pr, segs, trailingSlash) {
+    let path = segs.filter((s, i) => !(s === '' && i === segs.length - 1)).join('/');
+    if (path === '' || trailingSlash) path = path ? `${path}/index.html` : 'index.html';
+    let safe;
+    try { safe = cleanPath(path, { binary: true }); } catch { return null; }
+    const row = get(db, 'SELECT content FROM published_files WHERE floor_id=? AND project=? AND path=?', f.id, pr.slug, safe);
+    if (row) return { type: mimeOf(safe), body: row.content };
+    if (safe !== 'index.html' && !safe.endsWith('/index.html')) return null;
+    const md = get(db, 'SELECT content FROM published_files WHERE floor_id=? AND project=? AND path=?', f.id, pr.slug, safe.replace(/index\.html$/, 'index.md'));
+    if (!md) return null;
+    const key = `${f.id}|${pr.slug}|${pr.published_at}|${safe}|${f.name}|${f.number}|${f.colors}|${pr.title}|${pr.sources}`;
+    let body = docCache.get(key);
+    if (body === undefined) {
+      body = renderDoc(f, pr, md.content);
+      if (docCache.size >= 40) docCache.delete(docCache.keys().next().value);
+      docCache.set(key, body);
+    }
+    return { type: 'text/html; charset=utf-8', body };
+  }
   function serveSite(req, res, rawSegs) {
     const SITE = { ...BASE_HEADERS, 'content-security-policy': SANDBOX_CSP, 'referrer-policy': 'no-referrer', 'cache-control': 'no-store' };
     const miss = () => { res.writeHead(404, { ...SITE, 'content-type': 'text/plain; charset=utf-8' }); res.end('Not found'); };
@@ -501,36 +542,105 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       const s = sessionOf(req);
       if (!s || s.floor_id !== f.id) return miss();
       // The owner's cookie authorises this navigation; a signed path lets the page's own assets load too.
-      res.writeHead(302, { ...SITE, location: previewUrl(f, pr.slug) + rest.map(encodeURIComponent).join('/') });
+      const target = previewUrl(f, pr.slug);
+      res.writeHead(302, { ...SITE, location: target + rest.map(encodeURIComponent).join('/') });
+      return res.end();
+    }
+    // With app origins configured, this friendly link just points at the project's own address. Everything above has already decided whether the viewer may have it.
+    if (cfg.appsBaseDomain) {
+      const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+      const target = `${appOrigin(cfg, appLabel(db, f, pr.slug))}/${signed ? `${rest[0]}/` : tail.map(encodeURIComponent).join('/')}${signed ? '' : q}`;
+      res.writeHead(302, { ...SITE, location: target });
       return res.end();
     }
     if (rawSegs.length === 2 && !req.url.split('?')[0].endsWith('/')) {
       res.writeHead(301, { ...SITE, location: `${BASE}/f/${f.slug}/${pr.slug}/` });
       return res.end();
     }
-    let path = tail.filter((s, i) => !(s === '' && i === tail.length - 1)).join('/');
-    if (path === '' || req.url.split('?')[0].endsWith('/')) path = path ? `${path}/index.html` : 'index.html';
-    let safe;
-    try { safe = cleanPath(path); } catch { return miss(); }
-    let row = get(db, 'SELECT content FROM published_files WHERE floor_id=? AND project=? AND path=?', f.id, pr.slug, safe);
-    let body, type;
-    if (row) {
-      const ext = safe.split('.').pop().toLowerCase();
-      type = TEXT_EXT[ext]; body = row.content;
-    } else if (safe === 'index.html' || safe.endsWith('/index.html')) {
-      row = get(db, 'SELECT content FROM published_files WHERE floor_id=? AND project=? AND path=?', f.id, pr.slug, safe.replace(/index\.html$/, 'index.md'));
-      if (!row) return miss();
-      type = 'text/html; charset=utf-8';
-      const key = `${f.id}|${pr.slug}|${pr.published_at}|${safe}|${f.name}|${f.number}|${f.colors}|${pr.title}|${pr.sources}`;
-      body = docCache.get(key);
-      if (body === undefined) {
-        body = renderDoc(f, pr, row.content);
-        if (docCache.size >= 40) docCache.delete(docCache.keys().next().value);
-        docCache.set(key, body);
-      }
-    } else return miss();
-    res.writeHead(200, { ...SITE, 'content-type': type });
-    res.end(req.method === 'HEAD' ? undefined : body);
+    const lib = sharedAsset(tail);
+    if (lib) { res.writeHead(200, { ...SITE, 'content-type': lib.type, 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' }); return res.end(req.method === 'HEAD' ? undefined : lib.body); }
+    const hit = publishedFile(f, pr, tail, req.url.split('?')[0].endsWith('/'));
+    if (!hit) return miss();
+    res.writeHead(200, { ...SITE, 'content-type': hit.type });
+    res.end(req.method === 'HEAD' ? undefined : hit.body);
+  }
+  // Paths the server answers itself on every project: the client library and the vendored Three.js. They win over any published file of that name.
+  function sharedAsset(segs) {
+    if (segs[0] !== '_office' || segs.length !== 2) return null;
+    if (segs[1] === 'client.js') return { type: 'text/javascript; charset=utf-8', body: clientLib };
+    if (segs[1] === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
+    return null;
+  }
+
+  // ---- a project on its own origin ----
+  // Nothing here reads The Office's cookies or knows who is logged in. The one credential is a pass for a private project, scoped to this exact origin.
+  function serveApp(req, res, label, rawUrl) {
+    const HEAD = { ...appHeaders(cfg), 'cache-control': 'no-cache' };
+    const miss = () => { res.writeHead(404, { ...HEAD, 'content-type': 'text/plain; charset=utf-8' }); res.end('Not found'); };
+    delete req.headers.authorization;
+    const pass = A.parseCookies(req.headers.cookie)[previewCookieName(cfg)];
+    delete req.headers.cookie;
+    const entry = label ? lookupLabel(db, label) : null;
+    if (!entry) return miss();
+    const f = get(db, 'SELECT * FROM floors WHERE id=?', entry.floor_id);
+    if (!f || f.status !== 'active') return miss();
+    const pr = get(db, 'SELECT * FROM projects WHERE floor_id=? AND slug=? AND published_at IS NOT NULL', f.id, entry.project);
+    if (!pr) return miss();
+    const raw = rawUrl.split('?')[0];
+    const rawSegs = raw.split('/').slice(1);
+    let segs;
+    try { segs = rawSegs.map((s) => decodeURIComponent(s)); } catch { return miss(); }
+    const validPass = (v) => {
+      const m = String(v || '').match(/^(\d{1,12})\.([A-Za-z0-9_-]{20,64})$/);
+      return !!m && Number(m[1]) * 1000 >= now() && A.safeEqual(m[2], A.signPreview(secret, f.id, pr.slug, Number(m[1])));
+    };
+    if (segs[0]?.startsWith('~p')) {
+      const v = segs[0].slice(2);
+      if (!validPass(v)) return miss();
+      // Trade the signed path for a cookie that only this origin holds, so absolute asset paths and service workers still work.
+      res.writeHead(302, { ...HEAD, 'set-cookie': previewCookie(cfg, v, Math.max(1, Number(v.split('.')[0]) - Math.floor(now() / 1000))), location: '/' });
+      return res.end();
+    }
+    if (pr.private && !validPass(pass)) return miss();
+    if (segs[0] === '_data') return serveData(req, res, f, pr, label, rawUrl, HEAD);
+    if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...HEAD, allow: 'GET, HEAD' }); return res.end(); }
+    limit('publicSite', ipOf(req));
+    const lib = sharedAsset(segs);
+    if (lib) { res.writeHead(200, { ...HEAD, 'content-type': lib.type }); return res.end(req.method === 'HEAD' ? undefined : lib.body); }
+    let hit = publishedFile(f, pr, segs, raw.endsWith('/'));
+    // A path with no extension is a client-side route: hand it to the app's own page.
+    if (!hit && !segs.at(-1).includes('.')) hit = publishedFile(f, pr, [''], true);
+    if (!hit) return miss();
+    const etag = `W/"${pr.published_at}"`;
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ...HEAD, etag }); return res.end(); }
+    res.writeHead(200, { ...HEAD, etag, 'content-type': hit.type });
+    res.end(req.method === 'HEAD' ? undefined : hit.body);
+  }
+  async function serveData(req, res, f, pr, label, rawUrl, HEAD) {
+    const reply = (status, obj) => { res.writeHead(status, { ...HEAD, 'cache-control': 'no-store', 'content-type': 'application/json; charset=utf-8', ...(status === 429 ? { 'retry-after': '30' } : {}) }); res.end(JSON.stringify(obj)); };
+    try {
+      const ip = ipOf(req);
+      const read = req.method === 'GET' || req.method === 'HEAD';
+      // Only the project's own pages may use this. There is deliberately no CORS, and a browser can't forge Origin or Sec-Fetch-Site.
+      const own = `${cfg.appsScheme}://${String(req.headers.host).toLowerCase().replace(/\.$/, '')}`;
+      const origin = req.headers.origin; const site = req.headers['sec-fetch-site'];
+      if (origin !== undefined && origin !== own) return reply(403, { error: 'bad_origin', message: 'Only this project\'s own pages can use its data.' });
+      if (site && site !== 'same-origin' && site !== 'none') return reply(403, { error: 'bad_origin', message: 'Only this project\'s own pages can use its data.' });
+      if (!read && origin === undefined) return reply(403, { error: 'bad_origin', message: 'Only this project\'s own pages can use its data.' });
+      limit(read ? 'dataRead' : 'dataWrite', `${label}:${ip}`);
+      if (!read) limit('dataProject', label);
+      const url = new URL(rawUrl, 'http://x');
+      const m = url.pathname.match(/^\/_data\/v1\/(.*)$/);
+      if (!m) return reply(404, { error: 'not_found' });
+      let path;
+      try { path = m[1].split('/').map((s) => decodeURIComponent(s)).join('/'); } catch { return reply(400, { error: 'bad_path' }); }
+      const [status, out] = await handleData({ db, req, floorId: f.id, project: pr.slug, path, query: url.searchParams, body: () => readJson(req, DATA_LIMITS.bodyBytes), now });
+      reply(status, out);
+    } catch (e) {
+      if (e instanceof DataError || e instanceof HttpError) return reply(e.status, { error: e.code, message: e.message });
+      log('error', 'data', { err: scrub(e?.message, cfg) });
+      reply(500, { error: 'server_error' });
+    }
   }
 
   // ---- static app ----
@@ -544,9 +654,30 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     send(res, 200, req.method === 'HEAD' ? undefined : gz ? file.gz : file.body, headers);
   }
 
+  function refuseSiblings(req) {
+    if (req.headers['sec-fetch-site'] === 'same-site') throw new HttpError(403, 'bad_origin', 'Cross-site request refused.');
+    if (!cfg.appsBaseDomain) return;
+    for (const h of [req.headers.origin, req.headers.referer]) {
+      if (!h) continue;
+      let host = ''; try { host = new URL(h).host; } catch { continue; }
+      if (appHostLabel(cfg, host) !== null) throw new HttpError(403, 'bad_origin', 'Cross-site request refused.');
+    }
+  }
+
   // ---- dispatcher ----
   async function handle(req, res) {
     const started = Date.now();
+    // Anything addressed to the apps domain is a project origin and nothing else. It can never reach the main app, the API or the admin.
+    const appLabelHere = appHostLabel(cfg, req.headers.host);
+    if (appLabelHere !== null) {
+      try { return await serveApp(req, res, appLabelHere, req.url); } catch (e) {
+        if (res.headersSent) return undefined;
+        const status = e instanceof HttpError ? e.status : 500;
+        if (status === 500) log('error', 'app origin', { err: scrub(e?.message, cfg) });
+        res.writeHead(status, { ...appHeaders(cfg), 'content-type': 'text/plain; charset=utf-8', ...(status === 429 ? { 'retry-after': '30' } : {}) });
+        return res.end(status === 429 ? 'Too many requests.' : 'Not found');
+      }
+    }
     const ip = ipOf(req);
     let url;
     try { url = new URL(req.url, 'http://x'); } catch { return send(res, 400, 'Bad request'); }
@@ -563,6 +694,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       }
       if (rest.startsWith('/api/')) {
         const method = req.method;
+        // A sibling subdomain counts as "same site", so SameSite=Lax alone would let a published page send the owner's cookie here.
+        refuseSiblings(req);
         if (method !== 'GET') { checkOrigin(req); limit('mutate', `all:${ip}`); } else limit('read', ip);
         const sub = rest;
         let matched = false;

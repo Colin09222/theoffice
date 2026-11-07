@@ -6,6 +6,8 @@ import { createTools, toolDefs, STAFF_TOOLS, MANAGER_TOOLS, publicUrl } from './
 import { managerPrompt, staffPrompt } from './prompts.js';
 import { slugify, WorkspaceError } from './workspace.js';
 import { seededLook } from '../public/js/looks.js';
+import { Computer } from './computer.js';
+import { deleteFloorData } from './appdata.js';
 
 const today = (ms) => new Date(ms).toISOString().slice(0, 10);
 const MAX_STAFF_STEPS = 14, MAX_MANAGER_STEPS = 8, MAX_OPEN_TASKS = 14, MAX_TASKS_PER_DAY = 60, EVENT_KEEP = 1500;
@@ -22,8 +24,10 @@ const TOOL_LOOK = {
 export class Halt extends Error { constructor(why) { super(why); this.name = 'Halt'; this.why = why; } }
 
 export class Engine {
-  constructor({ db, cfg, models, llm, bus, log, now = Date.now, fetcher, httpFetch }) {
+  constructor({ db, cfg, models, llm, bus, log, now = Date.now, fetcher, httpFetch, sessions }) {
     Object.assign(this, { db, cfg, models, llm, bus, log, now });
+    this.Halt = Halt;
+    this.computer = sessions ? new Computer(this, sessions) : null;
     this.limiter = new Limiter(cfg.maxCallsFloor, cfg.maxCallsGlobal);
     this.tools = createTools({ db, cfg, engine: this, fetcher, httpFetch });
     this.runs = new Map();      // agentId -> { ctl, floorId, promise }
@@ -97,7 +101,7 @@ export class Engine {
       if (!agent) continue;
       run(this.db, "UPDATE tasks SET status='doing', updated_at=? WHERE id=?", this.now(), t.id);
       this.emitTask(t.id);
-      this.launch(floor, agent, (ctl) => this.runStaff(floor.id, agent.id, t.id, ctl));
+      this.launch(floor, agent, (ctl) => (this.computer?.handles(agent.role) ? this.computer.run(floor.id, agent.id, t.id, ctl) : this.runStaff(floor.id, agent.id, t.id, ctl)));
     }
   }
   launch(floor, agent, fn) {
@@ -215,7 +219,7 @@ export class Engine {
     // 'office' notices (budget, outage, stop) are for the boss only. If they reached the model it would lose the thread.
     const msgs = all(this.db, "SELECT id,role,text FROM messages WHERE floor_id=? AND role!='office' ORDER BY id DESC LIMIT 30", floor.id).reverse();
     const roster = { manager: mgr.name };
-    const out = [{ role: 'system', content: managerPrompt(floor, boss, roster) }];
+    const out = [{ role: 'system', content: managerPrompt(floor, boss, roster, this.cfg) }];
     for (const m of msgs) {
       if (m.role === 'boss') out.push({ role: 'user', content: m.text });
       else if (m.role === 'manager') out.push({ role: 'assistant', content: m.text });
@@ -299,7 +303,7 @@ export class Engine {
     let messages = task.transcript ? JSON.parse(task.transcript) : null;
     if (!messages) {
       messages = [
-        { role: 'system', content: staffPrompt(floor, agent, roleCfg, task) },
+        { role: 'system', content: staffPrompt(floor, agent, roleCfg, task, this.cfg) },
         { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}` },
       ];
     }
@@ -604,6 +608,7 @@ export class Engine {
   }
   resetFloor(floorId) {
     this.cancelOpen(floorId);
+    deleteFloorData(this.db, floorId);
     tx(this.db, () => {
       for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
       run(this.db, "DELETE FROM agents WHERE floor_id=? AND hired=1", floorId);
@@ -614,6 +619,7 @@ export class Engine {
   killFloor(floorId) {
     this.cancelOpen(floorId);
     this.emit(floorId, 'reload', {}, { persist: false });
+    deleteFloorData(this.db, floorId);
     tx(this.db, () => {
       for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions', 'agents', 'sessions']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
       run(this.db, 'DELETE FROM floors WHERE id=?', floorId);

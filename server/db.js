@@ -74,7 +74,22 @@ CREATE TABLE IF NOT EXISTS ledger (
 );
 CREATE INDEX IF NOT EXISTS ledger_floor_day ON ledger(floor_id, day);
 CREATE INDEX IF NOT EXISTS ledger_day ON ledger(day);
+CREATE TABLE IF NOT EXISTS app_labels (
+  label TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, project TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS app_labels_project ON app_labels(floor_id, project);
+CREATE TABLE IF NOT EXISTS app_kv (
+  floor_id INTEGER NOT NULL, project TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
+  size INTEGER NOT NULL, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project, scope, key)
+);
+CREATE TABLE IF NOT EXISTS app_scores (
+  floor_id INTEGER NOT NULL, project TEXT NOT NULL, board TEXT NOT NULL, player TEXT NOT NULL, name TEXT NOT NULL,
+  score REAL NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project, board, player)
+);
+CREATE INDEX IF NOT EXISTS app_scores_rank ON app_scores(floor_id, project, board, score);
 `;
+// Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS.
+const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: 'INTEGER NOT NULL DEFAULT 0', session_charged: 'REAL NOT NULL DEFAULT 0', session_baseline: "TEXT NOT NULL DEFAULT ''", session_publish: "TEXT NOT NULL DEFAULT '[]'", session_tries: 'INTEGER NOT NULL DEFAULT 0' } };
 
 export function openDb(dataDir) {
   let path = ':memory:';
@@ -82,6 +97,10 @@ export function openDb(dataDir) {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 4000; PRAGMA foreign_keys = OFF;');
   db.exec(SCHEMA);
+  for (const [table, cols] of Object.entries(ADDED)) {
+    const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+    for (const [name, def] of Object.entries(cols)) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+  }
   return db;
 }
 
