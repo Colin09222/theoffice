@@ -322,6 +322,9 @@ const hits = (a, b) => a && b && !(a.r <= b.l || a.l >= b.r || a.b <= b.t || a.t
     const sizes = await p.ev(`(() => { const hit = (e) => { const r = e.getBoundingClientRect(); const b = getComputedStyle(e, '::before'); const grow = -2 * (parseFloat(b.top) || 0); return Math.min(r.width, r.height) + grow; }; return { pins: [...document.querySelectorAll('.pin')].map(hit), scrub: [...document.querySelectorAll('.scrub-btn')].map(hit) }; })()`);
     if (sizes.pins.some((n) => n < 43.5)) throw new Error(`pins ${sizes.pins}`);
     if (sizes.scrub.some((n) => n < 43.5)) throw new Error(`scrub ${sizes.scrub}`);
+    // The room eases into its new space a frame at a time, and on this renderer that takes a while.
+    await p.until('(() => { const v = window.__office.view; return Math.abs(v.insetNow.bottom - v.insets.bottom) < 1 && v.pinKey; })()', 'the room settled', 30000);
+    await sleep(600);
     await p.click('.pin[data-pin=talk]');
     await p.until('window.__office.tab === "talk"', 'talk tab', 3000);
     await p.click('[data-tab=chat]');
