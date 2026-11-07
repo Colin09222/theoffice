@@ -1656,7 +1656,7 @@ export class OfficeView {
   resize(w, h) {
     this.w = w; this.h = h;
     // A phone sees a corner of the floor up close rather than the whole of it too small to read; a drag slides across the rest.
-    if (!this.sized && !this.kept && w <= 760) { this.zoom = this.targetZoom = 1.6; }
+    if (!this.sized && !this.kept) { this.zoom = this.targetZoom = w <= 760 ? 1.7 : 1.25; this.pan.set(0, -1.5); this.targetPan.set(0, -1.5); }
     this.sized = true;
     if (!this.insetNow) this.insetNow = { ...(this.insets || this.defaultInsets()) };
     this.applyInsets();
