@@ -258,7 +258,7 @@ describe('what the model sees', () => {
 });
 
 describe('on a computer', () => {
-  test('the task\'s uploads arrive as bytes beside the project, and a copied photo survives the save back', async () => {
+  test('the task\'s uploads arrive as bytes beside the project, and the photo the computer copies in survives the save back and goes live', async () => {
     const sessions = createMockSessions({});
     const t = await start({ computerEnabled: true, outputLagMs: 0 }, { sessions });
     t.app.engine.runManager = async () => {};
@@ -267,7 +267,6 @@ describe('on a computer', () => {
     const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", f.id);
     const a = (await upload(c, 'shop.png', PNG)).data;
     const row = get(t.db, 'SELECT * FROM attachments WHERE id=?', a.id);
-    writeBinaryFile(t.db, f.id, 'projects/game/images/shop.png', PNG, null, 1e8);
     const task = t.app.engine.assignTask(f, mgr, { to: 'builder', title: 'Build it', brief: 'Use the photo', plan: '', project: 'game', private: false, dependsOn: [], files: [row] });
     t.app.engine.kick();
     await until(() => ['review', 'failed', 'blocked', 'done'].includes(get(t.db, 'SELECT status FROM tasks WHERE id=?', task.id).status) && !t.app.engine.runs.size, { what: 'computer task', timeout: 10000 });
@@ -280,6 +279,11 @@ describe('on a computer', () => {
     const kept = get(t.db, 'SELECT content FROM files WHERE floor_id=? AND path=?', f.id, 'projects/game/images/shop.png');
     assert.ok(kept && Buffer.from(kept.content).equals(PNG), 'the photo came back intact');
     assert.ok(Buffer.from(get(t.db, 'SELECT content FROM files WHERE floor_id=? AND path=?', f.id, row.path).content).equals(PNG), 'the upload is untouched');
+    // It went live with the build, and a visitor gets it byte for byte.
+    const live = await new Client(t).raw('GET', `/f/${c.slug}/game/images/shop.png`);
+    assert.equal(live.status, 200); assert.equal(live.headers.get('content-type'), 'image/png');
+    assert.ok(Buffer.from(await live.arrayBuffer()).equals(PNG));
+    assert.equal((await new Client(t).raw('GET', `/f/${c.slug}/game/uploads/${row.path.slice(8)}`)).status, 404);
   });
 
   test('a file too big to take back is kept, not taken for deleted', async () => {
