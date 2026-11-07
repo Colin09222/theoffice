@@ -451,6 +451,7 @@ export class Actor {
     const s = this.queue.shift();
     this.action = s || null;
     if (!s) { this.scene = false; this.offDuty = false; this.view.life?.release(this); this.settle(); return; }
+    if (s.unless?.()) { this.next(); return; }
     if (s.run) { s.run(this); this.next(); return; }
     if (s.walk) { const [wx, wz] = this.view.nav.freeNear(s.walk[0], s.walk[1]); this.goTo(wx, wz, () => this.next()); return; }
     if (s.anim || !this.seated) this.char.setAnim(s.anim || 'stand');
@@ -531,7 +532,7 @@ export class Actor {
     if (state === was) return;
     this.applyStatePose();
     // Called back to work from a break: the coffee can wait.
-    if (state !== 'idle' && this.offDuty) { this.offDuty = false; this.queue = []; this.action = null; this.path = []; this.afterWalk = null; this.settle(); }
+    if (state !== 'idle' && this.offDuty) { this.offDuty = false; this.queue = []; this.action = null; this.path = []; this.afterWalk = null; this.hush(); this.view.claims.delete(this); this.settle(); }
     // Reading sometimes means a trip to the bookshelf.
     if (state === 'reading' && this.view.time - this.lastShelf > 25 && this.seated && !this.action && !this.isManager) {
       this.lastShelf = this.view.time;

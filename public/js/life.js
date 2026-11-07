@@ -55,6 +55,9 @@ export class FloorLife {
     q.push(ev);
     while (q.length > QUEUE_MAX) q.shift();
     this.queues.set(ev.from, q);
+    // Whatever they are doing now, they have the paper in their hand until they get to hand it over.
+    const paper = CARRIES.has(ev.kind) && this.people.get(ev.from)?.char?.paper;
+    if (paper) paper.visible = true;
   }
   /** Someone finished a scene or a step list and is free for the next line. */
   release(actor) { this.view.claims.delete(actor); }
@@ -82,7 +85,7 @@ export class FloorLife {
       steps.push({ anim: 'talk', say: ev.text, to: ev.to, hold, paper: false, small: ev.kind === 'small' });
       steps.push({ anim: 'stand', hold: 0.5 });
     } else {
-      steps.push({ say: ev.text, to: ev.to, hold, small: ev.kind === 'small' });
+      steps.push({ say: ev.text, to: ev.to, hold, paper: false, small: ev.kind === 'small' });
     }
     a.perform(steps, { scene: true });
   }
@@ -175,12 +178,14 @@ export class FloorLife {
     this.view.claims.set(b, [sb[0], sb[1]]);
     const [one, two] = SMALL_TALK[Math.floor(Math.random() * SMALL_TALK.length)];
     const there = (who, at) => !who.path.length && Math.hypot(who.group.position.x - at[0], who.group.position.z - at[1]) < 0.6;
-    const met = () => there(a, sa) && there(b, sb);
+    let together = false;
+    const met = () => { together ||= there(a, sa) && there(b, sb); return together; };
+    const alone = () => !together;  // called back to work before they met: nobody is left talking to thin air
     const facing = (p, q) => Math.atan2(q[0] - p[0], q[1] - p[1]);
-    const log = (who, to, text) => ({ run: () => this.onSmallTalk?.({ from: who.id, to: to.id, fromName: who.info.name, toName: to.info.name, text, kind: 'small', ts: Date.now() }) });
+    const log = (who, to, text) => ({ unless: alone, run: () => this.onSmallTalk?.({ from: who.id, to: to.id, fromName: who.info.name, toName: to.info.name, text, kind: 'small', ts: Date.now() }) });
     const wait = 14;
-    a.perform([{ walk: [sa[0], sa[1]] }, { anim: 'stand', hold: wait, until: met, face: facing(sa, sb) }, log(a, b, one), { anim: 'talk', say: one, to: b.id, small: true, hold: readingTime(one), face: facing(sa, sb) }, { anim: 'sip', hold: readingTime(two) + 1.5, face: facing(sa, sb) }], { offDuty: true });
-    b.perform([{ walk: [sb[0], sb[1]] }, { anim: 'stand', hold: wait, until: met, face: facing(sb, sa) }, { anim: 'sip', hold: readingTime(one), face: facing(sb, sa) }, log(b, a, two), { anim: 'talk', say: two, to: a.id, small: true, hold: readingTime(two), face: facing(sb, sa) }, { anim: 'stand', hold: 1.2, face: facing(sb, sa) }], { offDuty: true });
+    a.perform([{ walk: [sa[0], sa[1]] }, { anim: 'stand', hold: wait, until: met, face: facing(sa, sb) }, log(a, b, one), { unless: alone, anim: 'talk', say: one, to: b.id, small: true, hold: readingTime(one), face: facing(sa, sb) }, { unless: alone, anim: 'sip', hold: readingTime(two) + 1.5, face: facing(sa, sb) }], { offDuty: true });
+    b.perform([{ walk: [sb[0], sb[1]] }, { anim: 'stand', hold: wait, until: met, face: facing(sb, sa) }, { unless: alone, anim: 'sip', hold: readingTime(one), face: facing(sb, sa) }, log(b, a, two), { unless: alone, anim: 'talk', say: two, to: a.id, small: true, hold: readingTime(two), face: facing(sb, sa) }, { unless: alone, anim: 'stand', hold: 1.2, face: facing(sb, sa) }], { offDuty: true });
     return true;
   }
   /** Which room someone is standing in, by id. Read by the tests and handy when debugging a stuck person. */

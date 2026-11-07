@@ -17,6 +17,8 @@ for (const [label, opts] of [['desktop', { width: 1440, height: 900 }], ['phone'
   await p.until('window.__office.view.modelsOn === true && [...window.__office.view.actors.values()].every((a) => a.char.isModel)', 'models', 60000);
   await sleep(1500);
   for (const a of (await p.ev('[...window.__office.view.actors.keys()]'))) await p.ev(`window.__office.view.actors.get(${JSON.stringify(a)}).idleTimer = 1e9; true`);
+  await p.until('__stage.frame > 8', 'frames', 120000);
+  await sleep(1000);
   await p.shot(join(OUT, `floors2-quiet-${label}.jpg`));
   await c.post(`/api/floors/${c.slug}/chat`, { text: `go build ${label === 'desktop' ? 'midnight rolls' : 'morning buns'} [slow]` });
   // The renderer here is software, and slow. Run the room's clock by hand up to the moment worth seeing, then let it be drawn.

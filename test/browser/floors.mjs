@@ -236,6 +236,14 @@ const hits = (a, b) => a && b && !(a.r <= b.l || a.l >= b.r || a.b <= b.t || a.t
       if (calls.calls > 200) throw new Error(`${layout}: ${calls.calls} draw calls`);
     }
     await owner.post(`/api/floors/${owner.slug}/customise`, { decor: { layout: 'open' } });
+    await p.until('window.__office.view.decor.layout === "open"', 'open plan again', 15000);
+  });
+  await step(tag('someone new starting leaves everyone else where they are'), async () => {
+    await p.ev('window.__before = window.__office.view; window.__crew = window.__office.view.actors.size; true');
+    const r = await owner.post(`/api/floors/${owner.slug}/hire`, { role: 'tester' });
+    if (r.status !== 201) throw new Error(`hire: ${r.status}`);
+    await p.until('window.__office.view.actors.size === window.__crew + 1', 'the new person at a desk', 15000);
+    if (!(await p.ev('window.__office.view === window.__before'))) throw new Error('the room was rebuilt, so everyone jumped back to their chairs');
   });
   await step(tag('no console errors'), async () => {
     const errs = p.errors.filter((e) => !/status of 40[0-9]|status of 429/.test(e));
@@ -316,6 +324,14 @@ const hits = (a, b) => a && b && !(a.r <= b.l || a.l >= b.r || a.b <= b.t || a.t
     if (sizes.scrub.some((n) => n < 43.5)) throw new Error(`scrub ${sizes.scrub}`);
     await p.click('.pin[data-pin=talk]');
     await p.until('window.__office.tab === "talk"', 'talk tab', 3000);
+    await p.click('[data-tab=chat]');
+  });
+  await step(tag('the company card lives in the sheet'), async () => {
+    await p.click('[data-tab=about]');
+    await p.until('!!document.querySelector(".tab-body [data-share]")', 'the card under About', 3000);
+    const st = await p.ev('({ text: document.querySelector(".tab-body").textContent, panel: document.querySelector(".floor-panel").getBoundingClientRect().height, share: document.querySelector("[data-share]").getBoundingClientRect() })');
+    if (!/Run by/.test(st.text) || !/\d+ people/.test(st.text)) throw new Error(st.text.slice(0, 160));
+    if (st.share.bottom > 845 || st.share.height < 36) throw new Error(JSON.stringify(st.share));
     await p.click('[data-tab=chat]');
   });
   await step(tag('a line said out loud fits the screen and stays above the sheet, with people walking between rooms'), async () => {

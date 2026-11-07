@@ -45,7 +45,7 @@ class FloorPage {
       this.view = this.makeView();
       stage.setView(this.view);
       wirePins(this);
-    }
+    } else this.pinsEl.hidden = true;  // no room to float over
     this.renderAll();
     this.layout();
     this.onResize = () => this.layout();
@@ -98,6 +98,13 @@ class FloorPage {
     if (this.dead || !this.panel) return;
     const phone = isPhone();
     this.panel.classList.toggle('closed', !this.panelOpen);
+    // The card's details sit on the card on a desktop and under About on a phone. Turning a tablet round moves them.
+    const wasPhone = this.phoneLayout; this.phoneLayout = phone;
+    if (wasPhone !== phone) {
+      if (!phone) this.root.querySelector('.floor-top').append(this.cardEl);
+      if (!phone && this.tab === 'about') this.tab = this.canSeeChat ? 'chat' : 'talk';
+      if (wasPhone !== undefined) { this.renderTabs(); this.renderBody(); }
+    }
     document.body.dataset.sheet = this.panelOpen ? 'half' : 'peek';
     this.pillEl.hidden = phone || this.panelOpen;
     if (!this.pillEl.hidden) this.pillEl.textContent = this.canSeeChat ? (this.owner ? `Talk to ${this.state.agents.find((a) => a.role === 'manager')?.name || 'your manager'}` : 'Read the chat') : 'See what they\'re saying';
@@ -209,6 +216,7 @@ class FloorPage {
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
       tabs.push(['orders', 'Orders']);  // floors-plus: standing orders, after every existing tab
     }
+    if (isPhone()) tabs.push(['about', 'About']);  // on a phone the company card lives in the sheet
     return tabs;
   }
   renderTabs() {
@@ -229,6 +237,7 @@ class FloorPage {
     this.renderBanner();
     clear(this.bodyEl);
     if (this.tab === 'chat') this.renderChat();
+    if (this.tab === 'about') this.bodyEl.append(this.cardEl);
     if (this.tab === 'talk') this.renderTalk();
     if (this.tab === 'work') this.renderWork();
     if (this.tab === 'tasks') this.renderTasks();

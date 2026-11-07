@@ -36,6 +36,22 @@
 /* the card's own parts */
 .card-logo { display: none; }
 .card-more { display: none; }
+.card-more p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.35; }
+.card-boss b { color: var(--ink); font-weight: 600; }
+.card-crew { display: flex; align-items: center; gap: 7px; }
+.card-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.card-dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(99, 214, 155, .22); }
+.card-activity { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.card-activity b { font-weight: 600; color: var(--ink); }
+.card-made h3 { font: 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 6px 0 4px; }
+.card-project { display: flex; width: 100%; justify-content: space-between; gap: 8px; padding: 5px 9px; margin-bottom: 3px; border-radius: 9px; border: 0; background: rgba(255, 255, 255, .07); color: var(--ink); text-align: left; font-size: 13px; cursor: pointer; }
+.card-project:hover { background: rgba(255, 255, 255, .14); }
+.card-project span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-project small { color: var(--ink-3); flex: none; }
+.card-actions { display: flex; gap: 7px; margin-top: 4px; }
+.card-actions .btn { min-height: 34px; padding: 5px 13px; font-size: 13px; }
+.tab-body > .card-more { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; overflow-y: auto; flex: 1; min-height: 0; }
+.floor-pins[hidden] { display: none; }
 .panel-grip, .panel-close { display: none; }
 .talk-pill { display: none; }
 .floor-scrubber { display: none; }
@@ -51,21 +67,7 @@
   .floor-tag { grid-column: 1 / -1; white-space: normal; max-width: none; margin-top: 6px; font-size: 13.5px; font-family: var(--serif); color: var(--ink); }
   .floor-meta { position: static; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
   .spend-wrap { align-items: flex-end; }
-  .card-more { display: flex; flex-direction: column; gap: 6px; }
-  .card-more p { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.35; }
-  .card-boss b { color: var(--ink); font-weight: 600; }
-  .card-crew { display: flex; align-items: center; gap: 7px; }
-  .card-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); flex: none; }
-  .card-dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(99, 214, 155, .22); }
-  .card-activity { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .card-activity b { font-weight: 600; color: var(--ink); }
-  .card-made h3 { font: 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 6px 0 4px; }
-  .card-project { display: flex; width: 100%; justify-content: space-between; gap: 8px; padding: 5px 9px; margin-bottom: 3px; border-radius: 9px; border: 0; background: rgba(255, 255, 255, .07); color: var(--ink); text-align: left; font-size: 13px; cursor: pointer; }
-  .card-project:hover { background: rgba(255, 255, 255, .14); }
-  .card-project span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .card-project small { color: var(--ink-3); flex: none; }
-  .card-actions { display: flex; gap: 7px; margin-top: 4px; }
-  .card-actions .btn { min-height: 34px; padding: 5px 13px; font-size: 13px; }
+  .floor-top .card-more { display: flex; flex-direction: column; gap: 6px; }
   .controls { left: 14px; bottom: 16px; max-width: 360px; flex-wrap: nowrap; }
   .controls .btn { padding: 6px 12px; font-size: 13px; min-height: 32px; }
   .floor-panel { right: 68px; top: 14px; bottom: 16px; width: clamp(300px, 26vw, 372px); }
