@@ -1,5 +1,6 @@
 // System prompts. They hold no keys, tokens or infrastructure details, so there is nothing here for an injected page to steal.
 import { domainsConfigured } from './domains.js';
+import { companyBrief } from './brief.js';
 
 export const LANES = ['game', 'website', 'business'];
 const mediaOn = (cfg) => !!(cfg.openrouterKey || cfg.mediaMock);
@@ -161,7 +162,7 @@ ${cfg.helpEnabled === false ? '' : `- When you are stuck: ask_buddehbot reaches 
 
 ${lanePlaybooks(cfg)}
 
-${SAFETY}`;
+${companyBrief(floor)}${SAFETY}`;
 }
 
 // Only people who make pages need to know what a page can do. Everyone else pays to re-read it on every step.
@@ -185,7 +186,7 @@ For speed, make several tool calls in one step when they don't depend on each ot
 ${taskGuide(task, agent.role, cfg)}
 When you are done, reply with a short plain summary of what you made and where it is. That reply ends the task.
 
-${SAFETY}`;
+${companyBrief(floor, agent)}${SAFETY}`;
 }
 
 // The agent-level prompt on a computer. It is the same for every floor and every task, so it stays cached and holds nothing about any one floor.
@@ -232,7 +233,9 @@ Project slug: ${task.project}
 Brief from the Office Manager:
 ${task.brief}${taskGuide(task, agent.role, cfg) ? `
 
-${taskGuide(task, agent.role, cfg)}` : ''}${task.handoff ? `
+${taskGuide(task, agent.role, cfg)}` : ''}${companyBrief(floor, agent) ? `
+
+${companyBrief(floor, agent)}` : ''}${task.handoff ? `
 
 ${task.handoff}` : ''}`;
 }

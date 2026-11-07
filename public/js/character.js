@@ -25,6 +25,7 @@ const G = {
   paper: new THREE.BoxGeometry(0.26, 0.02, 0.34),
   mug: new THREE.CylinderGeometry(0.06, 0.05, 0.12, 10),
   phone: new THREE.BoxGeometry(0.1, 0.17, 0.014),
+  halo: new THREE.TorusGeometry(0.22, 0.035, 6, 18),
 };
 /** One material for every person on the floor: colour lives in the vertices. */
 export const CHAR_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0 });
@@ -60,24 +61,63 @@ function buildHair(head, look) {
   if (style === 'mohawk') for (let i = 0; i < 5; i++) head.add(part(G.box, c, 0, 0.33 + Math.sin((i / 4) * Math.PI) * 0.08, 0.2 - i * 0.11, 0.08, 0.2, 0.1));
   if (style === 'pigtails') { cap(); head.add(part(G.hairBall, c, -0.38, 0.02, -0.04, 0.8, 1.2, 0.8)); head.add(part(G.hairBall, c, 0.38, 0.02, -0.04, 0.8, 1.2, 0.8)); }
 }
-function buildHat(head, look, accent) {
+function buildHat(head, look, accent, dome = 1) {
   const hat = look.hat;
-  if (hat === 'cap') { head.add(part(G.hairCap, accent, 0, 0.05, 0, 1.02, 0.9, 1.02)); head.add(part(G.box, accent, 0, 0.17, 0.33, 0.44, 0.035, 0.26)); }
-  if (hat === 'beanie') { head.add(part(G.hairCap, accent, 0, 0.05, 0, 1.03, 1.05, 1.03)); head.add(part(G.cyl, darker(accent), 0, 0.14, 0, 0.38, 0.1, 0.38)); }
+  if (hat === 'cap') { head.add(part(G.hairCap, accent, 0, 0.05 * dome, 0, 1.02 * dome, 0.9, 1.02 * dome)); head.add(part(G.box, accent, 0, 0.17, 0.33 * dome, 0.44, 0.035, 0.26)); }
+  if (hat === 'beanie') { head.add(part(G.hairCap, accent, 0, 0.05 * dome, 0, 1.03 * dome, 1.05, 1.03 * dome)); head.add(part(G.cyl, darker(accent), 0, 0.14, 0, 0.38 * dome, 0.1, 0.38 * dome)); }
   if (hat === 'tophat') { head.add(part(G.cyl, '#17181c', 0, 0.33, 0, 0.44, 0.035, 0.44)); head.add(part(G.cyl, '#17181c', 0, 0.54, 0, 0.27, 0.4, 0.27)); head.add(part(G.cyl, accent, 0, 0.39, 0, 0.275, 0.06, 0.275)); }
   if (hat === 'crown') {
     head.add(part(G.cyl, '#e9b949', 0, 0.37, 0, 0.28, 0.12, 0.28));
     for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2; head.add(part(G.cone, '#e9b949', Math.cos(a) * 0.24, 0.49, Math.sin(a) * 0.24, 0.065, 0.16, 0.065)); }
   }
   if (hat === 'party') { const c = part(G.cone, accent, 0.06, 0.55, 0, 0.2, 0.42, 0.2); c.rotation.z = -0.12; head.add(c); head.add(part(G.hairBall, '#fff6d8', 0.09, 0.78, 0, 0.32, 0.32, 0.32)); }
-  if (hat === 'hardhat') { head.add(part(G.hairCap, '#f2b632', 0, 0.06, 0, 1.03, 0.9, 1.03)); head.add(part(G.cyl, '#f2b632', 0, 0.15, 0, 0.44, 0.03, 0.44)); }
+  if (hat === 'hardhat') { head.add(part(G.hairCap, '#f2b632', 0, 0.06 * dome, 0, 1.03 * dome, 0.9, 1.03 * dome)); head.add(part(G.cyl, '#f2b632', 0, 0.15, 0, 0.44 * dome, 0.03, 0.44 * dome)); }
   if (hat === 'headphones') {
     head.add(part(G.box, '#23252b', 0, 0.39, 0, 0.64, 0.05, 0.08));
     head.add(part(G.cyl, '#23252b', -0.36, 0.04, 0, 0.11, 0.08, 0.11).rotateZ(Math.PI / 2)); head.add(part(G.cyl, '#23252b', 0.36, 0.04, 0, 0.11, 0.08, 0.11).rotateZ(Math.PI / 2));
   }
+  if (hat === 'cowboy') { head.add(part(G.cyl, '#8a5a2b', 0, 0.3, 0, 0.62, 0.035, 0.5)); head.add(part(G.cyl, '#8a5a2b', 0, 0.45, 0, 0.27, 0.3, 0.27)); head.add(part(G.cyl, accent, 0, 0.34, 0, 0.28, 0.06, 0.28)); }
+  if (hat === 'wizard') { head.add(part(G.cyl, '#3c2f7c', 0, 0.3, 0, 0.46, 0.035, 0.46)); const c = part(G.cone, '#3c2f7c', 0, 0.68, -0.02, 0.32, 0.8, 0.32); c.rotation.x = -0.1; head.add(c); head.add(part(G.hairBall, '#f4c95d', 0.1, 0.56, 0.2, 0.3, 0.3, 0.3)); head.add(part(G.hairBall, '#f4c95d', -0.08, 0.76, 0.12, 0.22, 0.22, 0.22)); }
+  if (hat === 'chef') { head.add(part(G.cyl, '#f7f4ec', 0, 0.36, 0, 0.3, 0.18, 0.3)); head.add(part(G.hairBall, '#f7f4ec', 0, 0.6, 0, 2.3, 1.5, 2.3)); }
+  if (hat === 'viking') { head.add(part(G.hairCap, '#8e959c', 0, 0.05 * dome, 0, 1.03 * dome, 0.95, 1.03 * dome)); head.add(part(G.cyl, '#6d4a2c', 0, 0.16, 0, 0.39 * dome, 0.05, 0.39 * dome)); for (const s of [-1, 1]) { const horn = part(G.cone, '#efe6d0', s * 0.42, 0.4, 0, 0.07, 0.36, 0.07); horn.rotation.z = -s * 0.5; head.add(horn); } }
+  if (hat === 'pirate') { head.add(part(G.cyl, '#17181c', 0, 0.3, 0, 0.46, 0.05, 0.34)); const crown = part(G.box, '#17181c', 0, 0.34, 0, 0.72, 0.24, 0.3); head.add(crown); head.add(part(G.hairBall, '#f4f1ea', 0, 0.48, 0.14, 0.42, 0.42, 0.2)); }
+  if (hat === 'beret') { const b = part(G.hairBall, accent, 0.06, 0.34, 0, 2.5, 0.9, 2.5); b.rotation.z = -0.2; head.add(b); head.add(part(G.cyl, darker(accent), 0, 0.26, 0, 0.3, 0.05, 0.3)); }
+  if (hat === 'propeller') { head.add(part(G.hairCap, accent, 0, 0.05 * dome, 0, 1.02 * dome, 0.9, 1.02 * dome)); head.add(part(G.cyl, '#2b2d35', 0, 0.44, 0, 0.04, 0.14, 0.04)); head.add(part(G.box, '#e0559b', -0.2, 0.5, 0, 0.4, 0.03, 0.12)); head.add(part(G.box, '#3f8efc', 0.2, 0.5, 0, 0.4, 0.03, 0.12)); }
+  if (hat === 'halo') { const r = new THREE.Mesh(G.halo, mat('#ffe27a')); r.position.y = 0.62; r.rotation.x = Math.PI / 2; head.add(r); }
+}
+/** Styles the kit's heads don't have, added on top of whatever hair the variant came with. Sizes are in the same head units as a hat. */
+function buildModelHair(head, look) {
+  const c = look.hairColor;
+  if (look.hair === 'mohawk') for (let i = 0; i < 6; i++) head.add(part(G.box, c, 0, 0.27 + Math.sin((i / 5) * Math.PI) * 0.12, 0.28 - i * 0.12, 0.09, 0.24, 0.11));
+  if (look.hair === 'bun') head.add(part(G.hairBall, c, 0, 0.42, -0.18, 1.05, 1.05, 1.05));
+  if (look.hair === 'pigtails') for (const s of [-1, 1]) head.add(part(G.hairBall, c, s * 0.42, 0.02, -0.06, 0.95, 1.4, 0.95));
+  if (look.hair === 'curly') for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2; head.add(part(G.hairBall, c, Math.cos(a) * 0.3, 0.3 + (i % 2) * 0.07, Math.sin(a) * 0.28 - 0.04, 0.95, 0.85, 0.95)); }
+  if (look.hair === 'long') { head.add(part(G.box, c, 0, -0.36, -0.28, 0.66, 0.66, 0.12)); for (const s of [-1, 1]) head.add(part(G.box, c, s * 0.36, -0.36, -0.08, 0.1, 0.6, 0.34)); }
+}
+/** Everything worn apart from a hat. `head` and `chest` are groups already sized for the character they sit on, facing +z. */
+function buildExtras(head, chest, look, accent) {
+  const e = look.wear;
+  if (!e || e === 'none') return;
+  const hair = look.hair === 'none' ? '#4a2f1d' : look.hairColor;
+  if (e === 'beard') { head.add(part(G.box, hair, 0, -0.26, 0.28, 0.5, 0.26, 0.14)); head.add(part(G.box, hair, 0, -0.34, 0.3, 0.3, 0.16, 0.12)); }
+  if (e === 'moustache') for (const s of [-1, 1]) { const m = part(G.box, hair, s * 0.08, -0.1, 0.36, 0.17, 0.05, 0.06); m.rotation.z = s * -0.25; head.add(m); }
+  if (e === 'scarf') { chest.add(part(G.cyl, accent, 0, 0.3, 0.03, 0.34, 0.15, 0.34)); chest.add(part(G.box, darker(accent, 0.85), 0.14, 0.02, 0.32, 0.17, 0.42, 0.06)); }
+  if (e === 'bowtie') for (const s of [-1, 1]) { const b = part(G.cone, accent, s * 0.1, 0.25, 0.33, 0.1, 0.2, 0.05); b.rotation.z = s * Math.PI / 2; chest.add(b); }
+  if (e === 'tie') { chest.add(part(G.box, accent, 0, 0.0, 0.32, 0.11, 0.42, 0.03)); chest.add(part(G.box, darker(accent, 0.8), 0, 0.26, 0.32, 0.15, 0.08, 0.04)); }
+  if (e === 'badge') { chest.add(part(G.box, '#f7f4ec', 0.14, 0.06, 0.32, 0.16, 0.2, 0.02)); chest.add(part(G.box, accent, 0.14, 0.12, 0.33, 0.14, 0.06, 0.02)); }
+  if (e === 'cape') { chest.add(part(G.box, accent, 0, -0.14, -0.34, 0.62, 0.74, 0.04)); chest.add(part(G.cyl, darker(accent, 0.8), 0, 0.3, 0, 0.3, 0.07, 0.3)); }
+  if (e === 'backpack') { chest.add(part(G.box, accent, 0, 0.03, -0.38, 0.46, 0.5, 0.2)); chest.add(part(G.box, darker(accent, 0.8), 0, -0.06, -0.5, 0.3, 0.22, 0.07)); }
+  if (e === 'wings') for (const s of [-1, 1]) { const w = part(G.box, '#f7f4ec', s * 0.42, 0.12, -0.42, 0.6, 0.34, 0.04); w.rotation.y = s * 0.55; w.rotation.z = s * 0.35; chest.add(w); const t = part(G.box, '#e6e0d2', s * 0.36, -0.1, -0.4, 0.42, 0.24, 0.04); t.rotation.y = s * 0.55; t.rotation.z = s * 0.2; chest.add(t); }
+}
+/** The eyewear the kit has no model for. */
+function buildFaceWear(head, look, z, y = 0.03) {
+  if (look.glasses === 'monocle') { const r = new THREE.Mesh(G.ring, mat('#e9b949')); r.position.set(0.14, y, 0.345 + z); r.scale.setScalar(1.25); head.add(r); head.add(part(G.box, '#e9b949', 0.235, y - 0.17, 0.33 + z, 0.014, 0.22, 0.014)); }
+  if (look.glasses === 'eyepatch') { head.add(part(G.box, '#101114', -0.14, y - 0.02, 0.345 + z, 0.2, 0.17, 0.03)); const s = part(G.box, '#101114', 0, y + 0.08, 0.34 + z, 0.82, 0.028, 0.02); s.rotation.z = -0.2; head.add(s); }
 }
 /** How far above the head's centre a hat reaches, in head units, so a name label clears it. */
-const HAT_TOP = { none: 0, cap: 0.1, beanie: 0.2, tophat: 0.75, crown: 0.58, party: 0.95, hardhat: 0.12, headphones: 0.42 };
+/** How far a hat rises above the kit's head, in the same units, so a name label clears it. */
+const HAT_CLEAR = { cap: 0.1, beanie: 0.14, tophat: 0.45, crown: 0.3, party: 0.65, hardhat: 0.1, headphones: 0.08, cowboy: 0.3, wizard: 0.8, chef: 0.65, viking: 0.3, pirate: 0.25, beret: 0.14, propeller: 0.3, halo: 0.34 };
+const HAT_TOP = { none: 0, cap: 0.1, beanie: 0.2, tophat: 0.75, crown: 0.58, party: 0.95, hardhat: 0.12, headphones: 0.42, cowboy: 0.5, wizard: 1.0, chef: 0.75, viking: 0.5, pirate: 0.45, beret: 0.3, propeller: 0.56, halo: 0.68 };
 function buildOutfit(root, look, parts) {
   const c = look.outfitColor;
   const o = look.outfit;
@@ -188,11 +228,13 @@ export class Character {
     head.add(part(G.ball, darker(look.skin, 0.9), -0.2, -0.06, 0.28, 0.5, 0.35, 0.3)); head.add(part(G.ball, darker(look.skin, 0.9), 0.2, -0.06, 0.28, 0.5, 0.35, 0.3));
     if (look.glasses === 'round') { for (const x of [-0.125, 0.125]) { const r = new THREE.Mesh(G.ring, mat('#22202a')); r.position.set(x, 0.03, 0.345); head.add(r); } head.add(part(G.box, '#22202a', 0, 0.03, 0.35, 0.08, 0.014, 0.014)); }
     if (look.glasses === 'shades') { head.add(part(G.box, '#101114', -0.125, 0.03, 0.345, 0.17, 0.09, 0.02)); head.add(part(G.box, '#101114', 0.125, 0.03, 0.345, 0.17, 0.09, 0.02)); head.add(part(G.box, '#101114', 0, 0.05, 0.35, 0.1, 0.02, 0.014)); }
+    buildFaceWear(head, look, 0);
     buildHair(head, look);
     buildHat(head, look, accent);
     root.add(head);
     Object.assign(this, { torso, body, armL, armR, legL, legR, head, eyes });
     buildOutfit(root, look, this);
+    buildExtras(head, torso, look, accent);
     // Props: shown only while in use, so they cost nothing the rest of the time.
     this.paper = new THREE.Mesh(G.paper, mat('#fbf7ea')); this.paper.visible = false; this.paper.position.set(0, 0.26, 0.36); this.paper.rotation.x = 0.3; this.paper.userData.keep = true;
     root.add(this.paper);
@@ -264,6 +306,7 @@ const BY_OUTFIT = {
 const FEMALE_HAIR = ['long', 'bun', 'pigtails'], MALE_HAIR = ['short', 'side', 'mohawk'];
 const hashLook = (look) => { let h = 7; for (const ch of JSON.stringify([look.skin, look.hairColor, look.outfitColor, look.glasses, look.hat])) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
 export function variantFor(look) {
+  if (look.body && look.body !== 'auto' && VARIANTS[`character-${look.body}`]) return `character-${look.body}`;
   const cands = BY_OUTFIT[look.outfit] || BY_OUTFIT.tee;
   const female = cands.map((c) => c.includes('female'));
   let i = hashLook(look) % cands.length;
@@ -271,6 +314,7 @@ export function variantFor(look) {
   else if (MALE_HAIR.includes(look.hair) && female.includes(false)) i = female.indexOf(false);
   return cands[i];
 }
+const MODEL_HEAD = 0.53;  // our head parts are sized for a head of radius 0.36; this fits them to the kit's
 export const MODEL_SCALE = 2.45;  // model units are about 0.67 per person; the room's people stand about 1.65 tall, 1.7 desks
 
 /** Replaces the colours of chosen atlas cells, keeping each cell's light-to-dark shading. Uniforms live on the material so a clone keeps its look. */
@@ -307,14 +351,15 @@ export class ModelCharacter {
     this.isModel = true;
     const model = utils.clone(asset.scene);
     this.model = model;
-    // The kit's people face -z (the hair sits at +z); ours face +z, so the model is turned inside its group and every
-    // relative turn below is mirrored to match.
-    model.rotation.y = Math.PI;
+    // The kit's people face +z, the same way ours do, so the model needs no turn inside its group.
     this.group.add(model);
     this.group.scale.setScalar(scale);
     const bone = (n) => { let b = null; model.traverse((o) => { if (o.name === n) b = o; }); return b; };
     this.root = bone('root'); this.torso = bone('torso'); this.head = bone('head');
-    this.armL = bone('arm-left'); this.armR = bone('arm-right'); this.legL = bone('leg-left'); this.legR = bone('leg-right');
+    // Poses call the arm on the -x side "L", so the rig's own left and right are matched to that by position, not by name.
+    const armA = bone('arm-left'), armB = bone('arm-right'), legA = bone('leg-left'), legB = bone('leg-right');
+    const swap = (armA?.position.x ?? 0) > 0;
+    this.armL = swap ? armB : armA; this.armR = swap ? armA : armB; this.legL = swap ? legB : legA; this.legR = swap ? legA : legB;
     this.rest = new Map();
     for (const b of [this.root, this.torso, this.head, this.armL, this.armR, this.legL, this.legR]) if (b) this.rest.set(b, { q: b.quaternion.clone(), p: b.position.clone() });
     // Recolour: skin and hair on the head, skin, top and trousers on the body.
@@ -322,7 +367,8 @@ export class ModelCharacter {
     const o = look.outfit;
     const top = o === 'labcoat' ? '#f2f0ea' : look.outfitColor;
     const legs = o === 'suit' ? darker(look.outfitColor, 0.85) : o === 'overalls' ? look.outfitColor : o === 'dress' ? look.outfitColor : null;
-    const headSlots = [[v.skin, look.skin], [v.hair, look.hair === 'none' ? look.skin : look.hairColor]];
+    const bald = look.hair === 'none' || look.hair === 'mohawk';  // a mohawk is ours, so the variant's own hair goes
+    const headSlots = [[v.skin, look.skin], [v.hair, bald ? look.skin : look.hairColor]];
     const bodySlots = [[v.skin, look.skin], [v.top, top]];
     if (legs && (v.legs[0] !== v.top[0] || v.legs[1] !== v.top[1])) bodySlots.push([v.legs, legs]);
     this.materials = [];
@@ -340,24 +386,31 @@ export class ModelCharacter {
     if (this.actions.walk) this.actions.walk.setEffectiveTimeScale(1.35);
     // A hat from our own parts and glasses from the kit, on the head bone. The hat group is sized to the model's head.
     if (this.head) {
-      const hat = new THREE.Group(); hat.position.set(0, 0.165, -0.005); hat.rotation.y = Math.PI; hat.scale.setScalar(0.5);
-      buildHat(hat, look, accent);
+      // The head mesh spans y 0..0.38 from this bone and is about 0.19 across from its centre, which is one "head unit" at 0.53.
+      const hat = new THREE.Group(); hat.position.set(0, 0.19, -0.002); hat.scale.setScalar(MODEL_HEAD);
+      buildHat(hat, look, accent, 1.22);
+      buildModelHair(hat, look);
+      buildFaceWear(hat, look, 0.0, -0.06);
+      const chest = new THREE.Group();
+      if (this.torso) { chest.position.set(0, 0.07, 0.012); chest.scale.setScalar(0.4); }
+      buildExtras(hat, chest, look, accent);
       if (hat.children.length) { mergeColored(hat, CHAR_MAT); this.head.add(hat); this.hat = hat; }
+      if (chest.children.length && this.torso) { mergeColored(chest, CHAR_MAT); this.torso.add(chest); this.chest = chest; }
       if (glasses) {
         const g = glasses.clone(true);
         g.traverse((obj) => { if (obj.isMesh) { obj.castShadow = false; obj.frustumCulled = false; } });
-        g.position.set(0, 0.19, -0.075); g.scale.setScalar(0.6); this.head.add(g); this.glasses = g;
+        g.position.set(0, 0.125, 0.085); this.head.add(g); this.glasses = g;
       }
     }
-    // Props, scaled back to world size and held in the right hand (the model's -z is its front).
+    // Props, scaled back to world size and held in the right hand.
     const ps = 1 / scale;
-    this.paper = new THREE.Mesh(G.paper, mat('#fbf7ea')); this.paper.visible = false; this.paper.position.set(0, 0.11, -0.11); this.paper.rotation.x = -0.3; this.paper.scale.setScalar(ps);
+    this.paper = new THREE.Mesh(G.paper, mat('#fbf7ea')); this.paper.visible = false; this.paper.position.set(0, 0.11, 0.11); this.paper.rotation.x = 0.3; this.paper.scale.setScalar(ps);
     if (this.torso) this.torso.add(this.paper);
-    this.mug = new THREE.Mesh(G.mug, mat(accent)); this.mug.visible = false; this.mug.position.set(0, -0.13, -0.02); this.mug.scale.setScalar(ps);
-    this.phone = new THREE.Mesh(G.phone, mat('#1b1c22')); this.phone.visible = false; this.phone.position.set(-0.01, -0.12, -0.03); this.phone.rotation.x = 0.6; this.phone.rotation.y = Math.PI; this.phone.scale.setScalar(ps);
+    this.mug = new THREE.Mesh(G.mug, mat(accent)); this.mug.visible = false; this.mug.position.set(0, -0.13, 0.02); this.mug.scale.setScalar(ps);
+    this.phone = new THREE.Mesh(G.phone, mat('#1b1c22')); this.phone.visible = false; this.phone.position.set(0.01, -0.12, 0.03); this.phone.rotation.x = -0.6; this.phone.scale.setScalar(ps);
     if (this.armR) this.armR.add(this.mug, this.phone);
     this.headTop = 0.672 * scale;
-    this.labelY = this.headTop + (HAT_TOP[look.hat] || 0) * 0.36 * 0.5 * scale;
+    this.labelY = this.headTop + (HAT_CLEAR[look.hat] || 0) * MODEL_HEAD * scale;
   }
   seatedY(seatTop) { return seatTop - 0.03 * this.scale; }
   setAnim(name) { this.anim = name; }
@@ -378,23 +431,25 @@ export class ModelCharacter {
     this.mixer.update(dt);
     // The kit's clips set the base pose; our poses turn the bones on top of it.
     const p = poseFor(b, t, dt, this);
-    // The model is turned half-way round inside the group, so a turn about its local x or z runs the other way (y is unchanged).
     const lean = b.walk * 0.05 - b.stretch * 0.1 + b.phone * 0.05;
     if (this.root) {
       this.root.position.y += (Math.abs(Math.sin(t * 7)) * 0.045 * b.cheer + Math.sin(t * 2) * 0.002);
-      this.root.rotateX(-lean); this.root.rotateZ(-Math.sin(t * 0.9) * 0.02 * b.listen);
+      this.root.rotateX(lean); this.root.rotateZ(Math.sin(t * 0.9) * 0.02 * b.listen);
     }
     const armX = 1 - walk;  // the walk clip swings the arms itself
     // Our arm layers assume a hanging arm; the clips start from a slightly spread one, so the outward turn is eased back a little.
-    if (this.armL) { this.armL.rotateX(-(p.aL * armX + p.aL * walk * 0.2 * (1 - b.walk))); this.armL.rotateZ(-(p.zL * 0.9 + 0.1)); }
-    if (this.armR) { this.armR.rotateX(-(p.aR * armX + p.aR * walk * 0.2 * (1 - b.walk))); this.armR.rotateZ(-(p.zR * 0.9 - 0.1)); this.armR.rotateY(b.pour * -0.6); }
-    if (this.head) { this.head.rotateX(-p.headX); this.head.rotateY(p.headY); this.head.rotateZ(-p.headZ); }
+    if (this.armL) { this.armL.rotateX(p.aL * armX + p.aL * walk * 0.2 * (1 - b.walk)); this.armL.rotateZ(p.zL * 0.9 + 0.1); }
+    if (this.armR) { this.armR.rotateX(p.aR * armX + p.aR * walk * 0.2 * (1 - b.walk)); this.armR.rotateZ(p.zR * 0.9 - 0.1); this.armR.rotateY(b.pour * -0.6); }
+    if (this.head) { this.head.rotateX(p.headX); this.head.rotateY(p.headY); this.head.rotateZ(p.headZ); }
     if (this.torso) this.torso.rotateY(b.talk * Math.sin(t * 2.1) * 0.08);
   }
   dispose() {
     for (const m of this.materials) m.dispose();
     if (this.hat) disposeMerged(this.hat);
+    if (this.chest) disposeMerged(this.chest);
     this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.model);
+    // Each person's cloned skeleton has its own bone texture on the GPU, and it stays there until told otherwise.
+    this.model.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.dispose(); });
     this.group.removeFromParent();
   }
 }
@@ -428,20 +483,29 @@ export function createPreview(canvas, look, accent) {
   const fill = new THREE.DirectionalLight('#dbe8ff', 0.6); fill.position.set(-3, 2, -2); scene.add(fill);
   const floor = new THREE.Mesh(new THREE.CircleGeometry(1.1, 28), new THREE.ShadowMaterial({ opacity: 0.22 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
   const cam = new THREE.PerspectiveCamera(26, (rect.width || 200) / (rect.height || 240), 0.1, 30);
-  cam.position.set(0, 1.5, 5.4); cam.lookAt(0, 0.95, 0);
+  cam.position.set(0, 1.65, 6.3); cam.lookAt(0, 1.12, 0);  // room above the head for the tallest hat
   let ch = new Character(look, { accent }); scene.add(ch.group);
   let gen = 0, raf, dead = false, last = performance.now();
+  // The person on screen stays until the next one is ready, so changing an option never flashes a stand-in once the model is cached.
   const swapIn = (next, acc) => {
     const my = ++gen;
-    loadModelCharacter(next, { accent: acc, scale: 2.5 }).then((mc) => {  // the same height in the frame as the stand-in
+    return loadModelCharacter(next, { accent: acc, scale: 2.5 }).then((mc) => {  // the same height in the frame as the stand-in
       if (dead || my !== gen) { mc.dispose(); return; }
-      ch.dispose(); ch = mc; scene.add(ch.group);
-    }).catch(() => { /* the stand-in stays */ });
+      const y = ch.group.rotation.y;
+      ch.dispose(); ch = mc; ch.group.rotation.y = y; scene.add(ch.group);
+    }).catch(() => {
+      if (dead || my !== gen) return;
+      ch.dispose(); ch = new Character(next, { accent: acc }); scene.add(ch.group);
+    });
   };
   swapIn(look, accent);
+  let shown = '';
   const loop = (now) => {
     if (dead) return;
     raf = requestAnimationFrame(loop);
+    // The canvas may only get its real size once it is on the page, and a phone can turn. Keep the picture in proportion either way.
+    const size = `${canvas.clientWidth}x${canvas.clientHeight}`;
+    if (size !== shown && canvas.clientWidth && canvas.clientHeight) { shown = size; renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); cam.aspect = canvas.clientWidth / canvas.clientHeight; cam.updateProjectionMatrix(); }
     const dt = Math.min((now - last) / 1000, 0.1); last = now;
     ch.group.rotation.y = Math.sin(now / 1400) * 0.55;
     ch.update(dt);
@@ -449,7 +513,7 @@ export function createPreview(canvas, look, accent) {
   };
   raf = requestAnimationFrame(loop);
   return {
-    update(next, acc = accent) { ch.dispose(); ch = new Character(next, { accent: acc }); scene.add(ch.group); swapIn({ ...next }, acc); },
+    update(next, acc = accent) { swapIn({ ...next }, acc); },
     dispose() { dead = true; gen++; cancelAnimationFrame(raf); floor.geometry.dispose(); renderer.dispose(); renderer.forceContextLoss?.(); },
   };
 }

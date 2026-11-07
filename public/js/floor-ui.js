@@ -1,10 +1,9 @@
 // The floor page. One SSE stream feeds the 3D characters and the panels: chat, work feed, task board, projects, requests.
 import { stage } from './stage.js';
-import { h, api, BASE, $, clear, put, modal, toast, money, timeAgo, session, ApiError, refreshMe } from './dom.js';
+import { h, api, BASE, $, clear, put, modal, toast, money, timeAgo, session, ApiError } from './dom.js';
 import { OfficeView } from './office-scene.js';
 import { renderMarkdown } from './markdown.js';
-import { characterBuilder, swatches, chips } from './builder.js';
-import { FLOOR_STYLES, PETS } from './looks.js';
+import { openCustomisePanel } from './customise.js';
 import { openLogin } from './claim.js';
 
 const COLUMNS = [['todo', 'To do'], ['doing', 'Doing'], ['review', 'With manager'], ['done', 'Done']];
@@ -37,7 +36,7 @@ class FloorPage {
     this.buildShell();
     if (stage.ok) {
       this.labels = $('#labels'); clear(this.labels);
-      this.view = new OfficeView({ state: s, labels: this.labels });
+      this.view = new OfficeView({ state: this.viewState(), labels: this.labels });
       stage.setView(this.view);
     }
     this.renderAll();
@@ -45,7 +44,7 @@ class FloorPage {
     this.connect();
   }
   applyBrand() {
-    const { primary, accent } = this.state.floor.colors;
+    const { primary, accent } = this.preview?.colors || this.state.floor.colors;
     document.documentElement.style.setProperty('--brand', primary);
     document.documentElement.style.setProperty('--brand-2', accent);
   }
@@ -139,7 +138,7 @@ class FloorPage {
   openAgent(a) {
     if (!this.owner) {
       modal(a.name, (body) => {
-        body.append(h('div.stack', {}, h('p.lede', {}, `${a.title}. ${a.activity || STATE_LABEL[a.state] || 'At desk'}.`)));
+        body.append(h('div.stack', {}, h('p.lede', {}, `${a.title}${a.vibe ? `, ${a.vibe.toLowerCase()} type` : ''}. ${a.activity || STATE_LABEL[a.state] || 'At desk'}.`)));
       });
       return;
     }
@@ -222,7 +221,8 @@ class FloorPage {
       try { await api(`/floors/${this.slug}/chat`, { method: 'POST', body: { text } }); this.view?.bossTalks(); this.dropLanes(); } catch (e) { for (const b of buttons) b.disabled = false; toast(e.message, 'bad'); }
     } }, h('b', {}, title), h('span', {}, what)));
     return h('div.lanes', { role: 'group', 'aria-label': 'What should we start on?' }, ...buttons,
-      h('p.fineprint', {}, 'Your staff research, write, build and publish. Nobody here can send email, post, run ads or spend money, so they will tell you what only you can do.'));
+      h('p.fineprint', {}, 'Your staff research, write, build and publish. Nobody here can send email, post, run ads or spend money, so they will tell you what only you can do.'),
+      h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => this.openCustomise('vibe') }, 'First, make this office yours'));
   }
   dropLanes() { this.lanesEl?.remove(); this.lanesEl = null; }
   messageEl(m) {
@@ -531,77 +531,20 @@ class FloorPage {
   }
 
   // ---- customise ----
-  openCustomise(tab = 'company', agentId) {
-    const s = this.state;
-    let cleanup = () => {};
-    modal('Customise', (body, close) => {
-      const draft = { name: s.floor.name, tagline: s.floor.tagline, colors: { ...s.floor.colors }, decor: { ...s.floor.decor }, publicChat: s.floor.publicChat, defaultPrivate: s.floor.defaultPrivate, boss: { name: s.floor.boss.name, look: { ...s.floor.boss.look } } };
-      const pane = h('div.custom-pane');
-      const tabs = h('nav.tabs');
-      const save = async () => {
-        try { await api(`/floors/${this.slug}/settings`, { method: 'POST', body: draft }); toast('Saved'); close(); } catch (e) { toast(e.message, 'bad'); }
-      };
-      const show = (id, agent) => {
-        cleanup(); cleanup = () => {};
-        clear(tabs);
-        for (const [k, label] of [['company', 'Company'], ['boss', 'You'], ['staff', 'Staff'], ['decor', 'Decor']]) tabs.append(h(`button.tab${k === id ? '.on' : ''}`, { type: 'button', 'data-custom': k, onclick: () => show(k) }, label));
-        clear(pane);
-        if (id === 'company') {
-          pane.append(h('form.stack', { onsubmit: (e) => { e.preventDefault(); save(); } },
-            h('label.field', {}, h('span', {}, 'Company name'), h('input', { name: 'company', value: draft.name, maxlength: 60, oninput: (e) => { draft.name = e.target.value; } })),
-            h('label.field', {}, h('span', {}, 'Tagline'), h('input', { value: draft.tagline, maxlength: 120, oninput: (e) => { draft.tagline = e.target.value; } })),
-            h('label.field', {}, h('span', {}, 'Main colour'), h('input', { type: 'color', value: draft.colors.primary, oninput: (e) => { draft.colors.primary = e.target.value; } })),
-            h('label.field', {}, h('span', {}, 'Accent colour'), h('input', { type: 'color', value: draft.colors.accent, oninput: (e) => { draft.colors.accent = e.target.value; } })),
-            h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.publicChat, onchange: (e) => { draft.publicChat = e.target.checked; } }), h('span', {}, 'Visitors can read my chat with the manager. Private project names are hidden, but anything else said about them isn\'t')),
-            h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.defaultPrivate, onchange: (e) => { draft.defaultPrivate = e.target.checked; } }), h('span', {}, 'New projects start private')),
-            h('button.btn.primary.wide', { type: 'submit' }, 'Save'),
-            h('button.btn.ghost.wide', { type: 'button', onclick: async () => { try { await api('/logout', { method: 'POST' }); await refreshMe(); close(); window.officeGo('/'); } catch (e) { toast(e.message, 'bad'); } } }, 'Sign out of this floor')));
-        }
-        if (id === 'boss') {
-          const holder = h('div');
-          pane.append(h('form.stack', { onsubmit: (e) => { e.preventDefault(); draft.boss.look = builder.look; save(); } },
-            h('label.field', {}, h('span', {}, 'Your name'), h('input', { value: draft.boss.name, maxlength: 30, oninput: (e) => { draft.boss.name = e.target.value; } })), holder,
-            h('div.sticky-foot', {}, h('button.btn.primary.wide', { type: 'submit' }, 'Save'))));
-          const builder = characterBuilder(holder, draft.boss.look, draft.colors.accent);
-          draft.boss.look = builder.look;
-          cleanup = () => builder.dispose();
-        }
-        if (id === 'staff') {
-          const list = h('div.chips.staff-pick');
-          const editor = h('div');
-          const pick = (a) => {
-            for (const b of list.children) b.setAttribute('aria-checked', String(b.dataset.v === String(a.id)));
-            cleanup();
-            const holder = h('div');
-            const name = h('input', { value: a.name, maxlength: 24, 'aria-label': 'Name' });
-            clear(editor).append(h('form.stack', { onsubmit: async (e) => {
-              e.preventDefault();
-              try { await api(`/floors/${this.slug}/staff/${a.id}`, { method: 'POST', body: { name: name.value, look: b.look } }); toast(`${name.value.trim() || a.name} looks great`); close(); } catch (x) { toast(x.message, 'bad'); }
-            } }, h('label.field', {}, h('span', {}, `${a.title}'s name`), name), holder, h('div.sticky-foot', {}, h('button.btn.primary.wide', { type: 'submit' }, 'Save'))));
-            const b = characterBuilder(holder, a.look, draft.colors.accent);
-            cleanup = () => b.dispose();
-          };
-          for (const a of s.agents) list.append(h('button.chip', { type: 'button', 'data-v': String(a.id), role: 'radio', onclick: () => pick(a) }, a.name));
-          pane.append(list, editor);
-          pick(s.agents.find((a) => a.id === agent) || s.agents[0]);
-        }
-        if (id === 'decor') {
-          const d = draft.decor;
-          const toggle = (k, label) => h('label.toggle', {}, h('input', { type: 'checkbox', checked: d[k], onchange: (e) => { d[k] = e.target.checked; } }), h('span', {}, label));
-          const plants = h('input', { type: 'range', min: 0, max: 8, value: d.plants, 'aria-label': 'Plants', oninput: (e) => { d.plants = Number(e.target.value); } });
-          pane.append(h('form.stack', { onsubmit: (e) => { e.preventDefault(); save(); } },
-            h('div.field', {}, h('span', {}, 'Floor'), chips(FLOOR_STYLES, d.floor, (v) => { d.floor = v; }, 'Floor')),
-            h('label.field', {}, h('span', {}, 'Wall colour'), h('input', { type: 'color', value: d.wall, oninput: (e) => { d.wall = e.target.value; } })),
-            h('label.field', {}, h('span', {}, 'Plants'), plants),
-            h('div.field', {}, h('span', {}, 'Office pet'), chips(PETS, d.pet, (v) => { d.pet = v; }, 'Pet')),
-            h('div.toggle-grid', {}, toggle('rug', 'Rugs'), toggle('art', 'Art'), toggle('coffee', 'Coffee bar'), toggle('arcade', 'Arcade cabinet'), toggle('neon', 'Neon sign')),
-            h('button.btn.primary.wide', { type: 'submit' }, 'Save')));
-        }
-      };
-      body.append(tabs, pane);
-      show(tab, agentId);
-    }, { wide: true, onClose: () => cleanup() });
+  openCustomise(tab = 'vibe', agentId) { openCustomisePanel(this, tab, agentId); }
+  /** Shows a draft of the office without saving it. Staff, tasks and everything else stay live, and Cancel puts the real one back. */
+  previewRoom(decor, colors) {
+    this.preview = { decor, colors };
+    this.applyBrand();
+    if (stage.ok && this.view) this.rebuildScene();
   }
+  clearPreview({ rebuild = true } = {}) {
+    if (!this.preview) return;
+    this.preview = null;
+    this.applyBrand();
+    if (rebuild && stage.ok && this.view) this.rebuildScene();
+  }
+  viewState() { return this.preview ? { ...this.state, floor: { ...this.state.floor, decor: this.preview.decor, colors: this.preview.colors } } : this.state; }
 
   // ---- live ----
   connect() {
@@ -680,13 +623,19 @@ class FloorPage {
     this.streamEl.firstChild.textContent = this.streamBuf;
     this.scrollChat();
   }
+  /** Resolves once the state on the page is newer than this call, even if a reload was already under way. */
+  async reloadSettled() {
+    while (this.reloading) await new Promise((r) => setTimeout(r, 30));
+    await this.reload();
+  }
   async reload() {
     if (this.reloading) { this.reloadAgain = true; return; }
     this.reloading = true;
     try {
       const next = await api(`/floors/${this.slug}`);
       if (this.dead) return;
-      const rebuild = JSON.stringify([next.floor.decor, next.floor.colors, next.floor.boss, next.agents.map((a) => [a.id, a.name, a.look])]) !== JSON.stringify([this.state.floor.decor, this.state.floor.colors, this.state.floor.boss, this.state.agents.map((a) => [a.id, a.name, a.look])]);
+      const sceneKey = (s) => JSON.stringify([s.floor.name, s.floor.logoUrl, s.floor.decor, s.floor.colors, s.floor.boss, s.agents.map((a) => [a.id, a.name, a.look])]);
+      const rebuild = sceneKey(next) !== sceneKey(this.state);
       const scroll = this.bodyEl.firstChild?.scrollTop;
       const typing = this.bodyEl.querySelector('textarea, input');
       const draft = typing?.value; const focused = document.activeElement === typing;
@@ -707,9 +656,11 @@ class FloorPage {
       if (this.reloadAgain) { this.reloadAgain = false; this.reload(); }
     }
   }
+  // The camera stays where it was, so a change to the room is just a change to the room.
   rebuildScene() {
+    const { yaw, targetYaw, zoom, targetZoom } = this.view;
     this.view.destroy(); clear(this.labels);
-    this.view = new OfficeView({ state: this.state, labels: this.labels });
+    this.view = new OfficeView({ state: this.viewState(), labels: this.labels, keep: { yaw, targetYaw, zoom, targetZoom } });
     stage.setView(this.view);
   }
   catchUpBanner() {

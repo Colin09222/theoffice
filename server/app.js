@@ -13,7 +13,7 @@ import { publicUrl } from './tools.js';
 import { embeddedV4, expandV6 } from './safefetch.js';
 import { isIP } from 'node:net';
 import { renderMarkdown, esc } from '../public/js/markdown.js';
-import { LOOK_FIELDS, DEFAULT_LOOK, DEFAULT_DECOR, DEFAULT_COLORS, FLOOR_STYLES, PETS } from '../public/js/looks.js';
+import { LOOK_FIELDS, DEFAULT_LOOK, DEFAULT_DECOR, DEFAULT_COLORS, FLOOR_STYLES, PETS, LAYOUTS, WALL_MATS, ART_STYLES } from '../public/js/looks.js';
 import { createOpenRouterClient, scrub } from './llm.js';
 import { createAnthropicClient, createRouter } from './anthropic.js';
 import { createMockClient } from './mock.js';
@@ -29,6 +29,7 @@ import { installBuilding } from './building.js';
 import { installHelp } from './help.js';
 import { installPurchases } from './purchases.js';
 import { budgetReport } from './budget.js';
+import { installCustomise } from './customise.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any iscolinfree.com cookie, page or API.
@@ -55,6 +56,9 @@ function validDecor(input, base = DEFAULT_DECOR) {
   const out = { ...base }; const i = input && typeof input === 'object' ? input : {};
   if (FLOOR_STYLES.includes(i.floor)) out.floor = i.floor;
   if (PETS.includes(i.pet)) out.pet = i.pet;
+  if (LAYOUTS.includes(i.layout)) out.layout = i.layout;
+  if (WALL_MATS.includes(i.wallMat)) out.wallMat = i.wallMat;
+  if (ART_STYLES.includes(i.artStyle)) out.artStyle = i.artStyle;
   out.wall = hex(i.wall, out.wall);
   if (Number.isInteger(i.plants) && i.plants >= 0 && i.plants <= 8) out.plants = i.plants;
   for (const k of ['rug', 'art', 'coffee', 'arcade', 'neon']) if (typeof i[k] === 'boolean') out[k] = i[k];
@@ -377,22 +381,27 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const f = requireOwner(req, p.slug);
     limit('mutate', ip);
     const b = await readJson(req);
+    saveSettings(f, b);
+    engine.emit(f.id, 'reload', {}, { persist: false });
+    json(res, 200, { ok: true });
+  });
+  const saveSettings = (f, b) => {
     const boss = JSON.parse(f.boss);
     if (b.boss) { boss.name = clean(b.boss.name, 30) || boss.name; boss.look = validLook(b.boss.look, boss.look); }
     const name = clean(b.name, 60); const hasTag = typeof b.tagline === 'string';
     run(db, 'UPDATE floors SET name=?, tagline=?, colors=?, boss=?, decor=?, public_chat=?, default_private=? WHERE id=?',
       name.length >= 2 ? name : f.name, hasTag ? clean(b.tagline, 120) : f.tagline, JSON.stringify(validColors(b.colors, JSON.parse(f.colors))), JSON.stringify(boss), JSON.stringify(validDecor(b.decor, JSON.parse(f.decor))),
       typeof b.publicChat === 'boolean' ? Number(b.publicChat) : f.public_chat, typeof b.defaultPrivate === 'boolean' ? Number(b.defaultPrivate) : f.default_private, f.id);
-    engine.emit(f.id, 'reload', {}, { persist: false });
-    json(res, 200, { ok: true });
-  });
+  };
   POST('/api/floors/:slug/staff/:id', async ({ req, res, p, ip }) => {
     const f = requireOwner(req, p.slug);
     limit('mutate', ip);
     const b = await readJson(req);
     const a = get(db, 'SELECT * FROM agents WHERE id=? AND floor_id=?', Number(p.id), f.id);
     if (!a) throw new HttpError(404, 'not_found');
+    if (Object.hasOwn(models.all, clean(b.name, 24).toLowerCase())) throw new HttpError(400, 'name_is_a_job', 'That is a job here, so the manager would mix them up. Pick another name.');
     run(db, 'UPDATE agents SET name=?, look=? WHERE id=?', clean(b.name, 24) || a.name, JSON.stringify(validLook(b.look, JSON.parse(a.look))), a.id);
+    ext.refreshCrew?.(f.id);
     engine.emit(f.id, 'reload', {}, { persist: false });
     json(res, 200, { ok: true });
   });
@@ -617,8 +626,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
 
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
-  const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext)].filter(Boolean);
+  const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings };
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext)].filter(Boolean);
   // Their timers run with the engine's: started by whoever starts the engine, stopped on close.
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
