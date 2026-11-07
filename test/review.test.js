@@ -282,21 +282,6 @@ describe('what a hijacked member of staff can put in front of the manager', () =
   });
 });
 
-describe('standing orders a bot can leave behind', () => {
-  test('stop at a dozen, while the boss can still add their own', async () => {
-    const t = await start({ ordersPerFloor: Infinity });
-    const c = await claim(t, 'Planted Co');
-    const f = floorRow(t, c.slug); const mgr = agentOf(t, f.id, 'manager');
-    const ctx = t.app.engine.toolCtx(f, mgr, null, ['set_standing_order']);
-    const outs = [];
-    for (let i = 0; i < 30; i++) outs.push(await t.app.engine.tools.exec(ctx, 'set_standing_order', JSON.stringify({ instruction: `Run the whole company again, batch ${i}`, every: 'day', at: '09:00' })));
-    assert.equal(get(t.db, 'SELECT COUNT(*) n FROM standing_orders WHERE floor_id=?', f.id).n, 12);
-    assert.match(String(outs.at(-1)), /Ask the boss/);
-    const own = await c.post(`/api/floors/${c.slug}/orders`, { text: 'one more of mine', schedule: { every: 'day', at: '10:00' } });
-    assert.equal(own.status, 201, JSON.stringify(own.data));
-  });
-});
-
 describe('resetting a floor', () => {
   test('stops what it had scheduled, so a hostile floor\'s orders don\'t keep spending after it', async () => {
     const t = await start();

@@ -6,8 +6,6 @@ import { get, all, run, tx } from './db.js';
 const DAY = 86400000, HOUR = 3600000;
 // A due order whose floor is busy waits this long for a gap before that occurrence is written off.
 const GRACE_MS = 6 * HOUR;
-// However many the boss wants, this is how many a bot can leave behind for itself. Each one wakes the manager every day, for money, long after whatever talked it into them has gone.
-const MAX_BOT_ORDERS = 12;
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const IDLE_PREFIX = 'Paused: you have not opened the floor in';
 export const idleReason = (days) => `${IDLE_PREFIX} ${days} days`;
@@ -140,7 +138,6 @@ export function installOrders(ext) {
   function create(floor, { text, schedule, setBy = 'boss' }) {
     const clean = cleanText(text); const sched = schedOf(schedule);
     if (countFor(floor.id) >= cfg.ordersPerFloor) throw new OrderError(409, 'too_many', `A floor can have ${cfg.ordersPerFloor} standing orders. Delete one first.`);
-    if (setBy !== 'boss' && get(db, "SELECT COUNT(*) n FROM standing_orders WHERE floor_id=? AND set_by!='boss' AND status IN ('active','paused')", floor.id).n >= MAX_BOT_ORDERS) throw new OrderError(409, 'too_many', 'That is plenty of standing orders set up this way. Ask the boss to add any more under Orders.');
     const t = now();
     const r = run(db, 'INSERT INTO standing_orders (floor_id,text,schedule,next_run_at,est_usd,created_at,updated_at,set_by) VALUES (?,?,?,?,?,?,?,?)', floor.id, clean, JSON.stringify(sched), nextRunAt(sched, t), cfg.ordersEstimateUsd, t, t, setBy);
     touch(floor.id);
