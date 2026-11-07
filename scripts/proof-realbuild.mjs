@@ -28,7 +28,7 @@ Test it for real before you finish: serve dist/, and with Playwright and Chromiu
 const TEST_BRIEF = `Test "Orbit Dodge" in this project. Build it if dist/ is missing, serve dist/ and play it in a real browser with Playwright using real key presses. Check that it starts, the score rises, a collision ends the run, the high score survives a reload, the manifest and service worker are valid, and there are no console errors. Fix anything small and clear. Write TEST-REPORT.md and save.`;
 
 function makeApp(extra = {}) {
-  const cfg = loadConfig({ AI_MODE: 'mock', COMPUTER_ENABLED: '1', DATA_DIR: join(DIR, 'data'), ADMIN_PASSWORD: 'proof-only', APPS_BASE_DOMAIN: `apps.localhost:${PORT}`, APPS_SCHEME: 'http', PUBLIC_ORIGIN: `http://localhost:${PORT}`, MOCK_DELAY_MS: '50', FLOOR_DAILY_USD: '5', GLOBAL_DAILY_USD: '5', TASK_MAX_USD: '3', SESSION_MAX_USD: process.env.PROOF_MAX_USD || '3', ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '' });
+  const cfg = loadConfig({ AI_MODE: 'mock', COMPUTER_ENABLED: '1', DATA_DIR: join(DIR, 'data'), ADMIN_PASSWORD: 'proof-only', APPS_BASE_DOMAIN: `apps.localhost:${PORT}`, APPS_SCHEME: 'http', PUBLIC_ORIGIN: `http://localhost:${PORT}`, MOCK_DELAY_MS: '50', FLOOR_DAILY_USD: '4.5', GLOBAL_DAILY_USD: '4.5', TASK_MAX_USD: '3', SESSION_MAX_USD: process.env.PROOF_MAX_USD || '2', ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '' });
   const db = openDb(cfg.dataDir);
   const lines = [];
   const app = createApp({ db, cfg, models: loadModels(), log: (level, msg, x) => { if (level !== 'info') console.log(level, msg, JSON.stringify(x ?? {})); }, ...extra });
@@ -65,7 +65,7 @@ async function build() {
   const report = { slug: claim.slug, recovery: 'not kept' };
   report.builder = await runTask('builder', 'Build Orbit Dodge', BRIEF);
   const spent = get(db, 'SELECT SUM(cost_usd) n FROM ledger').n;
-  if (report.builder.status !== 'failed' && spent < Number(process.env.PROOF_TESTER_UNDER || 3)) {
+  if (report.builder.status !== 'failed' && spent < Number(process.env.PROOF_TESTER_UNDER || 2)) {
     engine.hireStaff(floor, 'tester', 'Tess');
     report.tester = await runTask('tester', 'Test Orbit Dodge', TEST_BRIEF);
   }

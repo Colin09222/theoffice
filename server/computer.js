@@ -206,7 +206,11 @@ export class Computer {
         e.feed(floor.id, agent, `went back to the computer for "${task.title}"`, task.project);
         return;
       }
-      if (task.session_tries >= MAX_LOST) throw new ProviderError('The computer keeps disappearing.', { retryable: false });
+      if (task.session_tries >= MAX_LOST) {
+        // The floor pauses, and resuming it is someone deciding to try again, so the count starts over.
+        run(e.db, 'UPDATE tasks SET session_tries=0 WHERE id=?', task.id);
+        throw new ProviderError('The computer keeps disappearing.', { retryable: false });
+      }
       run(e.db, "UPDATE tasks SET session_id='', session_charged=0, session_sent=0, session_tries=session_tries+1 WHERE id=?", task.id);
       this.pushMessage(task.id, 'Your earlier computer was lost. /workspace/project now holds everything that had been saved, so check what is still missing and finish the job.');
       st.id = ''; st.charged = 0;
@@ -433,8 +437,6 @@ export class Computer {
   }
   lost(st) {
     const e = this.engine;
-    const t = get(e.db, 'SELECT session_tries FROM tasks WHERE id=?', st.taskId);
-    if (t.session_tries >= MAX_LOST) throw new ProviderError('The computer keeps disappearing.', { retryable: false });
     run(e.db, "UPDATE tasks SET status='todo', updated_at=? WHERE id=? AND status='doing'", e.now(), st.taskId);
     e.emitTask(st.taskId);
     return undefined;

@@ -10,6 +10,7 @@
     "start": "node server/index.js",
     "test": "node --test --test-concurrency=1 test/*.test.js",
     "e2e": "node test/browser/e2e.mjs",
+    "e2e:apps": "node test/browser/apps.mjs",
     "validate-models": "node scripts/validate-models.mjs"
   },
   "dependencies": {

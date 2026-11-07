@@ -7,7 +7,7 @@ export const DATA_LIMITS = {
   valueBytes: 16 * 1024, bodyBytes: 32 * 1024, projectBytes: 5 * 1024 * 1024, floorBytes: 25 * 1024 * 1024, projectKeys: 5000,
   playerKeys: 100, playerBytes: 256 * 1024, boards: 20, boardEntries: 1000, listMax: 100, scoreRowBytes: 120,
 };
-const KEY = /^[A-Za-z0-9_.:-]{1,64}$/;
+const KEY = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,63}$/;
 const PLAYER = /^[A-Za-z0-9_-]{32,64}$/;
 
 export class DataError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
