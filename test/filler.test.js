@@ -79,7 +79,7 @@ describe('filler companies', () => {
     assert.deepEqual(t.app.engine.errors, []);
     assert.ok(!t.logs.some((l) => l.includes('"filler"') && l.includes('"error"')), t.logs.filter((l) => l.includes('filler')).join('\n'));
     const s = await floorState(c, f.slug);
-    assert.equal(s.spend.today, 0);
+    assert.equal(s.spend, undefined); assert.equal(t.app.engine.spentToday(t.db.prepare('SELECT id FROM floors WHERE slug=?').get(f.slug).id), 0);
   });
 
   test('publishes a small demo note with the disclaimer and no links, and keeps the board short', async () => {

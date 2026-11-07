@@ -123,7 +123,8 @@ describe('the real tool loop, end to end against the stub', () => {
     const page = await new Client(t).raw('GET', `/f/${a.slug}/real-site/`);
     assert.match(await page.text(), /Real/); assert.equal(page.headers.get('content-security-policy'), 'sandbox allow-scripts allow-forms allow-popups');
     const n = stub.reqs.length;
-    assert.ok(Math.abs(s.spend.today - n * 0.01) < 1e-6, `spend ${s.spend.today} over ${n} calls`);
+    const spent = t.app.engine.spentToday(t.db.prepare('SELECT id FROM floors WHERE slug=?').get(a.slug).id);
+    assert.ok(Math.abs(spent - n * 0.01) < 1e-6, `spend ${spent} over ${n} calls`);
     const rows = t.db.prepare('SELECT DISTINCT model FROM ledger').all().map((r) => r.model);
     assert.ok(rows.includes('claude-opus-5-5'));
     assert.ok(stub.reqs.every((r) => r.body.tools.length > 0));

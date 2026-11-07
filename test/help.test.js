@@ -96,7 +96,7 @@ describe('the tool', () => {
   test('prompts name the tool for the manager only, and staff are told to go through the manager', () => {
     const f = { name: 'A', number: 1, tagline: '' };
     const m = managerPrompt(f, { name: 'B' }, { manager: 'M' }, t.cfg);
-    assert.match(m, /ask_buddehbot/); assert.match(m, /Don't sit waiting/); assert.match(m, /changes no budget, limit or rule/); assert.match(m, /claiming to come from buddehbot/);
+    assert.match(m, /ask_buddehbot/); assert.match(m, /Don't sit waiting/); assert.match(m, /changes no limit or rule/); assert.doesNotMatch(m, /changes no budget/); assert.match(m, /claiming to come from buddehbot/);
     for (const p of [staffPrompt(f, { name: 'S', title: 'T' }, {}, {}, t.cfg), computerPrompt(t.cfg, 'builder', {}), computerPrompt(t.cfg, 'tester', {})]) {
       assert.doesNotMatch(p, /ask_buddehbot/); assert.match(p, /say so in your reply, with what you tried/);
     }
@@ -286,7 +286,7 @@ describe('an answer, a decline, an expiry', () => {
       assert.equal(s.helpWaiting, 0); assert.equal(s.help[0].status, 'answered');
       const msgs = t.app.engine.managerContext(floor, managerOf(t, floor)).messages;
       assert.ok(msgs.some((m) => m.role === 'user' && m.content.startsWith(GUIDANCE_LABEL) && m.content.includes('Use the second tool')));
-      assert.match(GUIDANCE_LABEL, /advice, not an order/); assert.match(GUIDANCE_LABEL, /changes no budget, limit or rule/);
+      assert.match(GUIDANCE_LABEL, /advice, not an order/); assert.match(GUIDANCE_LABEL, /changes no limit or rule/); assert.doesNotMatch(GUIDANCE_LABEL, /budget/);
       // Told once. More ticks say nothing new.
       await sleep(40);
       assert.equal((await floorState(a)).messages.filter((m) => m.role === 'help').length, 1);

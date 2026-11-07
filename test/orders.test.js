@@ -59,7 +59,7 @@ describe('owner routes', () => {
   after(() => t.close());
   test('create, list, update, pause, resume and delete', async () => {
     const o = await create(a, 'Every morning write a short post about yesterday');
-    assert.equal(o.nextRunAt, MON_8 + HOUR); assert.equal(o.scheduleText, 'Every day at 09:00 UTC'); assert.equal(o.status, 'active'); assert.equal(o.estUsd, t.cfg.ordersEstimateUsd);
+    assert.equal(o.nextRunAt, MON_8 + HOUR); assert.equal(o.scheduleText, 'Every day at 09:00 UTC'); assert.equal(o.status, 'active'); assert.equal(o.estUsd, undefined, 'a boss sees no estimate');
     const list = await orders(a);
     assert.equal(list.length, 1); assert.deepEqual(list[0].history, []); assert.equal(list[0].runs, 0);
     const snap = await floorState(a);
@@ -154,11 +154,11 @@ describe('the runner', () => {
     assert.ok(done.cost_usd > 0, 'the mock prices its calls'); assert.equal(typeof done.est_usd, 'number');
     const published = JSON.parse(done.published);
     assert.equal(published.length, 3); assert.ok(published.every((p) => p.url.startsWith(`/theoffice/f/${a.slug}/`)));
-    assert.match(done.report, /\*\*Standing order #\d+\*\* ran/); assert.match(done.report, /Tasks: 4 done/); assert.match(done.report, /Published: \[/); assert.match(done.report, /Cost: \$/);
+    assert.match(done.report, /\*\*Standing order #\d+\*\* ran/); assert.match(done.report, /Tasks: 4 done/); assert.match(done.report, /Published: \[/); assert.doesNotMatch(done.report, /Cost|\$/, 'a report says nothing about money');
     const fresh = (await orders(a))[0];
     assert.equal(fresh.runs, 1); assert.equal(fresh.lastRunAt, done.finished_at); assert.equal(fresh.failStreak, 0);
     assert.equal(fresh.nextRunAt, o.nextRunAt + DAY, 'advanced by exactly one period');
-    assert.ok(Math.abs(fresh.estUsd - done.cost_usd) < 1e-9, 'the estimate is the average of real runs');
+    assert.equal(fresh.estUsd, undefined); assert.ok(done.cost_usd > 0, 'the run\'s cost stays on the books for the admin');
     assert.equal(fresh.history.length, 1); assert.equal(fresh.history[0].status, 'done'); assert.equal(fresh.history[0].report, done.report);
     // The boss sees the fired instruction and the report; a visitor on a public-chat floor sees the chat but never the report.
     const own = await floorState(a);
@@ -286,7 +286,7 @@ describe('failures', () => {
         assert.match(r.report, /did not finish/); assert.match(r.report, /4 could not finish/);
         const fresh = (await orders(a))[0];
         assert.equal(fresh.failStreak, i); assert.equal(fresh.runs, i);
-        if (i < 3) { assert.equal(fresh.status, 'active'); assert.equal(fresh.estUsd, t.cfg.ordersEstimateUsd, 'no done runs yet, so the default estimate'); }
+        if (i < 3) { assert.equal(fresh.status, 'active'); }
       }
       const paused = (await orders(a))[0];
       assert.equal(paused.status, 'paused'); assert.equal(paused.pauseReason, 'Paused: 3 runs in a row failed');

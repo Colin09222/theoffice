@@ -97,36 +97,57 @@ export function budgetReportText(r) {
 // ---- figures already written down by earlier versions ----
 // A report, a tool result or something the manager said while it could see the day's spend. They go once, at the first boot of this version, because they would
 // otherwise reach a boss in the chat history, a visitor on a public-chat floor, or a model replaying its own past.
-const AMOUNT = '\\$\\s?\\d[\\d,]*(?:\\.\\d+)?';
-const REPORT_LINE = new RegExp(`^- Cost: ${AMOUNT}[^\\n]*\\n?`, 'gm');
-const TOOL_COST = new RegExp(`(?:\\\\n|\\s)*\\(cost ${AMOUNT}\\)`, 'g');
-const PICTURE_COST = new RegExp(`( KB), ${AMOUNT}\\)`, 'g');
+const DOLLARS = '\\$\\s?\\d[\\d,]*(?:\\.\\d+)?';
+// The same thing said out loud: "about 5 cents", "a few cents", "under a dollar".
+const HOW_MANY = '(?:\\d[\\d,]*(?:\\.\\d+)?|(?:an? )?(?:few|couple(?: of)?|handful of)|(?:[a-z]+-)?(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)|half a|an?|some|several)';
+const SPOKEN = `\\b${HOW_MANY}\\s?(?:cents?\\b|¢|dollars?\\b|bucks?\\b|penn(?:y|ies)\\b|usd\\b)|\\busd\\s?\\d[\\d,]*(?:\\.\\d+)?`;
+const AMOUNT = `${DOLLARS}|${SPOKEN}`;
+const REPORT_LINE = new RegExp(`^- Cost: ${DOLLARS}[^\\n]*\\n?`, 'gm');
+const TOOL_COST = new RegExp(`(?:\\\\n|\\s)*\\(cost ${DOLLARS}\\)`, 'g');
+const PICTURE_COST = new RegExp(`( KB), ${DOLLARS}\\)`, 'g');
 // Any sentence that talks about the budget or what was spent loses its amounts. A price on something the boss is deciding on doesn't talk like that.
-const SPEND_SENTENCE = /[^.!?\n]*\b(?:spent|spending|budget|burn(?:ed|t)?|so far today|cost so far|daily cap)\b[^.!?\n]*(?:\.\d+[^.!?\n]*)*[.!?]?/gi;
-const hasAmount = new RegExp(AMOUNT);
-const amounts = new RegExp(AMOUNT, 'g');
+// A sentence ends at . ! ? or a line break, but the point in $0.42 doesn't end one.
+const SENTENCE = /(?:[^.!?\n]|\.(?=\d))+[.!?]?/g;
+const SPEND_WORD = /\b(?:spent|spend|spending|budget|burn(?:ed|t|ing)?|so far|daily cap|used|credits?)\b|\bcost\s*:|\bcost (?:us|me|the)\b|\b(?:run|task|job|step|session|call|work|round|batch)\s+(?:has\s+)?cost\b|\btoday'?s? (?:total|bill|cost|tab)\b|\brunning (?:total|cost|tab)\b/i;
+const hasAmount = new RegExp(AMOUNT, 'i');
+const amounts = new RegExp(AMOUNT, 'gi');
+const MIGHT_HAVE_MONEY = /\$|¢|cent|dollar|buck|penn|usd/i;
 export function scrubSpendText(text) {
   const s = String(text ?? '');
-  if (!s.includes('$')) return s;
-  return s.replace(REPORT_LINE, '').replace(TOOL_COST, '').replace(PICTURE_COST, '$1)').replace(SPEND_SENTENCE, (m) => (hasAmount.test(m) ? m.replace(amounts, '[amount removed]') : m));
+  if (!MIGHT_HAVE_MONEY.test(s)) return s;
+  return s.replace(REPORT_LINE, '').replace(TOOL_COST, '').replace(PICTURE_COST, '$1)').replace(SENTENCE, (m) => (SPEND_WORD.test(m) && hasAmount.test(m) ? m.replace(amounts, '[amount removed]') : m));
+}
+// The same test in SQL, so the first boot of a big building only reads rows that could need it. LIKE ignores case.
+const mightHaveMoney = (column) => `(${['$', '¢', 'cent', 'dollar', 'buck', 'penn', 'usd'].map((w) => `${column} LIKE '%${w}%'`).join(' OR ')})`;
+/** An old event as it would replay: no cost fields, and no amounts in what it says. */
+function scrubEventData(v) {
+  if (typeof v === 'string') return scrubSpendText(v);
+  if (Array.isArray(v)) return v.map(scrubEventData);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'costUsd' && k !== 'estUsd').map(([k, x]) => [k, scrubEventData(x)]));
+  return v;
 }
 export function scrubOldSpend(db) {
   if (get(db, "SELECT 1 x FROM settings WHERE key='spend_scrub_v1'")) return;
   const fix = (table, column, where = '1=1') => {
-    for (const r of all(db, `SELECT rowid id, ${column} v FROM ${table} WHERE ${column} LIKE '%$%' AND ${where}`)) {
+    for (const r of all(db, `SELECT rowid id, ${column} v FROM ${table} WHERE ${mightHaveMoney(column)} AND ${where}`)) {
       const next = scrubSpendText(r.v);
       if (next !== r.v) run(db, `UPDATE ${table} SET ${column}=? WHERE rowid=?`, next, r.id);
     }
   };
-  fix('messages', 'text');
+  // Not what a boss typed: those are their own words, and a figure there is theirs to know.
+  fix('messages', 'text', "role!='boss'");
   fix('tasks', 'result');
   fix('tasks', 'brief');
   // Only work that can still run: a finished task's transcript never goes near a model or a view again.
   fix('tasks', 'transcript', "status IN ('todo','doing','blocked','review')");
-  for (const r of all(db, "SELECT id, data FROM events WHERE type='message' AND data LIKE '%$%'")) {
+  fix('questions', 'text');
+  fix('help_requests', 'question');
+  fix('help_requests', 'tried');
+  for (const r of all(db, `SELECT id, type, data FROM events WHERE ${mightHaveMoney('data')}`)) {
     let d; try { d = JSON.parse(r.data); } catch { continue; }
-    const next = scrubSpendText(d.text);
-    if (next !== d.text) run(db, 'UPDATE events SET data=? WHERE id=?', JSON.stringify({ ...d, text: next }), r.id);
+    if (r.type === 'message' && d?.role === 'boss') continue;
+    const next = JSON.stringify(scrubEventData(d));
+    if (next !== r.data) run(db, 'UPDATE events SET data=? WHERE id=?', next, r.id);
   }
   // Orders may not exist yet in a brand-new building; if so there is nothing old in them.
   if (get(db, "SELECT 1 x FROM sqlite_master WHERE type='table' AND name='standing_runs'")) fix('standing_runs', 'report');

@@ -38,6 +38,28 @@ What the lanes say depends on what is switched on, so a floor is never told it c
 
 iOS stays off (`IOS_ENABLED` unset), and no prompt or button mentions it.
 
+### The building's budgets
+
+```
+BUDGET_ANTHROPIC_USD=120    # the most the whole building may ever spend with the Claude API
+BUDGET_OPENROUTER_USD=120   # the same for OpenRouter
+```
+
+These are lifetime totals over the whole ledger, old rows included, not daily caps. The first boot of this version works out which provider every existing ledger row went to, from its model id, so **money already spent counts**. Domains come out of the registrar balance and count towards neither. A typo in either value falls back to 120, never to no limit.
+
+- **At the limit:** roles on that provider stop and keep their work. The boss hears only that the building is out of budget and to ask the owner, once per stoppage. Roles on the other provider carry on. Computer sessions are capped to what is left of the Anthropic total, and one that reaches it stops the same way and resumes in the same session.
+- **To resume:** raise the value in `.env` and restart. Work picks up by itself and the boss is told it has.
+- **Overrun:** a running call holds its worst-case estimate in `budget_holds`, and nothing starts once what is left is spoken for, so a limit can only be passed by calls already under way, at most one per call slot (`MAX_CALLS_GLOBAL`, default 6). A call in flight when the process dies is charged what it held at the next boot.
+- **Who sees figures:** only the admin. Bosses and visitors get none, and neither do bots, in prompts or in tool results. The one exception is the price of a specific domain or purchase a boss has to decide on. The first boot also removes old figures from chat, reports, task results, questions, still-running transcripts and stored events, once (`settings.spend_scrub_v1`). A boss's own messages are left as they wrote them.
+
+```sh
+node scripts/admin.mjs budget --json       # spent, limit, remaining and a flag (50%, 80%, 100%) per provider, and spend per floor
+node scripts/admin.mjs purchases list --json   # pending purchase requests, floor text fenced as untrusted data
+node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   # the floor hears on the server's next tick
+```
+
+Run them with the server's own environment (`docker compose exec`), because `budget` reads the limits from the environment it is given. The admin page shows the same under **Building budget**.
+
 ## 3. Deploy
 
 ```sh

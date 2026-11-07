@@ -228,6 +228,16 @@ Results on the code as committed, with other workers' browser suites running on 
 - "Answering is not a go" and the Tester's fix-and-replay each held in one real run, on the Game lane. The plan's checklist was reworded after the Business run so it leaves out what is already in hand, and that wording has not met a real model.
 - Domain buying was off in every real run. Its code is unchanged, apart from the manager's prompt wording and the state message hiding it when off.
 
+## The building's budgets and admin-only money (branch `lanes`)
+Owner's words: "Limit the total building api costs to 120$ for openrouter and 120$ for claude api. But only make it visible to me the admin ok. Not anyone else."
+
+- **Limits.** `BUDGET_ANTHROPIC_USD` and `BUDGET_OPENROUTER_USD`, default 120, are lifetime totals over the whole ledger. The first boot works out which provider every old row went to. Computer sessions are capped to what is left. A running call or session holds its worst case in `budget_holds`, in the database, so nothing can start on money already spoken for and only calls already under way can pass a limit, at most one per slot. A crash can't hide spending: a call that was in flight is charged what it held at the next boot.
+- **At a limit.** That provider's roles stop and keep their work, and the boss hears only that the building is out of budget and to ask the owner. The other provider's roles carry on. Raising the value and restarting resumes work by itself, in the same session on a computer. Standing orders hold off and paid tools refuse without saying why.
+- **Who sees figures.** Only the admin, on the admin page and through `node scripts/admin.mjs budget --json`. A boss keeps the price of a domain or purchase they are deciding on and nothing else. Bots are told no budget, limit or cost in any prompt or tool result, and a provider's own error text, which can carry account balances, stays in the log.
+- **Old figures.** The first boot removes them once from chat, reports, task results, questions, still-running transcripts and stored events. That includes amounts said in words: the "we have spent about 5 cents" from an earlier run is the case that found the gap. It works by matching a spend word and an amount in one sentence, so an unusual phrasing could survive, and an old sentence about a real price with "spent" in it could lose its number. A boss's own messages are left as they wrote them.
+- **Purchases.** `node scripts/admin.mjs purchases list --json` lists pending requests with everything a floor wrote fenced as untrusted data, and `purchases mark` decides one. The floor hears on the server's next tick.
+- **Tests.** `test/budget.test.js`, 41 tests, includes leak tests over an owner session, a visitor, replayed events, the ticker, the wall and every prompt and tool result in every configuration. The browser e2e checks the page text on every tab.
+
 ## Known limits
 - An interrupted task resumes from its last completed step, and the aborted call is charged as an estimate.
 - Spend caps reset at midnight UTC.

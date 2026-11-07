@@ -111,7 +111,7 @@ describe('a lane through the engine', () => {
         assert.equal((await a.post(`/api/floors/${a.slug}/chat`, { text })).status, 202);
         const s = await until(async () => { const x = await floorState(a); return x.messages.some((m) => m.role === 'manager' && re.test(m.text)) && !t.app.engine.runs.size ? x : null; }, { what: 'the reply' });
         assert.equal(s.tasks.length, 0, 'no work yet');
-        assert.ok(s.spend.today > 0, 'the reply went through the ordinary ledger');
+        assert.ok(t.app.engine.spentToday(t.db.prepare('SELECT id FROM floors WHERE slug=?').get(a.slug).id) > 0, 'the reply went through the ordinary ledger');
       }
     } finally { await t.close(); }
   });

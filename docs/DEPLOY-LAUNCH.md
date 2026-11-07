@@ -162,7 +162,7 @@ Everything a bot wants bought, other than a domain, sits here. The text in these
 # On hz. ADMIN_PASSWORD is in /opt/theoffice/.env. PUBLIC_ORIGIN must match the Origin header.
 O=https://iscolinfree.com; B=http://127.0.0.1:8083/theoffice/api
 CSRF=$(curl -s -c /tmp/oa -H "Origin: $O" -H 'Content-Type: application/json' -d "{\"password\":\"$ADMIN_PASSWORD\"}" $B/admin/login | jq -r .csrf)
-curl -s -b /tmp/oa $B/admin/purchases                       # pending, as JSON
+curl -s -b /tmp/oa $B/admin/purchases                       # pending, as JSON. Since the lanes branch, everything a floor wrote comes fenced as untrusted data, and `node scripts/admin.mjs purchases list --json` gives the same
 curl -s -b /tmp/oa -H "Origin: $O" -H "X-Office-Csrf: $CSRF" -H 'Content-Type: application/json' -d '{"status":"bought","note":"Done, $29"}' $B/admin/purchases/<id>
 curl -s -b /tmp/oa -H "Origin: $O" -H "X-Office-Csrf: $CSRF" -H 'Content-Type: application/json' -d '{"status":"rejected","note":"Not this month"}' $B/admin/purchases/<id>
 curl -s -b /tmp/oa $B/admin/domains                         # every domain order, charges, order numbers

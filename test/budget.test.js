@@ -48,6 +48,8 @@ function fileBuilding(dir) {
   return up;
 }
 const tmp = () => mkdtempSync(join(tmpdir(), 'office-budget-'));
+// The daily caps have their own tests. Here they would stop a floor first and hide what the lifetime limit does.
+const NO_DAILY = { floorDailyUsd: Infinity, globalDailyUsd: Infinity, taskMaxUsd: Infinity };
 
 describe('which provider a ledger row was paid to', () => {
   test('old rows are attributed from their model id when the column first appears', () => {
@@ -105,7 +107,7 @@ describe('when a provider reaches its total', () => {
     const s = await floorState(c);
     assert.equal(s.floor.paused, false, 'nothing for the boss to resume: it is not theirs to fix');
     // Every further word from the boss gets a line, but never a number.
-    await c.post(`/api/floors/${c.slug}/chat`, { text: 'hello?' });
+    await c.post(`/api/floors/${c.slug}/chat`, { text: 'go build thing, please' });
     await until(() => notices(t, floor).length === 2, { what: 'the second line' });
     assert.doesNotMatch(notices(t, floor)[1], /\d/);
     assert.equal(get(t.db, 'SELECT manager_wake w FROM floors WHERE id=?', floor.id).w, 1, 'the manager is still owed a turn');
@@ -116,7 +118,7 @@ describe('when a provider reaches its total', () => {
   });
   test('a role on the other provider keeps working while the Anthropic roles wait', async () => {
     const seen = [];
-    const t = await start({ budgetAnthropicUsd: 5 }, { llm: recording(seen) });
+    const t = await start({ budgetAnthropicUsd: 5, ...NO_DAILY }, { llm: recording(seen) });
     t.app.engine.runManager = async () => {};
     const c = await claim(t, 'Half Stopped'); const floor = floorOf(t, c);
     hire(t, floor, 'tester');
@@ -146,19 +148,23 @@ describe('when a provider reaches its total', () => {
     assert.equal((await floorState(c)).floor.outOfBudget, true);
   });
   test('a run already going stops at its next call, keeps its work and goes back in the queue', async () => {
-    const seen = [];
-    const t = await start({ budgetAnthropicUsd: 100 }, { llm: recording(seen) });
+    const seen = []; const inner = recording(seen);
+    // The total goes while the first call is out, so the same run's second call is the one that finds it gone. Waiting on the clock could miss a run this short.
+    let t = null; let gone = false;
+    const llm = { chat(x) { if (!gone && x.meta.kind === 'staff') { gone = true; spend(t.db, 'anthropic', 100); } return inner.chat(x); } };
+    t = await start({ budgetAnthropicUsd: 100, ...NO_DAILY }, { llm });
     t.app.engine.runManager = async () => {};
     const c = await claim(t, 'Mid Run'); const floor = floorOf(t, c);
     const { id } = assign(t, floor, 'researcher');
-    await until(() => taskOf(t, id).transcript, { what: 'some work to be saved' });
-    spend(t.db, 'anthropic', 100);
-    await until(() => taskOf(t, id).status === 'todo' && !t.app.engine.runs.size, { what: 'the task to go back' });
+    await until(() => gone && taskOf(t, id).status === 'todo' && !t.app.engine.runs.size, { what: 'the task to go back' });
+    const calls = seen.length;
+    assert.equal(calls, 1, 'no second call after the total went');
     assert.ok(JSON.parse(taskOf(t, id).transcript).length > 2, 'its work is kept');
     assert.notEqual(taskOf(t, id).status, 'failed');
     await until(() => notices(t, floor).length === 1, { what: 'the boss to hear' });
     t.cfg.budgetAnthropicUsd = 200;
     await until(() => taskOf(t, id).status === 'review', { what: 'it to finish' });
+    assert.ok(seen.length > calls, 'and it carried on');
   });
   test('paid tools refuse without saying why, and only for their own provider', async () => {
     const t = await start({ budgetOpenrouterUsd: 1, budgetAnthropicUsd: 1, mediaMock: true, searchMock: true });
@@ -198,25 +204,24 @@ describe('when a provider reaches its total', () => {
 
 describe('in-flight calls hold their money', () => {
   test('a hold exists while a call runs and is gone after it, and nothing starts on money already spoken for', async () => {
-    const releases = []; const started = [];
+    const releases = []; const started = []; let free = false;
     const inner = createMockClient({ mockDelayMs: 0 });
-    const llm = { async chat(x) { started.push(x.meta.kind); await new Promise((r) => releases.push(r)); return inner.chat(x); } };
-    const t = await start({ budgetAnthropicUsd: 0.5 + MIN_ROOM_USD }, { llm });
+    const llm = { async chat(x) { started.push(x.meta.role); if (!free) await new Promise((r) => releases.push(r)); return inner.chat(x); } };
+    // Each call's worst case is about $0.25 to $0.35, so two of them speak for all of this.
+    const t = await start({ budgetAnthropicUsd: 0.4 }, { llm });
     t.app.engine.runManager = async () => {};
     const c = await claim(t, 'Holds'); const floor = floorOf(t, c);
-    for (const to of ['researcher', 'writer', 'designer']) assign(t, floor, to);
-    await until(() => started.length >= 1, { what: 'the first call' });
-    await sleep(100);
-    const held = get(t.db, 'SELECT COUNT(*) n, SUM(usd) usd FROM budget_holds').n;
-    assert.ok(held >= 1, 'it is written down');
-    const room = t.app.engine.budget.room('anthropic');
-    assert.ok(started.length === held, 'one hold per running call');
-    // Each call's worst case is well over what is left, so the first two speak for it all and the third has to wait.
-    assert.ok(started.length < 3, `${started.length} calls started on $0.60, room ${room}`);
-    const seen = started.length;
-    while (releases.length) releases.shift()();
-    await until(() => started.length > seen || get(t.db, 'SELECT COUNT(*) n FROM budget_holds').n === 0, { what: 'the first calls to settle' });
-    for (let i = 0; i < 400; i++) { while (releases.length) releases.shift()(); if (!t.app.engine.runs.size && !get(t.db, "SELECT 1 x FROM tasks WHERE status='doing'")) break; await sleep(5); }
+    try {
+      for (const to of ['researcher', 'writer', 'designer']) assign(t, floor, to);
+      await until(() => started.length >= 2, { what: 'the first calls' });
+      await sleep(200);
+      assert.deepEqual(started, ['researcher', 'writer'], 'the third has to wait');
+      assert.equal(get(t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 2, 'each running call is written down');
+      assert.ok(t.app.engine.budget.room('anthropic') <= 0);
+      assert.equal(t.app.engine.budget.out('anthropic'), false, 'held is not spent, so nobody has been stopped');
+      assert.equal(notices(t, floor).length, 0);
+    } finally { free = true; while (releases.length) releases.shift()(); }
+    await until(() => !t.app.engine.runs.size && !get(t.db, "SELECT 1 x FROM tasks WHERE status IN ('todo','doing')"), { what: 'everyone to finish' });
     assert.equal(get(t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0, 'every hold was given back');
   });
   test('many floors at once overrun the total by no more than one call per slot', async () => {
@@ -253,7 +258,7 @@ describe('across a restart', () => {
   test('the total, the stop and the told-once all survive, and raising the setting resumes the work', async () => {
     const dir = tmp(); const up = fileBuilding(dir);
     try {
-      let t = await up({ budgetAnthropicUsd: 10 });
+      let t = await up({ budgetAnthropicUsd: 10, ...NO_DAILY });
       const code = (await import('../server/auth.js')).issueCode(t.db, null);
       const c = new Client(t);
       const r = await c.post('/api/claim', { code, name: 'Restart Co', tagline: 'x', bossName: 'Boss', colors: { primary: '#aa3300', accent: '#ffcc00' }, look: { hair: 'bun' } });
@@ -266,14 +271,14 @@ describe('across a restart', () => {
       await t.close();
 
       const seen = [];
-      t = await up({ budgetAnthropicUsd: 10 }, { llm: recording(seen) });
+      t = await up({ budgetAnthropicUsd: 10, ...NO_DAILY }, { llm: recording(seen) });
       await sleep(250);
       assert.equal(seen.length, 0, 'still stopped after a restart');
       assert.equal(notices(t, floor).length, told, 'and not told again');
       assert.equal(total(t.db, 'anthropic'), 10);
       await t.close();
 
-      t = await up({ budgetAnthropicUsd: 30 }, { llm: recording(seen) });
+      t = await up({ budgetAnthropicUsd: 30, ...NO_DAILY }, { llm: recording(seen) });
       await until(() => seen.length > 0, { what: 'work to resume on the new limit' });
       await until(() => /budget again/.test(notices(t, floor).at(-1)), { what: 'the boss to hear' });
       await t.close();
@@ -445,9 +450,8 @@ const scanPrompt = (text, where) => {
 
 describe('leak tests: what bosses and visitors can see', () => {
   async function busyFloor() {
-    const t = await start({ ...CAPS, publicOrigin: '', mediaMock: true, searchMock: true });
+    const t = await start({ ...CAPS, publicOrigin: '', mediaMock: true, searchMock: true, ordersTickMs: 20 });
     const owner = await claim(t, 'Leaky Tiny');
-    await owner.post(`/api/floors/${owner.slug}/customise`, {}).catch(() => {});
     run(t.db, 'UPDATE floors SET public_chat=1 WHERE slug=?', owner.slug);
     const visitor = new Client(t);
     const liveOwner = sse(owner, owner.slug); const liveVisitor = sse(visitor, owner.slug);
@@ -509,7 +513,7 @@ describe('leak tests: what bosses and visitors can see', () => {
     const ticker = await b.visitor.get('/api/building/ticker?limit=50');
     assert.ok(ticker.data.items.length >= 1); scan(ticker.data, 'ticker', v);
     const wall = await b.visitor.get('/api/building/launched?limit=50');
-    assert.ok(wall.data.items.length >= 1, 'the wall has something on it'); scan(wall.data, 'launched wall', v);
+    assert.ok(wall.data.projects.length >= 1, 'the wall has something on it'); scan(wall.data, 'launched wall', v);
     scan((await b.visitor.get('/api/floors')).data, 'lobby', v);
     scan((await b.visitor.get('/api/me')).data, 'me', v);
     assert.equal((await b.visitor.get(`/api/floors/${b.owner.slug}/orders`)).status, 401);
@@ -647,6 +651,14 @@ describe('figures written down before this version', () => {
     assert.equal(scrubSpendText('tinyteacups.com is $11.46 for a year.'), 'tinyteacups.com is $11.46 for a year.');
     assert.equal(scrubSpendText('Priced at $9.50 a month.'), 'Priced at $9.50 a month.');
   });
+  test('an amount said in words goes too, because that is how a manager actually said it', () => {
+    for (const said of ['we have spent about 5 cents', 'We have spent about 5 cents so far, boss.', 'That job cost about five cents.', 'We spent a few cents on that.', 'So far 5¢.', 'The budget is down by forty-five cents.', 'We used under a dollar.', 'Spent 2 bucks today.', 'That run cost USD 0.05.', 'We have used 0.05 dollars of credit.']) {
+      const clean = scrubSpendText(said);
+      assert.doesNotMatch(clean, /\d\s?(?:cents?|¢|bucks?|dollars?)|five cents|few cents|a dollar|usd/i, said);
+      assert.match(clean, /\[amount removed\]/, said);
+    }
+    for (const fine of ['Priced at 50 cents a cookie.', 'A 10 cent stamp goes on every card.', 'He made a few dollars selling lemonade.', 'Nobody has mentioned a recent centre.']) assert.equal(scrubSpendText(fine), fine);
+  });
   test('the first boot cleans the rows that would otherwise show, and only once', async () => {
     const dir = tmp(); const up = fileBuilding(dir);
     try {
@@ -666,6 +678,13 @@ describe('figures written down before this version', () => {
       run(raw, "INSERT INTO events (floor_id,type,data,created_at) VALUES (?,'message',?,1)", floor.id, JSON.stringify({ id: Number(msg.lastInsertRowid), role: 'report', text: oldReport }));
       const transcript = JSON.stringify([{ role: 'user', content: 'x' }, { role: 'tool', tool_call_id: 'a', content: 'Saved projects/p/images/a.png (3 KB, $0.040). In a page use it.' }, { role: 'tool', tool_call_id: 'b', content: 'verdict\n\n(cost $0.010)' }]);
       const task = Number(run(raw, "INSERT INTO tasks (floor_id,title,brief,agent_id,status,result,transcript,created_at,updated_at) VALUES (?,'Old','b',?,'blocked','Done, for $0.42 spent.',?,1,1)", floor.id, mgr.id, transcript).lastInsertRowid);
+      // No dollar sign anywhere in these, which is how the real one slipped through.
+      run(raw, "INSERT INTO messages (floor_id,role,agent_id,text,created_at) VALUES (?,'manager',?,'Good news: we have spent about 5 cents so far.',1)", floor.id, mgr.id);
+      run(raw, "INSERT INTO events (floor_id,type,data,created_at) VALUES (?,'message',?,1)", floor.id, JSON.stringify({ id: 999, role: 'manager', text: 'Good news: we have spent about 5 cents so far.' }));
+      run(raw, "INSERT INTO events (floor_id,type,data,created_at) VALUES (?,'task',?,1)", floor.id, JSON.stringify({ id: 998, title: 'Old', status: 'done', costUsd: 0.123, result: 'That job cost about five cents.' }));
+      run(raw, "INSERT INTO questions (floor_id,agent_id,text,created_at) VALUES (?,?,'We have burned 40 cents, shall I carry on?',1)", floor.id, mgr.id);
+      // The boss's own words stay theirs.
+      run(raw, "INSERT INTO messages (floor_id,role,text,created_at) VALUES (?,'boss','My budget for the launch is $500.',1)", floor.id);
       run(raw, "INSERT INTO standing_orders (id,floor_id,text,schedule,next_run_at,created_at,updated_at) VALUES (77,?,'x','{\"every\":\"day\",\"at\":\"09:00\",\"tz\":\"UTC\"}',99999999999999,1,1)", floor.id);
       run(raw, "INSERT INTO standing_runs (order_id,floor_id,started_at,finished_at,status,cost_usd,est_usd,report) VALUES (77,?,1,2,'done',0.123,0.6,?)", floor.id, oldReport);
       raw.close();
@@ -673,6 +692,9 @@ describe('figures written down before this version', () => {
       t.app.engine.runManager = async () => {};
       const m = all(t.db, 'SELECT text FROM messages WHERE floor_id=? ORDER BY id', floor.id).map((x) => x.text).join('\n');
       assert.doesNotMatch(m, /Cost:|\$2\.50|\$10\b/); assert.match(m, /\$11\.46 a year/);
+      assert.doesNotMatch(m, /5 cents/); assert.match(m, /My budget for the launch is \$500/);
+      for (const e of all(t.db, 'SELECT data FROM events WHERE floor_id=?', floor.id)) { assert.doesNotMatch(e.data, /costUsd|5 cents|five cents/); }
+      assert.doesNotMatch(get(t.db, 'SELECT text FROM questions WHERE floor_id=?', floor.id).text, /40 cents/);
       for (const e of all(t.db, "SELECT data FROM events WHERE floor_id=? AND type='message'", floor.id)) assert.doesNotMatch(e.data, /Cost: \$/);
       const row = get(t.db, 'SELECT result,transcript FROM tasks WHERE id=?', task);
       assert.doesNotMatch(row.transcript, /\$/); assert.equal(JSON.parse(row.transcript).length, 3, 'still a transcript');
@@ -711,11 +733,11 @@ describe('the admin CLI', () => {
       spend(db, 'openrouter', 6, a); r = report(); assert.equal(r.providers.openrouter.flag, '50%'); assert.equal(r.flag, '80%', 'the top-level flag is the highest');
       spend(db, 'anthropic', 19.95, a); r = report(); assert.equal(r.providers.anthropic.flag, '100%', 'work has stopped, so the top flag shows'); assert.equal(r.providers.anthropic.stopped, true);
       spend(db, 'anthropic', 1, a); r = report(); assert.equal(r.providers.anthropic.remainingUsd, 0, 'an overrun reads as nothing left'); assert.ok(r.providers.anthropic.percent > 100);
-      assert.equal(r.floors[0].floorNumber, 4); assert.equal(r.floors[0].totalUsd, 107); assert.equal(r.floors[0].anthropicUsd, 101); assert.equal(r.floors[0].openrouterUsd, 6);
+      assert.equal(r.floors[0].floorNumber, 4); assert.equal(r.floors[0].totalUsd, 106.95); assert.equal(r.floors[0].anthropicUsd, 100.95); assert.equal(r.floors[0].openrouterUsd, 6);
       run(db, "INSERT INTO budget_holds (provider,kind,floor_id,usd,created_at) VALUES ('openrouter','call',?,0.5,1)", a);
       assert.equal(report().providers.openrouter.heldUsd, 0.5);
       // The figures a person reads say the same thing.
-      const text = cli('budget'); assert.equal(text.status, 0); assert.match(text.stdout, /anthropic\s+spent \$101\.00 of \$100\.00/); assert.match(text.stdout, /\[100%\]/); noKeys(text.stdout);
+      const text = cli('budget'); assert.equal(text.status, 0); assert.match(text.stdout, /anthropic\s+spent \$100\.95 of \$100\.00/); assert.match(text.stdout, /\[100%\]/); noKeys(text.stdout);
       db.close();
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });

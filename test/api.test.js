@@ -1,6 +1,6 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { boot, Client, claim, adminClient, floorState, waitDone, until, sse, sleep, allDone } from './helpers.js';
+import { boot, Client, claim, adminClient, floorState, spentToday, waitDone, until, sse, sleep, allDone } from './helpers.js';
 
 describe('claiming and sessions', () => {
   let t; before(async () => { t = await boot(); }); after(() => t.close());
@@ -88,10 +88,11 @@ describe('two floors, mock mode, end to end', () => {
       assert.deepEqual(f.projects.map((p) => p.kind).sort(), ['doc', 'research', 'site']);
       assert.ok(f.projects.some((p) => p.slug === slug), f.projects.map((p) => p.slug).join());
       const kinds = new Set(s.events.map((e) => e.type));
-      for (const k of ['agent', 'task', 'feed', 'meeting', 'handoff', 'spend', 'message', 'token', 'project']) assert.ok(kinds.has(k), `missing ${k}`);
+      for (const k of ['agent', 'task', 'feed', 'meeting', 'handoff', 'message', 'token', 'project']) assert.ok(kinds.has(k), `missing ${k}`);
+      assert.ok(!kinds.has('spend'), 'what was spent is the admin\'s alone');
       const states = new Set(s.events.filter((e) => e.type === 'agent').map((e) => e.data.state));
       for (const k of ['thinking', 'typing', 'reading', 'idle']) assert.ok(states.has(k), `no agent state ${k}`);
-      assert.ok(f.spend.today > 0); assert.match(f.messages.at(-1).text, /All done/);
+      assert.equal(f.spend, undefined); assert.ok(spentToday(t, f.floor) > 0); assert.match(f.messages.at(-1).text, /All done/);
       assert.ok(f.messages.at(-1).text.includes(`/theoffice/f/${f.floor.slug}/${slug}/`));
     }
     await sa.close(); await sb.close();
@@ -139,8 +140,8 @@ describe('boss controls', () => {
     assert.equal((await a.post(`/api/floors/${a.slug}/control`, { action: 'pause' })).data.paused, true);
     await until(async () => (await floorState(a)).agents.every((x) => x.state === 'idle'), { what: 'idle' });
     const s = await floorState(a); assert.equal(s.floor.paused, true); assert.ok(s.tasks.some((x) => x.status === 'todo'));
-    const cost = s.spend.today; await sleep(80);
-    assert.equal((await floorState(a)).spend.today, cost, 'no spend while paused');
+    const cost = spentToday(t, a); await sleep(80);
+    assert.equal(spentToday(t, a), cost, 'no spend while paused');
     await a.post(`/api/floors/${a.slug}/control`, { action: 'resume' });
     const f = await waitDone(a); assert.ok(f.tasks.every((x) => x.status === 'done'));
   });
@@ -226,18 +227,18 @@ describe('budget, concurrency and provider failure', () => {
     const stopped = await until(async () => { const s = await floorState(a); return s.floor.budgetStopped && s.agents.every((x) => x.state === 'idle') ? s : null; }, { what: 'budget stop' });
     assert.ok(stopped.messages.some((m) => /budget for today/.test(m.text)));
     assert.equal(stopped.messages.filter((m) => /budget for today/.test(m.text)).length, 1);
-    assert.ok(stopped.spend.today >= 2 && stopped.spend.today < 2 + 3 * 0.5 + 0.01, `spent ${stopped.spend.today}`);
+    assert.ok(spentToday(t, a) >= 2 && spentToday(t, a) < 2 + 3 * 0.5 + 0.01, `spent ${spentToday(t, a)}`);
     assert.ok(stopped.tasks.some((x) => x.status === 'todo'), 'unfinished work is kept for tomorrow');
-    const spent = stopped.spend.today; await sleep(1200);
-    assert.equal((await floorState(a)).spend.today, spent, 'nothing spent after the cap');
+    const spent = spentToday(t, a); await sleep(1200);
+    assert.equal(spentToday(t, a), spent, 'nothing spent after the cap');
     await a.post(`/api/floors/${a.slug}/chat`, { text: 'one more thing' });
     assert.match((await floorState(a)).messages.at(-1).text, /first thing tomorrow/);
     await b.post(`/api/floors/${b.slug}/chat`, { text: 'go build other' });
     await waitDone(b);
     clock += 86400000;
     const fresh = await floorState(a);
-    assert.equal(fresh.floor.budgetStopped, false); assert.equal(fresh.spend.today, 0);
-    await until(async () => (await floorState(a)).spend.today > 0, { what: 'next day work' });
+    assert.equal(fresh.floor.budgetStopped, false); assert.equal(spentToday(t, a), 0);
+    await until(() => spentToday(t, a) > 0, { what: 'next day work' });
     await t.close();
   });
   test('the global cap stops every floor', async () => {

@@ -334,7 +334,8 @@ describe('generate_image', () => {
   });
   test('budget is checked first, and bad output or a hostile name goes nowhere', async () => {
     const h1 = await withMedia(fetcher(png()), { floorDailyUsd: 0.01 });
-    assert.match(await h1.tool('designer', 'generate_image', { prompt: 'x', name: 'a', project: 'teacups' }), /budget/);
+    const refused = await h1.tool('designer', 'generate_image', { prompt: 'x', name: 'a', project: 'teacups' });
+    assert.match(refused, /not available right now/); assert.doesNotMatch(refused, /budget|\$/, 'and a bot isn\'t told why');
     const notPic = await withMedia(fetcher(png(0.01, Buffer.from('<script>alert(1)</script>'))));
     assert.match(await notPic.tool('designer', 'generate_image', { prompt: 'x', name: 'a', project: 'teacups' }), /not a picture/);
     assert.equal(all(notPic.t.db, 'SELECT 1 FROM files').length, 0);
@@ -531,9 +532,11 @@ describe('purchase requests for the owner\'s assistant', () => {
     await h.tool('researcher', 'file_purchase_request', { item: 'Fonts', price: 15, why: 'For the site' });
     const a = await adminClient(h.t);
     const list = (await a.get('/api/admin/purchases')).data;
-    assert.equal(list.purchases.length, 2); assert.match(list.notice, /written by bots/);
-    const row = list.purchases.find((p) => p.item === 'Stock photos');
-    assert.equal(row.priceUsd, 29); assert.equal(row.link, 'https://shop.example/x'); assert.equal(row.status, 'pending');
+    assert.equal(list.purchases.length, 2); assert.match(list.notice, /written by a bot/);
+    // What a floor wrote comes fenced, because the reader is more privileged than the writer. The price and the status are the office's own.
+    const row = list.purchases.find((p) => p.item.includes('Stock photos'));
+    assert.ok(row.item.startsWith(`<<<UNTRUSTED_FLOOR_DATA ${list.fence} `));
+    assert.equal(row.priceUsd, 29); assert.match(row.link, /https:\/\/shop\.example\/x/); assert.ok(row.link.startsWith('<<<UNTRUSTED_FLOOR_DATA')); assert.equal(row.status, 'pending');
     assert.equal((await new Client(h.t).get('/api/admin/purchases')).status, 401);
     assert.equal((await h.c.get('/api/admin/purchases')).status, 401, 'a boss is not the admin');
     assert.equal((await a.post(`/api/admin/purchases/${row.id}`, { status: 'pending' })).status, 400);

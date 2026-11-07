@@ -12,6 +12,8 @@ const results = []; let failures = 0;
 const check = (name, ok, detail = '') => { results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); if (!ok) failures++; console.log(results.at(-1)); };
 const step = async (name, fn) => { try { await fn(); check(name, true); } catch (e) { check(name, false, e.message); } };
 const q = (s) => JSON.stringify(s);
+// The page as a person reads it, less the one figure a boss keeps: the price of something they are deciding on.
+const moneyOnPage = (pg) => pg.ev(`(() => { const c = document.body.cloneNode(true); for (const e of c.querySelectorAll('.price, [data-buy], style, script')) e.remove(); const m = c.textContent.match(/.{0,50}(?:\\$\\s?\\d|\\d\\s?cents?\\b|\\bUSD\\b).{0,30}/); return m ? m[0] : null; })()`);
 
 // Floors with a question waiting, for the building manager's half of the test.
 const helpFloors = [];
@@ -141,7 +143,7 @@ async function run(label, opts, t, adminCode) {
     await sleep(400);
     await shot('06-chat');
   });
-  await step(tag('watching: real events drive characters, feed, board and spend'), async () => {
+  await step(tag('watching: real events drive characters, feed and board, with no figures on show'), async () => {
     await p.ev('window.__seen = { typing: 0, meeting: 0, carry: 0, walk: 0, bubbles: 0 }; window.__samp = setInterval(() => { const v = window.__office?.view; if (!v) return; for (const a of v.actors.values()) { if (a.state === "typing") window.__seen.typing++; if (a.path.length) window.__seen.walk++; if (a.char.paper.visible) window.__seen.carry++; if (!a.bubble.hidden) window.__seen.bubbles++; } }, 100); void 0');
     await p.type('.chat-input textarea', `Great, go build ${phone ? 'clown college' : 'midnight rolls'} [buy] [ask]`);
     await p.click('.send');
@@ -170,10 +172,9 @@ async function run(label, opts, t, adminCode) {
     if (!seen.typing) throw new Error('nobody typed');
     if (!seen.carry) throw new Error('no papers carried');
     if (!seen.bubbles) throw new Error('no speech bubbles');
-    const spend = await p.ev('window.__office.state.spend.today');
-    if (!(spend > 0)) throw new Error('no spend recorded');
-    const cap = t.cfg.floorDailyUsd.toFixed(2);
-    if (!new RegExp(`\\$0\\.\\d+ of \\$${cap.replace('.', '\\.')} today`).test(await p.ev('document.querySelector(".spend").textContent'))) throw new Error('spend label');
+    if (!(t.db.prepare('SELECT COALESCE(SUM(cost_usd),0) n FROM ledger').get().n > 0)) throw new Error('nothing went on the ledger');
+    if (await p.ev('window.__office.state.spend !== undefined')) throw new Error('the floor state carries what was spent');
+    if (await p.ev('document.querySelector(".spend") !== null')) throw new Error('there is a spend label on the page');
   });
   await step(tag('purchase requests go to the building manager, with no way to pay from here'), async () => {
     await p.click('[data-tab=requests]');
@@ -253,6 +254,9 @@ async function run(label, opts, t, adminCode) {
     if (!st.msgs) throw new Error('visitor can read messages');
     if (st.projects !== 2) throw new Error(`visitor sees ${st.projects} projects`);
     if (/Pause|Stop|Redirect|Customise/.test(st.controls)) throw new Error('visitor has controls');
+    const found = await moneyOnPage(v);
+    if (found) throw new Error(`a visitor sees: ${found}`);
+    if (/budget/i.test(await v.ev('document.body.textContent'))) throw new Error('a visitor reads about the budget');
     await v.goto(`http://localhost:${t.port}${docUrl}`);
     await sleep(300);
     if (!/Not found/.test(await v.ev('document.body.textContent'))) throw new Error('visitor reached a private doc');
@@ -296,7 +300,7 @@ async function run(label, opts, t, adminCode) {
     await p.until('(() => { const o = (window.__office.state.orders || [])[0]; return !!o && o.history.length > 0 && o.history[0].status !== "running"; })()', 'run finished and recorded', 40000);
     const run = await p.ev('JSON.stringify(window.__office.state.orders[0].history[0])');
     const r = JSON.parse(run);
-    if (!r.report || typeof r.costUsd !== 'number' || typeof r.estUsd !== 'number') throw new Error(`run record: ${run.slice(0, 200)}`);
+    if (!r.report || /Cost|\$/.test(r.report) || 'costUsd' in r || 'estUsd' in r) throw new Error(`run record: ${run.slice(0, 200)}`);
     await p.click('[data-tab=chat]');
     await p.until('document.querySelector(".msg.report") !== null', 'report in the chat');
     await p.click('[data-tab=orders]');
@@ -307,6 +311,17 @@ async function run(label, opts, t, adminCode) {
     await p.ev('window.confirm = () => true');
     await p.click('article.order [data-delete]');
     await p.until('document.querySelector("article.order") === null', 'deleted');
+  });
+  await step(tag('no spend or budget figure anywhere a boss can look, on any tab'), async () => {
+    for (const name of await p.ev('[...document.querySelectorAll("[data-tab]")].map((x) => x.dataset.tab)')) {
+      await p.click(`[data-tab=${name}]`);
+      await sleep(120);
+      const found = await moneyOnPage(p);
+      if (found) throw new Error(`${name} tab: ${found}`);
+    }
+    const key = await p.ev('JSON.stringify(window.__office.state).match(/"(?:spend|costUsd|estUsd|estimateUsd|limitUsd|spentUsd|remainingUsd)"/)?.[0] ?? null');
+    if (key) throw new Error(`the floor state has ${key}`);
+    await p.click('[data-tab=chat]');
   });
   await step(tag('walking out and back in shows it as it was, with no duplicates'), async () => {
     await p.click('.back');
@@ -447,7 +462,7 @@ async function run(label, opts, t, adminCode) {
     await sleep(500);
     const bad = await p.ev(`(() => {
       const out = []; const vw = innerWidth, vh = innerHeight;
-      for (const s of ['.floor-top .back', '.floor-name', '.status-pill', '.spend', '.floor-panel', '.tabs', '.controls']) {
+      for (const s of ['.floor-top .back', '.floor-name', '.status-pill', '.floor-panel', '.tabs', '.controls']) {
         const el = document.querySelector(s); if (!el) { out.push('missing ' + s); continue; }
         const r = el.getBoundingClientRect();
         if (r.left < -1 || r.top < -1 || r.right > vw + 1 || r.bottom > vh + 1) out.push('off screen ' + s);
@@ -456,7 +471,6 @@ async function run(label, opts, t, adminCode) {
       const hit = (a, b) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
       if (hit(rect('.controls'), rect('.floor-panel'))) out.push('controls over panel');
       if (hit(rect('.floor-name'), rect('.status-pill'))) out.push('title over status');
-      if (innerWidth > 760 && hit(rect('.spend'), rect('.floor-panel'))) out.push('spend over panel');
       if (document.documentElement.scrollWidth > vw + 1) out.push('page scrolls sideways');
       return out;
     })()`);
@@ -482,10 +496,15 @@ async function runAdmin(t) {
       await sleep(400);
       await p.shot(join(OUT, `${label}-17-admin.jpg`));
     });
-    await step(tag('sees floors, spend and pending purchase requests'), async () => {
+    await step(tag('sees floors, the building budget and pending purchase requests'), async () => {
       const txt = await p.ev('document.querySelector(".admin").textContent');
       if (!/Night Bakery|Pocket Circus/.test(txt)) throw new Error('floor missing');
       if (!/A domain name/.test(txt)) throw new Error('pending purchase missing');
+      // The one page in the building that shows these.
+      const cards = await p.ev('[...document.querySelectorAll(".budget-card")].map((c) => [c.dataset.provider, c.textContent])');
+      if (cards.length !== 2) throw new Error(`budget cards: ${cards.length}`);
+      for (const [provider, text] of cards) if (!/\$[\d.]+ of \$120\.00 spent, \$[\d.]+ left/.test(text)) throw new Error(`${provider} card: ${text.slice(0, 120)}`);
+      if (!/Spent by floor/.test(txt)) throw new Error('no per-floor spend');
     });
     await step(tag('help line: a fenced question, answered in a dialog, reaches that floor as guidance'), async () => {
       const slug = helpFloors.shift();

@@ -322,20 +322,20 @@ describe('limits and caps', () => {
     const h = await start({ stepUsd: 0.06, async onTurn(api) { for (;;) { await api.step(); steps++; if (steps > 100) break; } } }, { sessionMaxUsd: 0.3 });
     const row = await h.settle((await go(h)).id);
     assert.equal(row.status, 'failed');
-    assert.match(row.result, /spending limit/);
+    assert.match(row.result, /reached its limit/); assert.doesNotMatch(row.result, /\$|spen[dt]/i);
     assert.ok(steps <= 6, `took ${steps}`);
   });
   test('reaching the daily cap sends the task back to wait and tells the boss, instead of failing it', async () => {
     const h = await start({ stepUsd: 0.06, async onTurn(api) { for (let i = 0; i < 100; i++) await api.step(); } }, { floorDailyUsd: 0.2, sessionMaxUsd: 5, globalDailyUsd: 25 });
     const { id } = await go(h);
     await until(() => h.taskRow(id).status === 'todo' && h.taskRow(id).session_id, { what: 'requeue' });
-    assert.ok(all(h.t.db, "SELECT text FROM messages WHERE floor_id=? AND role='office'", h.floor.id).some((m) => /budget/i.test(m.text)));
+    assert.ok(all(h.t.db, "SELECT text FROM messages WHERE floor_id=? AND role='budget'", h.floor.id).some((m) => /budget/i.test(m.text)));
     assert.equal(h.sessions.calls.sessions.length, 1);
   });
   test('no session starts when nothing is left of the task cap or the day', async () => {
     const h = await start({}, { taskMaxUsd: 0.05 });
     const row = await h.settle((await go(h)).id);
-    assert.equal(row.status, 'failed'); assert.match(row.result, /spending limit/);
+    assert.equal(row.status, 'failed'); assert.match(row.result, /reached its limit/); assert.doesNotMatch(row.result, /\$|spen[dt]/i);
     assert.equal(h.sessions.calls.sessions.length, 0);
     const h2 = await start({}, { floorDailyUsd: 0.05 });
     const task2 = (await go(h2)).id;
@@ -703,7 +703,7 @@ describe('the whole floor, in mock mode', () => {
       const built = s.tasks.find((x) => x.title === 'Build the mini-site');
       assert.match(built.result, /Published/);
       assert.ok(s.projects.some((p) => p.kind === 'game'));
-      assert.ok(s.spend.today > 0);
+      assert.equal(s.spend, undefined); assert.ok(t.app.engine.spentToday(t.db.prepare('SELECT id FROM floors WHERE slug=?').get(c.slug).id) > 0);
     }
     await until(() => !t.app.engine.runs.size, { what: 'runs to end' });
     assert.equal(t.app.engine.errors.length, 0, t.app.engine.errors.join('; '));
