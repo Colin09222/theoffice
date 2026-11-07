@@ -110,6 +110,8 @@ body.flying .ticker { opacity: 0; transition: opacity .2s; }
 /* ---- phones ---- */
 @media (max-width: 760px) {
   .topbar-right { right: max(12px, env(safe-area-inset-right)); top: max(10px, env(safe-area-inset-top)); }
+  .topbar-right .btn { width: 46px; padding: 0; }
+  .topbar-right .btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .hero { left: 12px; top: max(10px, env(safe-area-inset-top)); width: min(58vw, 240px); }
   .hero h1 { font-size: 27px; padding: 11px 14px 13px; border-radius: 10px; box-shadow: inset 0 0 0 3px #fff8e6, 0 5px 0 var(--tomato-d), 0 12px 20px rgba(0, 0, 0, .3); }
   .hero p, .hints, .floor-tip { display: none; }

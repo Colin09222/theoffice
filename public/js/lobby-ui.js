@@ -171,8 +171,8 @@ export async function showLobby(root) {
     h('p.dir-hint', {}, 'Anyone can walk in and watch'));
 
   const account = session.floor
-    ? h('button.btn.chrome', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, icon('elevator'), 'My floor')
-    : h('button.btn.chrome', { type: 'button', onclick: () => openLogin() }, icon('sign-in'), 'Sign in');
+    ? h('button.btn.chrome', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, icon('elevator'), h('span', {}, 'My floor'))
+    : h('button.btn.chrome', { type: 'button', onclick: () => openLogin() }, icon('sign-in'), h('span', {}, 'Sign in'));
 
   put(root,
     h('header.topbar', {}, h('div.topbar-right', {}, account, muteButton())),

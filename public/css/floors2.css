@@ -212,7 +212,7 @@
 /* ---- pins over the rooms: map pins ---- */
 .floor-pins { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
 .floor-pins[hidden] { display: none; }
-.pin { position: absolute; left: 0; top: 0; pointer-events: auto; display: flex; align-items: center; gap: 0; height: 42px; min-width: 42px; padding: 0 10px; border: 0; border-radius: 21px; background: var(--sun); color: var(--ink); box-shadow: 0 4px 0 var(--sun-d), 0 8px 12px rgba(0, 0, 0, .35); will-change: transform; cursor: pointer; }
+.pin { position: absolute; left: 0; top: 0; pointer-events: auto; display: flex; align-items: center; gap: 0; height: 44px; min-width: 44px; padding: 0 11px; border: 0; border-radius: 22px; background: var(--sun); color: var(--ink); box-shadow: 0 4px 0 var(--sun-d), 0 8px 12px rgba(0, 0, 0, .35); will-change: transform; cursor: pointer; }
 .pin:hover, .pin:focus-visible { background: #fff; gap: 6px; box-shadow: 0 4px 0 #bda876, 0 8px 12px rgba(0, 0, 0, .35); }
 .pin .ico { width: 22px; height: 22px; }
 .pin-label { max-width: 0; overflow: hidden; white-space: nowrap; font: 700 16px var(--cond); transition: max-width .14s ease; }
