@@ -1,7 +1,7 @@
 // The character builder: a live 3D preview plus option pickers. Used when claiming a floor and in the customiser.
 import { h, clear } from './dom.js';
 import { createPreview } from './character.js';
-import { SKIN, HAIR, HAIR_COLOR, OUTFIT, OUTFIT_COLOR, HAT, GLASSES, EXTRA, BODY, CHARACTER_PRESETS, randomLook } from './looks.js';
+import { SKIN, HAIR, HAIR_COLOR, OUTFIT, OUTFIT_COLOR, HAT, GLASSES, WEAR, BODY, CHARACTER_PRESETS, randomLook } from './looks.js';
 
 const LABEL = { wood: 'Wood', carpet: 'Carpet', terrazzo: 'Terrazzo', concrete: 'Concrete', parquet: 'Parquet', checker: 'Checker', tile: 'Tile', rubber: 'Rubber', dog: 'Dog', cat: 'Cat', bunny: 'Bunny', duck: 'Duck', tortoise: 'Tortoise', robot: 'Robot', none: 'None', short: 'Short', side: 'Swept', long: 'Long', bun: 'Bun', curly: 'Curls', mohawk: 'Mohawk', pigtails: 'Pigtails', suit: 'Suit', shirt: 'Shirt', hoodie: 'Hoodie', tee: 'Tee', dress: 'Dress', labcoat: 'Lab coat', overalls: 'Overalls', cap: 'Cap', beanie: 'Beanie', tophat: 'Top hat', crown: 'Crown', party: 'Party', hardhat: 'Hard hat', headphones: 'Headset', cowboy: 'Cowboy', wizard: 'Wizard', chef: 'Chef', viking: 'Viking', pirate: 'Pirate', beret: 'Beret', propeller: 'Propeller', halo: 'Halo', round: 'Round', shades: 'Shades', monocle: 'Monocle', eyepatch: 'Eyepatch', beard: 'Beard', moustache: 'Moustache', scarf: 'Scarf', bowtie: 'Bow tie', tie: 'Tie', badge: 'Badge', cape: 'Cape', backpack: 'Backpack', wings: 'Wings', auto: 'Match my outfit', 'male-a': 'Specs', 'male-b': 'Big beard', 'male-c': 'Cop', 'male-d': 'Exec', 'male-e': 'Engineer', 'male-f': 'Scowler', 'female-a': 'Crutches', 'female-b': 'Space buns', 'female-c': 'Hairclip', 'female-d': 'Director', 'female-e': 'Ponytail', 'female-f': 'Backpacker', paint: 'Paint', brick: 'Brick', panels: 'Panels', shapes: 'Shapes', skyline: 'Skyline', posters: 'Posters', logo: 'Our logo' };
 
@@ -24,7 +24,7 @@ export function chips(options, value, onPick, label, names = {}) {
 
 /** Builds into `root`. Returns { look, dispose }; `look` is mutated in place as options change. `onChange` hears every change. */
 export function characterBuilder(root, startLook, accent, { onChange } = {}) {
-  const look = { extra: 'none', body: 'auto', ...startLook };
+  const look = { wear: 'none', body: 'auto', ...startLook };
   const canvas = h('canvas.char-preview', { width: 220, height: 260 });
   const form = h('div.char-options');
   clear(root).append(h('div.char-builder', {}, h('div.char-stage', {}, canvas), form));
@@ -47,7 +47,7 @@ export function characterBuilder(root, startLook, accent, { onChange } = {}) {
     pick('outfitColor', 'Outfit colour', swatches, OUTFIT_COLOR),
     pick('hat', 'Hat', chips, HAT),
     pick('glasses', 'Glasses', chips, GLASSES),
-    pick('extra', 'Extras', chips, EXTRA),
+    pick('wear', 'Extras', chips, WEAR),
   );
   return { look, dispose: () => preview.dispose() };
 }

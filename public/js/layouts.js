@@ -18,7 +18,7 @@ export const PLANS = {
       spots: [[-2.7, -3.5], [-0.35, -3.45], [1.9, -3.5], [-1.7, -2.35], [0.9, -2.35], [-0.4, -1.6], [-2.9, -2.4], [2.1, -2.4]] },
     console: -2.3, shelf: [-10.3, 2.4], coffee: [10.2, 1.7], fridge: [10.2, -1.5], arcade: [-9.8, 6.0], printer: [-9.9, 4.5], coat: [-10.1, -1.2],
     sofa: [6.9, 5.1], sofaUntil: 8, hang: [0.5, -2.3, 0], pet: [2, -1.6],
-    plants: [[-10.1, -6.0, 0.8, 0.8], [10.2, -5.9, -0.8, 0.9], [-4.0, -2.5, 0.9, 0.6], [3.4, -2.5, -0.9, 0.6], [10.3, 5.9, -0.9, -0.6], [-4.4, 6.2, 0, -0.9], [-0.2, 6.2, 0, -0.9], [-10.2, -0.3, 0.9, 0]],
+    plants: [[-10.1, -6.0, 0.8, 0.8], [10.2, -5.9, -0.8, 0.9], [-4.0, -2.5, 0.9, 0.6], [3.4, -2.5, -0.9, 0.6], [10.3, 5.9, 0, -1.0], [-4.4, 6.2, 0, -0.9], [-0.2, 6.2, 0, -0.9], [-10.2, -0.3, 0.9, 0]],
     rugs: [[7.0, -3.3, 5, 3.6, 'boss']],
     art: [[4.9, 2.5, 1.4, 1.75], [-5.6, 2.6, 1.5, 1.15]],
   },
@@ -196,7 +196,8 @@ export function makeNav() {
       const next = out[i + 1];
       if (!next || !clear(anchor, next)) { smooth.push(out[i]); anchor = out[i]; }
     }
-    if (smooth.length) smooth[smooth.length - 1] = [tx, tz]; else smooth.push([tx, tz]);
+    // The last leg goes to the exact spot, not the middle of its cell, as long as that doesn't clip a corner on the way.
+    if (smooth.length && clear(smooth.length > 1 ? smooth[smooth.length - 2] : [fx, fz], [tx, tz])) smooth[smooth.length - 1] = [tx, tz]; else smooth.push([tx, tz]);
     return smooth;
   };
   /** The nearest open spot, spiralling out, so an errand aimed at furniture ends beside it instead of inside it. */

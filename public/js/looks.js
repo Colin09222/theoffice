@@ -7,7 +7,7 @@ export const OUTFIT = ['suit', 'shirt', 'hoodie', 'tee', 'dress', 'labcoat', 'ov
 export const OUTFIT_COLOR = ['#27324a', '#3b3f46', '#8c2f39', '#2f6f62', '#c9772b', '#6a4c93', '#e6e0d2', '#2f7ec7', '#d94f70', '#111318', '#f2b632', '#37b679'];
 export const HAT = ['none', 'cap', 'beanie', 'tophat', 'crown', 'party', 'hardhat', 'headphones', 'cowboy', 'wizard', 'chef', 'viking', 'pirate', 'beret', 'propeller', 'halo'];
 export const GLASSES = ['none', 'round', 'shades', 'monocle', 'eyepatch'];
-export const EXTRA = ['none', 'beard', 'moustache', 'scarf', 'bowtie', 'tie', 'badge', 'cape', 'backpack', 'wings'];
+export const WEAR = ['none', 'beard', 'moustache', 'scarf', 'bowtie', 'tie', 'badge', 'cape', 'backpack', 'wings'];
 // The twelve people in Kenney's Mini Characters. Each has their own face, clothes and hair shape.
 export const BODY = ['auto', 'male-a', 'male-b', 'male-c', 'male-d', 'male-e', 'male-f', 'female-a', 'female-b', 'female-c', 'female-d', 'female-e', 'female-f'];
 export const FLOOR_STYLES = ['wood', 'carpet', 'terrazzo', 'concrete', 'parquet', 'checker', 'tile', 'rubber'];
@@ -17,10 +17,10 @@ export const WALL_MATS = ['paint', 'brick', 'wood', 'panels', 'concrete'];
 export const ART_STYLES = ['shapes', 'skyline', 'posters', 'logo'];
 
 export const LOOK_FIELDS = {
-  skin: SKIN, hair: HAIR, hairColor: HAIR_COLOR, outfit: OUTFIT, outfitColor: OUTFIT_COLOR, hat: HAT, glasses: GLASSES, extra: EXTRA, body: BODY,
+  skin: SKIN, hair: HAIR, hairColor: HAIR_COLOR, outfit: OUTFIT, outfitColor: OUTFIT_COLOR, hat: HAT, glasses: GLASSES, wear: WEAR, body: BODY,
 };
 
-export const DEFAULT_LOOK = { skin: SKIN[0], hair: 'short', hairColor: HAIR_COLOR[1], outfit: 'suit', outfitColor: OUTFIT_COLOR[0], hat: 'none', glasses: 'none', extra: 'none', body: 'auto' };
+export const DEFAULT_LOOK = { skin: SKIN[0], hair: 'short', hairColor: HAIR_COLOR[1], outfit: 'suit', outfitColor: OUTFIT_COLOR[0], hat: 'none', glasses: 'none', wear: 'none', body: 'auto' };
 export const DEFAULT_DECOR = { layout: 'open', floor: 'wood', wall: '#e9e1d3', wallMat: 'paint', artStyle: 'shapes', plants: 3, rug: true, art: true, coffee: true, arcade: false, neon: true, pet: 'none' };
 export const DEFAULT_COLORS = { primary: '#d9774a', accent: '#f4c95d' };
 
@@ -30,7 +30,7 @@ export function seededLook(seed) {
   return {
     skin: pick(SKIN.slice(0, 6), 11), hair: pick(HAIR.slice(1), 23), hairColor: pick(HAIR_COLOR.slice(0, 10), 37),
     outfit: pick(OUTFIT, 41), outfitColor: pick(OUTFIT_COLOR.slice(0, 10), 53),
-    hat: seed % 5 === 0 ? pick(HAT.slice(1, 8), 61) : 'none', glasses: seed % 4 === 1 ? 'round' : 'none', extra: 'none', body: 'auto',
+    hat: seed % 5 === 0 ? pick(HAT.slice(1, 8), 61) : 'none', glasses: seed % 4 === 1 ? 'round' : 'none', wear: 'none', body: 'auto',
   };
 }
 
@@ -74,20 +74,20 @@ export const VIBES = {
 };
 // One tap for a person. Colours are left alone unless the look needs them.
 export const CHARACTER_PRESETS = {
-  founder: { label: 'Founder', look: { body: 'male-d', hat: 'none', glasses: 'none', extra: 'none', outfit: 'suit', outfitColor: '#27324a' } },
-  hacker: { label: 'Hacker', look: { body: 'male-f', hat: 'headphones', glasses: 'shades', extra: 'none', outfit: 'hoodie', outfitColor: '#111318' } },
-  scientist: { label: 'Scientist', look: { body: 'female-e', hat: 'none', glasses: 'round', extra: 'badge', outfit: 'labcoat', outfitColor: '#e6e0d2' } },
-  chef: { label: 'Chef', look: { body: 'male-b', hat: 'chef', glasses: 'none', extra: 'scarf', outfit: 'labcoat', outfitColor: '#e6e0d2' } },
-  wizard: { label: 'Wizard', look: { body: 'male-b', hat: 'wizard', glasses: 'none', extra: 'cape', outfit: 'dress', outfitColor: '#6a4c93' } },
-  pirate: { label: 'Pirate', look: { body: 'male-f', hat: 'pirate', glasses: 'eyepatch', extra: 'none', outfit: 'shirt', outfitColor: '#8c2f39' } },
-  rocker: { label: 'Rocker', look: { body: 'female-f', hat: 'none', glasses: 'shades', extra: 'none', hair: 'mohawk', hairColor: '#d65db1', outfit: 'tee', outfitColor: '#111318' } },
-  royal: { label: 'Royal', look: { body: 'female-d', hat: 'crown', glasses: 'monocle', extra: 'cape', outfit: 'dress', outfitColor: '#8c2f39' } },
-  cowboy: { label: 'Cowboy', look: { body: 'male-c', hat: 'cowboy', glasses: 'none', extra: 'bowtie', outfit: 'shirt', outfitColor: '#c9772b' } },
-  angel: { label: 'Angel', look: { body: 'female-b', hat: 'halo', glasses: 'none', extra: 'wings', outfit: 'dress', outfitColor: '#e6e0d2' } },
+  founder: { label: 'Founder', look: { body: 'male-d', hat: 'none', glasses: 'none', wear: 'none', outfit: 'suit', outfitColor: '#27324a' } },
+  hacker: { label: 'Hacker', look: { body: 'male-f', hat: 'headphones', glasses: 'shades', wear: 'none', outfit: 'hoodie', outfitColor: '#111318' } },
+  scientist: { label: 'Scientist', look: { body: 'female-e', hat: 'none', glasses: 'round', wear: 'badge', outfit: 'labcoat', outfitColor: '#e6e0d2' } },
+  chef: { label: 'Chef', look: { body: 'male-b', hat: 'chef', glasses: 'none', wear: 'scarf', outfit: 'labcoat', outfitColor: '#e6e0d2' } },
+  wizard: { label: 'Wizard', look: { body: 'male-b', hat: 'wizard', glasses: 'none', wear: 'cape', outfit: 'dress', outfitColor: '#6a4c93' } },
+  pirate: { label: 'Pirate', look: { body: 'male-f', hat: 'pirate', glasses: 'eyepatch', wear: 'none', outfit: 'shirt', outfitColor: '#8c2f39' } },
+  rocker: { label: 'Rocker', look: { body: 'female-f', hat: 'none', glasses: 'shades', wear: 'none', hair: 'mohawk', hairColor: '#d65db1', outfit: 'tee', outfitColor: '#111318' } },
+  royal: { label: 'Royal', look: { body: 'female-d', hat: 'crown', glasses: 'monocle', wear: 'cape', outfit: 'dress', outfitColor: '#8c2f39' } },
+  cowboy: { label: 'Cowboy', look: { body: 'male-c', hat: 'cowboy', glasses: 'none', wear: 'bowtie', outfit: 'shirt', outfitColor: '#c9772b' } },
+  angel: { label: 'Angel', look: { body: 'female-b', hat: 'halo', glasses: 'none', wear: 'wings', outfit: 'dress', outfitColor: '#e6e0d2' } },
 };
 
 /** A random look from the full lists, for "Surprise me". `rand` is injectable so tests can pin it. */
 export function randomLook(rand = Math.random) {
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
-  return { skin: pick(SKIN), hair: pick(HAIR), hairColor: pick(HAIR_COLOR), outfit: pick(OUTFIT), outfitColor: pick(OUTFIT_COLOR), hat: rand() < 0.6 ? pick(HAT.slice(1)) : 'none', glasses: rand() < 0.35 ? pick(GLASSES.slice(1)) : 'none', extra: rand() < 0.4 ? pick(EXTRA.slice(1)) : 'none', body: pick(BODY) };
+  return { skin: pick(SKIN), hair: pick(HAIR), hairColor: pick(HAIR_COLOR), outfit: pick(OUTFIT), outfitColor: pick(OUTFIT_COLOR), hat: rand() < 0.6 ? pick(HAT.slice(1)) : 'none', glasses: rand() < 0.35 ? pick(GLASSES.slice(1)) : 'none', wear: rand() < 0.4 ? pick(WEAR.slice(1)) : 'none', body: pick(BODY) };
 }

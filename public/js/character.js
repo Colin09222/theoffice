@@ -96,7 +96,7 @@ function buildModelHair(head, look) {
 }
 /** Everything worn apart from a hat. `head` and `chest` are groups already sized for the character they sit on, facing +z. */
 function buildExtras(head, chest, look, accent) {
-  const e = look.extra;
+  const e = look.wear;
   if (!e || e === 'none') return;
   const hair = look.hair === 'none' ? '#4a2f1d' : look.hairColor;
   if (e === 'beard') { head.add(part(G.box, hair, 0, -0.26, 0.28, 0.5, 0.26, 0.14)); head.add(part(G.box, hair, 0, -0.34, 0.3, 0.3, 0.16, 0.12)); }
