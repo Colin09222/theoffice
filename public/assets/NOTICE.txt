@@ -1,0 +1,22 @@
+Third-party textures under public/assets/3d
+===========================================
+
+All are CC0 1.0 (public domain, http://creativecommons.org/publicdomain/zero/1.0/), downloaded on 7 November 2026 straight from
+the original sites. Credit is not required; we give it anyway. Each set was resized and re-compressed (colour 512 px, normal 384 px,
+roughness 256 px, JPEG) and wrapped in a small .glb by scripts/pack-textures.mjs, because the static server only serves a short list of
+file types. The pixels are otherwise unchanged. Nothing here comes from any other site.
+
+From Poly Haven (https://polyhaven.com, CC0), 1k JPG maps from dl.polyhaven.org:
+  wood       laminate_floor_02       https://polyhaven.com/a/laminate_floor_02
+  darkwood   wood_floor_worn         https://polyhaven.com/a/wood_floor_worn
+  parquet    herringbone_parquet     https://polyhaven.com/a/herringbone_parquet
+  concrete   concrete_floor_02       https://polyhaven.com/a/concrete_floor_02
+  tile       floor_tiles_06          https://polyhaven.com/a/floor_tiles_06
+  brick      red_brick_03            https://polyhaven.com/a/red_brick_03
+  plaster    painted_plaster_wall    https://polyhaven.com/a/painted_plaster_wall
+  cast       concrete_wall_008       https://polyhaven.com/a/concrete_wall_008
+  env        art_studio (HDRI, the site's own tonemapped JPG, resized to 512 x 256)   https://polyhaven.com/a/art_studio
+
+From ambientCG (https://ambientcg.com, CC0), 1K-JPG downloads:
+  carpet     Carpet016               https://ambientcg.com/view?id=Carpet016
+  terrazzo   Terrazzo009             https://ambientcg.com/view?id=Terrazzo009

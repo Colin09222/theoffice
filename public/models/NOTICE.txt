@@ -30,7 +30,11 @@ Files kept (only the ones the app uses; the rest of each kit was not copied):
     bookcaseOpen, books, cardboardBoxOpen, chairDesk, chairModernCushion, coatRackStanding, computerKeyboard, computerMouse,
     computerScreen, desk, kitchenBar, kitchenCabinet, kitchenCabinetUpper, kitchenCoffeeMachine, kitchenFridgeLarge,
     kitchenMicrowave, kitchenSink, lampRoundFloor, laptop, loungeChair, loungeDesignSofa, loungeSofa, pillow, pillowBlue,
-    plantSmall1, plantSmall2, plantSmall3, pottedPlant, speaker, stoolBar, tableCoffee, tableCross, trashcan
+    plantSmall1, plantSmall2, plantSmall3, pottedPlant, speaker, stoolBar, tableCoffee, tableCross, trashcan,
+    and, for the offices (added 7 November 2026 from the same zip, same sha256): bear, benchCushion, bookcaseClosed, bookcaseClosedWide,
+    bookcaseOpenLow, cardboardBoxClosed, chairRounded, deskCorner, lampRoundTable, lampSquareFloor, lampSquareTable, loungeChairRelax,
+    loungeDesignChair, pillowLong, radio, rugDoormat, rugRectangle, rugRound, rugRounded, rugSquare, sideTable, sideTableDrawers, speakerSmall, table,
+    tableCoffeeGlass, tableGlass, tableRound, televisionModern, televisionVintage
   characters/  from Mini Characters "Models/GLB format", unmodified .glb files and the shared texture:
     character-male-a .. character-male-f, character-female-a .. character-female-f, aid-glasses, aid-sunglasses,
     Textures/colormap.png
@@ -40,3 +44,5 @@ people); the files themselves are not edited.
 
 The .glb files are not byte-for-byte the kits': scripts/strip-models.mjs removes animation clips the app never plays and UVs
 no material samples, and stores normals, UVs and skin weights in small integers. The models themselves are unchanged.
+
+The floor and wall textures are listed separately, in public/assets/NOTICE.txt.

@@ -462,7 +462,7 @@ describe('every floor plan can be walked', () => {
       }
     });
     test(`${id}: desks and furniture stay in the room and out of each other's seats`, () => {
-      assert.equal(plan.desks.length, 8); assert.equal(plan.plants.length, 8); assert.equal(plan.meet.spots.length, 8);
+      assert.equal(plan.desks.length, 12); assert.equal(plan.plants.length, 8); assert.equal(plan.meet.spots.length, 8);
       const seats = [plan.manager, plan.boss, ...plan.desks].map(seatOf);
       const rects = [plan.manager, plan.boss].map((d) => [...turnedBig(d)]).concat(plan.desks.map((d) => deskRect(d)));
       for (const s of seats) {
@@ -470,10 +470,11 @@ describe('every floor plan can be walked', () => {
         for (const [x, z, w, d] of rects) assert.ok(!(Math.abs(s.at[0] - x) < w / 2 - 0.02 && Math.abs(s.at[1] - z) < d / 2 - 0.02), `seat ${s.at} is inside the desk at ${x},${z}`);
       }
       for (const [i, a] of rects.entries()) for (const b of rects.slice(i + 1)) assert.ok(!(Math.abs(a[0] - b[0]) < (a[2] + b[2]) / 2 - 0.02 && Math.abs(a[1] - b[1]) < (a[3] + b[3]) / 2 - 0.02), `desks at ${a[0]},${a[1]} and ${b[0]},${b[1]} overlap`);
-      for (const [x, z, w, d] of [...planBlocks(plan, { coffee: true, arcade: true, plants: 8, staffCount: 8 }), ...plan.desks.map(deskRect)]) assert.ok(x - w / 2 >= -ROOM_W / 2 - 0.5 && x + w / 2 <= ROOM_W / 2 + 0.5 && z - d / 2 >= -ROOM_D / 2 - 0.5 && z + d / 2 <= ROOM_D / 2 + 0.5, `${x},${z} leaves the room`);
+      for (const [x, z, w, d] of [...planBlocks(plan, { coffee: true, arcade: true, plants: 8, staffCount: 12 }), ...plan.desks.map(deskRect)]) assert.ok(x - w / 2 >= -ROOM_W / 2 - 0.5 && x + w / 2 <= ROOM_W / 2 + 0.5 && z - d / 2 >= -ROOM_D / 2 - 0.5 && z + d / 2 <= ROOM_D / 2 + 0.5, `${x},${z} leaves the room`);
     });
     test(`${id}: the whiteboard is on solid wall, not across a window`, () => {
-      for (const [a, b] of plan.windows) assert.ok(plan.board + 2.3 <= a + 0.01 || plan.board - 2.3 >= b - 0.01, `board at ${plan.board} crosses window ${a}..${b}`);
+      // Only a board on the outer back wall can meet a window; one on a meeting room's glass wall has none.
+      if (plan.boardZ < -ROOM_D / 2 + 0.3) for (const [a, b] of plan.windows) assert.ok(plan.board + 2.3 <= a + 0.01 || plan.board - 2.3 >= b - 0.01, `board at ${plan.board} crosses window ${a}..${b}`);
       if (plan.roller) for (const [a, b] of plan.windows) assert.ok(plan.roller[1] <= a || plan.roller[0] >= b);
     });
   }

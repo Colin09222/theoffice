@@ -248,6 +248,7 @@ export class Character {
     for (const pivot of [armL, armR, legL, legR]) mergeColored(pivot, CHAR_MAT);
   }
   setAnim(name) { this.anim = name; }
+  setManner(m) { this.manner = m; }
   /** Advance the procedural animation. Named poses blend so nothing ever snaps. */
   update(dt, speed = 0) {
     this.t += dt;
@@ -414,6 +415,8 @@ export class ModelCharacter {
   }
   seatedY(seatTop) { return seatTop - 0.03 * this.scale; }
   setAnim(name) { this.anim = name; }
+  /** How this person moves (see manner in offices.js): their pace sets the walk clip's speed, and the rest shapes how they stand about. */
+  setManner(m) { this.manner = m; if (m && this.actions.walk) this.actions.walk.setEffectiveTimeScale(1.35 * (m.pace / 2.6)); }
   update(dt, speed = 0) {
     this.t += dt;
     const t = this.t, b = this.blend;
@@ -442,6 +445,17 @@ export class ModelCharacter {
     if (this.armR) { this.armR.rotateX(p.aR * armX + p.aR * walk * 0.2 * (1 - b.walk)); this.armR.rotateZ(p.zR * 0.9 - 0.1); this.armR.rotateY(b.pour * -0.6); }
     if (this.head) { this.head.rotateX(p.headX); this.head.rotateY(p.headY); this.head.rotateZ(p.headZ); }
     if (this.torso) this.torso.rotateY(b.talk * Math.sin(t * 2.1) * 0.08);
+    const m = this.manner;
+    if (m) {
+      // Standing about, everyone has their own way of doing it: a lean, a slow shift of weight, and something to do with their arms.
+      const still = Math.max(0, 1 - sit - walk - b.talk - b.sip - b.phone - b.cheer - b.pour - b.stretch - b.type - b.think - b.carry);
+      if (this.root) { this.root.rotateZ((m.lean + Math.sin(t * m.shift) * 0.012) * (1 - sit)); this.root.position.x += Math.sin(t * m.shift) * 0.006 * still; }
+      if (m.stance === 1 && this.armR) { this.armR.rotateZ(0.5 * still); this.armR.rotateX(-0.35 * still); }
+      if (m.stance === 2) { if (this.armL) this.armL.rotateX(-0.9 * still); if (this.armR) this.armR.rotateX(-0.9 * still); }
+      if (m.stance === 3) { if (this.armL) this.armL.rotateX(0.45 * still); if (this.armR) this.armR.rotateX(0.45 * still); }
+      if (this.head) this.head.rotateY(Math.sin(t * 0.37 + m.shift * 9) * 0.22 * still);
+      if (m.sway && this.torso) this.torso.rotateY(Math.sin(t * 7.6) * 0.05 * m.sway * walk);
+    }
   }
   dispose() {
     for (const m of this.materials) m.dispose();
