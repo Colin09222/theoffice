@@ -118,6 +118,12 @@ test('models config has a Claude manager and all four staff', () => {
   assert.match(m.roles.manager.model, /^claude-/); assert.equal(m.roles.manager.provider, 'anthropic'); for (const r of ['researcher', 'writer', 'builder', 'designer']) assert.ok(m.roles[r].model, r);
   for (const c of Object.values(m.all)) assert.ok(!/claude-cli|subscription/.test(c.model));
 });
+test('a spending cap of off means no cap', async () => {
+  const { loadConfig } = await import('../server/config.js');
+  const c = loadConfig({ FLOOR_DAILY_USD: 'off', GLOBAL_DAILY_USD: 'off', TASK_MAX_USD: 'off' });
+  assert.equal(c.floorDailyUsd, Infinity); assert.equal(c.taskMaxUsd, Infinity);
+  assert.equal(loadConfig({}).floorDailyUsd, 10);
+});
 test('validLook keeps only allowed values', () => {
   const l = validLook({ hair: 'bun', hat: '<script>', skin: 'javascript:', extra: 1 });
   assert.equal(l.hair, 'bun'); assert.equal(l.hat, 'none'); assert.equal(l.extra, undefined); assert.match(l.skin, /^#/);

@@ -83,8 +83,8 @@ class FloorPage {
   }
   renderSpend() {
     const { today, cap } = this.state.spend;
-    this.spendEl.textContent = `${money(today)} of ${money(cap)} today`;
-    this.spendBar.style.width = `${Math.min(100, (today / cap) * 100)}%`;
+    this.spendEl.textContent = cap == null ? `${money(today)} today` : `${money(today)} of ${money(cap)} today`;
+    this.spendBar.style.width = cap == null ? '0%' : `${Math.min(100, (today / cap) * 100)}%`;
   }
   renderControls() {
     clear(this.controlsEl);

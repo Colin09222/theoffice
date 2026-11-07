@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const num = (v, d) => { const n = Number(v); return v !== undefined && v !== '' && Number.isFinite(n) ? n : d; };
+// A spending cap of "off" means no cap.
+const cap = (v, d) => (v === 'off' ? Infinity : num(v, d));
 
 export function loadConfig(env = process.env, overrides = {}) {
   const publicOrigin = (env.PUBLIC_ORIGIN || '').replace(/\/+$/, '');
@@ -22,9 +24,9 @@ export function loadConfig(env = process.env, overrides = {}) {
     adminPassword: env.ADMIN_PASSWORD || '',
     publicOrigin,
     trustProxy: env.TRUST_PROXY === '1',
-    floorDailyUsd: num(env.FLOOR_DAILY_USD, 10),
-    globalDailyUsd: num(env.GLOBAL_DAILY_USD, 25),
-    taskMaxUsd: num(env.TASK_MAX_USD, 3),
+    floorDailyUsd: cap(env.FLOOR_DAILY_USD, 10),
+    globalDailyUsd: cap(env.GLOBAL_DAILY_USD, 25),
+    taskMaxUsd: cap(env.TASK_MAX_USD, 3),
     maxCallsFloor: num(env.MAX_CALLS_FLOOR, 3),
     maxCallsGlobal: num(env.MAX_CALLS_GLOBAL, 6),
     maxStaff: num(env.MAX_STAFF, 8),

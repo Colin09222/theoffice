@@ -206,7 +206,7 @@ export class Engine {
     const published = all(this.db, 'SELECT slug,title,kind,private FROM projects WHERE floor_id=? AND published_at IS NOT NULL ORDER BY published_at DESC LIMIT 20', floor.id).map((p) => ({ ...p, url: publicUrl(floor.slug, p.slug) }));
     const name = (id) => staff.find((s) => s.id === id)?.name || 'unassigned';
     const state = [
-      `STATE at ${new Date(this.now()).toISOString()}. Spent today $${this.spentToday(floor.id).toFixed(3)} of $${this.cfg.floorDailyUsd}.`,
+      `STATE at ${new Date(this.now()).toISOString()}. Spent today $${this.spentToday(floor.id).toFixed(3)} ${Number.isFinite(this.cfg.floorDailyUsd) ? ` of $${this.cfg.floorDailyUsd}` : ''}.`,
       `Roster: ${staff.map((s) => `${s.name} (${s.role})`).join(', ')}. Staff limit ${this.cfg.maxStaff}. Hireable: ${Object.keys(this.models.hireable).join(', ')}.`,
       `Open tasks: ${tasks.length ? tasks.map((t) => `#${t.id} [${t.status}] "${t.title}" (${name(t.agent_id)})${t.status === 'review' ? ` result: ${t.result.slice(0, 600)}` : ''}`).join(' | ') : 'none'}`,
       `Recently finished: ${recent.length ? recent.map((t) => `#${t.id} [${t.status}] "${t.title}": ${t.result.slice(0, 200)}`).join(' | ') : 'none'}`,

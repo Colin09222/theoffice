@@ -42,4 +42,4 @@ Most roles run on Claude Opus 5.5 through the Claude API (`$4` in, `$20` out, `$
 
 Floor agents must not use the Claude CLI or a Claude subscription.
 
-Caps: `FLOOR_DAILY_USD=10`, `GLOBAL_DAILY_USD=25`, `TASK_MAX_USD=3`, 14 steps per staff task, 60 tasks per floor per day.
+Spending caps are off on the live server at the owner's request (`FLOOR_DAILY_USD`, `GLOBAL_DAILY_USD` and `TASK_MAX_USD` set to `off`; defaults are 10, 25 and 3). The limits of 14 steps per staff task and 60 tasks per floor per day still apply.
