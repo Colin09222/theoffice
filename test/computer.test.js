@@ -307,9 +307,12 @@ describe('limits and caps', () => {
     assert.ok(get(h.t.db, "SELECT 1 x FROM published_files WHERE floor_id=? AND project='game'", h.floor.id), 'what was saved still went up');
   });
   test('every session has a hard budget, even with every cap off', async () => {
-    const h = await start({}, { floorDailyUsd: Infinity, globalDailyUsd: Infinity, taskMaxUsd: Infinity, sessionMaxUsd: 5 });
+    const h = await start({}, { floorDailyUsd: Infinity, globalDailyUsd: Infinity, taskMaxUsd: Infinity, sessionMaxUsd: Infinity });
     await h.settle((await go(h)).id);
-    assert.deepEqual(h.sessions.calls.sessions[0].budget, { type: 'limit', max_list_cost: { amount: '500', currency: 'USD' } });
+    assert.deepEqual(h.sessions.calls.sessions[0].budget, { type: 'limit', max_list_cost: { amount: '200', currency: 'USD' } });
+    const set = await start({}, { sessionMaxUsd: 1 });
+    await set.settle((await go(set)).id);
+    assert.equal(set.sessions.calls.sessions[0].budget.max_list_cost.amount, '100');
   });
   test('the budget is the smallest of the session limit, the task cap and what is left of the day', async () => {
     const h = await start({}, { floorDailyUsd: 1.5, globalDailyUsd: 9, taskMaxUsd: 3, sessionMaxUsd: 5 });

@@ -571,6 +571,8 @@ class FloorPage {
     on('task', (d) => {
       const i = this.state.tasks.findIndex((t) => t.id === d.id);
       if (i >= 0) this.state.tasks[i] = { ...this.state.tasks[i], ...d }; else this.state.tasks.push(d);
+      // A page can stay open through any number of tasks. The oldest finished one goes first, and the board only ever shows the last few of those.
+      if (this.state.tasks.length > 300) { const old = this.state.tasks.findIndex((t) => ['done', 'failed', 'cancelled'].includes(t.status)); if (old >= 0) this.state.tasks.splice(old, 1); }
       this.view?.updateBoard(this.state.tasks);
       if (this.tab === 'tasks') this.renderBody();
     });

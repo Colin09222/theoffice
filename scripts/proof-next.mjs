@@ -6,6 +6,7 @@
 //   help     an ask_buddehbot round trip, answered through the real CLI in its own process
 //   stop     a limit just above what has gone: Claude roles stop, nobody sees a figure, an OpenRouter role carries on, and raising it resumes the work
 //   session  a real computer at a limit it can't finish inside. Run it with its own PROOF_BASE
+//   slices   a real computer with no limits of its own, on a slice small enough to need topping up while it runs. Run it with its own PROOF_BASE. About $1 at most
 //   spend    what every step has cost so far
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -32,12 +33,12 @@ const spent = (db) => Object.fromEntries(['anthropic', 'openrouter'].map((p) => 
 const floorCost = (db, id) => Number(get(db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND kind!='domain'", id).n.toFixed(4));
 
 let watcher = null;
-async function makeApp({ budgetAnthropic = LIMIT.anthropic, computer = true } = {}) {
+async function makeApp({ budgetAnthropic = LIMIT.anthropic, computer = true, extra = {} } = {}) {
   if (!process.env.ANTHROPIC_API_KEY || !process.env.OPENROUTER_API_KEY) throw new Error('keys are not set');
   const cfg = loadConfig({
     AI_MODE: 'live', COMPUTER_ENABLED: computer ? '1' : '0', DATA_DIR: DATA, ADMIN_PASSWORD: 'proof-only', APPS_BASE_DOMAIN: `apps.localhost:${PORT}`, APPS_SCHEME: 'http', PUBLIC_ORIGIN: ORIGIN,
     FLOOR_DAILY_USD: '8', GLOBAL_DAILY_USD: '8', TASK_MAX_USD: '1.2', SESSION_MAX_USD: '1', BUDGET_ANTHROPIC_USD: String(budgetAnthropic), BUDGET_OPENROUTER_USD: String(LIMIT.openrouter),
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY, OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY, ...extra,
   });
   const db = openDb(cfg.dataDir);
   const app = createApp({ db, cfg, models: loadModels(), log: (level, msg, x) => { if (level !== 'info') log(level, msg, JSON.stringify(x ?? {}).slice(0, 300)); } });
@@ -305,6 +306,52 @@ async function session() {
   await finish(app, db);
 }
 
+// What the mock can't settle about running with no work caps: that a running session's budget can be raised, that it carries on without stopping, and that the platform takes the date filter.
+async function slices() {
+  const results = [];
+  const check = (name, ok, detail = '') => { results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${String(detail).slice(0, 200)})` : ''}`); log(results.at(-1)); };
+  const SLICE = 0.25;
+  const { db, app } = await makeApp({ budgetAnthropic: 1.2, extra: { TASK_MAX_USD: 'off', SESSION_MAX_USD: 'off', FLOOR_DAILY_USD: 'off', GLOBAL_DAILY_USD: 'off', SESSION_SLICE_USD: String(SLICE) } });
+  app.engine.runManager = async () => {};
+  const client = app.engine.computer.client;
+  const seen = { created: [], raised: [], refused: [] };
+  const realCreate = client.createSession.bind(client);
+  client.createSession = (x, ...rest) => { seen.created.push(x?.budget?.max_list_cost?.amount); return realCreate(x, ...rest); };
+  const realUpdate = client.updateSession.bind(client);
+  client.updateSession = async (id, x) => {
+    const status = (await client.retrieve(id)).status;
+    try { const r = await realUpdate(id, x); seen.raised.push({ status, amount: x?.budget?.max_list_cost?.amount }); return r; } catch (e) { seen.refused.push({ status, err: String(e?.message).slice(0, 160) }); throw e; }
+  };
+  const boss = new Boss();
+  const made = await boss.claim(db, 'Small Slices', 'Ari');
+  const floor = get(db, 'SELECT * FROM floors WHERE slug=?', made.slug);
+  watchFloor(app, floor);
+  const mgr = get(db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", floor.id);
+  const t = app.engine.assignTask(floor, mgr, { to: 'builder', title: 'Build a one page site', brief: 'A one page site about a cat called Biscuit: a drawn SVG portrait, a hand-written stylesheet and a short story about her. Check it in a browser at phone and desktop size, then publish it.', plan: '', project: 'biscuit', private: false, dependsOn: [] });
+  app.engine.kick();
+  const task = () => get(db, 'SELECT * FROM tasks WHERE id=?', t.id);
+  await until('a computer to start', () => task().session_id, 180000);
+  check('it started on one slice, as a whole number of cents', seen.created[0] === String(SLICE * 100), seen.created[0]);
+  await until('it to stop or finish', () => !app.engine.runs.size && ['todo', 'review', 'failed'].includes(task().status), 12 * 60000);
+  check('it finished, all in one session', task().status === 'review' && seen.created.length === 1, `${task().status}, ${seen.created.length} sessions`);
+  check('its budget was raised while it was running, and the platform took it', seen.raised.some((r) => r.status === 'running'), JSON.stringify(seen.raised));
+  check('nothing was refused', !seen.refused.length, JSON.stringify(seen.refused));
+  check('every amount was a whole number of cents', [...seen.created, ...seen.raised.map((r) => r.amount)].every((a) => /^\d+$/.test(a)));
+  const events = [];
+  for await (const ev of client.listEvents(task().session_id)) events.push(ev);
+  check('it never stopped at its cap', !events.some((ev) => ev.stop_reason?.type === 'budget_reached'), `${events.filter((ev) => ev.stop_reason?.type === 'budget_reached').length} stops in ${events.length} events`);
+  const stamps = events.map((ev) => Date.parse(ev.processed_at)).filter(Boolean);
+  const mid = stamps[Math.floor(stamps.length / 2)];
+  const later = [];
+  for await (const ev of client.listEvents(task().session_id, mid)) later.push(ev);
+  check('the platform takes the date filter and honours it', later.length > 0 && later.length < events.length && later.every((ev) => !ev.processed_at || Date.parse(ev.processed_at) >= mid), `${later.length} of ${events.length}`);
+  check('the work was saved and published', !!get(db, 'SELECT 1 x FROM projects WHERE floor_id=? AND published_at IS NOT NULL', floor.id));
+  check('nothing is left held', get(db, 'SELECT COUNT(*) n FROM budget_holds').n === 0);
+  writeFileSync(join(OUT, 'slices.txt'), `${results.join('\n')}\n\nspent ${JSON.stringify(spent(db))}\n`);
+  log('DONE slices', results.filter((r) => r.startsWith('FAIL')).length, 'failed of', results.length, 'all spend', JSON.stringify(spent(db)));
+  await finish(app, db);
+}
+
 const cmd = process.argv[2];
 try {
   if (cmd === 'website') await website();
@@ -312,7 +359,8 @@ try {
   else if (cmd === 'help') await help();
   else if (cmd === 'stop') await stop();
   else if (cmd === 'session') await session();
+  else if (cmd === 'slices') await slices();
   else if (cmd === 'spend') { if (!existsSync(join(DATA, 'office.db'))) console.log('nothing yet'); else { const db = openDb(DATA); console.log(JSON.stringify(spent(db))); db.close(); } }
-  else { console.error('website | tone | help | stop | session | spend'); process.exitCode = 1; }
+  else { console.error('website | tone | help | stop | session | slices | spend'); process.exitCode = 1; }
 } catch (e) { log('FAILED', String(e?.message || e).slice(0, 400)); process.exitCode = 1; }
 process.exit();

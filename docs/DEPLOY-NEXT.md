@@ -7,6 +7,7 @@
 - **No more figures.** Spend and caps disappear from the floor page, tasks, orders and reports. Old figures are removed from old chat at first boot.
 - **Money already spent counts.** Every old ledger row counts against the new limits, so a provider already past its limit stops at first boot. Check step 5 straight away.
 - **The manager starts when asked.** A request to make something is now the go-ahead, with no "say go" step. This costs money sooner than before, and `lanes` and `ultra-workers` disagreed about it: see "Decisions for the owner".
+- **Nothing stops a job for its size.** No limit on steps, tasks, computers or minutes, and no "that's the budget for today". Only the building's lifetime limits stop the work. See "Work caps".
 
 ## What each branch needs
 
@@ -15,6 +16,7 @@
 | `lanes` | `BUDGET_*`, `HELP_*`, all optional | Two tables, four columns, the first-boot scrub | Nothing new |
 | `ultra-workers` | None | None | Nothing new |
 | `ultra-custom` | None | `floors.identity`, `floors.crew`, `agents.persona`, added at boot | Nothing new |
+| Work caps off | Remove the old caps: see "Work caps" | `tasks.seen_links`, added at boot | Nothing new |
 | `ultra-look` | None | None | Stamped URLs and brotli worked out at start-up, re-packed models. Expect a short CPU blip on the capped core just after start while assets compress. Gzip answers until each file lands |
 
 ## Environment
@@ -30,7 +32,80 @@ HELP_PER_FLOOR_DAY=5       # questions per floor per UTC day
 HELP_TICK_MS=5000          # how often the server looks for answers, expiries and purchase decisions
 ```
 
-`FLOOR_DAILY_USD`, `GLOBAL_DAILY_USD`, `TASK_MAX_USD` and `SESSION_MAX_USD` are unchanged and still apply alongside the lifetime limits. Leave existing values alone.
+## Work caps
+
+The owner, verbatim: "Make if unlimited steps and sessions dude i told you im fine without guardrails the money if i lose it is fine its within the budgeted amount i had and it literally cannot go above that because its all capped thru the provider".
+
+**Check `/opt/theoffice/.env` before you start the new code. A cap set there still applies.** `.env.example` used to set most of these, and the ops notes say session caps were changed by hand on live (backup at `/opt/theoffice-env-pre-nocaps-*`). Delete every line from the table below. A big number left behind does no harm, but it does nothing useful either, and a small one quietly brings the cap back.
+
+Every one of these is now off unless set. For a count, only a positive number sets it, so `off`, `0` or a typo all leave it off. A dollar setting takes a number or `off`, and an explicit `0` still means nothing may be spent.
+
+| Setting | Used to be | What it stopped |
+|---|---|---|
+| `MAX_STAFF_STEPS` | 14 | A staff task, per run |
+| `MAX_MANAGER_STEPS` | 8 | A manager's turn |
+| `MAX_OPEN_TASKS` | 14 | New tasks while a floor had this many open |
+| `MAX_TASKS_PER_DAY` | 60 | New tasks on a floor in a day |
+| `MAX_REVISIONS` | 2 | The manager sending work back |
+| `MAX_STAFF` | 8 | Hiring. It never bit, because there are 8 jobs and a floor has one of each |
+| `SESSION_MAX_STEPS` | 40 | A computer, per round of work |
+| `SESSION_MAX_MINUTES` | 30 | A computer, per attach |
+| `MAX_SESSIONS_FLOOR` | 2 | Computers at once on a floor. Only the Builder and the Tester use one, so 2 is also the most a floor can have |
+| `MAX_SESSIONS_GLOBAL` | 4 | Computers at once in the building |
+| `MAX_FIX_TURNS` | 2 | A computer told its save or publish didn't go through, before the task failed. This was the stuck-loop stop |
+| `SESSION_WRAP_UP` | on | Set to `1` to turn it back on. It told a lane job to stop polishing at 12 to 22 steps |
+| `TASK_MAX_USD` | 3 | A task |
+| `SESSION_MAX_USD` | 5 | A computer. It counts the session's whole life now, so a restart can't reset it |
+| `FLOOR_DAILY_USD` | 10 | A floor, for the day |
+| `GLOBAL_DAILY_USD` | 25 | The building, for the day |
+| `IMAGES_PER_FLOOR_DAY`, `IMAGES_PER_TASK` | 12, 6 | Pictures |
+| `REVIEWS_PER_FLOOR_DAY` | 20 | Design reviews |
+| `SEARCHES_PER_FLOOR_DAY` | 60 | Searches |
+| `ORDERS_PER_FLOOR` | 3 | Standing orders on a floor |
+| `ORDERS_MAX_FAILS` | 3 | Standing orders that keep failing, which used to pause themselves |
+
+The instruction named the steps, tasks, sessions, staff and stuck-loop stops. The dollar settings and the tool and order limits weren't named. They are off too, because a $3 limit on a task stops a job whatever its step count says, and the owner said money within the budget is fine. Live already runs with `FLOOR_DAILY_USD`, `GLOBAL_DAILY_USD` and `TASK_MAX_USD` set to `off`, at the owner's request. Each goes back with one line in `.env`.
+
+**Kept, because they aren't work caps:**
+- `BUDGET_ANTHROPIC_USD` and `BUDGET_OPENROUTER_USD`, $120 each. A typo here still falls back to 120, never to no limit.
+- The domain rules: `DOMAIN_MAX_USD` of $25, one year only, only the boss's click, `DOMAINS_PER_FLOOR_DAY` and `DOMAINS_GLOBAL_DAY`.
+- `MAX_CALLS_FLOOR` and `MAX_CALLS_GLOBAL`, which protect against provider rate limits.
+- Every security rule, including the per-address rate limits, the viewer limits and the file and data limits.
+
+**Also left alone, as a judgment call:**
+- `HELP_PER_FLOOR_DAY` of 5 and the 25 pending purchase requests, because those are the owner's attention rather than the floor's work.
+- `FLOOR_QUOTA_MB` and 2000 files a floor, because the disk is shared. A job that hits one is told, and can tidy up.
+- `ORDERS_IDLE_DAYS` of 14, so a floor nobody opens doesn't drain the budget. `ORDERS_MIN_HOURS` never bites, because orders can only be daily or weekly.
+- One computer at a time on a project, because two would overwrite each other's work.
+- The pause when a provider is down: three retries on a call, five dropped streams in a row, or two computers lost before they got anywhere. Those stop retrying something broken, not work. Resume is one press, and a computer lost after 10 or more steps no longer counts.
+
+The wording in the job playbooks that says "aim for about 15 steps" on a small job and "at most three searches" is still there. It is advice from real runs, and nothing enforces it.
+
+**What this means for the money.** One job that loops, or one bot that won't stop, can now spend the whole of what is left of a provider's $120, in one go and on one floor. Nothing else steps in, and there is no pacing from day to day. `node scripts/admin.mjs budget --json` flags 50%, 80% and 100%, so poll it. If that turns out not to be wanted, `TASK_MAX_USD` and `FLOOR_DAILY_USD` are the two lines that help most.
+
+**How a running computer is paid for.** The platform needs a number, and whatever a session is promised is held from the building's total. So a session is promised `SESSION_SLICE_USD` ($2) at a time, and gets the next slice as it nears the end of the last. If the first session were promised everything left, the rest of the building would wait for it. That setting isn't a cap, and it only matters near the end of the budget, where a smaller one lets more sessions share what's left.
+
+**What keeps a long run from growing without end.** The container's limit is 700 MB. All of this is measured by `scripts/soak-unlimited.mjs` and covered in `test/unlimited.test.js`.
+
+| What would have grown | What happens now |
+|---|---|
+| A staff or manager run's messages, in memory, in the database and in every request | Above 240,000 characters the oldest whole steps go, down to about 150,000. The opening, the latest step and the last 12 notes from the boss and the manager stay. This also stops a long task overflowing the model's context |
+| The proof that a cited link was opened, which was in those steps | Kept in `tasks.seen_links`, up to 32 KB a task |
+| Reading every task's transcript at once when a doc is published | One batch at a time, stopping as soon as every link is found |
+| A computer's list of event ids | Forgotten after 15 minutes, and the listing no longer asks for anything older |
+| Abort listeners from a call or computer waiting its turn | Removed after each wait |
+| The state message's list of open tasks | 40 at most, reports first, with a count of the rest. If more reports are waiting than fit, the manager goes round again, but only if the last round got through some |
+| A page left open | Keeps 300 tasks at most, dropping the oldest finished one first |
+| Whole projects in memory while computers start and finish | Two at a time, whatever the number of computers. The old limit of 4 sessions used to cover this by accident |
+| A viewer that stopped reading | Dropped at 256 KB unsent. It reconnects and catches up |
+| The engine's list of internal errors | The last 100 |
+
+The database still grows with real work, a row per model call on the ledger and at most about 250 KB of transcript per task. The budget limits that, not a cap.
+
+**Not proven on the real platform.** All of this ran against the mock. Two things only the real platform can settle: raising a session's budget while it is running, and the date filter on its event list. If the first is refused, a session stops at the end of each slice and is woken by the raise that the earlier real check did prove, so a job carries on with a short pause every $2. If the second is refused, the client reads the whole history instead. To settle both, about $1 with the Office keys in the environment:
+```sh
+PROOF_BASE=/tmp/office-slices node scripts/proof-next.mjs slices
+```
 
 ## Data migration
 
@@ -58,7 +133,7 @@ The ledger and each task's `cost_usd` keep every real figure for the admin. The 
    ```sh
    ssh hz 'sqlite3 /opt/theoffice/data/office.db ".backup /opt/theoffice/data/before-next.db"'
    ```
-2. **Set the environment.** Add the lines above to `/opt/theoffice/.env` if you want anything other than the defaults.
+2. **Set the environment.** Add the lines above to `/opt/theoffice/.env` if you want anything other than the defaults, and delete every line in the table under "Work caps", or those caps stay on.
 3. **Merge and copy the code.** From a clean checkout of `office-next` or the merged `main`:
    ```sh
    rsync -a --delete --exclude data --exclude node_modules --exclude .git --exclude .env ./ hz:/opt/theoffice/
@@ -118,4 +193,5 @@ Raise `BUDGET_ANTHROPIC_USD` or `BUDGET_OPENROUTER_USD` in `.env` and run `docke
 ## Decisions for the owner
 
 - **Does the manager wait for a go?** `lanes` said no work starts until the boss says go, and real runs tightened that. `ultra-workers` later made the request itself the go-ahead, after real runs with people typing the way people type. The merge keeps the `ultra-workers` behaviour, because the two can't both hold and it is the newer evidence. To go back, `server/prompts.js` holds the wording.
+- **Should the dollar limits per task, per computer and per day be off too?** The instruction named steps and sessions, and the merge turned these off as well: see "Work caps". The cost is that one floor can spend the whole budget on a bad day. To put one back, set it in `.env`.
 - **The boss sees no share of the budget either.** `ultra-look` showed "12% of today's allowance". The merge removes it under "only make it visible to me the admin". If the owner wanted bosses to see a share, it has to come back deliberately.

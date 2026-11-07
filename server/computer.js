@@ -31,6 +31,8 @@ const TOP_UP_AT = 0.5;
 const LOST_NEEDS_STEPS = 10;
 // How long an event id is remembered: the platform won't be asked for anything older again. A long session has no end of events, and this keeps the memory for them flat.
 const SEEN_WINDOW_MS = 15 * 60000, SEEN_PRUNE_AT = 2000;
+// Boxing up or bringing back a project holds all of it in memory, and this container has 700 MB. Computers keep working whatever this is, and just take turns with their files.
+const FILE_WORK_AT_ONCE = 2;
 const MAX_ARCHIVE_BYTES = 40 * 1024 * 1024, MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hash = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16);
@@ -92,6 +94,7 @@ export class Computer {
   constructor(engine, client) {
     this.engine = engine; this.client = client;
     this.limiter = new Limiter(engine.cfg.maxSessionsFloor, engine.cfg.maxSessionsGlobal);
+    this.fileWork = new Limiter(Infinity, FILE_WORK_AT_ONCE);
   }
   handles(role) { return !!computerRole(this.engine.models.all[role]); }
 
@@ -129,19 +132,19 @@ export class Computer {
 
   // ---- money ----
   /**
-   * The most this session may be promised right now: the smallest of its own limit, every cap that is set, and what is left of the building's Anthropic total. A session
-   * that already holds some is counted as not holding it, since that isn't being taken from anyone. With no limit of its own it is promised a slice at a time (see topUp):
-   * otherwise the first session would hold everything that is left and the rest of the building would wait for it, and the platform has to be given a number either way.
+   * The most this session may be promised right now: the smallest of what is left of its own limit, every cap that is set, and what is left of the building's Anthropic total.
+   * What it already holds is counted as not held, since that isn't being taken from anyone. If its own limit is more than a slice, or it has none, it is promised a slice at a time
+   * (see topUp): otherwise the first session would hold everything that is left and the rest of the building would wait for it, and the platform has to be given a number either way.
    */
-  room(floorId, task, st = null) {
+  room(floorId, task, st) {
     const { cfg } = this.engine; const e = this.engine;
-    const mine = st?.hold || 0;
     const perTask = cfg.taskMaxUsd - task.cost_usd;
-    const perDay = Math.min(cfg.floorDailyUsd - e.spentToday(floorId) - (e.reserved.get(floorId) || 0), cfg.globalDailyUsd - e.spentGlobal() - e.reservedTotal) + mine;
-    const own = Math.min(cfg.sessionMaxUsd, perTask);
-    const perBuilding = e.budget.room('anthropic') + mine;
+    const perDay = Math.min(cfg.floorDailyUsd - e.spentToday(floorId) - (e.reserved.get(floorId) || 0), cfg.globalDailyUsd - e.spentGlobal() - e.reservedTotal) + st.hold;
+    // Over the session's whole life: going back in line for the next slice can't start its limit again.
+    const own = Math.min(cfg.sessionMaxUsd - st.charged, perTask);
+    const perBuilding = e.budget.room('anthropic') + st.hold;
     const most = Math.min(own, perDay, perBuilding);
-    const slices = own === Infinity;
+    const slices = own > cfg.sessionSliceUsd;
     return { usd: slices ? Math.min(most, cfg.sessionSliceUsd) : most, daily: perDay < own, building: perBuilding < Math.min(own, perDay), slices, slice: slices && cfg.sessionSliceUsd < most };
   }
   /**
@@ -278,14 +281,14 @@ export class Computer {
     // What this task held before a restart is replaced below, and what its session spent meanwhile goes on the ledger first, so the room is the real room.
     e.budget.releaseTask(task.id);
     if (st.id) await this.reconcile(st);
-    let room = this.room(floor.id, task);
+    let room = this.room(floor.id, task, st);
     const heldUp = (r) => r.usd < MIN_ROOM_USD && ((r.daily && !e.spentOver(floor.id, MIN_ROOM_USD)) || (r.building && !e.budget.out('anthropic')));
     // Short of room only because other sessions hold it: they give back what they don't spend, so wait for them.
     while (heldUp(room)) {
       e.setAgent(agent.id, { state: 'queued', activity: 'Waiting for a turn' });
       await pause(2000, signal);
       e.checkpoint(floor.id, signal);
-      room = this.room(floor.id, task);
+      room = this.room(floor.id, task, st);
     }
     st.room = room;
     if (room.usd < MIN_ROOM_USD) {
@@ -321,17 +324,22 @@ export class Computer {
     const agentRef = await this.agentRef(agent.role);
     const vaulted = !!task.vault && !!e.cfg.iosEnabled && !!e.cfg.iosVaultId;
     const environment = vaulted ? await this.environmentId(IOS_HOSTS, 'ma_environment_ios') : await this.environmentId();
-    // Only this one project goes in. Other projects, other floors and anything of ours stay out of the box.
-    const files = projectFiles(e.db, floor.id, task.project);
-    const box = packTgz([
-      { path: '.office/save.sh', data: Buffer.from(SAVE_SH), mode: 0o755 },
-      { path: '.office/client.js', data: CLIENT_JS },
-      { path: '.office/launch-check.mjs', data: Buffer.from(LAUNCH_CHECK) },
-      { path: '.office/three.module.min.js', data: THREE_JS },
-      ...files.map((f) => ({ path: `project/${f.path}`, data: f.data })),
-    ]);
-    e.checkpoint(floor.id, signal);
-    const upload = await this.client.upload(box, 'bundle.tgz');
+    let upload, baseline;
+    const free = await this.fileWork.acquire(floor.id, signal);
+    try {
+      // Only this one project goes in. Other projects, other floors and anything of ours stay out of the box.
+      const files = projectFiles(e.db, floor.id, task.project);
+      const box = packTgz([
+        { path: '.office/save.sh', data: Buffer.from(SAVE_SH), mode: 0o755 },
+        { path: '.office/client.js', data: CLIENT_JS },
+        { path: '.office/launch-check.mjs', data: Buffer.from(LAUNCH_CHECK) },
+        { path: '.office/three.module.min.js', data: THREE_JS },
+        ...files.map((f) => ({ path: `project/${f.path}`, data: f.data })),
+      ]);
+      baseline = baselineOf(files);
+      e.checkpoint(floor.id, signal);
+      upload = await this.client.upload(box, 'bundle.tgz');
+    } finally { free(); }
     let session;
     try {
       session = await this.whenAllowed(st, () => this.client.createSession({
@@ -348,7 +356,7 @@ export class Computer {
     }
     st.id = session.id;
     this.equip(st);
-    run(e.db, 'UPDATE tasks SET session_id=?, session_baseline=?, session_sent=0, session_charged=0 WHERE id=?', session.id, JSON.stringify(baselineOf(files)), task.id);
+    run(e.db, 'UPDATE tasks SET session_id=?, session_baseline=?, session_sent=0, session_charged=0 WHERE id=?', session.id, JSON.stringify(baseline), task.id);
     e.feed(floor.id, agent, `started a computer for "${task.title}"`, task.project);
     e.setAgent(agent.id, { state: 'thinking', activity: 'Starting up the computer', project: task.project, task_id: task.id });
   }
@@ -662,6 +670,11 @@ export class Computer {
       return { ok: false, problem: 'there is no saved project. Run bash /workspace/.office/save.sh.' };
     }
     if (file.size > MAX_ARCHIVE_BYTES) return { ok: false, problem: `the saved project is over ${MAX_ARCHIVE_BYTES / 1048576} MB. Leave out large or generated files.` };
+    const free = await this.fileWork.acquire(floor.id, st.signal);
+    try { return await this.bringBack(st, file, task); } finally { free(); }
+  }
+  async bringBack(st, file, task) {
+    const e = this.engine; const { floor, agent, taskId, project } = st;
     let unpacked;
     try { unpacked = unpackTgz(await this.client.download(file.id), { maxBytes: MAX_UNPACKED_BYTES }); } catch (err) {
       if (err instanceof TarError) return { ok: false, problem: err.message };

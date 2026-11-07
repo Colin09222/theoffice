@@ -3,10 +3,12 @@
 import { describe, test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { connect } from 'node:net';
+import { createServer } from 'node:http';
 import { getEventListeners } from 'node:events';
-import { boot, claim, until, sleep, floorState } from './helpers.js';
+import { boot, claim, until, sleep, floorState, sse } from './helpers.js';
 import { get, all, run } from '../server/db.js';
 import { createMockSessions } from '../server/mock-sessions.js';
+import { createManagedClient } from '../server/sessions.js';
 import { loadConfig, loadModels, capOrNull } from '../server/config.js';
 import { pause } from '../server/limiter.js';
 import { trimSteps } from '../server/engine.js';
@@ -173,6 +175,18 @@ describe('no limit on tasks', () => {
     daily.e.setGlobalPause(true);
     for (let i = 0; i < 3; i++) assign(daily, i);
     assert.throws(() => assign(daily, 3), /task limit for today/);
+  });
+  test('the board shows what is running, however long the queue behind it', async () => {
+    const h = await floor(scripted());
+    h.e.setGlobalPause(true);
+    const ids = [];
+    for (let i = 0; i < 120; i++) ids.push(assign(h, i).id);
+    run(h.t.db, "UPDATE tasks SET status='doing' WHERE id=?", ids[0]);
+    run(h.t.db, "UPDATE tasks SET status='blocked' WHERE id=?", ids[1]);
+    const s = await floorState(h.c);
+    assert.equal(s.tasks.length, 82, 'the latest 80, and those two');
+    assert.deepEqual(s.tasks.slice(0, 2).map((t) => t.id), ids.slice(0, 2));
+    assert.equal(s.tasks.at(-1).id, ids.at(-1), 'still oldest to newest');
   });
   test('the manager reads about a bounded number of them, reports first, and knows there are more', async () => {
     const h = await floor(scripted());
@@ -425,6 +439,73 @@ describe('computers with no limits of their own', () => {
     await until(() => ids.every((id) => get(t.db, 'SELECT status FROM tasks WHERE id=?', id).status !== 'doing' && get(t.db, 'SELECT status FROM tasks WHERE id=?', id).status !== 'todo'), { timeout: 30000, what: 'all six' });
     assert.equal(peak, 6);
   });
+  test('a big number where a session limit used to be behaves like no limit at all, rather than holding everything', async () => {
+    let most = 0; let h;
+    h = await computerFloor({ stepUsd: 0.5, usage: usageFor(0.5), async onTurn(api) { for (let i = 0; i < 8; i++) { await api.step(); await sleep(5); most = Math.max(most, h.e.budget.held('anthropic')); } finished(api); } }, { sessionMaxUsd: 100000 });
+    const row = await h.settle(h.go().id);
+    assert.equal(row.status, 'review');
+    assert.ok(most <= 2.001, `it held ${most}`);
+    assert.equal(h.sessions.calls.sessions[0].budget.max_list_cost.amount, '200');
+  });
+  test('a set session limit bigger than a slice is still that limit, over the session\'s whole life', async () => {
+    let steps = 0;
+    const h = await computerFloor({ stepUsd: 0.5, usage: usageFor(0.5), async onTurn(api) { for (;;) { await api.step(); steps++; await sleep(3); if (steps > 60) break; } } }, { sessionMaxUsd: 5 });
+    const row = await h.settle(h.go().id);
+    assert.equal(row.status, 'failed'); assert.match(row.result, /reached its limit/);
+    assert.ok(row.session_charged <= 5.51, `spent ${row.session_charged}`);
+    assert.ok(h.sessions.calls.sends.some((s) => /nearly up/.test(JSON.stringify(s.ev))), 'and it is told to save before the real end');
+  });
+  test('going back in line for a slice can\'t reset a set session limit', async () => {
+    let steps = 0;
+    // Usage that says next to nothing, so it is the platform that keeps stopping it.
+    const h = await computerFloor({ stepUsd: 0.5, usage: TINY, async onTurn(api) { for (;;) { await api.step(); steps++; if (steps > 60) break; } } }, { sessionMaxUsd: 5 });
+    const row = await h.settle(h.go().id, ['failed', 'review', 'done']);
+    assert.equal(row.status, 'failed');
+    assert.ok(steps <= 12, `took ${steps} steps at 50 cents each`);
+    assert.equal(h.sessions.calls.sessions.length, 1);
+  });
+  test('however many computers finish together, only two projects are in memory at a time', async () => {
+    let live = 0;
+    const turn = async (api) => { live++; await api.step(); while (live < 6) await sleep(5); finished(api); };
+    const sessions = createMockSessions({}, { onTurn: turn });
+    let downloading = 0, downloads = 0, most = 0;
+    const realDownload = sessions.download;
+    sessions.download = async (id) => { downloading++; downloads++; most = Math.max(most, downloading); await sleep(25); downloading--; return realDownload(id); };
+    let uploading = 0, mostUp = 0;
+    const realUpload = sessions.upload;
+    sessions.upload = async (...a) => { uploading++; mostUp = Math.max(mostUp, uploading); await sleep(15); uploading--; return realUpload(...a); };
+    const t = await boot({ computerEnabled: true, outputLagMs: 0 }, { sessions });
+    open.push(t);
+    t.app.engine.runManager = async () => {};
+    const ids = [];
+    for (let i = 0; i < 3; i++) {
+      const c = await claim(t, `Together ${i}`);
+      const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+      const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", f.id);
+      t.app.engine.hireStaff(f, 'tester', '');
+      for (const to of ['builder', 'tester']) ids.push(t.app.engine.assignTask(f, mgr, { to, title: 'Go', brief: 'b', plan: '', project: `p-${to}`, dependsOn: [], afterPrevious: false }).id);
+    }
+    t.app.engine.kick();
+    await until(() => ids.every((id) => ['review', 'failed'].includes(get(t.db, 'SELECT status FROM tasks WHERE id=?', id).status)) && !t.app.engine.runs.size, { timeout: 30000, what: 'all six' });
+    for (const id of ids) assert.equal(get(t.db, 'SELECT status FROM tasks WHERE id=?', id).status, 'review');
+    assert.equal(downloads, 6, 'all six came back');
+    assert.ok(most <= 2, `${most} at once`); assert.ok(mostUp <= 2, `${mostUp} uploads at once`);
+    assert.equal(t.app.engine.computer.fileWork.active, 0, 'and every turn was given back');
+  });
+  test('a run stopped while waiting its turn with the files gives everything back', async () => {
+    const h = await computerFloor({ async onTurn(api) { await api.step(); finished(api); } });
+    const fw = h.e.computer.fileWork;
+    const held = [await fw.acquire(0), await fw.acquire(0)];
+    h.go();
+    await until(() => fw.queue.length === 1, { what: 'it to wait for its turn' });
+    h.e.pauseFloor(h.f.id, 'Paused by the boss');
+    h.e.haltFloorRuns(h.f.id, 'pause');
+    await until(() => !h.e.runs.size, { what: 'it to stop' });
+    assert.equal(fw.queue.length, 0);
+    assert.equal(h.sessions.calls.uploads.length, 0);
+    held.forEach((free) => free());
+    assert.equal(fw.active, 0);
+  });
   test('a set limit on sessions still holds', async () => {
     let live = 0, peak = 0;
     const h = await computerFloor({ async onTurn(api) { live++; peak = Math.max(peak, live); await api.step(); await sleep(30); live--; finished(api); } }, { maxSessionsGlobal: 1 });
@@ -542,6 +623,39 @@ describe('computers with no limits of their own', () => {
   });
 });
 
+describe('asking the real client for part of a long history', () => {
+  async function fakePlatform(handler) {
+    const seen = [];
+    const server = createServer((req, res) => { seen.push(req.url); const [status, body] = handler(req.url); res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    open.push({ close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }) });
+    const client = createManagedClient({ anthropicKey: 'test-key', anthropicBase: `http://127.0.0.1:${server.address().port}` });
+    return { seen, client };
+  }
+  const page = (ids) => [200, { data: ids.map((id) => ({ id, type: 'agent.message', processed_at: '2026-11-07T12:00:00Z', content: [] })), has_more: false, first_id: null, last_id: null, next_page: null }];
+  const list = async (client, ...a) => { const out = []; for await (const ev of client.listEvents(...a)) out.push(ev.id); return out; };
+  test('sends the date it was given', async () => {
+    const { seen, client } = await fakePlatform(() => page(['a', 'b']));
+    assert.deepEqual(await list(client, 'sesn_1', Date.parse('2026-11-07T12:00:00Z')), ['a', 'b']);
+    assert.match(decodeURIComponent(seen[0]), /created_at\[gte\]=2026-11-07T12:00:00\.000Z/);
+  });
+  test('asks for everything when given no date', async () => {
+    const { seen, client } = await fakePlatform(() => page(['a']));
+    assert.deepEqual(await list(client, 'sesn_1', 0), ['a']);
+    assert.doesNotMatch(decodeURIComponent(seen[0]), /created_at/);
+  });
+  test('a platform that refuses the filter gets read from the start instead', async () => {
+    const { seen, client } = await fakePlatform((url) => (decodeURIComponent(url).includes('created_at') ? [400, { type: 'error', error: { type: 'invalid_request_error', message: 'no' } }] : page(['all'])));
+    assert.deepEqual(await list(client, 'sesn_1', Date.now()), ['all']);
+    assert.equal(seen.length, 2);
+  });
+  test('an outage is still an outage, not a reason to read all of history', async () => {
+    const down = await fakePlatform(() => [429, { type: 'error', error: { type: 'rate_limit_error', message: 'slow' } }]);
+    await assert.rejects(list(down.client, 'sesn_1', Date.now()));
+    assert.ok(!down.seen.some((u) => !decodeURIComponent(u).includes('created_at')), 'it never tried the whole history');
+  });
+});
+
 describe('what a long run leaves behind in memory', () => {
   test('waiting leaves nothing on the signal, however often it happens', async () => {
     const ctl = new AbortController();
@@ -593,6 +707,19 @@ describe('what a long run leaves behind in memory', () => {
     while (bus.total === 1 && sent < 2000) { h.e.emit(h.f.id, 'noise', { pad }, { persist: false }); sent++; await new Promise((r) => setImmediate(r)); }
     assert.equal(bus.total, 0, `still subscribed after ${sent * 64} KB`);
     socket.destroy();
+  });
+  test('catching up after being away is never mistaken for falling behind', async () => {
+    const h = await floor(scripted());
+    h.e.setGlobalPause(true);
+    const first = get(h.t.db, 'SELECT COALESCE(MAX(id),0) n FROM events WHERE floor_id=?', h.f.id).n;
+    // More than the backlog allowed to a live viewer, all sent in one burst when they connect.
+    for (let i = 0; i < 120; i++) h.e.emit(h.f.id, 'noise', { n: i, pad: 'x'.repeat(8192) });
+    const s = sse(h.c, h.c.slug, { since: first || 1 });
+    await until(() => s.events.filter((e) => e.type === 'noise').length === 120, { what: 'the whole catch-up' });
+    assert.equal(h.e.bus.total, 1, 'and they are still connected');
+    h.e.emit(h.f.id, 'noise', { n: 'live' }, { persist: false });
+    await until(() => s.events.some((e) => e.data?.n === 'live'), { what: 'a live event after it' });
+    await s.close();
   });
   test('a viewer that keeps up is left alone', async () => {
     const h = await floor(scripted());

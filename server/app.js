@@ -181,7 +181,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       return v;
     });
     // Named columns: a view has no business loading transcripts, however large a task's have grown.
-    const tasks = all(db, 'SELECT id,plan,title,brief,agent_id,project,status,result,updated_at,depends_on FROM tasks WHERE floor_id=? ORDER BY id DESC LIMIT 80', f.id).reverse().map((t) => {
+    // The latest, and whatever is running now: the queue runs oldest first, so with a long queue that can be far behind the latest.
+    const tasks = all(db, "SELECT id,plan,title,brief,agent_id,project,status,result,updated_at,depends_on FROM tasks WHERE floor_id=? AND (status IN ('doing','blocked') OR id>=(SELECT COALESCE(MIN(id),0) FROM (SELECT id FROM tasks WHERE floor_id=? ORDER BY id DESC LIMIT 80))) ORDER BY id", f.id, f.id).map((t) => {
       const v = taskView(t);
       if (viewer.owner) return v;
       const { brief: _b, result: _r, ...pub } = v;
@@ -312,7 +313,6 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     res.writeHead(200, { ...BASE_HEADERS, 'content-security-policy': mainCsp, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     res.socket?.setNoDelay?.(true);
     const write = (ev) => {
-      if (res.writableLength > STREAM_BACKLOG) { res.destroy(); return; }
       // A revoked or expired session stops being the owner at once. The browser reconnects as a visitor.
       if (viewer.owner) {
         const live = get(db, 'SELECT expires_at e FROM sessions WHERE hash=?', viewer.sessionHash);
@@ -323,7 +323,9 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       if (!v) return;
       res.write(`${v.id ? `id: ${v.id}\n` : ''}event: ${v.type}\ndata: ${JSON.stringify({ ...v.data, _ts: v.ts, _id: v.id || undefined })}\n\n`);
     };
-    const sub = { ip, send: write, close: () => res.end() };
+    // Counted from what the catch-up below leaves unsent. That goes out in one burst, and dropping a viewer for it would only make them reconnect and ask for the same burst.
+    let mostUnsent = Infinity;
+    const sub = { ip, send: (ev) => { if (res.writableLength > mostUnsent) res.destroy(); else write(ev); }, close: () => res.end() };
     // Catch-up: everything persisted since the client last saw, with the same redaction as live events.
     const lastRaw = req.headers['last-event-id'] ?? url.searchParams.get('since');
     const last = Number(lastRaw);
@@ -333,6 +335,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       }
     }
     res.write(': connected\n\n');
+    mostUnsent = res.writableLength + STREAM_BACKLOG;
     const off = bus.subscribe(f.id, sub);
     const beat = setInterval(() => res.write(': beat\n\n'), 20000); beat.unref?.();
     req.on('close', () => { clearInterval(beat); off(); });
