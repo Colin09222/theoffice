@@ -49,8 +49,9 @@ export function installPurchases(ext) {
     // One transaction, so a crash or a second process can neither lose this nor say it twice.
     const sent = tx(db, () => {
       if (!run(db, 'UPDATE purchases SET notify=0 WHERE id=? AND notify=1', p.id).changes) return false;
-      engine.officeNotice(p.floor_id, `${said}${p.admin_note ? `: ${p.admin_note}` : '.'}`);
-      engine.addMessage(p.floor_id, 'note', null, `${said}.`);
+      engine.bossNotice(p.floor_id, `${said}${p.admin_note ? `: ${p.admin_note}` : '.'}`);
+      // The manager gets the staff's own words back as data: the item was written by whoever filed it, and an office note has more weight than that.
+      engine.addMessage(p.floor_id, 'note', null, `The building manager ${p.status === 'bought' ? 'bought' : 'turned down'} what the staff asked for: <untrusted_data source="purchase request">${String(p.item).replace(/<\/?\s*untrusted_data/gi, '[untrusted_data')}</untrusted_data>`);
       run(db, 'UPDATE floors SET manager_wake=1 WHERE id=?', p.floor_id);
       return true;
     });

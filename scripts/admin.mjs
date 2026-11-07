@@ -4,7 +4,7 @@ import { loadConfig, loadModels } from '../server/config.js';
 import { openDb, all, get } from '../server/db.js';
 import { issueCode } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
-import { helpListing, helpListingText, answerHelp, declineHelp, HelpError, HELP_LIMITS } from '../server/help.js';
+import { helpListing, helpListingText, answerHelp, declineHelp, HelpError, HELP_LIMITS, newFence } from '../server/help.js';
 import { budgetReport, budgetReportText } from '../server/budget.js';
 import { purchaseListing, purchaseListingText, decidePurchase, PurchaseError } from '../server/purchases.js';
 import { readFileSync, statSync } from 'node:fs';
@@ -44,7 +44,10 @@ if (cmd === 'code') {
   }
   console.log(issueCode(db, floor));
 } else if (cmd === 'floors') {
-  for (const f of all(db, 'SELECT number,slug,name,status,filler FROM floors ORDER BY number')) console.log(`${String(f.number).padStart(3)}  ${f.slug.padEnd(28)} ${f.status.padEnd(10)} ${f.name}${f.filler ? '  (filler)' : ''}`);
+  // A name is whatever the floor's boss typed, and a slug is made from it, so both are fenced like every other listing here.
+  const fence = newFence();
+  console.log(`${fence.notice}\n`);
+  for (const f of all(db, 'SELECT number,slug,name,status,filler FROM floors ORDER BY number')) console.log(`${String(f.number).padStart(3)}  ${f.status.padEnd(10)} ${fence.wrap('floor', `${f.slug}: ${f.name}`)}${f.filler ? '  [filler]' : ''}`);
 } else if (cmd === 'filler') {
   // These work on the database file alone. A running server notices a removal on its next tick.
   const sub = rest[0];

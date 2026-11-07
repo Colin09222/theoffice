@@ -6,6 +6,8 @@ import { get, all, run, tx } from './db.js';
 const DAY = 86400000, HOUR = 3600000;
 // A due order whose floor is busy waits this long for a gap before that occurrence is written off.
 const GRACE_MS = 6 * HOUR;
+// However many the boss wants, this is how many a bot can leave behind for itself. Each one wakes the manager every day, for money, long after whatever talked it into them has gone.
+const MAX_BOT_ORDERS = 12;
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const IDLE_PREFIX = 'Paused: you have not opened the floor in';
 export const idleReason = (days) => `${IDLE_PREFIX} ${days} days`;
@@ -16,7 +18,7 @@ CREATE TABLE IF NOT EXISTS standing_orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, text TEXT NOT NULL, schedule TEXT NOT NULL,
   next_run_at INTEGER NOT NULL, last_run_at INTEGER, status TEXT NOT NULL DEFAULT 'active', pause_reason TEXT NOT NULL DEFAULT '',
   fail_streak INTEGER NOT NULL DEFAULT 0, runs INTEGER NOT NULL DEFAULT 0, est_usd REAL NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, set_by TEXT NOT NULL DEFAULT 'boss'
 );
 CREATE INDEX IF NOT EXISTS standing_orders_floor ON standing_orders(floor_id, id);
 CREATE INDEX IF NOT EXISTS standing_orders_due ON standing_orders(status, next_run_at);
@@ -94,6 +96,7 @@ const runView = (r) => ({ id: r.id, orderId: r.order_id, startedAt: r.started_at
 export function installOrders(ext) {
   const { db, cfg, engine, log, now, hooks, GET, POST, json, readJson, limit, requireOwner, HttpError, clean2 } = ext;
   db.exec(SCHEMA);
+  if (!all(db, 'PRAGMA table_info(standing_orders)').some((c) => c.name === 'set_by')) db.exec("ALTER TABLE standing_orders ADD COLUMN set_by TEXT NOT NULL DEFAULT 'boss'");
   const seenRunning = new Set();  // runs seen by a previous tick, so a run never finishes on the tick that started it
   let timer = null; let stopped = false;
 
@@ -134,11 +137,12 @@ export function installOrders(ext) {
     return text;
   };
   const schedOf = (input) => { const r = parseSchedule(input, cfg); if (r.error) throw new OrderError(400, 'bad_schedule', r.error); return r.schedule; };
-  function create(floor, { text, schedule }) {
+  function create(floor, { text, schedule, setBy = 'boss' }) {
     const clean = cleanText(text); const sched = schedOf(schedule);
     if (countFor(floor.id) >= cfg.ordersPerFloor) throw new OrderError(409, 'too_many', `A floor can have ${cfg.ordersPerFloor} standing orders. Delete one first.`);
+    if (setBy !== 'boss' && get(db, "SELECT COUNT(*) n FROM standing_orders WHERE floor_id=? AND set_by!='boss' AND status IN ('active','paused')", floor.id).n >= MAX_BOT_ORDERS) throw new OrderError(409, 'too_many', 'That is plenty of standing orders set up this way. Ask the boss to add any more under Orders.');
     const t = now();
-    const r = run(db, 'INSERT INTO standing_orders (floor_id,text,schedule,next_run_at,est_usd,created_at,updated_at) VALUES (?,?,?,?,?,?,?)', floor.id, clean, JSON.stringify(sched), nextRunAt(sched, t), cfg.ordersEstimateUsd, t, t);
+    const r = run(db, 'INSERT INTO standing_orders (floor_id,text,schedule,next_run_at,est_usd,created_at,updated_at,set_by) VALUES (?,?,?,?,?,?,?,?)', floor.id, clean, JSON.stringify(sched), nextRunAt(sched, t), cfg.ordersEstimateUsd, t, t, setBy);
     touch(floor.id);
     changed(floor.id);
     return view(orderRow(floor.id, Number(r.lastInsertRowid)));
@@ -157,7 +161,8 @@ export function installOrders(ext) {
     }
     // A new schedule, or coming back from a pause, starts from the next slot: never from one that slipped by while it was off.
     const next = patch.schedule !== undefined || (status === 'active' && o.status !== 'active') || o.next_run_at < t ? nextRunAt(sched, t) : o.next_run_at;
-    run(db, 'UPDATE standing_orders SET text=?, schedule=?, next_run_at=?, status=?, pause_reason=?, fail_streak=?, updated_at=? WHERE id=?', text, JSON.stringify(sched), next, status, reason, streak, t, o.id);
+    // Only the boss's own route comes through here, and saving the words makes them the boss's.
+    run(db, 'UPDATE standing_orders SET text=?, schedule=?, next_run_at=?, status=?, pause_reason=?, fail_streak=?, updated_at=?, set_by=? WHERE id=?', text, JSON.stringify(sched), next, status, reason, streak, t, patch.text === undefined ? o.set_by : 'boss', o.id);
     changed(floor.id);
     return view(orderRow(floor.id, o.id));
   }
@@ -197,7 +202,13 @@ export function installOrders(ext) {
       if (advance) run(db, 'UPDATE standing_orders SET next_run_at=?, updated_at=? WHERE id=?', nextRunAt(JSON.parse(o.schedule), Math.max(t, o.next_run_at)), t, o.id);
       return Number(r.lastInsertRowid);
     });
-    engine.bossMessage(floor, `Standing order #${o.id}: ${o.text}`);
+    if (o.set_by === 'boss') engine.bossMessage(floor, `Standing order #${o.id}: ${o.text}`);
+    else {
+      // Words the manager wrote never come back as the boss's. They would count as what the boss said, in the manager's reading and in the check on published claims.
+      engine.addMessage(floor.id, 'note', null, `Standing order #${o.id}, which you set up, has come due. Carry it out now: ${o.text}`);
+      run(db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
+      engine.kick();
+    }
     changed(floor.id);
     return runId;
   }

@@ -181,7 +181,7 @@ export function createDomainBroker({ db, cfg, engine, client }) {
       } catch (e) {
         engine.log('warn', 'domain preflight failed', { order: id, kind: e?.kind, number: e?.number });
         backToBoss(o, `Nothing was charged: ${sayNc(e)}. You can press the button again.`);
-        engine.officeNotice(o.floor_id, `I couldn't buy **${o.domain}**, boss: ${sayNc(e)}. Nothing was charged. You can try the button again in Requests.`);
+        engine.bossNotice(o.floor_id, `I couldn't buy **${o.domain}**, boss: ${sayNc(e)}. Nothing was charged. You can try the button again in Requests.`);
         return;
       }
       if (!q.buyable) { set(id, { status: 'failed', note: `Not bought: ${q.why}. Nothing was charged.` }); wakeManager(o.floor_id, `${o.domain} could not be bought: ${q.why}. Nothing was charged. Pick another name if one is still needed.`); tell(o.floor_id); return; }
@@ -192,11 +192,11 @@ export function createDomainBroker({ db, cfg, engine, client }) {
       }
       if (balance === null || balance < q.priceUsd) {
         backToBoss(o, `Nothing was charged. The building's Namecheap balance is too low for this name ($${q.priceUsd.toFixed(2)}). Press the button again once it has been topped up.`);
-        engine.officeNotice(o.floor_id, `Boss, **${o.domain}** was not bought and nothing was charged: the building's Namecheap balance is too low to cover the $${q.priceUsd.toFixed(2)}. Ask the building manager to top it up, then press Buy again under Requests.`);
+        engine.bossNotice(o.floor_id, `Boss, **${o.domain}** was not bought and nothing was charged: the building's Namecheap balance is too low to cover the $${q.priceUsd.toFixed(2)}. Ask the building manager to top it up, then press Buy again under Requests.`);
         return;
       }
       // Written first. From this line on, nothing may ever send another create for this order.
-      const claimed = run(db, "UPDATE domain_orders SET status='sent', sent_at=?, updated_at=? WHERE id=? AND status='buying'", now(), now(), id);
+      const claimed = run(db, "UPDATE domain_orders SET status='sent', reply='', sent_at=?, updated_at=? WHERE id=? AND status='buying'", now(), now(), id);
       if (!claimed.changes) return;
       // On disk before the money moves, even through a power cut: SQLite in this mode would otherwise be free to lose the last write.
       db.exec('PRAGMA wal_checkpoint(FULL)');
@@ -205,7 +205,7 @@ export function createDomainBroker({ db, cfg, engine, client }) {
         if (nc.isCertainRefusal(e)) {
           engine.log('warn', 'domain refused', { order: id, number: e.number });
           set(id, { status: 'failed', note: `Not bought: ${e.safeText || `the registrar refused it (error ${e.number})`}. Nothing was charged.` });
-          engine.officeNotice(o.floor_id, `I couldn't buy **${o.domain}**, boss: ${e.safeText || 'the registrar refused it'}. Nothing was charged.`);
+          engine.bossNotice(o.floor_id, `I couldn't buy **${o.domain}**, boss: ${e.safeText || 'the registrar refused it'}. Nothing was charged.`);
           tell(o.floor_id);
           return;
         }
@@ -214,7 +214,7 @@ export function createDomainBroker({ db, cfg, engine, client }) {
         // Words saying the balance was short are worth passing on, but they aren't proof nothing moved. The account's own list still decides.
         const low = !!e?.lowFunds;
         set(id, { reply: low ? 'low_funds' : '', note: low ? 'The registrar says the balance is too low. Confirming nothing was charged before you can try again.' : 'The registrar did not give a clear answer. Checking whether it went through; it will not be bought twice.', next_try_at: now() + (cfg.domainRetryMs ?? 30000) });
-        if (low) engine.officeNotice(o.floor_id, `Boss, the registrar says the building's Namecheap balance is too low for **${o.domain}**. I'm confirming nothing was charged. Ask the building manager to top it up; the Buy button comes back once that's confirmed.`);
+        if (low) engine.bossNotice(o.floor_id, `Boss, the registrar says the building's Namecheap balance is too low for **${o.domain}**. I'm confirming nothing was charged. Ask the building manager to top it up; the Buy button comes back once that's confirmed.`);
         tell(o.floor_id);
         return;
       }
@@ -264,7 +264,7 @@ export function createDomainBroker({ db, cfg, engine, client }) {
       const tries = o.dns_tries + 1;
       engine.log('warn', 'domain dns failed', { order: id, kind: e?.kind, number: e?.number, tries });
       set(id, { dns_tries: tries, next_try_at: now() + Math.min((cfg.domainRetryMs ?? 30000) * 2 ** tries, 3600000), note: tries >= MAX_DNS_TRIES ? 'Bought, but its address could not be set. The building manager has to finish this by hand.' : 'Bought. Still setting its address.' });
-      if (tries === MAX_DNS_TRIES) engine.officeNotice(o.floor_id, `**${o.domain}** is bought, boss, but I can't point it at the site. The building manager needs to finish that by hand.`);
+      if (tries === MAX_DNS_TRIES) engine.bossNotice(o.floor_id, `**${o.domain}** is bought, boss, but I can't point it at the site. The building manager needs to finish that by hand.`);
       tell(o.floor_id);
     }
   }
@@ -292,12 +292,12 @@ export function createDomainBroker({ db, cfg, engine, client }) {
           if (o.reply === 'low_funds') {
             // The registrar said the balance was short and the name never appeared. Both agree, so it can safely wait for another click.
             backToBoss(o, 'Nothing was charged. The building\'s Namecheap balance was too low. Press the button again once it has been topped up.');
-            engine.officeNotice(o.floor_id, `**${o.domain}** was not bought, boss, and nothing was charged. Once the building manager has topped up the balance, press Buy again under Requests.`);
+            engine.bossNotice(o.floor_id, `**${o.domain}** was not bought, boss, and nothing was charged. Once the building manager has topped up the balance, press Buy again under Requests.`);
           } else {
             // No proof either way, so it can't be called "nothing charged", and the name stays blocked. Only a person with the registrar's records can settle this.
             set(o.id, { status: 'uncertain', note: 'The registrar never gave a clear answer. The building manager is checking the account. It will not be bought again until they do.' });
             engine.log('error', 'domain order needs a person', { order: o.id });
-            engine.officeNotice(o.floor_id, `I can't confirm whether **${o.domain}** went through, boss. The registrar never gave a clear answer. The building manager will check the account, and nothing more will happen with it until they have.`);
+            engine.bossNotice(o.floor_id, `I can't confirm whether **${o.domain}** went through, boss. The registrar never gave a clear answer. The building manager will check the account, and nothing more will happen with it until they have.`);
             tell(o.floor_id);
           }
         } else set(o.id, { next_try_at: now() + (cfg.domainRetryMs ?? 60000) });
@@ -311,7 +311,7 @@ export function createDomainBroker({ db, cfg, engine, client }) {
     if (!o || o.status !== 'uncertain') throw new DomainRefused('only an order marked uncertain can be settled by hand');
     if (outcome === 'not_bought') {
       set(id, { status: 'failed', note: 'The building manager checked: it was not bought and nothing was charged.' });
-      engine.officeNotice(o.floor_id, `The building manager checked **${o.domain}**: it wasn't bought and nothing was charged. Ask the manager if you still want it.`);
+      engine.bossNotice(o.floor_id, `The building manager checked **${o.domain}**: it wasn't bought and nothing was charged. Ask the manager if you still want it.`);
     } else if (outcome === 'bought') {
       const usd = Number(chargedUsd);
       if (!Number.isFinite(usd) || usd < 0 || usd > 100000) throw new DomainRefused('say what was charged');

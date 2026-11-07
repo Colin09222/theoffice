@@ -165,6 +165,8 @@ export function openDb(dataDir) {
 export const get = (db, sql, ...a) => db.prepare(sql).get(...a);
 export const all = (db, sql, ...a) => db.prepare(sql).all(...a);
 export const run = (db, sql, ...a) => db.prepare(sql).run(...a);
+/** One row at a time, for what could be too big to hold all at once. */
+export const each = (db, sql, ...a) => db.prepare(sql).iterate(...a);
 export function tx(db, fn) {
   db.exec('BEGIN IMMEDIATE');
   try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }

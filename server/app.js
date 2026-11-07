@@ -7,7 +7,7 @@ import { get, all, run, tx } from './db.js';
 import { ROOT } from './config.js';
 import * as A from './auth.js';
 import { Bus } from './bus.js';
-import { Engine, agentView, taskView, PRIVATE_TEXT, redactChat, viewEvent } from './engine.js';
+import { Engine, agentView, taskView, PRIVATE_TEXT, redactChat, redactor, viewEvent } from './engine.js';
 import { slugify, slugPattern, cleanPath, mimeOf, listFiles, readFile, floorBytes, WorkspaceError } from './workspace.js';
 import { publicUrl } from './tools.js';
 import { embeddedV4, expandV6 } from './safefetch.js';
@@ -41,6 +41,8 @@ const BASE_HEADERS = {
 };
 const LIMITS = { form: [8, 60000], buy: [10, 60000], dataRead: [600, 60000], dataWrite: [90, 60000], dataIp: [300, 60000], dataProject: [1500, 60000], code: [8, 60000], login: [6, 60000], admin: [5, 60000], adminAll: [60, 60000], chat: [20, 60000], mutate: [90, 60000], read: [900, 60000], publicSite: [600, 60000], sse: [40, 60000] };
 const MAX_CHAT = 4000;
+// A viewer this far behind has stopped reading. Everything after this would wait in memory for someone who may never take it, and a browser that really is slow reconnects and catches up.
+const MAX_STREAM_BACKLOG = 512 * 1024;
 const RESERVED = new Set(['api', 'admin', 'f', 'floor', 'js', 'css', 'vendor', 'robots', 'www', 'static', 'assets']);
 
 class HttpError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
@@ -173,9 +175,10 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   function snapshot(f, viewer) {
     const hidden = viewer.owner ? new Set() : privateSet(f);
     if (!viewer.owner && viewer.defaultPrivate) hidden.add(''); // nothing untagged is public on a default-private floor
+    const hide = viewer.owner ? (s) => s : redactor(db, f.id);
     const agents = all(db, 'SELECT * FROM agents WHERE floor_id=? ORDER BY id', f.id).map((a) => {
       const v = agentView(a);
-      if (hidden.has(a.project)) { v.activity = PRIVATE_TEXT; v.taskId = null; }
+      if (hidden.has(a.project)) { v.activity = PRIVATE_TEXT; v.taskId = null; } else v.activity = hide(v.activity);
       return v;
     });
     // Named columns: a view has no business loading transcripts, however large a task's have grown.
@@ -183,13 +186,13 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       const v = taskView(t);
       if (viewer.owner) return v;
       const { brief: _b, result: _r, ...pub } = v;
-      return hidden.has(t.project) ? { ...pub, title: 'Private task', plan: '', project: '' } : pub;
+      return hidden.has(t.project) ? { ...pub, title: 'Private task', plan: '', project: '' } : { ...pub, title: hide(pub.title), plan: hide(pub.plan) };
     });
     const projects = all(db, 'SELECT * FROM projects WHERE floor_id=? AND published_at IS NOT NULL ORDER BY published_at DESC', f.id).filter((p) => viewer.owner || !p.private).map((p) => (viewer.owner ? projectOwnerView(f, p) : projectView(f, p)));
     const feedRows = all(db, "SELECT * FROM events WHERE floor_id=? AND type='feed' ORDER BY id DESC LIMIT 120", f.id).reverse();
     const feed = feedRows.map((e) => {
       const d = JSON.parse(e.data);
-      return { id: e.id, ...d, text: hidden.has(e.project) && (d.agent !== null || e.project) ? PRIVATE_TEXT.toLowerCase() : d.text };
+      return { id: e.id, ...d, text: hidden.has(e.project) && (d.agent !== null || e.project) ? PRIVATE_TEXT.toLowerCase() : hide(d.text) };
     });
     // The same rules as the stream, so reloading the page can never show more than watching it live did.
     const talk = all(db, "SELECT * FROM events WHERE floor_id=? AND type='talk' ORDER BY id DESC LIMIT 80", f.id).reverse()
@@ -314,6 +317,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     res.writeHead(200, { ...BASE_HEADERS, 'content-security-policy': mainCsp, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     res.socket?.setNoDelay?.(true);
     const write = (ev) => {
+      if (res.writableLength > MAX_STREAM_BACKLOG) { res.destroy(); return; }
       // A revoked or expired session stops being the owner at once. The browser reconnects as a visitor.
       if (viewer.owner) {
         const live = get(db, 'SELECT expires_at e FROM sessions WHERE hash=?', viewer.sessionHash);
@@ -335,7 +339,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     }
     res.write(': connected\n\n');
     const off = bus.subscribe(f.id, sub);
-    const beat = setInterval(() => res.write(': beat\n\n'), 20000); beat.unref?.();
+    const beat = setInterval(() => { if (res.writableLength > MAX_STREAM_BACKLOG) res.destroy(); else res.write(': beat\n\n'); }, 20000); beat.unref?.();
     req.on('close', () => { clearInterval(beat); off(); });
     return 'stream';
   });

@@ -110,7 +110,7 @@ const PICTURE_COST = new RegExp(`( KB), ${DOLLARS}\\)`, 'g');
 const SENTENCE = /(?:[^.!?\n]|\.(?=\d))+[.!?]?/g;
 const SPEND_WORD = /\b(?:spent|spend|spending|budget|burn(?:ed|t|ing)?|so far|daily cap|used|credits?)\b|\bcost\s*:|\bcost (?:us|me|the)\b|\b(?:run|task|job|step|session|call|work|round|batch)\s+(?:has\s+)?cost\b|\btoday'?s? (?:total|bill|cost|tab)\b|\brunning (?:total|cost|tab)\b/i;
 const hasAmount = new RegExp(AMOUNT, 'i');
-const amounts = new RegExp(AMOUNT, 'gi');
+export const amounts = new RegExp(AMOUNT, 'gi');
 const MIGHT_HAVE_MONEY = /\$|¢|cent|dollar|buck|penn|usd/i;
 export function scrubSpendText(text) {
   const s = String(text ?? '');

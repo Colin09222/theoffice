@@ -326,7 +326,7 @@ describe('the rules', () => {
     await until(() => /balance/.test(h.statusOf(row.id).note));
     assert.equal(h.statusOf(row.id).status, 'awaiting_boss');
     assert.equal(h.stub.state.creates.length, 0);
-    const msgs = all(h.t.db, "SELECT text FROM messages WHERE floor_id=? AND role='office'", h.floor.id).map((m) => m.text).join(' ');
+    const msgs = all(h.t.db, "SELECT text FROM messages WHERE floor_id=? AND role='budget'", h.floor.id).map((m) => m.text).join(' ');
     assert.match(msgs, /balance is too low/); assert.match(msgs, /nothing was charged/);
     h.stub.state.balance = 50;
     await h.buy(row.id);
@@ -340,7 +340,7 @@ describe('the rules', () => {
     await h.buy(row.id);
     await until(() => /balance/.test(h.statusOf(row.id).note));
     assert.equal(h.statusOf(row.id).status, 'sent', 'not yet');
-    assert.match(all(h.t.db, "SELECT text FROM messages WHERE role='office'").map((m) => m.text).join(' '), /balance is too low/);
+    assert.match(all(h.t.db, "SELECT text FROM messages WHERE role='budget'").map((m) => m.text).join(' '), /balance is too low/);
     run(h.t.db, 'UPDATE domain_orders SET sent_at=?, next_try_at=0 WHERE id=?', Date.now() - 16 * 60000, row.id);
     await h.t.app.engine.domains.reconcile();
     assert.equal(h.statusOf(row.id).status, 'awaiting_boss');

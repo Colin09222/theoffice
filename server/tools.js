@@ -1,7 +1,7 @@
 // The complete set of things an agent can do. There is no shell, no code execution and no real filesystem here.
 import { writeFile, writeBinaryFile, readFile, listFiles, publishSnapshot, WorkspaceError, slugify, slugPattern } from './workspace.js';
 import { safeFetch, FetchBlocked } from './safefetch.js';
-import { get, all, run } from './db.js';
+import { get, all, run, each } from './db.js';
 import { DomainRefused, domainsConfigured } from './domains.js';
 import { ProviderError, plainProviderText, scrub } from './llm.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './media.js';
@@ -10,6 +10,8 @@ import { formatReport } from './launch-check.js';
 import { LANES } from './prompts.js';
 import { OrderError } from './orders.js';
 import { HelpError, HELP_LIMITS, flatText } from './help.js';
+
+const LINK_SCAN_CHARS = 8 * 1024 * 1024, MAX_LINKS_CHECKED = 100;
 
 const str = (o, k, max, req = true) => {
   const v = o?.[k];
@@ -185,23 +187,39 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
   };
   const brokerError = (e) => { if (e instanceof ProviderError) { engine.log('warn', 'tool provider failed', { status: e.status, err: scrub(e.message, cfg) }); return new WorkspaceError(`that did not work: ${plainProviderText(e)}`); } return e; };
   // A link nobody here ever opened is what an invented source looks like from outside. Publishing a doc checks each one against what searches returned and pages opened on this floor, against what teammates handed over, and against what the boss said.
-  const seenOnFloor = (floorId, exceptPrefix) => {
-    const parts = [bossText(db, floorId)];
-    for (const t of all(db, "SELECT transcript FROM tasks WHERE floor_id=? AND transcript!=''", floorId)) {
+  // A drive can hold a hundred megabytes of markdown, and one publish must not need all of that in memory. So each place is read once and let go, newest first, and only until the links are found or the allowance runs out.
+  const unseenOnFloor = (floorId, exceptPrefix, keys) => {
+    const left = new Set(keys);
+    let room = LINK_SCAN_CHARS;
+    const look = (text) => {
+      const part = text.length > room ? text.slice(0, room) : text;
+      room -= part.length;
+      const hay = part.toLowerCase().replaceAll('://www.', '://');
+      for (const k of left) if (hay.includes(k)) left.delete(k);
+    };
+    const done = () => !left.size || room <= 0;
+    look(bossText(db, floorId));
+    for (const t of each(db, "SELECT transcript FROM tasks WHERE floor_id=? AND transcript!='' ORDER BY id DESC", floorId)) {
+      if (done()) break;
       let msgs; try { msgs = JSON.parse(t.transcript); } catch { continue; }
       // A refusal quotes the link, and reading a draft back shows it again. Neither means anyone has seen the page.
-      for (const m of msgs) if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string' && !/^Error:|^<untrusted_data source="workspace:/.test(m.content)) parts.push(m.content);
+      for (const m of msgs) if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string' && !/^Error:|^<untrusted_data source="workspace:/.test(m.content)) look(m.content);
     }
-    for (const f of all(db, "SELECT path,content FROM files WHERE floor_id=? AND path LIKE 'projects/%.md'", floorId)) if (!f.path.startsWith(exceptPrefix) && typeof f.content === 'string') parts.push(f.content);
-    return parts.join('\n').toLowerCase().replaceAll('://www.', '://');
+    for (const f of each(db, "SELECT path,content FROM files WHERE floor_id=? AND path LIKE 'projects/%.md' ORDER BY updated_at DESC", floorId)) {
+      if (done()) break;
+      if (!f.path.startsWith(exceptPrefix) && typeof f.content === 'string') look(f.content);
+    }
+    return left;
   };
   const unseenLinks = (c, prefix, sources) => {
     const doc = get(db, 'SELECT content FROM files WHERE floor_id=? AND path=?', c.floor.id, `${prefix}index.md`)?.content;
     const urls = new Set([...sources.map((s) => s.url), ...(typeof doc === 'string' ? [...doc.matchAll(/https?:\/\/[^\s)\]>"'`]+/gi)].map((m) => m[0].replace(/[.,;:!?*_]+$/, '')) : [])]);
-    if (!urls.size) return [];
-    const seen = seenOnFloor(c.floor.id, prefix);
     const key = (u) => u.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
-    return [...urls].filter((u) => !/^https?:\/\/([a-z0-9-]+\.)?(example\.(com|org|net)|localhost)([/:]|$)/i.test(u) && !seen.includes(key(u))).slice(0, 12)
+    // The first hundred say whether links were made up. A doc of nothing but links can't hold up the whole building.
+    const checked = [...urls].filter((u) => !/^https?:\/\/([a-z0-9-]+\.)?(example\.(com|org|net)|localhost)([/:]|$)/i.test(u)).slice(0, MAX_LINKS_CHECKED);
+    if (!checked.length) return [];
+    const unseen = unseenOnFloor(c.floor.id, prefix, new Set(checked.map(key)));
+    return checked.filter((u) => unseen.has(key(u))).slice(0, 12)
       .map((u) => `a link nobody here opened or found in a search (open it with fetch_url, or take it out along with whatever rests on it): "${u}"`);
   };
   const handlers = {
@@ -230,6 +248,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const slug = str(a, 'project', 60);
       if (!slugPattern.test(slug)) throw new WorkspaceError('project must be lowercase letters, digits and hyphens');
       if (isPrivate(c, slug) && !isPrivate(c, c.project)) throw new WorkspaceError('that project is private, and this task can\'t change it');
+      // These go up on the launched wall in the lobby.
+      if (!isPrivate(c, slug)) outbound(c, `${a.title ?? ''} ${a.description ?? ''}`, 'title or description');
       const kind = ['site', 'app', 'game', 'simulation', 'doc', 'research'].includes(a.kind) ? a.kind : 'site';
       const directory = a.directory === undefined || a.directory === null || a.directory === '' ? '' : String(a.directory);
       if (directory && !/^[A-Za-z0-9_-][A-Za-z0-9._-]*(\/[A-Za-z0-9_-][A-Za-z0-9._-]*){0,2}$/.test(directory)) throw new WorkspaceError('directory must be a simple relative folder such as dist');
@@ -425,7 +445,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (!engine.orders) throw new WorkspaceError('standing orders are not available');
       const schedule = { every: a.every, at: a.at, weekday: a.weekday, tz: str(a, 'tz', 64, false) || undefined };
       let o;
-      try { o = engine.orders.create(c.floor, { text: str(a, 'instruction', 2000), schedule }); } catch (e) { if (e instanceof OrderError) throw new WorkspaceError(e.message); throw e; }
+      try { o = engine.orders.create(c.floor, { text: str(a, 'instruction', 2000), schedule, setBy: 'manager' }); } catch (e) { if (e instanceof OrderError) throw new WorkspaceError(e.message); throw e; }
       return `Standing order #${o.id} set: ${o.scheduleText}. First run ${new Date(o.nextRunAt).toISOString().slice(0, 16).replace('T', ' ')} UTC, when the floor is quiet. Tell the boss it shows under Orders, where they can change or delete it.`;
     },
     list_standing_orders(c) {

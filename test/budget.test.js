@@ -804,14 +804,14 @@ describe('the admin CLI', () => {
       const cli = cliIn(dir);
       const bought = cli('purchases', 'mark', '--id', String(a), '--status', 'bought', '--note', 'Done, $12');
       assert.equal(bought.status, 0, bought.stderr); assert.match(bought.stdout, /Marked/); noKeys(bought.stdout);
-      await until(() => all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='office'", floor.id).some((m) => /bought "Good photos": Done, \$12/.test(m.text)), { what: 'the floor to hear' });
+      await until(() => all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='budget'", floor.id).some((m) => /bought "Good photos": Done, \$12/.test(m.text)), { what: 'the floor to hear' });
       assert.equal(cli('purchases', 'mark', '--id', String(a), '--status', 'rejected').status, 1, 'decided once');
       assert.equal(get(t.db, 'SELECT status s FROM purchases WHERE id=?', a).s, 'bought');
       assert.equal(cli('purchases', 'mark', '--id', String(b), '--status', 'rejected').status, 0);
-      await until(() => all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='note'", floor.id).some((m) => /turned down "Bad idea"/.test(m.text)), { what: 'the manager to hear' });
+      await until(() => all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='note'", floor.id).some((m) => /turned down.*<untrusted_data source="purchase request">Bad idea</.test(m.text)), { what: 'the manager to hear' });
       await until(() => prompts.some((p) => p.includes('turned down')), { what: 'the manager to be woken' });
       await sleep(40);
-      assert.equal(all(t.db, "SELECT 1 x FROM messages WHERE floor_id=? AND role='office' AND text LIKE '%Good photos%'", floor.id).length, 1, 'said once');
+      assert.equal(all(t.db, "SELECT 1 x FROM messages WHERE floor_id=? AND role='budget' AND text LIKE '%Good photos%'", floor.id).length, 1, 'said once');
       assert.equal(cli('purchases', 'mark', '--id', '999', '--status', 'bought').status, 1);
       assert.equal(cli('purchases', 'mark', '--id', String(b), '--status', 'pending').status, 1);
       assert.equal(cli('purchases', 'list', '--json').status, 0);
