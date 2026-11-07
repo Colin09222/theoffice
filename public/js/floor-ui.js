@@ -630,6 +630,11 @@ class FloorPage {
     this.streamEl.firstChild.textContent = this.streamBuf;
     this.scrollChat();
   }
+  /** Resolves once the state on the page is newer than this call, even if a reload was already under way. */
+  async reloadSettled() {
+    while (this.reloading) await new Promise((r) => setTimeout(r, 30));
+    await this.reload();
+  }
   async reload() {
     if (this.reloading) { this.reloadAgain = true; return; }
     this.reloading = true;

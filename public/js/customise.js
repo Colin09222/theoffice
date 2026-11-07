@@ -34,7 +34,9 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
     identity: { about: '', tone: '', rules: '', avoid: '', routing: {}, ...(s.identity || {}) },
     staff: s.agents.map(staffDraft),
   };
-  const before = JSON.stringify(draft.staff);
+  const withoutStaff = () => JSON.stringify({ ...draft, staff: null });
+  const before = withoutStaff();
+  const changedStaff = () => draft.staff.filter((a) => JSON.stringify(a) !== JSON.stringify(page.state.agents.map(staffDraft).find((x) => x.id === a.id)));
   const showRoom = (now) => {
     clearTimeout(timer);
     const go = () => page.previewRoom({ ...draft.decor }, { ...draft.colors });
@@ -44,11 +46,11 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
   const m = modal('Customise', (body, close) => {
     const pane = h('div.custom-pane');
     const tabs = h('nav.tabs.custom-tabs');
-    let current = tab, currentAgent = agentId;
-    const sheet = () => m?.el;
+    let currentAgent = agentId;
+    const card = body.parentElement;
     const save = async (e) => {
       e?.preventDefault();
-      const staff = draft.staff.filter((a) => JSON.stringify(a) !== JSON.stringify(s.agents.map(staffDraft).find((x) => x.id === a.id))).map(({ role: _r, ...a }) => a);
+      const staff = changedStaff().map(({ role: _r, ...a }) => a);
       try {
         await api(`/floors/${page.slug}/customise`, { method: 'POST', body: { name: draft.name, tagline: draft.tagline, colors: draft.colors, decor: draft.decor, publicChat: draft.publicChat, defaultPrivate: draft.defaultPrivate, boss: draft.boss, identity: draft.identity, staff } });
         saved = true; toast('Saved'); close();
@@ -128,7 +130,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
           if (!asking) { leave.append(h('button.btn.ghost', { type: 'button', 'data-let-go': a.id, onclick: () => paintLeave(true) }, `Let ${a.name} go`)); return; }
           leave.append(h('span', {}, `Let ${a.name} go? Their desk goes with them.`), h('div.row', {},
             h('button.btn.danger', { type: 'button', 'data-let-go-yes': a.id, onclick: async () => {
-              try { await api(`/floors/${page.slug}/staff/${a.id}/let-go`, { method: 'POST', body: {} }); toast(`${a.name} has left`); currentAgent = null; await page.reload(); syncStaff(); render('staff'); } catch (x) { toast(x.message, 'bad'); paintLeave(false); }
+              try { await api(`/floors/${page.slug}/staff/${a.id}/let-go`, { method: 'POST', body: {} }); toast(`${a.name} has left`); currentAgent = null; await page.reloadSettled(); syncStaff(); render('staff'); } catch (x) { toast(x.message, 'bad'); paintLeave(false); }
             } }, 'Yes, let them go'),
             h('button.btn.ghost', { type: 'button', onclick: () => paintLeave(false) }, 'Keep them')));
         };
@@ -151,7 +153,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
         h('h3', {}, 'Hire', h('small', {}, `${staffN} of ${hiring.cap} desks taken`)),
         staffN >= hiring.cap ? h('small.field-hint', {}, 'Every desk is taken. Let someone go to hire someone new.') : free.length ? h('div.chips', {}, ...free.map((r) => h('button.chip', { type: 'button', 'data-hire-role': r.role, onclick: async (e) => {
           e.target.disabled = true;
-          try { await api(`/floors/${page.slug}/hire`, { method: 'POST', body: { role: r.role } }); toast(`A new ${r.title} is on the way up`); await page.reload(); syncStaff(); currentAgent = page.state.agents.find((x) => x.role === r.role)?.id; render('staff'); } catch (x) { toast(x.message, 'bad'); e.target.disabled = false; }
+          try { await api(`/floors/${page.slug}/hire`, { method: 'POST', body: { role: r.role } }); toast(`A new ${r.title} is on the way up`); await page.reloadSettled(); syncStaff(); currentAgent = page.state.agents.find((x) => x.role === r.role)?.id; render('staff'); } catch (x) { toast(x.message, 'bad'); e.target.disabled = false; }
         } }, r.title))) : h('small.field-hint', {}, 'You have one of everyone.')) : null;
       pane.append(list, editor, hire);
       pick(draft.staff.find((a) => a.id === currentAgent) || draft.staff[0]);
@@ -177,39 +179,35 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
         h('div.field', {}, h('span', {}, 'Floor'), chips(FLOOR_STYLES, d.floor, change('floor'), 'Floor')),
         h('div.field', {}, h('span', {}, 'Walls'), h('div.color-row', {}, chips(WALL_MATS, d.wallMat, change('wallMat'), 'Walls'), wallColour)),
         h('div.field', {}, h('span', {}, 'Wall art'), chips(ART_STYLES, d.artStyle, change('artStyle'), 'Wall art')),
-        d.artStyle === 'logo' || true ? h('small.field-hint', {}, s.floor.logoUrl ? 'Our logo uses the logo from your published work.' : 'Our logo draws one from your name, until your staff publish a picture with "logo" in its file name.') : null,
+        h('small.field-hint', {}, s.floor.logoUrl ? '"Our logo" hangs the logo from your published work.' : '"Our logo" draws one from your name, until your staff publish a picture with "logo" in its file name.'),
         h('div.field', {}, h('span', {}, 'Office pet'), chips(PETS, d.pet, change('pet'), 'Pet')),
         h('label.field', {}, h('span', {}, 'Plants'), plants),
         h('div.toggle-grid', {}, toggle('rug', 'Rugs'), toggle('art', 'Art'), toggle('coffee', 'Coffee bar'), toggle('arcade', 'Arcade cabinet'), toggle('neon', 'Neon sign'))));
     };
 
     const render = (id) => {
-      current = id;
       cleanup(); cleanup = () => {};
       clear(tabs);
       for (const [k, label] of TABS) tabs.append(h(`button.tab${k === id ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(k === id), 'data-custom': k, onclick: () => render(k) }, label));
       clear(pane);
       pane.scrollTop = 0;
-      sheet()?.classList.toggle('short', SHORT.has(id));
+      card.classList.toggle('short', SHORT.has(id));
       ({ vibe: tabVibe, company: tabCompany, boss: tabBoss, staff: tabStaff, decor: tabOffice })[id]();
     };
 
     body.append(h('form.custom-form', { onsubmit: save }, tabs, pane,
       h('div.custom-foot', {}, h('button.btn.ghost', { type: 'button', 'data-custom-cancel': '', onclick: () => close() }, 'Cancel'), h('button.btn.primary.grow', { type: 'submit' }, 'Save'))));
-    render.current = () => current;
-    setTimeout(() => {
-      m.el.classList.add('customise'); m.el.parentElement.classList.add('customise-back');
-      m.el.classList.toggle('short', SHORT.has(current));
-    }, 0);
     render(tab);
   }, { wide: true, onClose: () => {
     clearTimeout(timer);
     cleanup();
     // On Save the room already shows what was saved, and the reload that follows brings the state into line with it.
     if (saved) page.clearPreview({ rebuild: false }); else {
+      const unsaved = before !== withoutStaff() || changedStaff().length;
       page.clearPreview();
-      if (before !== JSON.stringify(draft.staff)) toast('Not saved');
+      if (unsaved) toast('Not saved');
     }
   } });
+  m.el.classList.add('customise'); m.el.parentElement.classList.add('customise-back');
   return m;
 }

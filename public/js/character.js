@@ -497,9 +497,13 @@ export function createPreview(canvas, look, accent) {
     });
   };
   swapIn(look, accent);
+  let shown = '';
   const loop = (now) => {
     if (dead) return;
     raf = requestAnimationFrame(loop);
+    // The canvas may only get its real size once it is on the page, and a phone can turn. Keep the picture in proportion either way.
+    const size = `${canvas.clientWidth}x${canvas.clientHeight}`;
+    if (size !== shown && canvas.clientWidth && canvas.clientHeight) { shown = size; renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); cam.aspect = canvas.clientWidth / canvas.clientHeight; cam.updateProjectionMatrix(); }
     const dt = Math.min((now - last) / 1000, 0.1); last = now;
     ch.group.rotation.y = Math.sin(now / 1400) * 0.55;
     ch.update(dt);
