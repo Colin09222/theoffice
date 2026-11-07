@@ -13,8 +13,8 @@ Nothing beyond a normal deploy is needed: no new environment variables, no build
 - The static table is built at start-up, so the server must restart to pick the files up, as with any deploy.
 
 ## After deploying
-1. Open the lobby on a desktop: `__stage.post` should be set and `__stage.q.ao` should read `full` (`half` on a phone,
-   `off` after the frame-time watchdog decides the device can't keep up, and no post at all on the low tier).
+1. Open the lobby on a desktop: `__stage.post` should be set and `__stage.q.ao` should read `full` on an ordinary screen and `half` on
+   a dense one or a phone (`off` after the frame-time watchdog decides the device can't keep up, and no post at all on the low tier).
 2. Open a floor: people should get their model within a second or two (`[...__office.view.actors.values()][0].char.isModel`
    is true) and the furniture should swap (`__office.view.modelsOn`). If either stays false, check that
    `/theoffice/models/characters/character-male-a.glb` returns `model/gltf-binary` and that the addons bundle loads.
