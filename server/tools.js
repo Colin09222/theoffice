@@ -3,7 +3,7 @@ import { writeFile, writeBinaryFile, readFile, listFiles, publishSnapshot, Works
 import { safeFetch, FetchBlocked } from './safefetch.js';
 import { get, all, run } from './db.js';
 import { DomainRefused, domainsConfigured } from './domains.js';
-import { ProviderError } from './llm.js';
+import { ProviderError, plainProviderText, scrub } from './llm.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './media.js';
 import { runCheck, saveCheck, gateProblem, launchFacts, composeReport } from './launch.js';
 import { formatReport } from './launch-check.js';
@@ -178,11 +178,12 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     if (isPrivate(c, c.project) && slug !== c.project && !isPrivate(c, slug)) throw new WorkspaceError('this task is private, so it can\'t put anything in a public project');
     return slug;
   };
-  const roomFor = (c, usd) => {
-    if (engine.overBudget(c.floor.id, usd)) throw new WorkspaceError('today\'s budget would not cover that');
-    if (c.task && (get(db, 'SELECT cost_usd n FROM tasks WHERE id=?', c.task.id)?.n ?? 0) + usd > cfg.taskMaxUsd) throw new WorkspaceError('this task\'s budget would not cover that');
+  // It doesn't say why. A bot has no business knowing there is a limit or how near it is, because it could only pass that on.
+  const roomFor = (c, usd, provider) => {
+    const short = engine.overBudget(c.floor.id, usd) || engine.budget.out(provider) || engine.budget.room(provider) <= 0 || (c.task && (get(db, 'SELECT cost_usd n FROM tasks WHERE id=?', c.task.id)?.n ?? 0) + usd > cfg.taskMaxUsd);
+    if (short) throw new WorkspaceError('that is not available right now, so carry on without it');
   };
-  const brokerError = (e) => { if (e instanceof ProviderError) { engine.log('warn', 'tool provider failed', { status: e.status }); return new WorkspaceError(`that did not work: ${e.message}`); } return e; };
+  const brokerError = (e) => { if (e instanceof ProviderError) { engine.log('warn', 'tool provider failed', { status: e.status, err: scrub(e.message, cfg) }); return new WorkspaceError(`that did not work: ${plainProviderText(e)}`); } return e; };
   const handlers = {
     write_file(c, a) {
       const content = typeof a.content === 'string' ? a.content : '';
@@ -255,12 +256,11 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       outbound(c, q, 'search');
       if (serverSearch(cfg) && SEARCH_ROLES.has(c.agent.role) && engine.search) {
         if (todayCount(c, 'search') >= cfg.searchesPerFloorDay) throw new WorkspaceError('this floor has done all its searching for today');
-        roomFor(c, 0.2);
+        roomFor(c, 0.2, 'anthropic');
         // What was searched for isn't shown on the floor: visitors can read the feed.
         c.say('browsing', 'Searching the web', 'searched the web');
         let r;
-        try { r = await engine.search.search(q, c.signal); } catch (e) { if (e instanceof ProviderError) { engine.log('warn', 'search failed', { status: e.status }); return 'Search is unavailable right now.'; } throw e; }
-        engine.charge(c.floor.id, c.agent, engine.search.model, r.usage.prompt, r.usage.completion, r.usage.cost, { taskId: c.task?.id, kind: 'search' });
+        try { r = await engine.brokerCall(c, { provider: 'anthropic', usd: 0.2, model: engine.search.model, kind: 'search' }, () => engine.search.search(q, c.signal)); } catch (e) { if (e instanceof ProviderError) { engine.log('warn', 'search failed', { status: e.status }); return 'Search is unavailable right now.'; } throw e; }
         const list = r.sources.slice(0, 12).map((s, i) => `${i + 1}. ${s.title}\n${s.url}`).join('\n');
         return wrapUntrusted('web_search', `${r.failed && !r.text ? `The search failed (${r.failed}).` : r.text || 'No results.'}${list ? `\n\nSources:\n${list}` : ''}`);
       }
@@ -325,21 +325,21 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       c.imagesMade = c.imagesMade || 0;
       if (c.imagesMade >= cfg.imagesPerTask) throw new WorkspaceError(`that is ${cfg.imagesPerTask} pictures for this task, the limit`);
       if (todayCount(c, 'image') >= cfg.imagesPerFloorDay) throw new WorkspaceError(`this floor has made its ${cfg.imagesPerFloorDay} pictures for today`);
-      roomFor(c, engine.media.image.estimateUsd || 0.25);
+      const estimate = engine.media.image.estimateUsd || 0.25;
+      roomFor(c, estimate, 'openrouter');
       c.say('typing', `Drawing ${name}`, `is making a picture: ${name}`, { project });
       let img;
-      try { img = await engine.media.generateImage({ prompt, aspect: a.aspect, signal: c.signal }); } catch (e) { throw brokerError(e); }
+      try { img = await engine.brokerCall(c, { provider: 'openrouter', usd: estimate, model: engine.media.image.model, kind: 'image' }, () => engine.media.generateImage({ prompt, aspect: a.aspect, signal: c.signal })); } catch (e) { throw brokerError(e); }
       c.imagesMade++;
-      engine.charge(c.floor.id, c.agent, engine.media.image.model, img.usage.prompt, img.usage.completion, img.usage.cost, { taskId: c.task?.id, kind: 'image' });
       const rel = `${directory}/${name}.${img.ext}`;
       const saved = writeBinaryFile(db, c.floor.id, `projects/${project}/${rel}`, img.bytes, c.agent.id, cfg.quotaBytes);
       engine.emitProject(c.floor.id, project);
       // A computer has its own copy of the project, so the picture goes there too.
       if (c.mountFile) {
         const at = await c.mountFile(img.bytes, `${name}.${img.ext}`);
-        return `Made it (${Math.ceil(saved.size / 1024)} KB, $${img.usage.cost.toFixed(3)}). It is at ${at}. Run: mkdir -p /workspace/project/${directory} && cp ${at} /workspace/project/${rel}`;
+        return `Made it (${Math.ceil(saved.size / 1024)} KB). It is at ${at}. Run: mkdir -p /workspace/project/${directory} && cp ${at} /workspace/project/${rel}`;
       }
-      return `Saved ${saved.path} (${Math.ceil(saved.size / 1024)} KB, $${img.usage.cost.toFixed(3)}). In a page in that project use the relative path ${rel}.`;
+      return `Saved ${saved.path} (${Math.ceil(saved.size / 1024)} KB). In a page in that project use the relative path ${rel}.`;
     },
     async review_design(c, a) {
       if (!engine.media) throw new WorkspaceError('design review is not available');
@@ -347,7 +347,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const file = str(a, 'file', 300); const about = str(a, 'about', 500, false);
       if (about) outbound(c, about, 'description');
       if (todayCount(c, 'review') >= cfg.reviewsPerFloorDay) throw new WorkspaceError('this floor has had all its design reviews for today');
-      roomFor(c, engine.media.review.estimateUsd || 0.1);
+      const estimate = engine.media.review.estimateUsd || 0.1;
+      roomFor(c, estimate, 'openrouter');
       let bytes;
       if (c.readOutput) bytes = await c.readOutput(file);
       else {
@@ -362,11 +363,10 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (bytes.length > MAX_IMAGE_BYTES) throw new WorkspaceError('that screenshot is over 6 MB; take a viewport-sized one');
       c.say('reading', 'Getting a second opinion on the design', 'sent the design to another lab for a blunt review', { project });
       let r;
-      try { r = await engine.media.reviewDesign({ bytes, mime: type.mime, context: about, signal: c.signal }); } catch (e) { throw brokerError(e); }
-      engine.charge(c.floor.id, c.agent, engine.media.review.model, r.usage.prompt, r.usage.completion, r.usage.cost, { taskId: c.task?.id, kind: 'review' });
+      try { r = await engine.brokerCall(c, { provider: 'openrouter', usd: estimate, model: engine.media.review.model, kind: 'review' }, () => engine.media.reviewDesign({ bytes, mime: type.mime, context: about, signal: c.signal })); } catch (e) { throw brokerError(e); }
       const verdict = /FIX FIRST/i.test(r.text) ? 'fix first' : /\bSHIP\b/i.test(r.text) ? 'ship' : 'see notes';
       run(db, 'UPDATE projects SET design_review=? WHERE floor_id=? AND slug=?', JSON.stringify({ at: engine.now(), model: engine.media.review.model, verdict, text: r.text.slice(0, 2000) }), c.floor.id, project);
-      return wrapUntrusted('design review from another lab', `${r.text}\n\n(cost $${r.usage.cost.toFixed(3)})`);
+      return wrapUntrusted('design review from another lab', r.text);
     },
     async launch_check(c, a) {
       const slug = projectFor(c, a);

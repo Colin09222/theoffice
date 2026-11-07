@@ -53,8 +53,7 @@ class FloorPage {
   buildShell() {
     const s = this.state;
     this.titleEl = h('h1.floor-name'); this.tagEl = h('p.floor-tag');
-    this.statusEl = h('span.status-pill'); this.spendEl = h('span.spend');
-    this.spendBar = h('i.spend-fill');
+    this.statusEl = h('span.status-pill');
     this.controlsEl = h('div.controls');
     this.staffEl = h('div.staff-strip', { role: 'list' });
     this.tabsEl = h('nav.tabs', { role: 'tablist' });
@@ -66,7 +65,7 @@ class FloorPage {
       h('header.floor-top', {},
         h('button.btn.chrome.back', { type: 'button', 'aria-label': 'Back to the lobby', onclick: () => window.officeGo('/') }, '←', h('span', {}, 'Lobby')),
         h('div.floor-title', {}, h('span.floor-num', {}, `Floor ${s.floor.number}`), this.titleEl, this.tagEl),
-        h('div.floor-meta', {}, this.statusEl, h('div.spend-wrap', {}, this.spendEl, h('span.spend-track', {}, this.spendBar)))),
+        h('div.floor-meta', {}, this.statusEl)),
       this.controlsEl,
       panel,
     );
@@ -81,17 +80,12 @@ class FloorPage {
     let label = 'Open', cls = 'ok';
     const working = s.agents.some((a) => a.state !== 'idle');
     if (working) { label = 'Working'; cls = 'busy'; }
+    if (f.outOfBudget) { label = 'Out of budget'; cls = 'warn'; }
     if (f.budgetStopped) { label = 'Budget used, back tomorrow'; cls = 'warn'; }
     if (f.paused) { label = 'Paused'; cls = 'warn'; }
     if (f.globalPause) { label = 'Building paused'; cls = 'warn'; }
     if (f.status === 'suspended') { label = 'Closed'; cls = 'bad'; }
     this.statusEl.className = `status-pill ${cls}`; this.statusEl.textContent = label;
-    this.renderSpend();
-  }
-  renderSpend() {
-    const { today, cap } = this.state.spend;
-    this.spendEl.textContent = cap == null ? `${money(today)} today` : `${money(today)} of ${money(cap)} today`;
-    this.spendBar.style.width = cap == null ? '0%' : `${Math.min(100, (today / cap) * 100)}%`;
   }
   renderControls() {
     clear(this.controlsEl);
@@ -113,7 +107,7 @@ class FloorPage {
   async control(action, text) {
     try {
       const r = await api(`/floors/${this.slug}/control`, { method: 'POST', body: { action, text } });
-      Object.assign(this.state.floor, { paused: r.paused, pauseReason: r.pauseReason, budgetStopped: r.budgetStopped });
+      Object.assign(this.state.floor, { paused: r.paused, pauseReason: r.pauseReason, budgetStopped: r.budgetStopped, outOfBudget: r.outOfBudget });
       this.renderHeader(); this.renderControls(); this.renderBanner();
     } catch (e) { toast(e.message, 'bad'); }
   }
@@ -188,6 +182,7 @@ class FloorPage {
     else if (f.globalPause) text = 'The building manager has paused all work.';
     else if (f.paused) text = f.pauseReason || 'This floor is paused.';
     else if (f.budgetStopped) text = 'Today\'s budget is used up. Work picks up again tomorrow.';
+    else if (f.outOfBudget) text = 'The building is out of budget, so work has stopped. Please ask the owner about it.';
     else if (this.catchUp) text = this.catchUp;
     this.bannerEl.textContent = text; this.bannerEl.hidden = !text;
   }
@@ -235,7 +230,7 @@ class FloorPage {
     const body = h('div.msg-body');
     body.innerHTML = renderMarkdown(m.text); // renderMarkdown escapes all input first, and the CSP forbids inline script regardless
     // A report (launch report, standing-order report) or an answer from the help line is for the boss alone, and gets its own look.
-    const cls = m.role === 'boss' ? 'boss' : m.role === 'office' ? 'manager.notice' : m.role === 'report' ? 'manager.report' : m.role === 'help' ? 'manager.help' : 'manager';
+    const cls = m.role === 'boss' ? 'boss' : m.role === 'office' || m.role === 'budget' ? 'manager.notice' : m.role === 'report' ? 'manager.report' : m.role === 'help' ? 'manager.help' : 'manager';
     return h(`div.msg.${cls}`, { 'data-id': m.id, 'data-role': m.role }, h('span.msg-who', {}, who), body);
   }
   renderQuestions() {
@@ -277,7 +272,7 @@ class FloorPage {
       const shown = key === 'done' ? col.slice(-12).reverse() : col;
       board.append(h('section.col', {}, h('h3', {}, title, h('span', {}, String(col.length))),
         ...shown.map((x) => h(`article.card.${x.status}`, {}, h('b', {}, x.title),
-          h('small', {}, agents.find((a) => a.id === x.agentId)?.name || '', x.status === 'blocked' ? ' · waiting on the boss' : '', this.owner && x.costUsd ? ` · ${money(x.costUsd)}` : ''),
+          h('small', {}, agents.find((a) => a.id === x.agentId)?.name || '', x.status === 'blocked' ? ' · waiting on the boss' : ''),
           this.owner && x.result ? h('p', {}, x.result.slice(0, 180)) : null))));
     }
     const failed = t.filter((x) => x.status === 'failed' || x.status === 'cancelled');
@@ -464,7 +459,7 @@ class FloorPage {
   renderOrders() {
     const orders = this.state.orders || []; const lim = this.state.orderLimits || {};
     const wrap = h('div.orders', { 'data-orders': String(orders.length) });
-    wrap.append(h('p.lede', {}, `Standing orders run on their own while you're away, through the same manager, staff and daily budget as anything you ask for in chat. Up to ${lim.perFloor ?? 3} per floor, at most once a day.`));
+    wrap.append(h('p.lede', {}, `Standing orders run on their own while you're away, through the same manager and staff as anything you ask for in chat. Up to ${lim.perFloor ?? 3} per floor, at most once a day.`));
     if (!orders.length) wrap.append(h('p.empty', {}, 'No standing orders yet. Set one below, or ask your manager for something "every morning".'));
     for (const o of orders) wrap.append(this.orderCard(o));
     if (orders.length < (lim.perFloor ?? 3)) wrap.append(this.orderForm());
@@ -484,8 +479,7 @@ class FloorPage {
       h('div.order-meta', {},
         h('span', {}, h('b', {}, o.scheduleText)),
         h('span', {}, o.status === 'active' ? `Next run ${timeUntil(o.nextRunAt)}` : 'Not scheduled while paused'),
-        h('span', {}, `About ${money(o.estUsd)} a run`),
-        last ? h('span', {}, `Last run ${money(last.costUsd)}${last.status === 'failed' ? ', did not finish' : ''}`) : h('span', {}, 'Not run yet')),
+        last ? h('span', {}, `Last run ${timeAgo(last.startedAt)}${last.status === 'failed' ? ', did not finish' : ''}`) : h('span', {}, 'Not run yet')),
       h('div.order-acts', {},
         o.status === 'active'
           ? h('button.btn.ghost', { type: 'button', 'data-pause': o.id, onclick: () => act('', { status: 'paused' }, 'Paused') }, 'Pause')
@@ -499,7 +493,7 @@ class FloorPage {
     const doc = h('div.doc');
     if (r.report) doc.innerHTML = renderMarkdown(r.report); // renderMarkdown escapes its input, and the CSP forbids inline script regardless
     const label = r.status === 'running' ? 'running' : r.status === 'done' ? 'done' : 'did not finish';
-    return h(`li.order-run.${r.status}`, { 'data-run': r.id }, h('small', {}, `${new Date(r.startedAt).toLocaleString()} · ${label} · ${money(r.costUsd)} (estimated ${money(r.estUsd)})`), r.report ? doc : h('span', {}, 'Working on it...'));
+    return h(`li.order-run.${r.status}`, { 'data-run': r.id }, h('small', {}, `${new Date(r.startedAt).toLocaleString()} · ${label}`), r.report ? doc : h('span', {}, 'Working on it...'));
   }
   // The schedule controls, shared by the new-order form and the edit dialog. read() gives the body the API wants.
   orderFields(draft = {}) {
@@ -637,7 +631,6 @@ class FloorPage {
       this.view?.updateBoard(this.state.tasks);
       if (this.tab === 'tasks') this.renderBody();
     });
-    on('spend', (d) => { this.state.spend.today = d.today; this.renderSpend(); });
     on('token', (d) => { this.streamBuf += d.text; this.showStream(); });
     on('token_reset', () => { this.streamBuf = ''; this.showStream(); });
     on('message', (d) => {

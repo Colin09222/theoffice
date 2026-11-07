@@ -120,6 +120,12 @@ CREATE TABLE IF NOT EXISTS help_requests (
 );
 CREATE INDEX IF NOT EXISTS help_requests_floor ON help_requests(floor_id, id);
 CREATE INDEX IF NOT EXISTS help_requests_open ON help_requests(status, expires_at);
+-- Money promised to calls and computer sessions that are running now. It lives here rather than in memory, so a restart can't forget it and overspend a provider's limit.
+CREATE TABLE IF NOT EXISTS budget_holds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'call', floor_id INTEGER, agent_id INTEGER, task_id INTEGER, usd REAL NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS budget_holds_provider ON budget_holds(provider);
+CREATE INDEX IF NOT EXISTS budget_holds_task ON budget_holds(task_id);
 `;
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS.
 const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: 'INTEGER NOT NULL DEFAULT 0', session_charged: 'REAL NOT NULL DEFAULT 0', session_baseline: "TEXT NOT NULL DEFAULT ''", session_publish: "TEXT NOT NULL DEFAULT '[]'", session_tries: 'INTEGER NOT NULL DEFAULT 0' }, app_scores: { lower: 'INTEGER NOT NULL DEFAULT 0' },
@@ -133,6 +139,10 @@ Object.assign(ADDED.tasks, { vault: 'INTEGER NOT NULL DEFAULT 0' });
 ADDED.floors = { filler: 'INTEGER NOT NULL DEFAULT 0', last_opened_at: 'INTEGER NOT NULL DEFAULT 0' };
 // lanes: which playbook a task belongs to (game, website or business), so the person doing it gets their part of that playbook.
 Object.assign(ADDED.tasks, { lane: "TEXT NOT NULL DEFAULT ''" });
+// The building's limits: which provider each ledger row was paid to, which providers have stopped a floor, and a decision from the CLI that the floor hasn't heard yet.
+Object.assign(ADDED.ledger, { provider: "TEXT NOT NULL DEFAULT ''" });
+Object.assign(ADDED.floors, { budget_out: "TEXT NOT NULL DEFAULT ''" });
+Object.assign(ADDED.purchases, { notify: 'INTEGER NOT NULL DEFAULT 0' });
 
 export function openDb(dataDir) {
   let path = ':memory:';
@@ -143,6 +153,11 @@ export function openDb(dataDir) {
   for (const [table, cols] of Object.entries(ADDED)) {
     const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
     for (const [name, def] of Object.entries(cols)) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS ledger_provider ON ledger(provider, cost_usd)');
+  // Rows from before the column existed. A bare claude- id went to the Claude API; an id with a slash is OpenRouter's naming, whoever made the model. Domains are paid from the registrar balance and count towards neither.
+  if (db.prepare("SELECT 1 x FROM ledger WHERE provider='' AND kind!='domain' LIMIT 1").get()) {
+    db.exec(`UPDATE ledger SET provider = CASE WHEN kind='search' THEN 'anthropic' WHEN kind IN ('image','review') THEN 'openrouter' WHEN model='managed-session' OR model LIKE 'claude-%' THEN 'anthropic' ELSE 'openrouter' END WHERE provider='' AND kind!='domain'`);
   }
   return db;
 }

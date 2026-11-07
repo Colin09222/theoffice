@@ -5,6 +5,8 @@ import { openDb, all, get } from '../server/db.js';
 import { issueCode } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
 import { helpListing, helpListingText, answerHelp, declineHelp, HelpError, HELP_LIMITS } from '../server/help.js';
+import { budgetReport, budgetReportText } from '../server/budget.js';
+import { purchaseListing, purchaseListingText, decidePurchase, PurchaseError } from '../server/purchases.js';
 import { readFileSync, statSync } from 'node:fs';
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -19,7 +21,10 @@ const usage = () => {
     '  node scripts/admin.mjs filler free --floor N    same as remove: free floor N so a code can be issued for it',
     '  node scripts/admin.mjs help list [--json]       what floors have asked buddehbot and not had answered. Everything a floor wrote is fenced as untrusted data',
     '  node scripts/admin.mjs help answer --id N --text-file PATH   answer one, as guidance to that floor\'s manager',
-    '  node scripts/admin.mjs help answer --id N --decline          decline one'].join('\n'));
+    '  node scripts/admin.mjs help answer --id N --decline          decline one',
+    '  node scripts/admin.mjs budget [--json]          spent, limit and remaining per provider, what each floor has spent, and a flag at 50%, 80% and 100%',
+    '  node scripts/admin.mjs purchases list [--json]  what the staff have asked to buy and nobody has decided. Everything a floor wrote is fenced as untrusted data',
+    '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick'].join('\n'));
   process.exit(1);
 };
 if (!cmd) usage();
@@ -82,6 +87,23 @@ if (cmd === 'code') {
         console.log(`Answered #${id}. It reaches the manager as guidance on the server's next tick.`);
       }
     } catch (e) { if (e instanceof HelpError) die(e.message); throw e; }
+  } else usage();
+} else if (cmd === 'budget') {
+  // Read from the database and this process's own BUDGET_ settings, so it needs the same environment as the server. It prints no key.
+  const report = budgetReport(db, cfg);
+  console.log(rest.includes('--json') ? JSON.stringify(report, null, 2) : budgetReportText(report));
+} else if (cmd === 'purchases') {
+  const sub = rest[0];
+  const valueOf = (flag) => { const i = rest.indexOf(flag); return i >= 0 ? rest[i + 1] : undefined; };
+  if (sub === 'list') {
+    const listing = purchaseListing(db);
+    console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : purchaseListingText(listing));
+  } else if (sub === 'mark') {
+    const id = Number(valueOf('--id')); const status = valueOf('--status');
+    if (!Number.isSafeInteger(id) || id <= 0) die('--id must be a request number from "purchases list".');
+    if (status !== 'bought' && status !== 'rejected') die('--status must be bought or rejected.');
+    try { decidePurchase(db, id, status, valueOf('--note') ?? ''); } catch (e) { if (e instanceof PurchaseError) die(e.message); throw e; }
+    console.log(`Marked #${id} ${status}. The floor hears on the server's next tick.`);
   } else usage();
 } else usage();
 db.close();

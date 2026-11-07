@@ -89,7 +89,7 @@ export function parseSchedule(input, cfg = {}) {
 }
 export const describeSchedule = (s) => `Every ${s.every === 'week' ? WEEKDAYS[s.weekday] : 'day'} at ${s.at} ${s.tz || 'UTC'}`;
 
-const runView = (r) => ({ id: r.id, orderId: r.order_id, startedAt: r.started_at, finishedAt: r.finished_at, status: r.status, costUsd: r.cost_usd, estUsd: r.est_usd, tasksDone: r.tasks_done, tasksFailed: r.tasks_failed, published: JSON.parse(r.published || '[]'), report: r.report });
+const runView = (r) => ({ id: r.id, orderId: r.order_id, startedAt: r.started_at, finishedAt: r.finished_at, status: r.status, tasksDone: r.tasks_done, tasksFailed: r.tasks_failed, published: JSON.parse(r.published || '[]'), report: r.report });
 
 export function installOrders(ext) {
   const { db, cfg, engine, log, now, hooks, GET, POST, json, readJson, limit, requireOwner, HttpError, clean2 } = ext;
@@ -106,12 +106,12 @@ export function installOrders(ext) {
   };
   const view = (o) => ({
     id: o.id, text: o.text, schedule: JSON.parse(o.schedule), scheduleText: describeSchedule(JSON.parse(o.schedule)), nextRunAt: o.next_run_at, lastRunAt: o.last_run_at,
-    status: o.status, pauseReason: o.pause_reason, failStreak: o.fail_streak, runs: o.runs, estUsd: o.est_usd, createdAt: o.created_at, updatedAt: o.updated_at,
+    status: o.status, pauseReason: o.pause_reason, failStreak: o.fail_streak, runs: o.runs, createdAt: o.created_at, updatedAt: o.updated_at,
     running: !!get(db, "SELECT 1 x FROM standing_runs WHERE order_id=? AND status='running'", o.id),
     history: all(db, 'SELECT * FROM standing_runs WHERE order_id=? ORDER BY id DESC LIMIT 10', o.id).map(runView),
   });
   const list = (floorId) => all(db, 'SELECT * FROM standing_orders WHERE floor_id=? ORDER BY id', floorId).map(view);
-  const limits = () => ({ perFloor: cfg.ordersPerFloor, minHours: cfg.ordersMinHours, idleDays: cfg.ordersIdleDays, maxFails: cfg.ordersMaxFails, estimateUsd: cfg.ordersEstimateUsd });
+  const limits = () => ({ perFloor: cfg.ordersPerFloor, minHours: cfg.ordersMinHours, idleDays: cfg.ordersIdleDays, maxFails: cfg.ordersMaxFails });
 
   // The boss is here. Orders that were only waiting for that carry on, from the next slot rather than the one they missed.
   function touch(floorId) {
@@ -181,6 +181,7 @@ export function installOrders(ext) {
     if (engine.globalPaused()) return 'the building is paused';
     if (floor.paused) return 'the floor is paused';
     if (engine.floorState(floor.id).budgetStopped) return 'today\'s budget is used up';
+    if (engine.budget.out(engine.agentProvider({ role: 'manager' }))) return 'the building is out of budget';
     if (busy(floor.id)) return 'the floor was busy';
     return null;
   }
@@ -274,7 +275,6 @@ export function installOrders(ext) {
     else lines.push(`- Took about ${mins} ${mins === 1 ? 'minute' : 'minutes'}.`);
     lines.push(`- Tasks: ${done} done${failed ? `, ${failed} could not finish` : ''}${tasks.length === 0 ? ' (the manager answered without assigning work)' : ''}.`);
     if (published.length) lines.push(`- Published: ${published.map((p) => `[${p.title.replace(/[[\]]/g, '')}](${p.url})`).join(', ')}.`);
-    lines.push(`- Cost: $${cost.toFixed(3)} (estimated $${Number(r.est_usd).toFixed(2)}).`);
     const report = lines.join('\n');
     const o = get(db, 'SELECT * FROM standing_orders WHERE id=?', r.order_id);
     const streak = status === 'failed' ? (o?.fail_streak ?? 0) + 1 : 0;

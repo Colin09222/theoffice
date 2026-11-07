@@ -165,10 +165,6 @@ body[data-page="floor"] #ui::before { content: ''; position: absolute; inset: 0;
 .floor-meta { position: absolute; top: 16px; right: 452px; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .status-pill { padding: 5px 11px; border-radius: 999px; font: 11px var(--mono); letter-spacing: .07em; text-transform: uppercase; background: rgba(22, 26, 40, .72); border: 1px solid var(--glass-line); white-space: nowrap; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .status-pill.ok { color: var(--ok); } .status-pill.busy { color: var(--brand-2); } .status-pill.warn { color: var(--warn); } .status-pill.bad { color: var(--bad); }
-.spend-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-.spend { font: 11.5px var(--mono); color: var(--ink); text-shadow: 0 1px 8px rgba(10, 16, 30, .9); white-space: nowrap; }
-.spend-track { width: 124px; height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .18); overflow: hidden; display: block; }
-.spend-fill { display: block; height: 100%; width: 0; background: var(--brand-2); border-radius: 4px; transition: width .4s; }
 .controls { position: absolute; left: 22px; bottom: 20px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; max-width: calc(100vw - 490px); }
 .visitor-note { padding: 8px 14px; border-radius: 999px; background: rgba(22, 26, 40, .66); font-size: 13.5px; -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
 .floor-panel { position: absolute; right: 18px; top: 16px; bottom: 18px; width: 414px; display: flex; flex-direction: column; overflow: hidden; }
@@ -271,6 +267,15 @@ body[data-page="floor"] #ui::before { content: ''; position: absolute; inset: 0;
 .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 10px; }
 .metric { padding: 13px 15px; border-radius: 14px; background: rgba(255, 255, 255, .06); display: flex; flex-direction: column; gap: 3px; }
 .metric small { color: var(--ink-2); font-size: 12px; } .metric b { font-family: var(--serif); font-size: 19px; font-weight: 500; }
+.budget-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.budget-card { padding: 13px 15px; border-radius: 14px; background: rgba(255, 255, 255, .06); display: flex; flex-direction: column; gap: 6px; }
+.budget-card p { margin: 0; font: 13px var(--mono); }
+.budget-card small { color: var(--ink-2); font-size: 12px; }
+.budget-track { display: block; height: 5px; border-radius: 5px; background: rgba(255, 255, 255, .14); overflow: hidden; }
+.budget-track i { display: block; height: 100%; border-radius: 5px; background: var(--ok); }
+.budget-flag { padding: 2px 8px; border-radius: 999px; font: 11px var(--mono); background: rgba(255, 255, 255, .1); color: var(--warn); }
+.budget-card.flag-80 .budget-track i, .budget-card.flag-50 .budget-track i { background: var(--warn); }
+.budget-card.flag-100 .budget-track i { background: var(--bad); } .budget-card.flag-100 .budget-flag { color: var(--bad); }
 .table-wrap { overflow-x: auto; border-radius: 14px; background: rgba(255, 255, 255, .04); }
 .admin-table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 760px; }
 .admin-table th { text-align: left; font: 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); padding: 11px 12px; border-bottom: 1px solid var(--glass-line); }
@@ -316,8 +321,6 @@ body[data-page="floor"] #ui::before { content: ''; position: absolute; inset: 0;
   .floor-tag { display: none; }
   .floor-meta { top: 10px; right: 12px; gap: 4px; }
   .status-pill { font-size: 9.5px; padding: 4px 8px; }
-  .spend { font-size: 10px; }
-  .spend-track { width: 96px; }
   .floor-panel { left: 0; right: 0; bottom: 0; top: auto; width: 100%; height: 54%; border-radius: 22px 22px 0 0; border-width: 1px 0 0; background: rgba(24, 30, 44, .92); }
   .controls { left: 10px; right: 10px; bottom: calc(54% + 8px); max-width: none; gap: 5px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .controls .btn { min-height: 31px; padding: 4px 11px; font-size: 12.5px; }
