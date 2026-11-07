@@ -597,8 +597,16 @@ describe('5. CSRF, rate limits, input limits, logging, noindex', () => {
     assert.equal(calls, before); assert.equal(t2.db.prepare('SELECT COUNT(*) n FROM ledger').get().n, 0);
     await t2.close();
   });
-  test('purchase requests have no payment path, and no card integration exists', async () => {
-    for (const f of srcFiles()) assert.doesNotMatch(readFileSync(f, 'utf8'), /stripe\.com|paypal|card_number|\bcheckout\b/i, f);
+  test('nothing can charge a card: no payment API is called anywhere, and only the checker, the brand filter and the link validator know these names', async () => {
+    const known = /(launch-check|domains|prompts|ios)\.js$|server\/app\.js$/;
+    for (const f of srcFiles()) {
+      const src = readFileSync(f, 'utf8');
+      assert.doesNotMatch(src, /api\.stripe\.com|api\.paypal\.com|sk_live_[a-z0-9]{8}|card_number/i, f);
+      if (!known.test(f)) assert.doesNotMatch(src, /stripe\.com|paypal|\bcheckout\b/i, f);
+    }
+    // The one Stripe address the server knows is the shape a boss may paste. It never fetches it.
+    const app = readFileSync(new URL('../server/app.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(app, /fetch\([^)]*stripe/i);
   });
 });
 

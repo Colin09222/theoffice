@@ -194,22 +194,28 @@ const FACADE_GLSL = `
     float bay = style < 0.5 ? 1.0 : style < 1.5 ? 1.35 : style < 2.5 ? 0.9 : 1.6;
     vec2 p = vec2(u / bay, yv);
     vec2 f = fract(p);
-    float fw = fwidth(p.x) + fwidth(p.y);
+    float wx = fwidth(p.x), wy = fwidth(p.y), fw = wx + wy;
+    // Filtered edges. A window only a pixel or two wide, stepped hard, comes out as speckle wherever there is no MSAA to hide it (the low tier, most of all).
+    #define EDGE(a, v, w) smoothstep((a) - (w), (a) + (w), (v))
+    float ex = min(wx, 0.25), ey = min(wy, 0.25);
     float win;
-    if (style < 0.5) win = step(0.3, f.x) * step(f.x, 0.7) * step(0.3, f.y) * step(f.y, 0.82);
-    else if (style < 1.5) win = step(0.06, f.x) * step(0.3, f.y) * step(f.y, 0.9);
-    else if (style < 2.5) win = step(0.05, f.x) * step(0.1, f.y);
-    else win = step(0.26, f.x) * step(f.x, 0.74) * step(0.22, f.y) * step(f.y, 0.86);
-    float avg = style < 0.5 ? 0.2 : style < 2.5 ? 0.4 : 0.3;
-    win = mix(win, avg, smoothstep(0.3, 1.0, fw));
-    float sky = clamp(_nn.y * 0.5 + 0.5 + f.y * 0.5, 0.0, 1.0);
-    vec3 glass = mix(s2l(vec3(0.20, 0.27, 0.36)), s2l(vec3(0.56, 0.68, 0.80)), f.y * 0.8);
-    float lit = step(0.94, hash(floor(p) + vSeed * 77.0));
+    if (style < 0.5) win = EDGE(0.3, f.x, ex) * (1.0 - EDGE(0.7, f.x, ex)) * EDGE(0.3, f.y, ey) * (1.0 - EDGE(0.82, f.y, ey));
+    else if (style < 1.5) win = EDGE(0.06, f.x, ex) * EDGE(0.3, f.y, ey) * (1.0 - EDGE(0.9, f.y, ey));
+    else if (style < 2.5) win = EDGE(0.05, f.x, ex) * EDGE(0.1, f.y, ey);
+    else win = EDGE(0.26, f.x, ex) * (1.0 - EDGE(0.74, f.x, ex)) * EDGE(0.22, f.y, ey) * (1.0 - EDGE(0.86, f.y, ey));
+    float avg = style < 0.5 ? 0.21 : style < 1.5 ? 0.56 : style < 2.5 ? 0.85 : 0.31;
+    // Further off, every window and every per-window detail melts into its average rather than sparkling.
+    float far = smoothstep(0.18, 0.6, fw);
+    win = mix(win, avg, far);
+    float shade = mix(f.y * 0.8, 0.4, far);
+    vec3 glass = mix(s2l(vec3(0.20, 0.27, 0.36)), s2l(vec3(0.56, 0.68, 0.80)), shade);
+    // The seed is interpolated, so it wobbles in its last bits, and this hash magnifies that into holes in a lit window: the speckle on the facades. Whole numbers don't wobble.
+    float lit = step(0.94, hash(floor(p) + floor(vSeed * 977.0 + 0.5))) * (1.0 - far);
     glass = mix(glass, s2l(vec3(0.95, 0.85, 0.65)), lit * 0.6);
     if (style > 1.5 && style < 2.5) {
       // Curtain wall: a darker spandrel band between the glass rows.
-      float band = step(0.1, f.y) * step(f.y, 0.3);
-      glass = mix(glass, base * 0.55, band);
+      float band = EDGE(0.1, f.y, ey) * (1.0 - EDGE(0.3, f.y, ey));
+      glass = mix(glass, base * 0.55, mix(band, 0.2, far));
     }
     base = mix(base, glass, win * 0.92);
     float parapet = step(vSize.y - 0.3, yv);

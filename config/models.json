@@ -8,8 +8,8 @@
       "effort": "high",
       "maxTokens": 16000,
       "pricing": {
-        "prompt": 4.0,
-        "completion": 20.0,
+        "prompt": 4,
+        "completion": 20,
         "cacheRead": 0.2
       }
     },
@@ -20,11 +20,11 @@
       "effort": "medium",
       "maxTokens": 12000,
       "pricing": {
-        "prompt": 4.0,
-        "completion": 20.0,
+        "prompt": 4,
+        "completion": 20,
         "cacheRead": 0.2
       },
-      "brief": "You dig up facts. Use web_search and fetch_url when available, keep notes in the workspace and always record your sources with URLs."
+      "brief": "You dig up facts. Use web_search and fetch_url, keep notes in the workspace and always record your sources with URLs. Say plainly when you could not confirm something."
     },
     "writer": {
       "title": "Writer",
@@ -33,8 +33,8 @@
       "effort": "medium",
       "maxTokens": 16000,
       "pricing": {
-        "prompt": 4.0,
-        "completion": 20.0,
+        "prompt": 4,
+        "completion": 20,
         "cacheRead": 0.2
       },
       "brief": "You write clear, lively documents in markdown: briefs, plans, copy, posts."
@@ -46,15 +46,15 @@
       "effort": "xhigh",
       "maxTokens": 32000,
       "pricing": {
-        "prompt": 4.0,
-        "completion": 20.0,
+        "prompt": 4,
+        "completion": 20,
         "cacheRead": 0.2
       },
       "brief": "You build working sites, games, simulations and apps, then publish them. Plain HTML, CSS and JavaScript unless the job calls for more.",
       "computer": {
         "effort": "high"
       },
-      "computerBrief": "You are the Builder. You build real things: websites, playable games (canvas, WebGL, Three.js), simulations, installable PWAs and front-end apps with real build tooling, then publish them. Prefer the simplest stack that does the job."
+      "computerBrief": "You are the Builder. You build real things: websites, playable games (canvas, WebGL, Three.js), simulations, installable PWAs and front-end apps with real build tooling, then publish them. Prefer the simplest stack that does the job. When a product needs a real picture, make it with generate_image rather than drawing placeholder boxes."
     },
     "designer": {
       "title": "Designer",
@@ -63,11 +63,11 @@
       "effort": "high",
       "maxTokens": 16000,
       "pricing": {
-        "prompt": 4.0,
-        "completion": 20.0,
+        "prompt": 4,
+        "completion": 20,
         "cacheRead": 0.2
       },
-      "brief": "You decide how things look: palettes, type, layout, CSS and inline SVG artwork."
+      "brief": "You decide how things look: palettes, type, layout and CSS. Use generate_image for real pictures such as hero images, logos, favicons and social previews, and inline SVG for simple shapes. Get a review_design opinion on a screenshot when one exists."
     }
   },
   "hireable": {
@@ -78,8 +78,8 @@
       "effort": "medium",
       "maxTokens": 12000,
       "pricing": {
-        "prompt": 4.0,
-        "completion": 20.0,
+        "prompt": 4,
+        "completion": 20,
         "cacheRead": 0.2
       },
       "brief": "You crunch numbers and write crisp comparisons and estimates."
@@ -91,8 +91,8 @@
       "effort": "medium",
       "maxTokens": 12000,
       "pricing": {
-        "prompt": 4.0,
-        "completion": 20.0,
+        "prompt": 4,
+        "completion": 20,
         "cacheRead": 0.2
       },
       "brief": "You find the angle, the audience and the words that sell an idea."
@@ -102,20 +102,20 @@
       "model": "google/gemini-3.1-pro-preview",
       "maxTokens": 8000,
       "pricing": {
-        "prompt": 2.0,
-        "completion": 12.0
+        "prompt": 2,
+        "completion": 12
       },
       "brief": "You read what the team made, look for mistakes and write up fixes.",
       "computer": {
         "model": "claude-opus-5-5",
         "effort": "medium",
         "pricing": {
-          "prompt": 4.0,
-          "completion": 20.0,
+          "prompt": 4,
+          "completion": 20,
           "cacheRead": 0.2
         }
       },
-      "computerBrief": "You are the Tester. You run what the team made in a real browser, look for what is broken and fix or report it."
+      "computerBrief": "You are the Tester. You run what the team made in a real browser, try to break it, run the launch checklist, and fix or report what is wrong."
     },
     "illustrator": {
       "title": "Illustrator",
@@ -124,11 +124,33 @@
       "effort": "high",
       "maxTokens": 16000,
       "pricing": {
-        "prompt": 4.0,
-        "completion": 20.0,
+        "prompt": 4,
+        "completion": 20,
         "cacheRead": 0.2
       },
-      "brief": "You draw with inline SVG: logos, icons, scenes."
+      "brief": "You make pictures: generate_image for real artwork, inline SVG for logos and icons."
+    }
+  },
+  "tools": {
+    "image": {
+      "model": "google/gemini-nano-banana-2.1",
+      "estimateUsd": 0.08
+    },
+    "review": {
+      "model": "openai/gpt-6.1-sol",
+      "maxTokens": 4000,
+      "estimateUsd": 0.1
+    },
+    "search": {
+      "model": "claude-opus-5-5",
+      "effort": "low",
+      "maxTokens": 8000,
+      "maxUses": 3,
+      "pricing": {
+        "prompt": 4,
+        "completion": 20,
+        "cacheRead": 0.2
+      }
     }
   }
 }

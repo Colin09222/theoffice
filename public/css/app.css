@@ -251,6 +251,14 @@ body[data-page="floor"] #ui::before { content: ''; position: absolute; inset: 0;
 .toast { background: rgba(20, 26, 40, .94); border: 1px solid var(--glass-line); padding: 9px 15px; border-radius: 999px; animation: rise .2s; transition: opacity .35s; max-width: 100%; text-align: center; }
 .toast.bad { border-color: var(--bad); }
 .toast.gone { opacity: 0; }
+.launch-bits { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.launch-bits .row { flex-wrap: wrap; gap: 10px; }
+.check.ok { color: var(--ok, #6fd39a); } .check.warn { color: #e3c06a; } .check.bad { color: var(--bad); }
+.live-domain { font-family: ui-monospace, monospace; }
+.domain-note { font-size: .92em; opacity: .9; }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 90px; }
+.bars i { flex: 1; min-width: 3px; background: var(--brand-2, #e8a33d); border-radius: 2px 2px 0 0; }
+.kv { display: flex; justify-content: space-between; gap: 12px; margin: 3px 0; overflow-wrap: anywhere; }
 
 /* admin */
 .admin { max-width: 1120px; margin: 0 auto; padding: 28px 22px 60px; }
@@ -319,6 +327,8 @@ body[data-page="floor"] #ui::before { content: ''; position: absolute; inset: 0;
   .dots b { width: 3px; height: 3px; }
   .tab { padding: 8px 9px; font-size: 13px; }
   #toasts { bottom: auto; top: 66px; }
+  /* On a floor the top half is the office, so messages sit over the staff strip instead of over the people. */
+  body[data-page='floor'] #toasts { top: auto; bottom: calc(54% - 58px); }
   .toast { font-size: 12.5px; padding: 6px 12px; }
   .admin { padding: 18px 14px 40px; }
   .admin-head h1 { font-size: 28px; }

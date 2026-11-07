@@ -33,6 +33,15 @@ function managerStep(meta) {
   }
   if (meta.answered) return { content: 'Thanks boss, that settles it.' };
   if (!meta.isFreshBoss) return { content: 'The team has wrapped up what they could, boss. What next?' };
+  if (/\[domain\]/.test(boss)) {
+    if (meta.step === 0) return { toolCalls: [call('check_domain', { names: ['tinyteacups.com'] })] };
+    if (meta.step === 1) return { toolCalls: [call('request_domain', { domain: 'tinyteacups.com', project: meta.published[0]?.slug || 'launch', why: 'So the launch has its own address.' })] };
+    return { content: 'I asked for the name, boss. The Buy button is under Requests.' };
+  }
+  if (/\[report\]/.test(boss)) {
+    if (meta.step === 0) return { toolCalls: [call('launch_report', { project: meta.published[0]?.slug, headline: 'It is live.', next_steps: 'Share it.' })] };
+    return { content: 'That is the report, boss.' };
+  }
   if (/\[mgrask\]/.test(boss) && meta.step === 0) return { toolCalls: [call('ask_boss', { question: 'Is the budget for this real or imaginary?' })] };
   if (ACT.test(boss)) {
     if (meta.step === 0 && meta.openCount === 0) {
@@ -74,6 +83,7 @@ function staffStep(meta) {
   } else if (role === 'builder') {
     if (/\[traverse\]/.test(b)) list.push(call('write_file', { path: '../../../etc/passwd', content: 'nope' }));
     list.push(call('read_file', { path: `${dir}/style.css` }));
+    if (/\[img\]/.test(meta.allBoss || b)) list.push(call('generate_image', { prompt: 'A small hero picture', name: 'hero', project: p }));
     list.push(call('write_file', { path: `${dir}/index.html`, content: /\[inject\]/.test(b) ? EVIL : SITE(p, 'A real page, written by a tiny staff while you watched.') }));
     list.push(call('write_file', { path: `${dir}/app.js`, content: JS }));
     list.push(call('publish_project', { project: p, title: p, description: 'A working little site.', kind: 'site' }));

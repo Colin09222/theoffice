@@ -87,9 +87,40 @@ CREATE TABLE IF NOT EXISTS app_scores (
   score REAL NOT NULL, lower INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project, board, player)
 );
 CREATE INDEX IF NOT EXISTS app_scores_rank ON app_scores(floor_id, project, board, score);
+CREATE TABLE IF NOT EXISTS domain_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, agent_id INTEGER, task_id INTEGER, domain TEXT NOT NULL, project TEXT NOT NULL DEFAULT '',
+  why TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, quoted_usd REAL NOT NULL, approved_usd REAL, charged_usd REAL, charged_estimated INTEGER NOT NULL DEFAULT 0,
+  order_id TEXT NOT NULL DEFAULT '', txn_id TEXT NOT NULL DEFAULT '', registrar_id TEXT NOT NULL DEFAULT '', privacy INTEGER NOT NULL DEFAULT 0, dns_ok INTEGER NOT NULL DEFAULT 0,
+  dns_tries INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, approved_at INTEGER, sent_at INTEGER, bought_at INTEGER, next_try_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS domain_orders_floor ON domain_orders(floor_id, id);
+CREATE INDEX IF NOT EXISTS domain_orders_domain ON domain_orders(domain, status);
+-- The database itself refuses a second live order for one name, whatever the code above it does.
+CREATE UNIQUE INDEX IF NOT EXISTS domain_orders_one_live ON domain_orders(domain) WHERE status IN ('buying','sent','bought','live');
+CREATE TABLE IF NOT EXISTS app_forms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, form TEXT NOT NULL, data TEXT NOT NULL, size INTEGER NOT NULL, hash TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS app_forms_project ON app_forms(floor_id, project, id);
+CREATE UNIQUE INDEX IF NOT EXISTS app_forms_dedupe ON app_forms(floor_id, project, form, hash);
+CREATE TABLE IF NOT EXISTS app_visits (
+  floor_id INTEGER NOT NULL, project TEXT NOT NULL, day TEXT NOT NULL, path TEXT NOT NULL, views INTEGER NOT NULL DEFAULT 0, uniques INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (floor_id, project, day, path)
+);
+CREATE TABLE IF NOT EXISTS app_visit_refs (
+  floor_id INTEGER NOT NULL, project TEXT NOT NULL, day TEXT NOT NULL, ref TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (floor_id, project, day, ref)
+);
+CREATE TABLE IF NOT EXISTS app_visit_seen (day TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY (day, hash));
+CREATE TABLE IF NOT EXISTS ios_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, agent_id INTEGER, project TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'awaiting_boss', build_id TEXT NOT NULL DEFAULT '', task_id INTEGER, note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ios_requests_floor ON ios_requests(floor_id, id);
 `;
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS.
-const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: 'INTEGER NOT NULL DEFAULT 0', session_charged: 'REAL NOT NULL DEFAULT 0', session_baseline: "TEXT NOT NULL DEFAULT ''", session_publish: "TEXT NOT NULL DEFAULT '[]'", session_tries: 'INTEGER NOT NULL DEFAULT 0' }, app_scores: { lower: 'INTEGER NOT NULL DEFAULT 0' } };
+const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: 'INTEGER NOT NULL DEFAULT 0', session_charged: 'REAL NOT NULL DEFAULT 0', session_baseline: "TEXT NOT NULL DEFAULT ''", session_publish: "TEXT NOT NULL DEFAULT '[]'", session_tries: 'INTEGER NOT NULL DEFAULT 0' }, app_scores: { lower: 'INTEGER NOT NULL DEFAULT 0' },
+  ledger: { kind: "TEXT NOT NULL DEFAULT 'model'" },
+  purchases: { admin_note: "TEXT NOT NULL DEFAULT ''", decided_at: 'INTEGER' },
+  projects: { payment_link: "TEXT NOT NULL DEFAULT ''", launch_check: "TEXT NOT NULL DEFAULT ''", launch_report: "TEXT NOT NULL DEFAULT ''", design_review: "TEXT NOT NULL DEFAULT ''", indexable: 'INTEGER NOT NULL DEFAULT 0' },
+};
+Object.assign(ADDED.tasks, { vault: 'INTEGER NOT NULL DEFAULT 0' });
 
 export function openDb(dataDir) {
   let path = ':memory:';

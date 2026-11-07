@@ -2,7 +2,13 @@
 import { get, all, run, tx } from './db.js';
 import { Limiter } from './limiter.js';
 import { ProviderError, scrub } from './llm.js';
-import { createTools, toolDefs, STAFF_TOOLS, MANAGER_TOOLS, publicUrl } from './tools.js';
+import { createTools, toolDefs, toolsForRole, publicUrl } from './tools.js';
+import { createDomainBroker } from './domains.js';
+import { createIos } from './ios.js';
+import { createMedia, createMockMedia } from './media.js';
+import { createSearch, createMockSearch } from './search.js';
+import { appLabel, appOrigin } from './apps.js';
+import { formCount } from './launch.js';
 import { managerPrompt, staffPrompt } from './prompts.js';
 import { slugify, WorkspaceError } from './workspace.js';
 import { seededLook } from '../public/js/looks.js';
@@ -24,12 +30,17 @@ const TOOL_LOOK = {
 export class Halt extends Error { constructor(why) { super(why); this.name = 'Halt'; this.why = why; } }
 
 export class Engine {
-  constructor({ db, cfg, models, llm, bus, log, now = Date.now, fetcher, httpFetch, sessions }) {
+  constructor({ db, cfg, models, llm, bus, log, now = Date.now, fetcher, httpFetch, sessions, namecheap, media, search }) {
     Object.assign(this, { db, cfg, models, llm, bus, log, now });
     this.Halt = Halt;
     this.computer = sessions ? new Computer(this, sessions) : null;
     this.limiter = new Limiter(cfg.maxCallsFloor, cfg.maxCallsGlobal);
     this.tools = createTools({ db, cfg, engine: this, fetcher, httpFetch });
+    this.domains = createDomainBroker({ db, cfg, engine: this, client: namecheap });
+    this.ios = createIos({ db, cfg, engine: this });
+    const brokers = models.tools || {};
+    this.media = media || (cfg.mediaMock ? createMockMedia(brokers) : cfg.openrouterKey && brokers.image ? createMedia({ cfg, tools: brokers, httpFetch: httpFetch || fetch }) : null);
+    this.search = search || (cfg.searchMock ? createMockSearch() : cfg.anthropicKey && brokers.search ? createSearch({ cfg, tool: brokers.search }) : null);
     this.runs = new Map();      // agentId -> { ctl, floorId, promise }
     this.reserved = new Map();  // floorId -> dollars reserved by in-flight calls
     this.reservedTotal = 0;
@@ -47,13 +58,17 @@ export class Engine {
     run(this.db, "UPDATE agents SET state='idle', activity='', project='', task_id=NULL");
     run(this.db, "UPDATE floors SET budget_notice_day=''");  // re-judged on the next tick, in case the caps changed
     this.computer?.recoverOrphans();
+    this.domains.recover();
     this.timer = setInterval(() => this.tick(), 1000);
     this.timer.unref?.();
+    this.domainTimer = setInterval(() => { this.domains.reconcile().catch((e) => this.fail('domains', e)); }, this.cfg.domainReconcileMs ?? 30000);
+    this.domainTimer.unref?.();
     this.kick();
   }
   async stop() {
     this.stopped = true;
     clearInterval(this.timer);
+    clearInterval(this.domainTimer);
     for (const r of this.runs.values()) r.ctl.abort(new Halt('shutdown'));
     await Promise.allSettled([...this.runs.values()].map((r) => r.promise));
   }
@@ -121,8 +136,9 @@ export class Engine {
   }
 
   // ---- budget ----
-  spentToday(floorId) { return get(this.db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND day=?', floorId, today(this.now())).n; }
-  spentGlobal() { return get(this.db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE day=?', today(this.now())).n; }
+  // A domain is paid for from the registrar balance and has limits of its own, so buying one doesn't stop the staff working for the day.
+  spentToday(floorId) { return get(this.db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND day=? AND kind!='domain'", floorId, today(this.now())).n; }
+  spentGlobal() { return get(this.db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE day=? AND kind!='domain'", today(this.now())).n; }
   overBudget(floorId, extra) {
     const f = this.spentToday(floorId) + (this.reserved.get(floorId) || 0) + extra;
     const g = this.spentGlobal() + this.reservedTotal + extra;
@@ -209,7 +225,7 @@ export class Engine {
     }
   }
   charge(floorId, agent, model, prompt, completion, cost, ctx) {
-    run(this.db, 'INSERT INTO ledger (floor_id,day,agent_id,model,prompt_tokens,completion_tokens,cost_usd,created_at) VALUES (?,?,?,?,?,?,?,?)', floorId, today(this.now()), agent.id, model, prompt, completion, cost, this.now());
+    run(this.db, 'INSERT INTO ledger (floor_id,day,agent_id,model,prompt_tokens,completion_tokens,cost_usd,created_at,kind) VALUES (?,?,?,?,?,?,?,?,?)', floorId, today(this.now()), agent.id, model, prompt, completion, cost, this.now(), ctx?.kind || 'model');
     if (ctx?.taskId) run(this.db, 'UPDATE tasks SET cost_usd=cost_usd+? WHERE id=?', cost, ctx.taskId);
     this.emit(floorId, 'spend', { today: this.spentToday(floorId), cap: this.cfg.floorDailyUsd }, { persist: false });
   }
@@ -220,14 +236,20 @@ export class Engine {
     const staff = all(this.db, 'SELECT id,name,role,title FROM agents WHERE floor_id=? AND role!=? ORDER BY id', floor.id, 'manager');
     const tasks = all(this.db, "SELECT id,title,status,agent_id,project,result,brief,revisions FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked','review') ORDER BY id", floor.id);
     const recent = all(this.db, "SELECT id,title,status,result FROM tasks WHERE floor_id=? AND status IN ('done','failed','cancelled') ORDER BY updated_at DESC LIMIT 12", floor.id);
-    const published = all(this.db, 'SELECT slug,title,kind,private FROM projects WHERE floor_id=? AND published_at IS NOT NULL ORDER BY published_at DESC LIMIT 20', floor.id).map((p) => ({ ...p, url: publicUrl(floor.slug, p.slug) }));
+    // Only counts and yes/no: what visitors typed into a form is theirs and the boss's, and it could be an attempt to steer the manager.
+    const published = all(this.db, 'SELECT slug,title,kind,private,payment_link,launch_check,design_review,launch_report FROM projects WHERE floor_id=? AND published_at IS NOT NULL ORDER BY published_at DESC LIMIT 20', floor.id).map((p) => {
+      const check = p.launch_check ? JSON.parse(p.launch_check) : null;
+      return { slug: p.slug, title: p.title, kind: p.kind, private: p.private, url: this.liveUrl(floor, p.slug), payment: !!p.payment_link, reviewed: !!p.design_review, reported: !!p.launch_report, signups: formCount(this.db, floor.id, p.slug), checklist: check ? `${check.errors.length + check.claims.length} problems, ${check.warnings.length} rough edges` : 'not run' };
+    });
+    const domainLines = this.domains.forFloor(floor.id).filter((d) => ['awaiting_boss', 'buying', 'sent', 'bought', 'live', 'failed'].includes(d.status)).slice(0, 8).map((d) => `${d.domain} (${d.status}, for ${d.project})`);
     const name = (id) => staff.find((s) => s.id === id)?.name || 'unassigned';
     const state = [
       `STATE at ${new Date(this.now()).toISOString()}. Spent today $${this.spentToday(floor.id).toFixed(3)} ${Number.isFinite(this.cfg.floorDailyUsd) ? ` of $${this.cfg.floorDailyUsd}` : ''}.`,
       `Roster: ${staff.map((s) => `${s.name} (${s.role})`).join(', ')}. Staff limit ${this.cfg.maxStaff}. Hireable: ${Object.keys(this.models.hireable).join(', ')}.`,
       `Open tasks: ${tasks.length ? tasks.map((t) => `#${t.id} [${t.status}] "${t.title}" (${name(t.agent_id)})${t.status === 'review' ? ` result: ${t.result.slice(0, 600)}` : ''}`).join(' | ') : 'none'}`,
       `Recently finished: ${recent.length ? recent.map((t) => `#${t.id} [${t.status}] "${t.title}": ${t.result.slice(0, 200)}`).join(' | ') : 'none'}`,
-      `Published: ${published.length ? published.map((p) => `${p.title} (${p.kind}${p.private ? ', private' : ''}) ${p.url}`).join(' | ') : 'nothing yet'}`,
+      `Published: ${published.length ? published.map((p) => `${p.title} [slug ${p.slug}] (${p.kind}${p.private ? ', private' : ''}) ${p.url} checklist: ${p.checklist}; design review: ${p.reviewed ? 'done' : 'not done'}; Stripe link from the boss: ${p.payment ? 'yes' : 'no'}; sign-ups: ${p.signups}; launch report given: ${p.reported ? 'yes' : 'no'}`).join(' | ') : 'nothing yet'}`,
+      `Domains: ${domainLines.length ? domainLines.join(' | ') : 'none'}. Limit: $${this.cfg.domainMaxUsd} a name, ${this.cfg.domainsPerFloorDay} a day, and only the boss's click buys one.`,
     ].join('\n');
     // 'office' notices (budget, outage, stop) are for the boss only. If they reached the model it would lose the thread.
     const msgs = all(this.db, "SELECT id,role,text FROM messages WHERE floor_id=? AND role!='office' ORDER BY id DESC LIMIT 30", floor.id).reverse();
@@ -255,8 +277,10 @@ export class Engine {
     const mgr = get(this.db, 'SELECT * FROM agents WHERE id=?', agentId);
     const signal = ctl.signal;
     const { messages, meta } = this.managerContext(floor, mgr);
-    const defs = toolDefs(MANAGER_TOOLS, this.cfg);
-    const ctx = this.toolCtx(floor, mgr, null, MANAGER_TOOLS);
+    const names = toolsForRole('manager');
+    const defs = toolDefs(names, this.cfg, 'manager');
+    const ctx = this.toolCtx(floor, mgr, null, names);
+    ctx.signal = signal;
     const call = { floorId, agent: mgr, signal, project: '' };
     try {
       for (let step = 0; step < MAX_MANAGER_STEPS; step++) {
@@ -311,8 +335,10 @@ export class Engine {
     let task = get(this.db, 'SELECT * FROM tasks WHERE id=?', taskId);
     const signal = ctl.signal;
     const roleCfg = this.models.all[agent.role];
-    const defs = toolDefs(STAFF_TOOLS, this.cfg);
-    const ctx = this.toolCtx(floor, agent, task, STAFF_TOOLS);
+    const names = toolsForRole(agent.role);
+    const defs = toolDefs(names, this.cfg, agent.role);
+    const ctx = this.toolCtx(floor, agent, task, names);
+    ctx.signal = signal;
     let messages = task.transcript ? JSON.parse(task.transcript) : null;
     if (!messages) {
       messages = [
@@ -422,6 +448,14 @@ export class Engine {
         if (feedText) self.feed(floor.id, agent, feedText, project);
       },
     };
+  }
+
+  /** The address a project is really at: its own domain, its own origin, or the sandbox link. */
+  liveUrl(floor, slug) {
+    const domain = this.domains.liveFor(floor.id, slug);
+    if (domain) return `https://${domain}/`;
+    if (this.cfg.appsBaseDomain) return `${appOrigin(this.cfg, appLabel(this.db, floor, slug))}/`;
+    return publicUrl(floor.slug, slug);
   }
 
   // ---- called by tools ----

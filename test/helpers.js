@@ -2,6 +2,7 @@ import { openDb } from '../server/db.js';
 import { loadConfig, loadModels } from '../server/config.js';
 import { createApp } from '../server/app.js';
 import { issueCode } from '../server/auth.js';
+import { request as httpRequest } from 'node:http';
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function until(fn, { timeout = 15000, every = 15, what = 'condition' } = {}) {
@@ -90,4 +91,20 @@ export function sse(c, slug, { since } = {}) {
     }
   }).catch(() => {});
   return { events, close: () => { ctl.abort(); return done; } };
+}
+
+/** fetch() refuses to set Host, so requests to a project origin or a bought domain go through this. */
+export function hostFetch(port, path, { method = 'GET', headers = {}, body } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: '127.0.0.1', port, path, method, headers: { ...(body ? { 'content-length': Buffer.byteLength(body) } : {}), ...headers } }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        resolve({ status: res.statusCode, headers: { get: (k) => { const v = res.headers[k.toLowerCase()]; return v === undefined ? null : Array.isArray(v) ? v.join(', ') : v; } }, text: async () => buf.toString(), arrayBuffer: async () => buf });
+      });
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
 }

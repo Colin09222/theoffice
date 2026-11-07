@@ -30,8 +30,8 @@ function renderLogin(wrap) {
 }
 
 async function renderDash(wrap) {
-  const metrics = h('section.metrics'); const floors = h('div.table-wrap'); const buys = h('section.buys'); const head = h('div.admin-actions');
-  clear(wrap).append(h('header.admin-head', {}, h('h1', {}, 'Building manager'), head), metrics, h('h2', {}, 'Floors'), floors, h('h2', {}, 'Pending purchase requests'), buys);
+  const metrics = h('section.metrics'); const floors = h('div.table-wrap'); const buys = h('section.buys'); const head = h('div.admin-actions'); const doms = h('section.buys');
+  clear(wrap).append(h('header.admin-head', {}, h('h1', {}, 'Building manager'), head), metrics, h('h2', {}, 'Floors'), floors, h('h2', {}, 'Pending purchase requests'), buys, h('h2', {}, 'Domains'), doms);
   const post = async (path, body) => { try { const r = await api(path, { method: 'POST', body, admin: true }); await draw(); return r; } catch (e) { toast(e.message, 'bad'); return null; } };
   const confirm = (title, text, go) => modal(title, (b, close) => b.append(h('div.stack', {}, h('p.lede', {}, text), h('div.row', {}, h('button.btn.ghost.grow', { type: 'button', onclick: () => close() }, 'Cancel'), h('button.btn.danger.grow', { type: 'button', 'data-confirm': true, onclick: () => { close(); go(); } }, title)))));
   async function draw() {
@@ -42,7 +42,7 @@ async function renderDash(wrap) {
       h(`button.btn.${d.globalPause ? 'primary' : 'danger'}`, { type: 'button', onclick: () => post('/admin/pause', { on: !d.globalPause }) }, d.globalPause ? 'Resume the building' : 'Pause the building'),
       h('button.btn.ghost', { type: 'button', onclick: async () => { await api('/admin/logout', { method: 'POST', admin: true }); await refreshMe(); clearInterval(timer); renderLogin(wrap); } }, 'Sign out'),
       h('a.btn.ghost', { href: '/theoffice', onclick: (e) => { e.preventDefault(); window.officeGo('/'); } }, 'Lobby'));
-    clear(metrics).append(metric('Spent today', d.globalCap == null ? money(d.spendToday) : `${money(d.spendToday)} of ${money(d.globalCap)}`), metric('Floors', String(d.floors.length)), metric('Unclaimed codes', String(d.unclaimedCodes)), metric('LLM calls now', `${d.liveLLM} running, ${d.queuedLLM} queued`), metric('Mode', d.aiMode === 'mock' ? 'Mock (no spend)' : 'Live'), metric('Status', d.globalPause ? 'Paused' : 'Running'));
+    clear(metrics).append(metric('Spent today', d.globalCap == null ? money(d.spendToday) : `${money(d.spendToday)} of ${money(d.globalCap)}`), metric('Floors', String(d.floors.length)), metric('Unclaimed codes', String(d.unclaimedCodes)), metric('LLM calls now', `${d.liveLLM} running, ${d.queuedLLM} queued`), metric('Mode', d.aiMode === 'mock' ? 'Mock (no spend)' : 'Live'), metric('Status', d.globalPause ? 'Paused' : 'Running'), metric('Domains bought', money(d.domainsSpent || 0)));
     const rows = d.floors.map((f) => h('tr', { 'data-floor': f.slug }, h('td', {}, String(f.number)),
       h('td', {}, h('a', { href: `/theoffice/floor/${f.slug}`, onclick: (e) => { e.preventDefault(); window.officeGo(`/floor/${f.slug}`); } }, f.name)),
       h('td', {}, f.status === 'active' ? (f.paused ? 'Paused' : 'Open') : 'Suspended'), h('td.num', {}, money(f.spendToday)), h('td.num', {}, money(f.spendTotal)), h('td.num', {}, String(f.running)), h('td.num', {}, String(f.projects)), h('td.num', {}, `${(f.bytes / 1048576).toFixed(1)} MB`),
@@ -51,7 +51,8 @@ async function renderDash(wrap) {
         h('button.btn.ghost.small', { type: 'button', onclick: () => confirm('Reset', `Wipe all work on ${f.name}, keeping the owner and their look?`, () => post(`/admin/floors/${f.id}/reset`)) }, 'Reset'),
         h('button.btn.danger.small', { type: 'button', onclick: () => confirm('Kill', `Delete ${f.name} and everything on it? This can't be undone, and the floor goes back on the market.`, () => post(`/admin/floors/${f.id}/kill`)) }, 'Kill'))));
     clear(floors).append(h('table.admin-table', {}, h('thead', {}, h('tr', {}, ...['#', 'Company', 'Status', 'Today', 'Total', 'Running', 'Projects', 'Storage', ''].map((t) => h('th', {}, t)))), h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: 9 }, 'No floors yet. Issue a code to get someone started.')))));
-    clear(buys).append(...(d.purchases.length ? d.purchases.map((p) => h('article.card.request', {}, h('div.row.spread', {}, h('b', {}, `${p.item}`), h('span.price', {}, money(p.price))), h('p', {}, p.why), h('small', {}, p.floor))) : [h('p.empty', {}, 'Nothing pending. Agents can only ask; nothing here can pay.')]));
+    clear(buys).append(...(d.purchases.length ? d.purchases.map((p) => h('article.card.request', {}, h('div.row.spread', {}, h('b', {}, `${p.item}`), h('span.price', {}, money(p.price))), h('p', {}, p.why), h('small', {}, p.floor))) : [h('p.empty', {}, 'Nothing pending. Agents can only ask.')]));
+    clear(doms).append(...(d.domainOrders?.length ? d.domainOrders.map((o) => h('article.card.request', {}, h('div.row.spread', {}, h('b', {}, o.domain), h('span.price', {}, money(o.chargedUsd ?? o.priceUsd))), h('small', {}, `${o.floor} · ${o.status}${o.estimated ? ' · amount estimated' : ''}${o.orderId ? ` · order ${o.orderId}` : ''}`), o.note ? h('p', {}, o.note) : null)) : [h('p.empty', {}, d.domainsOn ? 'No domains asked for yet.' : 'Domain buying is not set up.')]));
   }
   function issue() {
     modal('Issue an office code', (body) => {

@@ -150,7 +150,7 @@ class FloorPage {
     if (this.canSeeChat) tabs.push(['chat', this.owner ? 'Manager' : 'Chat']);
     tabs.push(['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
     if (this.owner) {
-      const pending = (s.purchases || []).filter((p) => p.status === 'pending').length;
+      const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domains || []).filter((d) => d.status === 'awaiting_boss').length + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length;
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
     }
     return tabs;
@@ -288,11 +288,75 @@ class FloorPage {
     return h(`article.project.kind-${p.kind}`, { 'data-project': p.slug },
       h('span.kind', {}, KIND[p.kind] || p.kind), h('h3', {}, p.title), h('p', {}, p.description || ''),
       p.sources?.length ? h('small', {}, `${p.sources.length} ${p.sources.length === 1 ? 'source' : 'sources'}`) : null,
+      p.domain ? h('small.live-domain', {}, p.domain) : null,
+      this.owner ? this.launchBits(p) : null,
       h('div.row', {}, h('button.btn.primary', { type: 'button', onclick: open }, 'Open'), priv,
         this.owner && p.appUrl ? h('button.link', { type: 'button', onclick: async () => {
           if (!window.confirm(`Delete every save, leaderboard and shared value for ${p.title}? This can't be undone.`)) return;
           try { const r = await api(`/floors/${this.slug}/projects/${p.slug}/clear-data`, { method: 'POST', body: {} }); toast(`Cleared ${r.removed} saved ${r.removed === 1 ? 'item' : 'items'}`); } catch (e) { toast(e.message, 'bad'); }
         } }, 'Clear saved data') : null));
+  }
+  // The product side of a card, for the boss: who came, who signed up, how money comes in, and what the checklist said.
+  launchBits(p) {
+    const box = h('div.launch-bits');
+    const c = p.launchCheck;
+    if (c) {
+      const problems = (c.errors?.length || 0) + (c.claims?.length || 0);
+      box.append(h(`small.check.${problems ? 'bad' : c.warnings?.length ? 'warn' : 'ok'}`, {}, problems ? `Checklist: ${problems} to look at` : c.warnings?.length ? `Checklist: ${c.warnings.length} rough edges` : 'Checklist passed'));
+    }
+    if (p.designReview) box.append(h('small', {}, `Design review: ${p.designReview.verdict}`));
+    box.append(h('div.row', {},
+      h('button.link', { type: 'button', 'data-stats': p.slug, onclick: () => this.openStats(p) }, 'Visitors'),
+      h('button.link', { type: 'button', 'data-signups': p.slug, onclick: () => this.openSignups(p) }, `Sign-ups${p.signups ? ` (${p.signups})` : ''}`),
+      h('button.link', { type: 'button', 'data-pay': p.slug, onclick: () => this.openPayment(p) }, p.hasPayment ? 'Payment link: on' : 'Add payment link'),
+      c || p.launchReport ? h('button.link', { type: 'button', onclick: () => this.openChecklist(p) }, 'Report') : null));
+    return box;
+  }
+  async openStats(p) {
+    try {
+      const s = await api(`/floors/${this.slug}/projects/${p.slug}/stats`);
+      modal(`Visitors: ${p.title}`, (body) => {
+        const max = Math.max(1, ...s.byDay.map((d) => d.views));
+        body.append(h('div.stack', {},
+          h('p.lede', {}, `${s.uniques} visitors and ${s.views} page views in the last ${s.days} days. Counted by this building, with no cookies and no outside service.`),
+          s.byDay.length ? h('div.bars', { role: 'img', 'aria-label': 'Page views by day' }, ...s.byDay.map((d) => h('i', { title: `${d.day}: ${d.views}`, css: { height: `${Math.max(4, (d.views / max) * 100)}%` } }))) : null,
+          s.pages.length ? h('div', {}, h('h3', {}, 'Pages'), ...s.pages.map((x) => h('p.kv', {}, h('span', {}, x.path), h('b', {}, String(x.views))))) : null,
+          s.refs.length ? h('div', {}, h('h3', {}, 'Came from'), ...s.refs.map((x) => h('p.kv', {}, h('span', {}, x.ref), h('b', {}, String(x.n))))) : null,
+          h('label.toggle', {}, h('input', { type: 'checkbox', checked: p.indexable || !!p.domain, disabled: !!p.domain, onchange: async (e) => { try { await api(`/floors/${this.slug}/projects/${p.slug}/indexable`, { method: 'POST', body: { on: e.target.checked } }); p.indexable = e.target.checked; } catch (x) { e.target.checked = !e.target.checked; toast(x.message, 'bad'); } } }), h('span', {}, p.domain ? 'Search engines can find it, because it has its own domain' : 'Let search engines find it'))));
+      });
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+  async openSignups(p) {
+    try {
+      const { entries } = await api(`/floors/${this.slug}/projects/${p.slug}/forms`);
+      modal(`Sign-ups: ${p.title}`, (body) => {
+        // Written by strangers, so text nodes only. Your staff never see these, only how many there are.
+        const keys = [...new Set(entries.flatMap((e) => Object.keys(e.fields)))];
+        body.append(h('div.stack', {},
+          entries.length ? h('a.btn.ghost', { href: `${BASE}/api/floors/${this.slug}/projects/${p.slug}/forms?format=csv`, download: `${p.slug}-signups.csv` }, 'Download a spreadsheet') : h('p.empty', {}, 'Nobody yet. When someone fills in a form on the site, it lands here.'),
+          entries.length ? h('div.table-wrap', {}, h('table.admin-table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Form'), ...keys.map((k) => h('th', {}, k)), h('th', {}, 'When'))), h('tbody', {}, entries.map((e) => h('tr', {}, h('td', {}, e.form), ...keys.map((k) => h('td', {}, String(e.fields[k] ?? ''))), h('td', {}, timeAgo(e.createdAt))))))) : null));
+      }, { wide: true });
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+  openPayment(p) {
+    modal('Take payments', (body, close) => {
+      const input = h('input', { type: 'url', placeholder: 'https://buy.stripe.com/...', 'aria-label': 'Stripe Payment Link', name: 'payment' });
+      body.append(h('form.stack', { onsubmit: async (e) => {
+        e.preventDefault();
+        try { await api(`/floors/${this.slug}/projects/${p.slug}/payment`, { method: 'POST', body: { link: input.value.trim() } }); toast(input.value.trim() ? 'Payment link saved' : 'Payment link removed'); close(); this.reload(); } catch (x) { toast(x.message, 'bad'); }
+      } }, h('p.lede', {}, 'Make a Payment Link in your own Stripe account and paste it here. Customers pay on Stripe\'s page and the money goes to you. The staff only get a button that points at it. No keys and no card numbers ever come through here.'),
+      p.hasPayment ? h('p', {}, 'A link is set. Paste a new one to replace it, or save this empty to remove it.') : null, input,
+      h('button.btn.primary.wide', { type: 'submit' }, 'Save')));
+    });
+  }
+  openChecklist(p) {
+    const c = p.launchCheck || {};
+    modal(`Launch: ${p.title}`, (body) => {
+      const sec = (title, items) => (items?.length ? h('div', {}, h('h3', {}, title), h('ul', {}, ...items.map((x) => h('li', {}, x)))) : null);
+      const d = h('div.doc');
+      if (p.launchReport) d.innerHTML = renderMarkdown(p.launchReport);
+      body.append(h('div.stack', {}, p.launchReport ? d : null, sec('Must fix', c.errors), sec('Possibly invented: please check', c.claims), c.reason ? h('p', {}, `The team's reason: ${c.reason}`) : null, sec('Rough edges', c.warnings), sec('Passed', c.passed), p.designReview ? h('div', {}, h('h3', {}, `Design review (${p.designReview.model})`), h('p', { css: { 'white-space': 'pre-wrap' } }, p.designReview.text)) : null));
+    }, { wide: true });
   }
   previewProject(p, url) {
     modal(p.title, (body) => {
@@ -313,19 +377,43 @@ class FloorPage {
   }
 
   // ---- requests ----
+  renderDomains(list) {
+    const DOMAIN_STATUS = { awaiting_boss: 'Waiting for you', buying: 'Buying now', sent: 'Confirming with the registrar', bought: 'Bought, setting its address', live: 'Live', declined: 'You said no', failed: 'Not bought' };
+    for (const d of this.state.domains || []) {
+      const waiting = d.status === 'awaiting_boss';
+      const buy = async () => {
+        try { await api(`/floors/${this.slug}/domains/${d.id}/buy`, { method: 'POST', body: { priceUsd: d.priceUsd } }); toast(`Buying ${d.domain}`); this.reload(); } catch (e) { toast(e.message, 'bad'); this.reload(); }
+      };
+      const no = async () => { try { await api(`/floors/${this.slug}/domains/${d.id}/decline`, { method: 'POST', body: {} }); this.reload(); } catch (e) { toast(e.message, 'bad'); } };
+      list.append(h(`article.card.request.domain.${d.status}`, { 'data-domain': d.domain },
+        h('div.row.spread', {}, h('b', {}, d.domain), h('span.price', {}, money(d.chargedUsd ?? d.priceUsd))),
+        d.why ? h('p', {}, d.why) : null,
+        h('small', {}, `For ${d.project} · ${DOMAIN_STATUS[d.status] || d.status}`),
+        d.note ? h('p.domain-note', {}, d.note) : null,
+        d.status === 'live' ? h('p', {}, h('a', { href: `https://${d.domain}/`, target: '_blank', rel: 'noopener noreferrer' }, `https://${d.domain}/`)) : null,
+        waiting ? h('div.row', {}, h('button.btn.primary', { type: 'button', 'data-buy': d.domain, onclick: buy }, `Buy for ${money(d.priceUsd)}`), h('button.btn.ghost', { type: 'button', onclick: no }, 'No thanks')) : null,
+        waiting ? h('p.fineprint', {}, 'One year, with WHOIS privacy on. It is registered in the building\'s name and paid from the building\'s Namecheap balance.') : null));
+    }
+    for (const r of this.state.ios || []) {
+      const answer = async (a) => { try { await api(`/floors/${this.slug}/ios/${r.id}/${a}`, { method: 'POST', body: {} }); this.reload(); } catch (e) { toast(e.message, 'bad'); } };
+      list.append(h('article.card.request', {}, h('b', {}, r.kind === 'submit' ? `Send ${r.project} to TestFlight` : `Build the iPhone app for ${r.project}`), h('small', {}, r.status === 'awaiting_boss' ? 'Waiting for you' : r.status),
+        r.status === 'awaiting_boss' ? h('div.row', {}, h('button.btn.primary', { type: 'button', onclick: () => answer('approve') }, 'Allow it'), h('button.btn.ghost', { type: 'button', onclick: () => answer('decline') }, 'No thanks')) : null));
+    }
+  }
   renderRequests() {
     const list = h('div.requests');
     const items = this.state.purchases || [];
-    if (!items.length) list.append(h('p.empty', {}, 'No purchase requests. Staff can ask, but they can\'t buy anything.'));
+    this.renderDomains(list);
+    if (!items.length && !(this.state.domains || []).length && !(this.state.ios || []).length) list.append(h('p.empty', {}, 'No requests. Staff can ask, but only you can say yes.'));
     for (const p of items) {
       const setStatus = async (status) => { try { await api(`/floors/${this.slug}/purchases/${p.id}`, { method: 'POST', body: { status } }); p.status = status; this.renderTabs(); this.renderBody(); } catch (e) { toast(e.message, 'bad'); } };
       list.append(h(`article.card.request.${p.status}`, {},
         h('div.row.spread', {}, h('b', {}, p.item), h('span.price', {}, money(p.price))),
-        h('p', {}, p.why), h('small', {}, `${p.agentName || 'Staff'} · ${p.status === 'pending' ? 'Pending' : p.status === 'declined' ? 'Declined' : 'You bought it yourself'}`),
+        h('p', {}, p.why), h('small', {}, `${p.agentName || 'Staff'} · ${{ pending: 'With the building manager', declined: 'Declined', 'bought-myself': 'You bought it yourself', bought: 'The building manager bought it', rejected: 'The building manager said no' }[p.status] || p.status}${p.adminNote ? `: ${p.adminNote}` : ''}`),
         p.link ? h('p', {}, h('a', { href: safeHref(p.link), target: '_blank', rel: 'noopener noreferrer nofollow' }, 'See the link')) : null,
         p.status === 'pending' ? h('div.row', {}, h('button.btn.ghost', { type: 'button', onclick: () => setStatus('bought-myself') }, 'I bought it myself'), h('button.btn.ghost', { type: 'button', onclick: () => setStatus('declined') }, 'Decline')) : null));
     }
-    list.append(h('p.fineprint', {}, 'Nothing in The Office can pay for anything. These are just notes from your staff.'));
+    list.append(h('p.fineprint', {}, 'Staff can\'t spend money. A domain needs your click. Anything else goes to the building manager to decide.'));
     this.bodyEl.append(list);
   }
 
@@ -443,7 +531,9 @@ class FloorPage {
     });
     on('question', () => this.reload());
     on('question_answered', () => this.reload());
-    on('purchase', () => { this.reload(); toast('A purchase request is waiting for you'); });
+    on('purchase', () => { this.reload(); toast('A purchase request has gone to the building manager'); });
+    let lastWaiting = (this.state.domains || []).filter((d) => d.status === 'awaiting_boss').length;
+    on('domain', async () => { await this.reload(); const n = (this.state.domains || []).filter((d) => d.status === 'awaiting_boss').length; if (n > lastWaiting) toast('A domain is waiting for your OK under Requests'); lastWaiting = n; });
     on('hired', () => this.reload());
     on('reload', () => this.reload());
     on('floor', (d) => {

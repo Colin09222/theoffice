@@ -10,6 +10,7 @@ export const scrub = (s, cfg) => {
   if (cfg?.openrouterKey) out = out.split(cfg.openrouterKey).join('[redacted]');
   if (cfg?.anthropicKey) out = out.split(cfg.anthropicKey).join('[redacted]');
   if (cfg?.webSearchKey) out = out.split(cfg.webSearchKey).join('[redacted]');
+  if (cfg?.namecheapKey) out = out.split(cfg.namecheapKey).join('[redacted]');
   return out.slice(0, 300);
 };
 

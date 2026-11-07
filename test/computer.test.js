@@ -74,7 +74,8 @@ describe('a task on a computer', () => {
     const h = await start();
     await h.settle((await go(h)).id);
     const env = h.sessions.calls.environments[0];
-    assert.deepEqual(env.config.networking, { type: 'limited', allow_package_managers: true, allow_mcp_servers: false, allowed_hosts: [] });
+    assert.deepEqual(env.config.networking, { type: 'limited', allow_package_managers: false, allow_mcp_servers: false, allowed_hosts: ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org'] });
+    assert.ok(!JSON.stringify(env).includes('github'), 'GitHub is not on the list');
     assert.equal(env.config.type, 'cloud');
     const def = h.sessions.calls.agents[0];
     const toolset = def.tools.find((x) => x.type === 'agent_toolset_20260401');

@@ -85,6 +85,14 @@
         throw e;
       });
     },
+    /**
+     * Send a waitlist or contact form to the boss: Office.submitForm('waitlist', {email: 'a@b.co', name: 'Sam'}).
+     * Resolves true when it is stored. Rejects with a message to show if the input is bad. Visitors can never read these back.
+     * Resolves false if there is no backend here, such as a local preview: say so rather than pretending it worked.
+     */
+    submitForm: function (form, fields) {
+      return call('POST', 'form/' + encodeURIComponent(form), { fields: fields }).then(function () { Office.connected = true; return true; }, function (e) { if (e && e.offline) return false; throw e; });
+    },
     /** State every visitor shares. Anyone using the site can change it, so never keep anything private here. */
     shared: {
       get: function (key, fallback) { return call('GET', 'shared/' + encodeURIComponent(key)).then(function (r) { return r.value; }, function (e) { if (e && (e.status === 404 || e.offline)) return fallback; throw e; }); },

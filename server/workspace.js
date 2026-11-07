@@ -76,6 +76,20 @@ export function publishSnapshot(db, floorId, slug, quotaBytes, directory = '') {
   });
 }
 
+/** A picture made by a broker on the server. Binary, so only a server path can write one: an agent's own write_file stays text-only. */
+export function writeBinaryFile(db, floorId, path, bytes, agentId, quotaBytes) {
+  const p = cleanPath(path, { binary: true });
+  if (bytes.length > MAX_SYNC_FILE_BYTES) throw new WorkspaceError('file too big');
+  return tx(db, () => {
+    const prev = get(db, 'SELECT size FROM files WHERE floor_id=? AND path=?', floorId, p);
+    if (!prev && get(db, 'SELECT COUNT(*) n FROM files WHERE floor_id=?', floorId).n >= MAX_FILES) throw new WorkspaceError('too many files in this workspace');
+    if (floorBytes(db, floorId) - (prev?.size || 0) + bytes.length > quotaBytes) throw new WorkspaceError('this floor has used all of its storage quota');
+    run(db, `INSERT INTO files (floor_id,path,content,size,agent_id,updated_at) VALUES (?,?,?,?,?,?)
+      ON CONFLICT(floor_id,path) DO UPDATE SET content=excluded.content,size=excluded.size,agent_id=excluded.agent_id,updated_at=excluded.updated_at`, floorId, p, new Uint8Array(bytes), bytes.length, agentId ?? null, Date.now());
+    return { path: p, size: bytes.length };
+  });
+}
+
 const hashOf = (c) => createHash('sha256').update(c).digest('hex');
 
 /** Every file in one project, for the box a computer starts from. */

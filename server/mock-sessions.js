@@ -105,6 +105,7 @@ export function createMockSessions(cfg, { onTurn = defaultTurn, usage = { input_
     async updateAgent(aid, def) { calls.agentUpdates.push({ id: aid, def }); return { id: aid, version: calls.agentUpdates.length + 1 }; },
     async upload(buffer, name) { const fid = id('file'); files.set(fid, buffer); calls.uploads.push({ id: fid, name, buffer }); return fid; },
     async deleteFile(fid) { files.delete(fid); calls.deleted.push(fid); },
+    async addFile(sid, fid, path) { calls.mounts = calls.mounts || []; calls.mounts.push({ sid, fid, path, data: files.get(fid) }); return { id: 'res' }; },
     async createSession(params) {
       const sid = id('sesn');
       const file = params.resources?.[0]?.file_id;

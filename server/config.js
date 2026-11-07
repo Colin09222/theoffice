@@ -43,7 +43,7 @@ export function loadConfig(env = process.env, overrides = {}) {
     maxCallsGlobal: num(env.MAX_CALLS_GLOBAL, 6),
     maxStaff: num(env.MAX_STAFF, 8),
     towerFloors: num(env.TOWER_FLOORS, 40),
-    quotaBytes: num(env.FLOOR_QUOTA_MB, 25) * 1024 * 1024,
+    quotaBytes: num(env.FLOOR_QUOTA_MB, 100) * 1024 * 1024,
     mockDelayMs: num(env.MOCK_DELAY_MS, 400),
     retryBaseMs: num(env.RETRY_BASE_MS, 1000),
     rateScale: 1, // only tests raise this, through overrides; there is deliberately no env switch
@@ -59,11 +59,31 @@ export function loadConfig(env = process.env, overrides = {}) {
     // App-grade publishing: each project on its own origin under this domain. Empty means today's sandbox mode.
     appsBaseDomain: appsBase(env.APPS_BASE_DOMAIN, publicOrigin),
     appsScheme: env.APPS_SCHEME === 'http' ? 'http' : 'https',
+    // Domain buying. Every credential stays in this process: nothing here ever reaches a prompt, a container, a tool result, a log or the database.
+    namecheapUser: env.NAMECHEAP_API_USER || '',
+    namecheapKey: env.NAMECHEAP_API_KEY || '',
+    namecheapClientIp: env.NAMECHEAP_CLIENT_IP || '',
+    namecheapBase: (env.NAMECHEAP_BASE_URL || 'https://api.namecheap.com/xml.response').replace(/\/+$/, ''),
+    domainContactSource: String(env.DOMAIN_CONTACT_SOURCE || '').trim().toLowerCase(),
+    domainMaxUsd: num(env.DOMAIN_MAX_USD, 25),
+    domainsPerFloorDay: num(env.DOMAINS_PER_FLOOR_DAY, 2),
+    domainsGlobalDay: num(env.DOMAINS_GLOBAL_DAY, 6),
+    domainTlds: String(env.DOMAIN_TLDS || 'com,net,org,io,co,app,dev,xyz,site,online,store,tech,club,live,studio').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+    serverIp: /^\d{1,3}(\.\d{1,3}){3}$/.test(env.SERVER_IP || '') ? env.SERVER_IP : '',
+    serverIp6: env.SERVER_IP6 || '',
+    // OpenRouter tools: images, and a second lab's eye on the design. The key never goes near a container.
+    imagesPerFloorDay: num(env.IMAGES_PER_FLOOR_DAY, 12),
+    imagesPerTask: num(env.IMAGES_PER_TASK, 6),
+    reviewsPerFloorDay: num(env.REVIEWS_PER_FLOOR_DAY, 20),
+    searchesPerFloorDay: num(env.SEARCHES_PER_FLOOR_DAY, 60),
+    // The iOS foundation is off until the owner's Apple and Expo accounts exist. The token itself lives in a Managed Agents vault, never here.
+    iosEnabled: env.IOS_ENABLED === '1',
+    iosVaultId: env.IOS_VAULT_ID || '',
     ...overrides,
   };
 }
 
 export function loadModels(path = resolve(ROOT, 'config/models.json')) {
   const m = JSON.parse(readFileSync(path, 'utf8'));
-  return { roles: m.roles, hireable: m.hireable, all: { ...m.roles, ...m.hireable } };
+  return { roles: m.roles, hireable: m.hireable, all: { ...m.roles, ...m.hireable }, tools: m.tools || {} };
 }

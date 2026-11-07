@@ -90,7 +90,7 @@ describe('a project on its own origin', () => {
   test('The Office and the private site do not exist on an app origin, whatever the path', async () => {
     for (const p of ['/theoffice', '/theoffice/', '/theoffice/api/me', '/theoffice/admin', '/theoffice/api/floors', '/theoffice/f/alpha-co/game/', '/live', '/admin', '/api/me', '/theoffice/../live', '/robots.txt']) {
       const r = await hit(t, hostA, p, { headers: { cookie: `${ownerCookie}; ${adminCookie}; bhq_auth=secret` } });
-      assert.ok(r.status === 404 || (r.status === 200 && /<h1>game/.test(r.text)), `${p} -> ${r.status} ${r.text.slice(0, 40)}`);
+      assert.ok(r.status === 404 || (r.status === 200 && /<h1>game/.test(r.text)) || (p === '/robots.txt' && /^User-agent/.test(r.text)), `${p} -> ${r.status} ${r.text.slice(0, 40)}`);
       assert.ok(!/floors|csrf|adminCsrf/.test(r.text), p);
     }
     assert.equal((await hit(t, hostA, '/theoffice/api/claim', { method: 'POST', body: {} })).status, 405);

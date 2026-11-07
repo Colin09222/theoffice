@@ -11,9 +11,13 @@ import { ProviderError, scrub } from './llm.js';
 import { costOf } from './anthropic.js';
 import { packTgz, unpackTgz, TarError } from './tarball.js';
 import { applySync, baselineOf, projectFiles, publishSnapshot, WorkspaceError } from './workspace.js';
-import { COMPUTER_TOOL_DEFS, computerToolName, publicUrl } from './tools.js';
+import { COMPUTER_TOOL_DEFS, computerToolName, publicUrl, toolsForRole } from './tools.js';
+import { runCheck, saveCheck, gateProblem } from './launch.js';
+import { IOS_HOSTS } from './ios.js';
 import { computerPrompt, computerBriefing } from './prompts.js';
 
+const PACKAGE_HOSTS = ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org'];
+const OUTPUT_WAIT_MS = 30000;
 const MIN_ROOM_USD = 0.1;
 const STALL_MS = 90_000;
 const STOP_GRACE_MS = 120_000;
@@ -30,6 +34,17 @@ mkdir -p /mnt/session/outputs
 cd /workspace/project
 tar czf /mnt/session/outputs/project.tgz --no-wildcards-match-slash --exclude=node_modules --exclude='.[!.]*' --exclude=__pycache__ --exclude=coverage --exclude=test-results --exclude=playwright-report .
 echo "Saved $(tar tzf /mnt/session/outputs/project.tgz | grep -vc '/$') files, $(du -h /mnt/session/outputs/project.tgz | cut -f1) compressed."
+`;
+const LAUNCH_CHECK = `${readFileSync(join(ROOT, 'server/launch-check.js'), 'utf8')}
+import { readdirSync, readFileSync as read$, statSync } from 'node:fs';
+import { join as join$, relative } from 'node:path';
+const root = process.argv[2] || '.';
+const files = [];
+const walk = (d) => { for (const n of readdirSync(d)) { if (n === 'node_modules' || n.startsWith('.')) continue; const p = join$(d, n); if (statSync(p).isDirectory()) walk(p); else files.push({ path: relative(root, p), data: read$(p) }); } };
+walk(root);
+const r = checkSite({ files, bossText: process.env.BOSS_TEXT || '', paymentLink: process.env.HAS_PAYMENT === '1', kind: process.argv[3] || 'site' });
+console.log(formatReport(r));
+process.exitCode = r.errors.length || r.claims.length ? 1 : 0;
 `;
 const CLIENT_JS = readFileSync(join(ROOT, 'server/app-client/office.js'));
 const THREE_JS = readFileSync(join(ROOT, 'public/vendor/three/three.module.min.js'));
@@ -73,14 +88,14 @@ export class Computer {
   // ---- control-plane objects: created once, kept by id, updated only when their definition changes ----
   setting(key) { const v = get(this.engine.db, 'SELECT value FROM settings WHERE key=?', key)?.value; return v ? JSON.parse(v) : null; }
   saveSetting(key, value) { run(this.engine.db, 'INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, JSON.stringify(value)); }
-  async environmentId() {
-    // Deny by default: package registries only. Each session gets its own container from this template, and nothing is shared between them.
-    const def = { name: 'theoffice-computer', config: { type: 'cloud', networking: { type: 'limited', allow_package_managers: true, allow_mcp_servers: false, allowed_hosts: [] } } };
+  async environmentId(hosts = PACKAGE_HOSTS, key = 'ma_environment') {
+    // Deny by default: named package registries and nothing else. allow_package_managers would also open GitHub, which is a way out for a hijacked agent. Checked on a real session: npm, pip, Vite and Playwright all work on this list.
+    const def = { name: key === 'ma_environment' ? 'theoffice-computer' : 'theoffice-ios', config: { type: 'cloud', networking: { type: 'limited', allow_package_managers: false, allow_mcp_servers: false, allowed_hosts: hosts } } };
     const h = hash(def);
-    const have = this.setting('ma_environment');
+    const have = this.setting(key);
     if (have?.hash === h) return have.id;
     const env = await this.client.createEnvironment({ ...def, name: `${def.name}-${h}` });
-    this.saveSetting('ma_environment', { id: env.id, hash: h });
+    this.saveSetting(key, { id: env.id, hash: h });
     return env.id;
   }
   async agentRef(roleKey) {
@@ -183,7 +198,7 @@ export class Computer {
       charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, warned: false, limit: '', lastText: '', lastFeed: '',
       pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
       publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
-      ctx: e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request']),
+      ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design')]), signal },
     };
   }
 
@@ -229,6 +244,7 @@ export class Computer {
       let live = null;
       try { live = await this.client.retrieve(st.id); } catch (err) { if (err?.status !== 404) throw err; }
       if (live && live.status !== 'terminated') {
+        this.equip(st);
         // The budget is fixed at creation, so a reattached session is re-capped to what may be spent from now on.
         const spent = Number(live.usage?.list_cost?.amount) || 0;
         await this.client.updateSession(st.id, { budget: { type: 'limit', max_list_cost: { amount: String(spent + Math.floor(room.usd * 100)), currency: 'USD' } } });
@@ -246,12 +262,14 @@ export class Computer {
       st.id = ''; st.charged = 0;
     }
     const agentRef = await this.agentRef(agent.role);
-    const environment = await this.environmentId();
+    const vaulted = !!task.vault && !!e.cfg.iosEnabled && !!e.cfg.iosVaultId;
+    const environment = vaulted ? await this.environmentId(IOS_HOSTS, 'ma_environment_ios') : await this.environmentId();
     // Only this one project goes in. Other projects, other floors and anything of ours stay out of the box.
     const files = projectFiles(e.db, floor.id, task.project);
     const box = packTgz([
       { path: '.office/save.sh', data: Buffer.from(SAVE_SH), mode: 0o755 },
       { path: '.office/client.js', data: CLIENT_JS },
+      { path: '.office/launch-check.mjs', data: Buffer.from(LAUNCH_CHECK) },
       { path: '.office/three.module.min.js', data: THREE_JS },
       ...files.map((f) => ({ path: `project/${f.path}`, data: f.data })),
     ]);
@@ -262,10 +280,13 @@ export class Computer {
       resources: [{ type: 'file', file_id: upload, mount_path: '/office/bundle.tgz' }],
       budget: { type: 'limit', max_list_cost: { amount: String(Math.floor(room.usd * 100)), currency: 'USD' } },
       metadata: { app: 'theoffice', floor: String(floor.id), task: String(task.id) },
+      // Only a task made by the boss's click ever holds this. The container still only sees a placeholder.
+      ...(vaulted ? { vault_ids: [e.cfg.iosVaultId] } : {}),
     });
     // The session holds its own copy of the box, so ours has no reason to outlive this call.
     await this.client.deleteFile(upload).catch(() => {});
     st.id = session.id;
+    this.equip(st);
     run(e.db, 'UPDATE tasks SET session_id=?, session_baseline=?, session_sent=0, session_charged=0 WHERE id=?', session.id, JSON.stringify(baselineOf(files)), task.id);
     e.feed(floor.id, agent, `started a computer for "${task.title}"`, task.project);
     e.setAgent(agent.id, { state: 'thinking', activity: 'Starting up the computer', project: task.project, task_id: task.id });
@@ -424,6 +445,28 @@ export class Computer {
       await this.client.send(st.id, [{ type: 'user.custom_tool_result', custom_tool_use_id: id, content: [{ type: 'text', text: out }] }]);
     }
   }
+  /** Ways for the office's own tools to reach this one container: a mount for pictures, and its outputs folder for screenshots. */
+  equip(st) {
+    st.ctx.mountFile = async (bytes, name) => {
+      const id = await this.client.upload(bytes, name);
+      const stamp = (st.mounts = (st.mounts || 0) + 1);
+      const path = `/generated/${stamp}-${name}`;
+      await this.client.addFile(st.id, id, path);
+      return `/mnt/session/uploads${path}`;
+    };
+    st.ctx.readOutput = async (name) => {
+      const file = String(name).split('/').pop();
+      if (!/^[A-Za-z0-9._-]{1,80}$/.test(file) || file === 'project.tgz') return null;
+      // It takes a few seconds for a file to show up here after it is written.
+      const until = Date.now() + (this.outputWaitMs ?? OUTPUT_WAIT_MS);
+      for (;;) {
+        const hit = (await this.client.listOutputs(st.id)).filter((f) => f.filename === file).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+        if (hit) return hit.size > MAX_ARCHIVE_BYTES ? null : this.client.download(hit.id);
+        if (Date.now() > until) return null;
+        await sleep(2000);
+      }
+    };
+  }
   async custom(st, ev) {
     const e = this.engine;
     const name = computerToolName(ev.name);
@@ -437,7 +480,7 @@ export class Computer {
     if (slug !== st.project) throw new WorkspaceError(`this computer can only publish its own project, "${st.project}"`);
     const kind = ['site', 'app', 'game', 'simulation', 'doc', 'research'].includes(a.kind) ? a.kind : 'site';
     const directory = cleanDirectory(a.directory);
-    const entry = { project: slug, title: String(a.title || slug).slice(0, 120), description: String(a.description || '').slice(0, 300), kind, directory };
+    const entry = { project: slug, title: String(a.title || slug).slice(0, 120), description: String(a.description || '').slice(0, 300), kind, directory, reason: String(a.claims_ok_because || '').slice(0, 300) };
     st.publish = [...st.publish.filter((p) => p.project !== slug), entry];
     run(this.engine.db, 'UPDATE tasks SET session_publish=? WHERE id=?', JSON.stringify(st.publish), st.taskId);
     return `Noted. ${directory ? `${directory}/` : 'The project folder'} goes live at ${publicUrl(st.floor.slug, slug)} once you have run .office/save.sh and ended your turn. Save first, and do it last, so the newest files are the ones published.`;
@@ -545,6 +588,10 @@ export class Computer {
       const has = (n) => get(e.db, 'SELECT 1 x FROM files WHERE floor_id=? AND path=?', floor.id, prefix + n);
       const isDoc = p.kind === 'doc' || p.kind === 'research';
       if (!has('index.html') && !(isDoc && has('index.md'))) return { ok: false, problem: `${prefix}${isDoc ? 'index.md' : 'index.html'} is missing from what you saved.` };
+      const check = runCheck(e.db, floor, p.project, p.directory, p.kind);
+      const refused = gateProblem(check, p.reason);
+      saveCheck(e.db, floor.id, p.project, check, p.reason, e.now());
+      if (refused) return { ok: false, problem: refused };
       try {
         const n = publishSnapshot(e.db, floor.id, p.project, e.cfg.quotaBytes, p.directory);
         e.upsertProject(floor, p.project, { title: p.title, description: p.description, kind: p.kind, sources: [], published: true });

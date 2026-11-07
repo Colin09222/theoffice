@@ -9,6 +9,8 @@ export const DATA_LIMITS = {
 };
 const KEY = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,63}$/;
 const PLAYER = /^[A-Za-z0-9_-]{32,64}$/;
+const FORM_LIMITS = { fields: 12, fieldBytes: 2000, entryBytes: 8192, entries: 5000, floorEntries: 20000 };
+const FIELD = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,39}$/;
 
 export class DataError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
 const bad = (code, message) => new DataError(400, code, message);
@@ -112,6 +114,33 @@ export async function handleData({ db, req, floorId: f, project: p, segments: se
       if (m === 'DELETE') { run(db, "DELETE FROM app_kv WHERE floor_id=? AND project=? AND scope='shared' AND key=?", f, p, key); return [200, { ok: true }]; }
     }
   }
+  // Write-only from the web. Visitors can add a row; only the boss, signed in on the main site, can ever read them. Models only ever see a count.
+  if (seg[0] === 'form' && seg.length === 2) {
+    const form = needKey(seg[1], 'form');
+    if (m !== 'POST') throw new DataError(404, 'not_found');
+    const b = await body();
+    const raw = b.fields && typeof b.fields === 'object' && !Array.isArray(b.fields) ? b.fields : null;
+    if (!raw) throw bad('bad_fields', 'Send fields.');
+    // The hidden field a person never fills in. A filled one gets a cheerful answer and goes nowhere.
+    if (raw.website || raw._hp) return [200, { ok: true }];
+    const clean = {};
+    const entries = Object.entries(raw);
+    if (!entries.length || entries.length > FORM_LIMITS.fields) throw bad('bad_fields', `A form has 1 to ${FORM_LIMITS.fields} fields.`);
+    for (const [k, v] of entries) {
+      if (!FIELD.test(k)) throw bad('bad_field', 'Field names are letters, digits, _ and -.');
+      if (typeof v !== 'string' && typeof v !== 'number' && typeof v !== 'boolean') throw bad('bad_field', 'Field values are plain text.');
+      const s = String(v).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]+/g, '').trim();
+      if (Buffer.byteLength(s) > FORM_LIMITS.fieldBytes) throw new DataError(413, 'too_large', 'That is too long.');
+      if (s) clean[k] = s;
+    }
+    if (!Object.keys(clean).length) throw bad('empty', 'Fill something in first.');
+    if (clean.email !== undefined && !/^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s.]{2,}$/.test(clean.email)) throw bad('bad_email', 'That email address does not look right.');
+    const text = JSON.stringify(clean);
+    if (Buffer.byteLength(text) > FORM_LIMITS.entryBytes) throw new DataError(413, 'too_large', 'That is too long.');
+    if (get(db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=? AND project=?', f, p).n >= FORM_LIMITS.entries || get(db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=?', f).n >= FORM_LIMITS.floorEntries) throw new DataError(507, 'quota', 'This list is full.');
+    run(db, 'INSERT OR IGNORE INTO app_forms (floor_id,project,form,data,size,hash,created_at) VALUES (?,?,?,?,?,?,?)', f, p, form, text, Buffer.byteLength(text), createHash('sha256').update(text).digest('hex'), t);
+    return [200, { ok: true }];
+  }
   if (seg[0] === 'board' && seg.length === 2) {
     const board = needKey(seg[1], 'board');
     // A board's direction is settled by its first score. A later request can't flip it, or a low score could knock the leaders off a full board.
@@ -151,9 +180,10 @@ export async function handleData({ db, req, floorId: f, project: p, segments: se
 }
 
 export function clearProjectData(db, floorId, project) {
-  return run(db, 'DELETE FROM app_kv WHERE floor_id=? AND project=?', floorId, project).changes + run(db, 'DELETE FROM app_scores WHERE floor_id=? AND project=?', floorId, project).changes;
+  return run(db, 'DELETE FROM app_kv WHERE floor_id=? AND project=?', floorId, project).changes + run(db, 'DELETE FROM app_scores WHERE floor_id=? AND project=?', floorId, project).changes + run(db, 'DELETE FROM app_forms WHERE floor_id=? AND project=?', floorId, project).changes;
 }
 export function deleteFloorData(db, floorId) {
   run(db, 'DELETE FROM app_kv WHERE floor_id=?', floorId);
   run(db, 'DELETE FROM app_scores WHERE floor_id=?', floorId);
+  for (const t of ['app_forms', 'app_visits', 'app_visit_refs']) run(db, `DELETE FROM ${t} WHERE floor_id=?`, floorId);
 }

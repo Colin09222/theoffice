@@ -57,6 +57,8 @@ export async function refreshMe() {
 export function toast(text, kind = '') {
   const el = h(`div.toast${kind ? `.${kind}` : ''}`, {}, text);
   const box = $('#toasts');
+  // On a phone the office has half the screen, so only the newest message gets a place on it.
+  if (isPhone()) box.replaceChildren();
   box.append(el);
   while (box.children.length > 2) box.firstChild.remove();  // never let them bury the office
   setTimeout(() => { el.classList.add('gone'); setTimeout(() => el.remove(), 400); }, 3800);
