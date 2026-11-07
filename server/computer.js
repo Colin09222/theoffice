@@ -8,21 +8,23 @@ import { get, all, run } from './db.js';
 import { ROOT } from './config.js';
 import { Limiter } from './limiter.js';
 import { ProviderError, scrub } from './llm.js';
+import { MIN_ROOM_USD } from './budget.js';
 import { costOf } from './anthropic.js';
 import { packTgz, unpackTgz, TarError } from './tarball.js';
 import { applySync, baselineOf, projectFiles, publishSnapshot, WorkspaceError } from './workspace.js';
-import { COMPUTER_TOOL_DEFS, computerToolName, publicUrl, toolsForRole } from './tools.js';
+import { COMPUTER_TOOL_DEFS, computerToolName, toolsForRole } from './tools.js';
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { IOS_HOSTS } from './ios.js';
 import { computerPrompt, computerBriefing } from './prompts.js';
 
 const PACKAGE_HOSTS = ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org'];
 const OUTPUT_WAIT_MS = 30000;
-const MIN_ROOM_USD = 0.1;
 const STALL_MS = 90_000;
 const STOP_GRACE_MS = 120_000;
 const MAX_FIX_TURNS = 2, MAX_LOST = 2, MAX_STREAM_FAILURES = 5;
-const WARN_STEPS_LEFT = 5;
+const WARN_STEPS_LEFT = 5, SPEND_WARN = 0.8;
+// A small job told to aim for 15 steps will still polish for 40 if nothing says stop. The hard limits stay for the jobs that really need them.
+const WRAP_UP = { change: 12, tester: 16, default: 22 };
 const MAX_ARCHIVE_BYTES = 40 * 1024 * 1024, MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hash = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16);
@@ -118,19 +120,24 @@ export class Computer {
   }
 
   // ---- money ----
-  /** The most this session may spend right now: the smallest of its own limit and every cap that is set. */
+  /** The most this session may spend right now: the smallest of its own limit, every cap that is set, and what is left of the building's Anthropic total. */
   room(floorId, task) {
     const { cfg } = this.engine; const e = this.engine;
     const perTask = cfg.taskMaxUsd - task.cost_usd;
     const perDay = Math.min(cfg.floorDailyUsd - e.spentToday(floorId) - (e.reserved.get(floorId) || 0), cfg.globalDailyUsd - e.spentGlobal() - e.reservedTotal);
-    return { usd: Math.min(cfg.sessionMaxUsd, perTask, perDay), daily: perDay < Math.min(cfg.sessionMaxUsd, perTask) };
+    const own = Math.min(cfg.sessionMaxUsd, perTask);
+    const perBuilding = e.budget.room('anthropic');
+    return { usd: Math.min(own, perDay, perBuilding), daily: perDay < own, building: perBuilding < Math.min(own, perDay) };
   }
   charge(st, model, prompt, completion, cost) {
-    this.engine.charge(st.floorId, st.agent, model, prompt, completion, cost, { taskId: st.taskId });
+    this.engine.charge(st.floorId, st.agent, model, prompt, completion, cost, { taskId: st.taskId, provider: 'anthropic' });
     st.charged += cost;
     run(this.engine.db, 'UPDATE tasks SET session_charged=? WHERE id=?', st.charged, st.taskId);
     const back = Math.min(cost, st.hold);
-    if (back > 0) { this.engine.unreserve(st.floorId, back); st.hold -= back; }
+    if (back > 0) {
+      this.engine.unreserve(st.floorId, back); st.hold -= back;
+      if (st.holdId) this.engine.budget.setHold(st.holdId, st.hold);
+    }
   }
   /** The platform's figure is the authority: running time and anything missed while disconnected is charged here. */
   async reconcile(st) {
@@ -161,7 +168,7 @@ export class Computer {
       }
       task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       if (!task.transcript) {
-        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], task, e.cfg) }]), task.id);
+        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }) }, e.cfg) }]), task.id);
         task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       }
       st = this.newState(floor, agent, task, signal);
@@ -180,6 +187,8 @@ export class Computer {
     } finally {
       if (st?.id) await this.reconcile(st);
       if (st?.hold > 0) { e.unreserve(floorId, st.hold); st.hold = 0; }
+      // A session left running through a restart may still spend what it was promised, so that hold stays until it is picked up again.
+      if (st?.holdId && !(st.id && signal.reason?.why === 'shutdown')) e.budget.release(st.holdId);
       release?.();
     }
   }
@@ -196,7 +205,7 @@ export class Computer {
     return {
       id: task.session_id || '', floorId: floor.id, floor, agent, taskId: task.id, project: task.project, signal, room: null,
       // History counts towards the steps, so a restart can't reset them. A round of fixes the manager asked for gets its own, or the fix never fits; the dollar caps still hold.
-      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), warned: false, limit: '', lastText: '', lastFeed: '',
+      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), wrapUpAt: task.lane || e.isLive(floor.id, task.project) ? (e.isLive(floor.id, task.project) && agent.role !== 'tester' ? WRAP_UP.change : WRAP_UP[agent.role] || WRAP_UP.default) * (1 + (task.revisions || 0)) : 0, warned: false, limit: '', lastText: '', lastFeed: '',
       pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
       publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
       ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design')]), signal },
@@ -204,43 +213,51 @@ export class Computer {
   }
 
   /** A session with nobody following it: its task was stopped, or its floor is paused. Stop it, and put what it cost on the ledger. */
-  async settleOrphan(task) {
+  async settleOrphan(task, { resume = false } = {}) {
     const e = this.engine;
     try {
       await this.client.send(task.session_id, [{ type: 'user.interrupt' }]).catch(() => {});
       const s = await this.client.retrieve(task.session_id);
       const delta = Number(s.usage?.list_cost?.amount) / 100 - task.session_charged;
       if (delta > 0.005) {
-        e.charge(task.floor_id, { id: task.agent_id }, 'managed-session', 0, 0, delta, { taskId: task.id });
+        e.charge(task.floor_id, { id: task.agent_id }, 'managed-session', 0, 0, delta, { taskId: task.id, provider: 'anthropic' });
         run(e.db, 'UPDATE tasks SET session_charged=session_charged+? WHERE id=?', delta, task.id);
       }
-    } catch (err) { e.log('warn', 'could not settle a session', { err: scrub(err?.message, e.cfg) }); }
+      if (resume) this.pushMessage(task.id, 'You were paused for a while. Carry on where you left off.');
+    } catch (err) { e.log('warn', 'could not settle a session', { err: scrub(err?.message, e.cfg) }); } finally { e.budget.releaseTask(task.id); }
   }
   /** At boot: sessions on floors that won't reattach for now are stopped, so they don't spend off the books. */
   recoverOrphans() {
     const paused = this.engine.globalPaused();
-    for (const t of all(this.engine.db, "SELECT t.id,t.session_id,t.session_charged,t.agent_id,t.floor_id FROM tasks t JOIN floors f ON f.id=t.floor_id WHERE t.session_id!='' AND t.status='todo' AND (f.paused=1 OR f.status!='active' OR ?)", paused ? 1 : 0)) this.settleOrphan(t);
+    const out = this.engine.budget.out('anthropic');
+    for (const t of all(this.engine.db, "SELECT t.id,t.session_id,t.session_charged,t.agent_id,t.floor_id,f.paused,f.status floor_status FROM tasks t JOIN floors f ON f.id=t.floor_id WHERE t.session_id!='' AND t.status='todo' AND (f.paused=1 OR f.status!='active' OR ? OR ?)", paused ? 1 : 0, out ? 1 : 0)) this.settleOrphan(t, { resume: out && !paused && !t.paused && t.floor_status === 'active' });
   }
 
   /** Reattach to this task's session if it is still alive, otherwise box up the project and start a fresh one. */
   async attach(st, task) {
     const e = this.engine; const { floor, agent, signal } = st;
+    // What this task held before a restart is replaced below, and what its session spent meanwhile goes on the ledger first, so the room is the real room.
+    e.budget.releaseTask(task.id);
+    if (st.id) await this.reconcile(st);
     let room = this.room(floor.id, task);
+    const heldUp = (r) => r.usd < MIN_ROOM_USD && ((r.daily && !e.spentOver(floor.id, MIN_ROOM_USD)) || (r.building && !e.budget.out('anthropic')));
     // Short of room only because other sessions hold it: they give back what they don't spend, so wait for them.
-    while (room.usd < MIN_ROOM_USD && room.daily && !e.spentOver(floor.id, MIN_ROOM_USD)) {
-      e.setAgent(agent.id, { state: 'queued', activity: 'Waiting for the budget to free up' });
+    while (heldUp(room)) {
+      e.setAgent(agent.id, { state: 'queued', activity: 'Waiting for a turn' });
       await new Promise((res, rej) => { const t = setTimeout(res, 2000); signal.addEventListener('abort', () => { clearTimeout(t); rej(signal.reason); }, { once: true }); });
       e.checkpoint(floor.id, signal);
       room = this.room(floor.id, task);
     }
     st.room = room;
     if (room.usd < MIN_ROOM_USD) {
+      if (room.building) throw new e.Halt('building_budget');
       if (room.daily) throw new e.Halt('budget');
-      e.finishTask(floor, agent, task.id, 'failed', 'Stopped: this task hit its spending limit.');
+      e.finishTask(floor, agent, task.id, 'failed', 'Stopped: this task reached its limit.');
       throw new e.Halt('stop');
     }
-    // Held from this moment, so nothing else on the floor can spend the same dollars while this one starts up.
+    // Held from this moment, so nothing else in the building can spend the same dollars while this one starts up.
     st.hold = room.usd; e.reserve(floor.id, st.hold);
+    st.holdId = e.budget.hold('anthropic', { kind: 'session', floorId: floor.id, agentId: agent.id, taskId: task.id, usd: room.usd });
     if (st.id) {
       let live = null;
       try { live = await this.client.retrieve(st.id); } catch (err) { if (err?.status !== 404) throw err; }
@@ -388,6 +405,10 @@ export class Computer {
             this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: `You have ${WARN_STEPS_LEFT} steps left on this computer. Finish up now: save your work with .office/save.sh, publish if you are going to, and reply with your summary.` }] }]).catch(() => {});
           }
           if (left <= 0) this.stopFor(st, 'steps');
+          if (st.wrapUpAt && st.steps >= st.wrapUpAt && !st.wrappedUp) {
+            st.wrappedUp = true;
+            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: `That is ${st.wrapUpAt} steps, which is what this job should take. Stop polishing and finish now: leave it working, run .office/save.sh, publish if you are going to, and reply with your summary, including anything still rough.` }] }]).catch(() => {});
+          }
         }
         return null;
       case 'span.model_request_end':
@@ -395,6 +416,11 @@ export class Computer {
         if (live && ev.model_usage) {
           const u = costOf(ev.model_usage, st.pricing);
           this.charge(st, st.model, u.prompt, u.completion, u.cost);
+          // A session stopped by its budget keeps only what was saved, and the platform gives no warning. It isn't told why, because a bot has no business knowing there is a limit.
+          if (!st.warnedSpend && st.room && st.charged >= st.room.usd * SPEND_WARN) {
+            st.warnedSpend = true;
+            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: 'Your time on this computer is nearly up. Save your work now with .office/save.sh, publish if you are going to, and reply with your summary.' }] }] ).catch(() => {});
+          }
         }
         return null;
       case 'agent.thinking':
@@ -484,7 +510,7 @@ export class Computer {
     const entry = { project: slug, title: String(a.title || slug).slice(0, 120), description: String(a.description || '').slice(0, 300), kind, directory, reason: String(a.claims_ok_because || '').slice(0, 300) };
     st.publish = [...st.publish.filter((p) => p.project !== slug), entry];
     run(this.engine.db, 'UPDATE tasks SET session_publish=? WHERE id=?', JSON.stringify(st.publish), st.taskId);
-    return `Noted. ${directory ? `${directory}/` : 'The project folder'} goes live at ${publicUrl(st.floor.slug, slug)} once you have run .office/save.sh and ended your turn. Save first, and do it last, so the newest files are the ones published.`;
+    return `Noted. ${directory ? `${directory}/` : 'The project folder'} goes live at ${this.engine.liveUrl(st.floor, slug)} once you have run .office/save.sh and ended your turn. Save first, and do it last, so the newest files are the ones published.`;
   }
   /** Sends user messages the session hasn't had yet: the first briefing, the manager's notes, the boss's answers, or a fix request. */
   async sendPending(st) {
@@ -526,13 +552,16 @@ export class Computer {
     }
     await this.reconcile(st);
     const links = result.published?.length ? `\n\nPublished: ${result.published.join(', ')}` : '';
+    // The manager decides what to do about a stopped task, and can't without this: what was being said when it stopped, and whether the work survived.
+    const soFar = `${st.lastText ? `\n\nLast thing it said: ${st.lastText.slice(0, 800)}` : ''}${result.ok ? e.savedSoFar(floor.id, { project: st.project }) : ' Its last save could not be read, so anything since the task began may be lost.'}`;
     if (outcome === 'budget') {
-      // Stopped by what was left of the day. Over for today if the money is really gone; otherwise it goes back in line for what other sessions give back.
+      // Stopped by what was left of the building's total or of the day. Over if the money is really gone; otherwise it goes back in line for what other sessions give back.
+      if (st.room.building) throw new e.Halt(e.budget.out('anthropic') ? 'building_budget' : 'wait');
       if (st.room.daily) throw new e.Halt(e.spentOver(floor.id, MIN_ROOM_USD) ? 'budget' : 'wait');
-      return e.finishTask(floor, agent, taskId, 'failed', `Stopped: this task hit its spending limit.${links}`);
+      return e.finishTask(floor, agent, taskId, 'failed', `Stopped: this task reached its limit.${links}${soFar}`);
     }
-    if (st.limit === 'steps') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of steps before finishing.${links}`);
-    if (st.limit === 'time') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of time before finishing.${links}`);
+    if (st.limit === 'steps') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of steps before finishing.${links}${soFar}`);
+    if (st.limit === 'time') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of time before finishing.${links}${soFar}`);
     if (!result.ok) return e.finishTask(floor, agent, taskId, 'failed', `The work could not be saved: ${result.problem}`);
     return e.finishTask(floor, agent, taskId, 'review', `${(st.lastText || 'Finished.').slice(0, 1800)}${links}`);
   }
@@ -596,7 +625,7 @@ export class Computer {
       try {
         const n = publishSnapshot(e.db, floor.id, p.project, e.cfg.quotaBytes, p.directory);
         e.upsertProject(floor, p.project, { title: p.title, description: p.description, kind: p.kind, sources: [], published: true });
-        published.push(publicUrl(floor.slug, p.project));
+        published.push(e.liveUrl(floor, p.project));
         e.feed(floor.id, agent, `published ${p.project} (${n} files)`, p.project);
         e.emitProject(floor.id, p.project);
       } catch (err) {

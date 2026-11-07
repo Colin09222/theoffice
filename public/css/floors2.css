@@ -92,6 +92,20 @@
 @media (min-width: 761px) and (max-height: 640px) {
   .card-made, .card-activity { display: none !important; }
 }
+/* A phone on its side: the smallest card that still says where you are, and the panel closes for the whole room. */
+@media (max-height: 520px) and (min-width: 761px) {
+  .floor-top { top: max(8px, env(safe-area-inset-top)); left: max(8px, env(safe-area-inset-left)); width: 176px; max-height: calc(100% - 66px); padding: 7px 10px; gap: 3px; }
+  .floor-top .back { min-height: 28px; }
+  .card-more, .floor-tag, .card-logo { display: none !important; }
+  .floor-name { font-size: 16px; }
+  .floor-num { margin-bottom: 0; }
+  .floor-panel { width: 290px; right: 50px; top: 8px; bottom: 8px; }
+  .floor-scrubber { right: 6px; width: 38px; height: calc(100% - 16px); padding: 3px 0; }
+  .scrub-btn { width: 30px; height: 30px; }
+  .controls { left: max(8px, env(safe-area-inset-left)); bottom: 8px; max-width: min(46vw, 330px); }
+  .controls .btn { min-height: 30px; padding: 3px 10px; font-size: 12px; }
+  .talk-pill { bottom: 8px; padding: 7px 14px; font-size: 13px; left: auto; right: 54px; transform: none; }
+}
 
 @media (max-width: 760px) {
   .floor-top { background: none; border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 0; }

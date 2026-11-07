@@ -69,6 +69,8 @@ export async function adminClient(t) {
   c.csrf = r.data.csrf;
   return c;
 }
+// What a floor has spent today, as only the admin can see it. Nothing a boss or a visitor gets carries this any more.
+export const spentToday = (t, c) => t.app.engine.spentToday(t.db.prepare('SELECT id FROM floors WHERE slug=?').get(c.slug).id);
 export const floorState = async (c, slug) => (await c.get(`/api/floors/${slug ?? c.slug}`)).data;
 export const allDone = (s) => s.tasks.length > 0 && s.tasks.every((t) => ['done', 'failed', 'cancelled'].includes(t.status)) && s.agents.every((a) => a.state === 'idle');
 export const waitDone = (c, what = 'floor to finish') => until(async () => { const s = await floorState(c); return allDone(s) ? s : null; }, { what });

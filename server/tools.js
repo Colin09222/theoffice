@@ -3,13 +3,13 @@ import { writeFile, writeBinaryFile, readFile, listFiles, publishSnapshot, Works
 import { safeFetch, FetchBlocked } from './safefetch.js';
 import { get, all, run } from './db.js';
 import { DomainRefused, domainsConfigured } from './domains.js';
-import { ProviderError } from './llm.js';
+import { ProviderError, plainProviderText, scrub } from './llm.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './media.js';
-import { runCheck, saveCheck, gateProblem, launchFacts, composeReport } from './launch.js';
+import { runCheck, saveCheck, gateProblem, launchFacts, composeReport, chatReport, bossText } from './launch.js';
 import { formatReport } from './launch-check.js';
 import { LANES } from './prompts.js';
 import { OrderError } from './orders.js';
-import { HelpError, HELP_LIMITS } from './help.js';
+import { HelpError, HELP_LIMITS, flatText } from './help.js';
 
 const str = (o, k, max, req = true) => {
   const v = o?.[k];
@@ -178,11 +178,32 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     if (isPrivate(c, c.project) && slug !== c.project && !isPrivate(c, slug)) throw new WorkspaceError('this task is private, so it can\'t put anything in a public project');
     return slug;
   };
-  const roomFor = (c, usd) => {
-    if (engine.overBudget(c.floor.id, usd)) throw new WorkspaceError('today\'s budget would not cover that');
-    if (c.task && (get(db, 'SELECT cost_usd n FROM tasks WHERE id=?', c.task.id)?.n ?? 0) + usd > cfg.taskMaxUsd) throw new WorkspaceError('this task\'s budget would not cover that');
+  // It doesn't say why. A bot has no business knowing there is a limit or how near it is, because it could only pass that on.
+  const roomFor = (c, usd, provider) => {
+    const short = engine.overBudget(c.floor.id, usd) || engine.budget.out(provider) || engine.budget.room(provider) <= 0 || (c.task && (get(db, 'SELECT cost_usd n FROM tasks WHERE id=?', c.task.id)?.n ?? 0) + usd > cfg.taskMaxUsd);
+    if (short) throw new WorkspaceError('that is not available right now, so carry on without it');
   };
-  const brokerError = (e) => { if (e instanceof ProviderError) { engine.log('warn', 'tool provider failed', { status: e.status }); return new WorkspaceError(`that did not work: ${e.message}`); } return e; };
+  const brokerError = (e) => { if (e instanceof ProviderError) { engine.log('warn', 'tool provider failed', { status: e.status, err: scrub(e.message, cfg) }); return new WorkspaceError(`that did not work: ${plainProviderText(e)}`); } return e; };
+  // A link nobody here ever opened is what an invented source looks like from outside. Publishing a doc checks each one against what searches returned and pages opened on this floor, against what teammates handed over, and against what the boss said.
+  const seenOnFloor = (floorId, exceptPrefix) => {
+    const parts = [bossText(db, floorId)];
+    for (const t of all(db, "SELECT transcript FROM tasks WHERE floor_id=? AND transcript!=''", floorId)) {
+      let msgs; try { msgs = JSON.parse(t.transcript); } catch { continue; }
+      // A refusal quotes the link, and reading a draft back shows it again. Neither means anyone has seen the page.
+      for (const m of msgs) if ((m.role === 'tool' || m.role === 'user') && typeof m.content === 'string' && !/^Error:|^<untrusted_data source="workspace:/.test(m.content)) parts.push(m.content);
+    }
+    for (const f of all(db, "SELECT path,content FROM files WHERE floor_id=? AND path LIKE 'projects/%.md'", floorId)) if (!f.path.startsWith(exceptPrefix) && typeof f.content === 'string') parts.push(f.content);
+    return parts.join('\n').toLowerCase().replaceAll('://www.', '://');
+  };
+  const unseenLinks = (c, prefix, sources) => {
+    const doc = get(db, 'SELECT content FROM files WHERE floor_id=? AND path=?', c.floor.id, `${prefix}index.md`)?.content;
+    const urls = new Set([...sources.map((s) => s.url), ...(typeof doc === 'string' ? [...doc.matchAll(/https?:\/\/[^\s)\]>"'`]+/gi)].map((m) => m[0].replace(/[.,;:!?*_]+$/, '')) : [])]);
+    if (!urls.size) return [];
+    const seen = seenOnFloor(c.floor.id, prefix);
+    const key = (u) => u.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
+    return [...urls].filter((u) => !/^https?:\/\/([a-z0-9-]+\.)?(example\.(com|org|net)|localhost)([/:]|$)/i.test(u) && !seen.includes(key(u))).slice(0, 12)
+      .map((u) => `a link nobody here opened or found in a search (open it with fetch_url, or take it out along with whatever rests on it): "${u}"`);
+  };
   const handlers = {
     write_file(c, a) {
       const content = typeof a.content === 'string' ? a.content : '';
@@ -222,6 +243,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
         .filter((s) => /^https?:\/\//i.test(s.url));
       const reason = str(a, 'claims_ok_because', 300, false);
       const check = await runCheck(db, c.floor, slug, directory, kind);
+      if (isDoc && c.task) check.claims.push(...unseenLinks(c, prefix, sources));
       const problem = gateProblem(check, reason);
       if (problem) { saveCheck(db, c.floor.id, slug, check, reason, engine.now()); throw new WorkspaceError(problem); }
       const n = publishSnapshot(db, c.floor.id, slug, cfg.quotaBytes, directory);
@@ -232,7 +254,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (check.claims.length) engine.feed(c.floor.id, c.agent, `published ${slug} with possible invented claims for the boss to check`, slug);
       c.say('typing', `Publishing ${slug}`, `published ${slug}`, { project: slug });
       engine.emitProject(c.floor.id, slug);
-      return `Published ${n} files at ${publicUrl(c.floor.slug, slug)}.${check.warnings.length ? ` Still rough: ${check.warnings.slice(0, 6).join(' ')}` : ''} ${cfg.appsBaseDomain ? 'It runs on its own origin, with real localStorage and service workers.' : 'Note: the site runs in a sandbox, so it cannot use cookies or localStorage without catching the error.'}`;
+      return `Published ${n} files at ${engine.liveUrl(c.floor, slug)}.${check.warnings.length ? ` Still rough: ${check.warnings.slice(0, 6).join(' ')}` : ''} ${cfg.appsBaseDomain ? 'It runs on its own origin, with real localStorage and service workers.' : 'Note: the site runs in a sandbox, so it cannot use cookies or localStorage without catching the error.'}`;
     },
     async fetch_url(c, a) {
       const url = str(a, 'url', 2000);
@@ -255,12 +277,11 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       outbound(c, q, 'search');
       if (serverSearch(cfg) && SEARCH_ROLES.has(c.agent.role) && engine.search) {
         if (todayCount(c, 'search') >= cfg.searchesPerFloorDay) throw new WorkspaceError('this floor has done all its searching for today');
-        roomFor(c, 0.2);
+        roomFor(c, 0.2, 'anthropic');
         // What was searched for isn't shown on the floor: visitors can read the feed.
         c.say('browsing', 'Searching the web', 'searched the web');
         let r;
-        try { r = await engine.search.search(q, c.signal); } catch (e) { if (e instanceof ProviderError) { engine.log('warn', 'search failed', { status: e.status }); return 'Search is unavailable right now.'; } throw e; }
-        engine.charge(c.floor.id, c.agent, engine.search.model, r.usage.prompt, r.usage.completion, r.usage.cost, { taskId: c.task?.id, kind: 'search' });
+        try { r = await engine.brokerCall(c, { provider: 'anthropic', usd: 0.2, model: engine.search.model, kind: 'search' }, () => engine.search.search(q, c.signal)); } catch (e) { if (e instanceof ProviderError) { engine.log('warn', 'search failed', { status: e.status }); return 'Search is unavailable right now.'; } throw e; }
         const list = r.sources.slice(0, 12).map((s, i) => `${i + 1}. ${s.title}\n${s.url}`).join('\n');
         return wrapUntrusted('web_search', `${r.failed && !r.text ? `The search failed (${r.failed}).` : r.text || 'No results.'}${list ? `\n\nSources:\n${list}` : ''}`);
       }
@@ -325,21 +346,21 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       c.imagesMade = c.imagesMade || 0;
       if (c.imagesMade >= cfg.imagesPerTask) throw new WorkspaceError(`that is ${cfg.imagesPerTask} pictures for this task, the limit`);
       if (todayCount(c, 'image') >= cfg.imagesPerFloorDay) throw new WorkspaceError(`this floor has made its ${cfg.imagesPerFloorDay} pictures for today`);
-      roomFor(c, engine.media.image.estimateUsd || 0.25);
+      const estimate = engine.media.image.estimateUsd || 0.25;
+      roomFor(c, estimate, 'openrouter');
       c.say('typing', `Drawing ${name}`, `is making a picture: ${name}`, { project });
       let img;
-      try { img = await engine.media.generateImage({ prompt, aspect: a.aspect, signal: c.signal }); } catch (e) { throw brokerError(e); }
+      try { img = await engine.brokerCall(c, { provider: 'openrouter', usd: estimate, model: engine.media.image.model, kind: 'image' }, () => engine.media.generateImage({ prompt, aspect: a.aspect, signal: c.signal })); } catch (e) { throw brokerError(e); }
       c.imagesMade++;
-      engine.charge(c.floor.id, c.agent, engine.media.image.model, img.usage.prompt, img.usage.completion, img.usage.cost, { taskId: c.task?.id, kind: 'image' });
       const rel = `${directory}/${name}.${img.ext}`;
       const saved = writeBinaryFile(db, c.floor.id, `projects/${project}/${rel}`, img.bytes, c.agent.id, cfg.quotaBytes);
       engine.emitProject(c.floor.id, project);
       // A computer has its own copy of the project, so the picture goes there too.
       if (c.mountFile) {
         const at = await c.mountFile(img.bytes, `${name}.${img.ext}`);
-        return `Made it (${Math.ceil(saved.size / 1024)} KB, $${img.usage.cost.toFixed(3)}). It is at ${at}. Run: mkdir -p /workspace/project/${directory} && cp ${at} /workspace/project/${rel}`;
+        return `Made it (${Math.ceil(saved.size / 1024)} KB). It is at ${at}. Run: mkdir -p /workspace/project/${directory} && cp ${at} /workspace/project/${rel}`;
       }
-      return `Saved ${saved.path} (${Math.ceil(saved.size / 1024)} KB, $${img.usage.cost.toFixed(3)}). In a page in that project use the relative path ${rel}.`;
+      return `Saved ${saved.path} (${Math.ceil(saved.size / 1024)} KB). In a page in that project use the relative path ${rel}.`;
     },
     async review_design(c, a) {
       if (!engine.media) throw new WorkspaceError('design review is not available');
@@ -347,7 +368,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const file = str(a, 'file', 300); const about = str(a, 'about', 500, false);
       if (about) outbound(c, about, 'description');
       if (todayCount(c, 'review') >= cfg.reviewsPerFloorDay) throw new WorkspaceError('this floor has had all its design reviews for today');
-      roomFor(c, engine.media.review.estimateUsd || 0.1);
+      const estimate = engine.media.review.estimateUsd || 0.1;
+      roomFor(c, estimate, 'openrouter');
       let bytes;
       if (c.readOutput) bytes = await c.readOutput(file);
       else {
@@ -362,11 +384,10 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (bytes.length > MAX_IMAGE_BYTES) throw new WorkspaceError('that screenshot is over 6 MB; take a viewport-sized one');
       c.say('reading', 'Getting a second opinion on the design', 'sent the design to another lab for a blunt review', { project });
       let r;
-      try { r = await engine.media.reviewDesign({ bytes, mime: type.mime, context: about, signal: c.signal }); } catch (e) { throw brokerError(e); }
-      engine.charge(c.floor.id, c.agent, engine.media.review.model, r.usage.prompt, r.usage.completion, r.usage.cost, { taskId: c.task?.id, kind: 'review' });
+      try { r = await engine.brokerCall(c, { provider: 'openrouter', usd: estimate, model: engine.media.review.model, kind: 'review' }, () => engine.media.reviewDesign({ bytes, mime: type.mime, context: about, signal: c.signal })); } catch (e) { throw brokerError(e); }
       const verdict = /FIX FIRST/i.test(r.text) ? 'fix first' : /\bSHIP\b/i.test(r.text) ? 'ship' : 'see notes';
       run(db, 'UPDATE projects SET design_review=? WHERE floor_id=? AND slug=?', JSON.stringify({ at: engine.now(), model: engine.media.review.model, verdict, text: r.text.slice(0, 2000) }), c.floor.id, project);
-      return wrapUntrusted('design review from another lab', `${r.text}\n\n(cost $${r.usage.cost.toFixed(3)})`);
+      return wrapUntrusted('design review from another lab', r.text);
     },
     async launch_check(c, a) {
       const slug = projectFor(c, a);
@@ -384,7 +405,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const facts = launchFacts(db, cfg, c.floor, slug, engine.domains, engine.liveUrl(c.floor, slug));
       const text = composeReport(facts, str(a, 'headline', 600), str(a, 'next_steps', 1500, false));
       run(db, 'UPDATE projects SET launch_report=? WHERE floor_id=? AND slug=?', text, c.floor.id, slug);
-      engine.reportToBoss(c.floor.id, text);
+      // The whole report sits on the project card. The chat gets what the boss needs now.
+      engine.reportToBoss(c.floor.id, chatReport(facts, str(a, 'headline', 600), str(a, 'next_steps', 1500, false)));
       engine.emitProject(c.floor.id, slug);
       return 'Sent to the boss. Do not repeat it; a line of your own is plenty.';
     },
@@ -423,7 +445,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     ask_buddehbot(c, a) {
       if (!engine.help) throw new WorkspaceError('the help line is not available');
       if (typeof a.question !== 'string' || typeof a.what_was_tried !== 'string') throw new WorkspaceError('question and what_was_tried are both required, as text');
-      outbound(c, `${a.question} ${a.what_was_tried}`, 'question');
+      // Judged as it will be stored, so a hidden character can't split a private name past the guard.
+      outbound(c, flatText(`${a.question} ${a.what_was_tried}`), 'question');
       let r;
       try { r = engine.help.ask(c.floor, c.agent, { question: a.question, tried: a.what_was_tried }); } catch (e) { if (e instanceof HelpError) throw new WorkspaceError(e.message); throw e; }
       if (r.already) return `You already asked that (#${r.id}) and it is still waiting. Asking again changes nothing, so carry on with anything else you can do.`;

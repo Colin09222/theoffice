@@ -274,14 +274,16 @@ describe('the launch report', () => {
     await h.publish();
     assert.match(await h.tool('manager', 'launch_report', { project: 'teacups', headline: 'Tiny Teacups is live.', next_steps: 'Share it.' }), /Sent to the boss/);
     const msg = get(h.t.db, "SELECT text FROM messages WHERE role='report' ORDER BY id DESC LIMIT 1").text;
-    assert.match(msg, /Launch report/); assert.match(msg, /Live at:.*teacups--/); assert.match(msg, /Design review:\*\* not done/); assert.match(msg, /Sign-ups so far:\*\* 0/);
-    assert.match(msg, /Taking money:\*\* no/);
-    assert.ok(get(h.t.db, "SELECT launch_report r FROM projects WHERE slug='teacups'").r);
+    assert.match(msg, /^\*\*.* is live:\*\* .*teacups--/); assert.match(msg, /Tiny Teacups is live\./); assert.match(msg, /Share it\./); assert.match(msg, /under Report on the project card/);
+    // The rest of what's on record is one click away, on the project card.
+    const full = get(h.t.db, "SELECT launch_report r FROM projects WHERE slug='teacups'").r;
+    assert.match(full, /Launch report/); assert.match(full, /Live at:.*teacups--/); assert.match(full, /Design review:\*\* not done/); assert.match(full, /Sign-ups so far:\*\* 0/);
+    assert.match(full, /Taking money:\*\* no/);
     // For the boss alone, even on a floor with public chat.
     await h.c.post(`/api/floors/${h.c.slug}/settings`, { publicChat: true });
     const seen = await new Client(h.t).get(`/api/floors/${h.c.slug}`);
-    assert.ok(Array.isArray(seen.data.messages)); assert.ok(!JSON.stringify(seen.data).includes('Launch report'));
-    assert.ok((await floorState(h.c)).messages.some((m) => /Launch report/.test(m.text)));
+    assert.ok(Array.isArray(seen.data.messages)); assert.ok(!JSON.stringify(seen.data).includes('is live:'));
+    assert.ok((await floorState(h.c)).messages.some((m) => /is live:/.test(m.text)));
     const { messages } = h.t.app.engine.managerContext(get(h.t.db, 'SELECT * FROM floors WHERE id=?', h.floor.id), h.agent('manager'));
     assert.doesNotMatch(JSON.stringify(messages), /Launch report: /);
   });
@@ -334,7 +336,8 @@ describe('generate_image', () => {
   });
   test('budget is checked first, and bad output or a hostile name goes nowhere', async () => {
     const h1 = await withMedia(fetcher(png()), { floorDailyUsd: 0.01 });
-    assert.match(await h1.tool('designer', 'generate_image', { prompt: 'x', name: 'a', project: 'teacups' }), /budget/);
+    const refused = await h1.tool('designer', 'generate_image', { prompt: 'x', name: 'a', project: 'teacups' });
+    assert.match(refused, /not available right now/); assert.doesNotMatch(refused, /budget|\$/, 'and a bot isn\'t told why');
     const notPic = await withMedia(fetcher(png(0.01, Buffer.from('<script>alert(1)</script>'))));
     assert.match(await notPic.tool('designer', 'generate_image', { prompt: 'x', name: 'a', project: 'teacups' }), /not a picture/);
     assert.equal(all(notPic.t.db, 'SELECT 1 FROM files').length, 0);
@@ -460,7 +463,7 @@ describe('web search', () => {
     assert.equal(reqs[2].messages.length, 3, 'each paused turn appended, nothing else');
     assert.equal(reqs[2].messages.filter((m) => m.role === 'user').length, 1);
     assert.equal(reqs[0].tools[0].type, 'web_search_20260209');
-    assert.ok(Math.abs(r.usage.cost - (3 * ((100 * 4 + 50 * 20) / 1e6) + 6 * 0.01)) < 1e-9);
+    assert.ok(Math.abs(r.usage.cost - (3 * ((100 * 2 + 50 * 10) / 1e6) + 6 * 0.01)) < 1e-9);
     assert.equal(r.searches, 6);
     assert.equal(JSON.stringify(reqs[0].messages).match(/tiny companies/g).length, 1);
     assert.equal(reqs[0].system, undefined, 'the search call holds nothing but the query');
@@ -531,9 +534,11 @@ describe('purchase requests for the owner\'s assistant', () => {
     await h.tool('researcher', 'file_purchase_request', { item: 'Fonts', price: 15, why: 'For the site' });
     const a = await adminClient(h.t);
     const list = (await a.get('/api/admin/purchases')).data;
-    assert.equal(list.purchases.length, 2); assert.match(list.notice, /written by bots/);
-    const row = list.purchases.find((p) => p.item === 'Stock photos');
-    assert.equal(row.priceUsd, 29); assert.equal(row.link, 'https://shop.example/x'); assert.equal(row.status, 'pending');
+    assert.equal(list.purchases.length, 2); assert.match(list.notice, /written by a bot/);
+    // What a floor wrote comes fenced, because the reader is more privileged than the writer. The price and the status are the office's own.
+    const row = list.purchases.find((p) => p.item.includes('Stock photos'));
+    assert.ok(row.item.startsWith(`<<<UNTRUSTED_FLOOR_DATA ${list.fence} `));
+    assert.equal(row.priceUsd, 29); assert.match(row.link, /https:\/\/shop\.example\/x/); assert.ok(row.link.startsWith('<<<UNTRUSTED_FLOOR_DATA')); assert.equal(row.status, 'pending');
     assert.equal((await new Client(h.t).get('/api/admin/purchases')).status, 401);
     assert.equal((await h.c.get('/api/admin/purchases')).status, 401, 'a boss is not the admin');
     assert.equal((await a.post(`/api/admin/purchases/${row.id}`, { status: 'pending' })).status, 400);

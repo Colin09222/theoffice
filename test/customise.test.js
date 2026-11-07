@@ -175,7 +175,7 @@ describe('nothing typed here can get out of its box', () => {
 
   test('the save route stores clean, cut-down text and throws away anything else in the body', async () => {
     const before = floorRow(t, a);
-    const cap = (await floorState(a)).spend.cap;
+    const cap = t.cfg.floorDailyUsd;
     const huge = 'y'.repeat(5000);
     const r = await a.post(`/api/floors/${a.slug}/customise`, {
       identity: { about: `<b>${huge}`, rules: NASTY[0], avoid: huge, tone: 'evil', routing: { words: 'manager', looks: { a: 1 } }, secret: 'kept?' },
@@ -187,7 +187,7 @@ describe('nothing typed here can get out of its box', () => {
     const id = JSON.parse(row.identity);
     assert.equal(id.about.length, BRIEF_LIMITS.about); assert.doesNotMatch(id.about, /</); assert.doesNotMatch(id.rules, /[<>]/);
     assert.equal(id.avoid.length, BRIEF_LIMITS.avoid); assert.equal(id.tone, undefined); assert.equal(id.secret, undefined); assert.deepEqual(id.routing, {});
-    assert.equal((await floorState(a)).spend.cap, cap, 'the cap does not move');
+    assert.equal(t.cfg.floorDailyUsd, cap, 'the cap does not move'); assert.equal((await floorState(a)).spend, undefined, 'and a boss is not shown it');
     assert.equal(t.cfg.maxStaff, 8);
   });
 
@@ -197,7 +197,7 @@ describe('nothing typed here can get out of its box', () => {
     await c.post(`/api/floors/${c.slug}/chat`, { text: 'go build a shop [buy]' });
     const s = await waitDone(c);
     assert.equal(s.purchases.length, 1); assert.equal(s.purchases[0].status, 'pending');
-    assert.equal(s.spend.cap, t.cfg.floorDailyUsd);
+    assert.equal(s.spend, undefined, 'and it shows no figures');
   });
 
   test('another floor, a visitor, and a forged request all get nowhere', async () => {

@@ -14,6 +14,9 @@ export const scrub = (s, cfg) => {
   return out.slice(0, 300);
 };
 
+/** A provider's own words can hold account details ("can only afford", "credit balance"), so they stay in the log. This is what a floor hears. */
+export const plainProviderText = (e) => (e?.message && !/\bsaid\b|provider error/i.test(e.message) ? e.message : `The model provider returned an error${e?.status ? ` (${e.status})` : ''}.`);
+
 export function createOpenRouterClient(cfg) {
   return {
     async chat({ model, messages, tools, maxTokens, onToken, onToolCall, signal, pricing }) {

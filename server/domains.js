@@ -72,7 +72,7 @@ export function createDomainBroker({ db, cfg, engine, client }) {
       else if (!r.available) why = 'taken';
       else if (r.premium || r.premiumPrice > 0 || r.eapFee > 0) why = 'premium';
       else if (total === null) why = 'no price listed';
-      else if (total > cfg.domainMaxUsd) why = `over the $${cfg.domainMaxUsd} limit`;
+      else if (total > cfg.domainMaxUsd) why = 'over the price limit';
       out.push({ domain: d, available: !!r?.available, premium: !!r?.premium, priceUsd: total, buyable: !why, why });
     }
     return out;
@@ -135,7 +135,7 @@ export function createDomainBroker({ db, cfg, engine, client }) {
       if (!o) throw new DomainRefused('no such request on this floor');
       if (o.status !== 'awaiting_boss') return false; // a double click, or a retry: the first one is already at work
       if (now() - o.created_at > REQUEST_TTL_MS) throw new DomainRefused('that request is over a week old; ask the manager to check the name again');
-      if (seen > cfg.domainMaxUsd) throw new DomainRefused(`that is over the $${cfg.domainMaxUsd} limit`);
+      if (seen > cfg.domainMaxUsd) throw new DomainRefused('that is over the price limit');
       if (liveToday('floor_id=?', floor.id) >= cfg.domainsPerFloorDay) throw new DomainRefused(`this floor has bought its ${cfg.domainsPerFloorDay} domains for today`);
       if (liveToday('1=1') >= cfg.domainsGlobalDay) throw new DomainRefused('the building has bought its domains for today');
       if (!get(db, 'SELECT 1 x FROM projects WHERE floor_id=? AND slug=?', floor.id, o.project)) throw new DomainRefused('the project it was for is gone');
@@ -241,7 +241,6 @@ export function createDomainBroker({ db, cfg, engine, client }) {
     if (!done) return;
     if (made.privacy === false) engine.log('warn', 'domain bought without privacy', { order: o.id });
     engine.feed(o.floor_id, null, `Bought ${o.domain}.`, o.project);
-    engine.emit(o.floor_id, 'spend', { today: engine.spentToday(o.floor_id), cap: cfg.floorDailyUsd }, { persist: false });
     tell(o.floor_id);
   }
   async function pointDns(id) {

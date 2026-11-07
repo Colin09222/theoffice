@@ -26,7 +26,7 @@ The License.txt shipped inside each zip reads, in full:
 
 Files kept (only the ones the app uses; the rest of each kit was not copied):
 
-  furniture/   from Furniture Kit "Models/GLTF format", unmodified .glb files:
+  furniture/   from Furniture Kit "Models/GLTF format" (see the note at the end):
     bookcaseOpen, books, cardboardBoxOpen, chairDesk, chairModernCushion, coatRackStanding, computerKeyboard, computerMouse,
     computerScreen, desk, kitchenBar, kitchenCabinet, kitchenCabinetUpper, kitchenCoffeeMachine, kitchenFridgeLarge,
     kitchenMicrowave, kitchenSink, lampRoundFloor, laptop, loungeChair, loungeDesignSofa, loungeSofa, pillow, pillowBlue,
@@ -37,3 +37,6 @@ Files kept (only the ones the app uses; the rest of each kit was not copied):
 
 The models are recoloured at runtime (company colours on chairs and sofas, a floor's own skin, hair and outfit colours on
 people); the files themselves are not edited.
+
+The .glb files are not byte-for-byte the kits': scripts/strip-models.mjs removes animation clips the app never plays and UVs
+no material samples, and stores normals, UVs and skin weights in small integers. The models themselves are unchanged.

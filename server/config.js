@@ -8,6 +8,8 @@ export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const num = (v, d) => { const n = Number(v); return v !== undefined && v !== '' && Number.isFinite(n) ? n : d; };
 // A spending cap of "off" means no cap.
 const cap = (v, d) => (v === 'off' ? Infinity : num(v, d));
+// A lifetime limit can't go below nothing, and a typo falls back to the default rather than to no limit at all.
+const lifetime = (v, d) => Math.max(0, cap(v, d));
 
 // May carry a port for local testing (apps.localhost:8083). A domain that contains the main site would hand it to published code, so it is refused.
 function appsBase(v, publicOrigin) {
@@ -39,6 +41,9 @@ export function loadConfig(env = process.env, overrides = {}) {
     floorDailyUsd: cap(env.FLOOR_DAILY_USD, 10),
     globalDailyUsd: cap(env.GLOBAL_DAILY_USD, 25),
     taskMaxUsd: cap(env.TASK_MAX_USD, 3),
+    // What the whole building may ever spend with each provider. Counted over the whole ledger, for the admin's eyes only. Raising one and restarting starts the work again.
+    budgetAnthropicUsd: lifetime(env.BUDGET_ANTHROPIC_USD, 120),
+    budgetOpenrouterUsd: lifetime(env.BUDGET_OPENROUTER_USD, 120),
     maxCallsFloor: num(env.MAX_CALLS_FLOOR, 3),
     maxCallsGlobal: num(env.MAX_CALLS_GLOBAL, 6),
     maxStaff: num(env.MAX_STAFF, 8),

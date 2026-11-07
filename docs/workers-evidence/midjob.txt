@@ -1,0 +1,8 @@
+PASS a vague request started a real computer without a second message
+PASS pausing stopped everything, and spending with it (0.000 after the pause)
+PASS resume went back to the same computer
+PASS a late add-on did not cancel the work under way (first task is doing, 3 open, was 2)
+PASS redirect cancelled the old work and made a new plan (Playtest Shelf Swipe [cancelled] | Make the cat orange [cancelled] | Words for cat sitting one-pager [doing] | Look for cat sitting one-pager [todo] | Build and publish cat sitting one-pager [todo])
+PASS the new plan is about the new thing (cat-sitting)
+PASS stop left nothing open or running, and nothing spending (0 open, 0.000 after the stop)
+cost 0.2533

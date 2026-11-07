@@ -71,7 +71,7 @@ function managerStep(meta, messages = []) {
     if (meta.step === 0) return { toolCalls: [call('launch_report', { project: meta.published[0]?.slug, headline: 'It is live.', next_steps: 'Share it.' })] };
     return { content: 'That is the report, boss.' };
   }
-  if (/\[mgrask\]/.test(boss) && meta.step === 0) return { toolCalls: [call('ask_boss', { question: 'Is the budget for this real or imaginary?' })] };
+  if (/\[mgrask\]/.test(boss) && meta.step === 0) return { toolCalls: [call('ask_boss', { question: 'Is the deadline for this real or imaginary?' })] };
   if (ACT.test(boss)) {
     if (meta.step === 0 && meta.openCount === 0) {
       const p = { plan: `Launch ${slug}`, project: slug, ...(/\[private\]/.test(boss) ? { private: true } : {}), ...(boss.match(/\[lane:(\w+)\]/) ? { lane: boss.match(/\[lane:(\w+)\]/)[1] } : {}) };

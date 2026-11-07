@@ -1,0 +1,94 @@
+PASS game: it was published as a game
+PASS game: a tap started no work
+PASS game: a Tester played it
+PASS game: no console errors on load
+PASS game: it has something to play on
+PASS game: still no errors after real key presses
+PASS game: it uses the saved high score
+PASS game: a score really saves to the shared board on its own origin (bobber-drop: [{"rank":1,"name":"Proof","score":7,"at":1794067790204,"you":false},{"rank":2,"name":"Proof","score":7,"at":1794067841659,"you":true}])
+PASS game: nothing invented on the page (Bobber Drop
+
+The hook swings over the lake. Tap, click or press Space to drop it straight down. It grabs the first thing it touches.
+
+Every catch hangs on your line: the swing gets slower and wider, a)
+PASS game: fits a phone
+PASS game: no errors on a phone
+PASS first game: no console errors
+PASS website: it was published as a site
+PASS website: a tap started no work
+PASS website: no console errors
+PASS website: nothing invented on the page (Skip to content
+Corner Spokes
+Join the list
+Bike repairs, right around the corner.
+
+I'm Maya. On Saturdays I set up a little repair stand in the neighbourhood and fix the small stuff that keeps you of)
+PASS website: has title
+PASS website: has description
+PASS website: has og:title
+PASS website: has favicon
+PASS website: has lang
+PASS website: design was reviewed by the other lab (fix first)
+PASS website: no working papers went live
+PASS website: fits a phone
+PASS business: research published with cited sources (17 sources)
+PASS business: a plan published
+PASS business: a landing page published
+PASS business: the report went to the boss
+PASS business: no console errors
+PASS business: nothing invented on the page (Second Shelf
+NOT OPEN YET · WAITLIST IS FREE
+Three good used paperbacks a month, picked around one theme.
+
+Second Shelf is a planned monthly box of second-hand paperback novels for US readers who get )
+PASS business: the page says it is not open yet (Second Shelf
+NOT OPEN YET · WAITLIST IS FREE
+Three good used paperbacks a month, picked around one theme.
+
+Second Shelf is a planned monthly box of second-hand paperback novels for US readers who get )
+PASS business: the waitlist form stores a real entry (mail
+Favourite genre
+(optional)
+Choose one, or leave blank
+Mystery & crime
+Thriller & suspense
+Literary fiction
+Romance
+Historical fiction
+Science fiction
+Fantasy
+Horror
+Classics
+A bit of everything
+W)
+PASS business: the thank-you promises no automatic email (mail
+Favourite genre
+(optional)
+Choose one, or leave blank
+Mystery & crime
+Thriller & suspense
+Literary fiction
+Romance
+Historical fiction
+Science fiction
+Fantasy
+Horror
+Classics
+A bit of everything
+W)
+PASS business: fits a phone
+PASS business plan: target customer
+PASS business plan: offer and pricing
+PASS business plan: competitors with links
+PASS business plan: numbers marked as estimates
+PASS business plan: a launch checklist
+PASS business plan: what only a human can do
+PASS help: the request was answered (answered)
+PASS help: every floor string was fenced in the real listing
+PASS help: the guidance reached the chat
+PASS help: the feed says it asked
+PASS help: the feed says it heard back
+PASS help: the manager passed it on (The help line answered. Here's what they said:
+
+**1. How long things stay up:** Published projects stay up for as long as the floor exists. It doesn't matter whether you visit, so nothing expires if y)
+PASS help: no staff were sent off

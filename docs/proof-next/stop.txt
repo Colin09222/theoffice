@@ -1,0 +1,30 @@
+PASS the floor shows it is out of budget
+PASS the boss hears once, and only to ask the owner (Boss, the building is out of budget, so work has stopped and everything is saved. Please ask the owner about it. We'll carry on by ourselves as soon as that is sorted.)
+PASS no Claude call was made ({"anthropic":1.3843,"openrouter":0.0846})
+PASS no figure in what the boss gets ({"figures":[],"fields":[]})
+PASS no figure in what a visitor gets, and no word of it ({"figures":[],"fields":[]})
+PASS the owner's page says out of budget, with no amount
+PASS a visitor's page has no figure and no word of the budget
+PASS the admin CLI shows it stopped ({"spentUsd":1.3843,"heldUsd":0,"limitUsd":1.43,"remainingUsd":0.0457,"percent":96.8,"flag":"100%","stopped":true})
+PASS an OpenRouter role carried on (review, openrouter 0.0846 to 0.0909)
+PASS and Claude still made no call
+PASS a restart stays stopped, and the boss isn't told twice
+PASS raising the limit resumed the work without being asked ({"anthropic":1.4824,"openrouter":0.0909})
+PASS the manager, resuming, says nothing about money (Welcome to the building, Sage. I'm your office manager and everyone's at their desks. What should Out Of Luck 358 start on? Tap one below, or just tell me what's on your mind.
+Here's one:
+
+"Welcome to)
+
+spent {"anthropic":1.4824,"openrouter":0.0909}
+
+boss's notices:
+Boss, the building is out of budget, so work has stopped and everything is saved. Please ask the owner about it. We'll carry on by ourselves as soon as that is sorted.
+Good news, boss: the building has budget again, so we're back at work.
+
+manager afterwards:
+Welcome to the building, Sage. I'm your office manager and everyone's at their desks. What should Out Of Luck 358 start on? Tap one below, or just tell me what's on your mind.
+Here's one:
+
+"Welcome to Out Of Luck 358, where we're short on luck and make up for it with effort."
+
+Mina had an open job for a one-line note. She marked it done but never saved a file, so I cancelled it and wrote this myself. There's no site yet. Tell me what it should be about and I'll get one built with this line at the top.

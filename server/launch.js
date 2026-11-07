@@ -62,7 +62,7 @@ let line = Promise.resolve();
 export function runCheck(db, floor, slug, directory = '', kind = 'site') {
   const pr = get(db, 'SELECT payment_link FROM projects WHERE floor_id=? AND slug=?', floor.id, slug);
   // Only the names of binary files matter here.
-  const files = filesToPublish(db, floor.id, slug, directory).map((f) => (TEXTY.test(f.path) ? f : { path: f.path, data: '' }));
+  const files = filesToPublish(db, floor.id, slug, directory).map((f) => (TEXTY.test(f.path) ? f : { path: f.path, data: '', size: f.data?.length ?? 0 }));
   const input = { files, bossText: bossText(db, floor.id), paymentLink: !!pr?.payment_link, kind };
   const job = line.then(() => new Promise((resolve) => setImmediate(resolve))).then(() => checkSite(input));
   line = job.catch(() => {});
@@ -86,6 +86,16 @@ export function launchFacts(db, cfg, floor, slug, domains, liveUrl) {
   const stats = projectStats(db, floor.id, slug, Date.now());
   return { project: p, url: liveUrl, domain: domains?.liveFor(floor.id, slug) || '', check, review, stats, signups: formCount(db, floor.id, slug), hasPayment: !!p.payment_link, friendly: publicUrl(floor.slug, slug) };
 }
+/** What goes in the chat. The link comes first, the words are the manager's, and anything the boss has to check themselves stays in. The rest is one click away under Report. */
+export function chatReport(f, headline, nextSteps) {
+  const c = f.check;
+  const lines = [`**${f.project.title} is live:** ${f.url}`];
+  if (String(headline || '').trim()) lines.push('', String(headline).trim());
+  if (c?.claims?.length) lines.push('', '**Please check these yourself. They look like claims nobody gave us:**', ...c.claims.slice(0, 8).map((w) => `- ${w}`), ...(c.reason ? [`The team's reason for keeping them: ${c.reason}`] : []));
+  if (String(nextSteps || '').trim()) lines.push('', '**Next:**', String(nextSteps).trim());
+  lines.push('', 'The full checklist is under Report on the project card.');
+  return lines.join('\n');
+}
 /** Built by the server from what is really on record, so a report can't claim a check that never ran. The manager only adds its own words at the top and bottom. */
 export function composeReport(f, headline, nextSteps) {
   const c = f.check;
@@ -94,7 +104,8 @@ export function composeReport(f, headline, nextSteps) {
   lines.push(`**Domain:** ${f.domain ? `${f.domain}` : 'none yet; it is on its project address'}`);
   lines.push(`**Taking money:** ${f.hasPayment ? 'yes, through your Stripe Payment Link' : 'no. Paste your Stripe Payment Link on the project card to switch it on'}`);
   lines.push(`**Sign-ups so far:** ${f.signups}`, `**Visitors so far:** ${f.stats.uniques} (${f.stats.views} page views)`);
-  if (f.review) lines.push(`**Design review:** ${f.review.verdict || 'done'}, by ${f.review.model}`); else lines.push('**Design review:** not done');
+  // The reviewer is blunt and only sees one screenshot, so "fix first" needs a pointer to what it said, or it is a dead end for the boss.
+  if (f.review) lines.push(`**Design review by ${f.review.model}:** ${f.review.verdict === 'fix first' ? 'its last look wanted changes first. The notes are under Report on the project card' : f.review.verdict || 'done'}`); else lines.push('**Design review:** not done');
   if (!c) lines.push('**Checklist:** not run');
   else {
     if (c.passed?.length) lines.push(`**Checklist passed:** ${c.passed.join(', ')}`);

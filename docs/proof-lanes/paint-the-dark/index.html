@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Paint the Dark: a glowing snail arcade game</title>
+<meta name="description" content="Steer a glowing snail through the dark. Its fading trail of light reveals hidden coins, so grab them before they vanish, and don't crash into your own bright trail.">
+<meta name="theme-color" content="#000000">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Paint the Dark">
+<meta property="og:description" content="Steer a glowing snail, light up hidden coins with its fading trail, and grab them before they vanish.">
+<meta property="og:image" content="og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Paint the Dark">
+<meta name="twitter:description" content="Steer a glowing snail, light up hidden coins with its fading trail, and grab them before they vanish.">
+<meta name="twitter:image" content="og.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  :root { --cyan: #7ff6ff; --gold: #ffd25a; --ink: #e9fbff; --dim: #8aa3b0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--ink); overflow: hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-user-select: none; user-select: none; }
+  canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
+  #hud { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center;
+    padding: max(10px, env(safe-area-inset-top)) 16px 0; pointer-events: none; font-weight: 700; letter-spacing: .04em; }
+  #hud[hidden] { display: none; }
+  #hud .lbl { font-size: 13px; color: var(--dim); letter-spacing: .12em; text-transform: uppercase; margin-right: 6px; }
+  #hud .score { font-size: 28px; color: var(--gold); text-shadow: 0 0 12px rgba(255,210,90,.6); }
+  #hud .best { font-size: 15px; color: var(--dim); }
+  #sound { pointer-events: auto; background: transparent; border: 1px solid #234; color: var(--dim); border-radius: 8px;
+    font: inherit; font-size: 14px; padding: 9px 12px; cursor: pointer; margin-left: 10px; }
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 5; }
+  .overlay[hidden] { display: none; }
+  .panel { width: min(420px, 100%); max-height: 100%; overflow: auto; text-align: center; padding: 22px 20px;
+    background: rgba(3, 10, 16, .94); border: 1px solid rgba(127, 246, 255, .25); border-radius: 18px;
+    box-shadow: 0 0 40px rgba(127, 246, 255, .12); backdrop-filter: blur(3px); }
+  h1 { margin: 0 0 6px; font-size: clamp(34px, 9vw, 52px); letter-spacing: .02em; color: var(--cyan);
+    text-shadow: 0 0 18px rgba(127, 246, 255, .7), 0 0 40px rgba(127, 246, 255, .35); }
+  h2 { margin: 0 0 4px; font-size: 26px; color: var(--cyan); }
+  .how { margin: 10px 0 18px; line-height: 1.45; color: #cfe7ee; font-size: 16px; }
+  ul.how { list-style: none; padding: 0; }
+  ul.how li { padding: 3px 0; }
+  #tip { position: fixed; left: 0; right: 0; bottom: max(18px, env(safe-area-inset-bottom)); text-align: center; pointer-events: none;
+    font-size: 15px; color: #cfe7ee; transition: opacity .6s; }
+  #tip b { color: #eaffff; text-shadow: 0 0 8px #7ff6ff; }
+  #tip i { font-style: normal; color: #9d8cff; }
+  .how b { color: var(--gold); }
+  .warn { color: #ffb4c8; }
+  button.big { font: inherit; font-weight: 800; font-size: 20px; padding: 12px 30px; border-radius: 999px; border: 0; cursor: pointer;
+    color: #001418; background: var(--cyan); box-shadow: 0 0 24px rgba(127, 246, 255, .55); }
+  button.big:focus-visible, #nameForm button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+  .keys { margin-top: 12px; font-size: 13px; color: var(--dim); }
+  .final { font-size: 64px; font-weight: 900; color: var(--gold); line-height: 1; margin: 6px 0 2px; text-shadow: 0 0 20px rgba(255,210,90,.5); }
+  .sub { color: var(--dim); font-size: 14px; }
+  .newbest { color: var(--gold); font-weight: 800; }
+  #nameForm[hidden] { display: none; }
+  #nameForm { display: flex; gap: 8px; margin: 14px 0 4px; }
+  #nameForm input[type=text] { flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 9px 12px; border-radius: 10px;
+    border: 1px solid #2c4a55; background: #04131a; color: var(--ink); }
+  #nameForm button { font: inherit; font-weight: 700; font-size: 15px; padding: 9px 14px; border-radius: 10px; border: 0;
+    background: var(--gold); color: #1a1200; cursor: pointer; }
+  #nameForm button:disabled { opacity: .5; cursor: default; }
+  .trap { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+  #formMsg { min-height: 18px; font-size: 13px; color: var(--dim); margin-bottom: 8px; }
+  #formMsg.err { color: #ff9db3; }
+  .boardTitle { margin: 6px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .12em; color: var(--dim); }
+  #board { list-style: none; margin: 0 0 16px; padding: 0; text-align: left; font-size: 15px; }
+  #board li { display: flex; gap: 10px; padding: 5px 10px; border-radius: 8px; }
+  #board li:nth-child(odd) { background: rgba(127, 246, 255, .05); }
+  #board li.you { background: rgba(255, 210, 90, .16); color: #fff3cf; }
+  #board .r { width: 26px; color: var(--dim); text-align: right; }
+  #board .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board .s { font-weight: 800; color: var(--gold); }
+  #board .empty { color: var(--dim); justify-content: center; }
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Paint the Dark game area"></canvas>
+
+<div id="hud" hidden>
+  <div><span class="lbl">Coins</span><span class="score" id="score" aria-live="polite">0</span></div>
+  <div><span class="best lbl" id="best">Best 0</span><button id="sound" type="button" aria-label="Toggle sound">Sound on</button></div>
+</div>
+
+<div class="overlay" id="title">
+  <div class="panel">
+    <h1>Paint the Dark</h1>
+    <ul class="how">
+      <li>Steer with <b>← →</b> or <b>tap either side</b></li>
+      <li>Your trail reveals hidden <b>coins</b>: grab them before they vanish</li>
+      <li class="warn">Avoid the edge and your bright trail</li>
+    </ul>
+    <button class="big" id="playBtn" type="button">Play</button>
+    <div class="keys">Press any arrow key, Space or Enter to start</div>
+  </div>
+</div>
+
+<div id="tip" hidden><b>Bright</b> trail is deadly · <i>faded</i> trail is safe</div>
+
+<div class="overlay" id="pause" hidden>
+  <div class="panel">
+    <h2>Paused</h2>
+    <p class="how">Press any key or tap to carry on.</p>
+  </div>
+</div>
+
+<div class="overlay" id="over" hidden>
+  <div class="panel">
+    <h2>Lights out</h2>
+    <div class="final" id="finalScore">0</div>
+    <div class="sub"><span id="coinWord">coins</span> · <span id="bestLine">Best 0</span></div>
+    <form id="nameForm" autocomplete="off">
+      <input type="text" id="nameInput" name="name" maxlength="12" placeholder="Your name" aria-label="Your name for the leaderboard">
+      <input type="text" name="website" class="trap" tabindex="-1" aria-hidden="true">
+      <button type="submit" id="saveBtn">Save score</button>
+    </form>
+    <div id="formMsg"></div>
+    <div class="boardTitle">Top 10 · all players</div>
+    <ol id="board"><li class="empty">Loading…</li></ol>
+    <button class="big" id="againBtn" type="button">Play again</button>
+    <div class="keys">or press Space</div>
+  </div>
+</div>
+
+<script src="_office/client.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

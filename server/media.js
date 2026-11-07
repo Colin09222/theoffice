@@ -12,7 +12,7 @@ export function sniffImage(b) {
   if (b.length > 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return { mime: 'image/webp', ext: 'webp' };
   return null;
 }
-const REVIEW_PROMPT = `You are a blunt senior product designer reviewing a screenshot of a page that is about to be published. Be specific and unsentimental. Reply in under 250 words:
+const REVIEW_PROMPT = `You are a blunt senior product designer reviewing a screenshot of a page that is about to be published. Be specific and unsentimental. Say so if it looks like a generic AI-made template that could be about anything. Reply in under 250 words:
 1. The three biggest visual problems, each with the fix (hierarchy, spacing, type, colour, contrast, alignment, anything that looks broken or generic).
 2. Anything on the page that looks invented: customer reviews, testimonials, ratings, customer counts, press logos, phone numbers, addresses, or claims a brand-new company could not honestly make. Name each one. If there are none, say "None seen".
 3. A verdict: SHIP, or FIX FIRST.

@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Bobber Drop – a one-button fishing game</title>
+<meta name="description" content="Bobber Drop: time one tap to drop a swinging hook into the lake. Every catch makes the line heavier, slower and wider until it snaps. Shared high-score board.">
+<meta property="og:title" content="Bobber Drop">
+<meta property="og:description" content="A one-button fishing game. Drop the swinging hook, land the big ones, and don't snap the line.">
+<meta property="og:image" content="og.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0d3b5c">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  html,body{margin:0;height:100%;background:#0a2234;overflow:hidden;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#f4f8fb;touch-action:none;-webkit-user-select:none;user-select:none}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  #stage{position:relative}
+  canvas{display:block;width:100%;height:100%}
+  .ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;box-sizing:border-box;background:rgba(6,24,38,.72);gap:10px}
+  .hidden{display:none!important}
+  h1{margin:0;font-size:44px;letter-spacing:1px;color:#ffd23f;text-shadow:0 3px 0 #b5481f}
+  h2{margin:0;font-size:32px;color:#ff6b5e}
+  p{margin:0;line-height:1.4}
+  .tap{font-size:22px;font-weight:700;animation:pulse 1.2s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .legend{display:grid;grid-template-columns:auto auto auto;gap:3px 14px;font-size:14px;background:rgba(255,255,255,.08);padding:10px 14px;border-radius:10px;text-align:left}
+  .legend b{color:#ffd23f}
+  .board{width:100%;max-width:290px;background:rgba(255,255,255,.08);border-radius:10px;padding:8px 12px;box-sizing:border-box;font-size:15px}
+  .board h3{margin:0 0 4px;font-size:14px;text-transform:uppercase;letter-spacing:1px;color:#9fd3f2}
+  .board ol{margin:0;padding:0;list-style:none}
+  .board li{display:flex;gap:8px;padding:2px 0}
+  .board li .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
+  .board li.you{color:#ffd23f;font-weight:700}
+  .row{display:flex;gap:8px}
+  input{font:inherit;font-size:17px;padding:8px 10px;border-radius:8px;border:2px solid #3b7fa8;background:#0d2f47;color:#fff;width:150px;user-select:text;-webkit-user-select:text}
+  button{font:inherit;font-size:17px;font-weight:700;padding:9px 16px;border-radius:8px;border:0;background:#ffd23f;color:#3a2200;cursor:pointer}
+  button.alt{background:#3b7fa8;color:#fff}
+  button:disabled{opacity:.5;cursor:default}
+  .big{font-size:56px;font-weight:800;color:#ffd23f;line-height:1}
+  .msg{font-size:14px;min-height:18px;color:#9fd3f2}
+  .small{font-size:13px;opacity:.8}
+</style>
+</head>
+<body>
+<div id="wrap"><div id="stage">
+  <canvas id="c" width="480" height="860" aria-label="Bobber Drop game"></canvas>
+
+  <div id="title" class="ov">
+    <h1>Bobber Drop</h1>
+    <p>The hook swings over the lake. <b>Tap, click or press Space</b> to drop it straight down. It grabs the first thing it touches.</p>
+    <p class="small">Every catch hangs on your line: the swing gets slower and wider, and the line tension rises. Missed drops fray the line. When the load reaches its limit, it snaps.</p>
+    <div class="legend" id="legend"></div>
+    <div class="board"><h3>Top anglers</h3><ol id="board1"><li>Loading…</li></ol></div>
+    <p class="tap">Tap to start</p>
+  </div>
+
+  <div id="over" class="ov hidden">
+    <h2>Snap! The line broke</h2>
+    <p>You landed</p>
+    <div class="big" id="final">0</div>
+    <p id="finalSub" class="small"></p>
+    <div class="row">
+      <input id="name" maxlength="12" placeholder="Your name" autocomplete="off" aria-label="Your name">
+      <button id="saveBtn">Save score</button>
+    </div>
+    <div class="msg" id="msg"></div>
+    <div class="board"><h3>Top anglers</h3><ol id="board2"><li>Loading…</li></ol></div>
+    <button id="retry" class="alt">Fish again</button>
+    <p class="small">or press Space</p>
+  </div>
+</div></div>
+
+<script src="_office/client.js"></script>
+<script>
+(() => {
+'use strict';
+const W = 480, H = 860;
+const PIVOT = { x: 240, y: 50 };
+const SURFACE = 280, BOTTOM = 840;
+const BOARD = 'bobber-drop';
+const START_STRENGTH = 40, FRAY = 4;
+
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const stage = document.getElementById('stage');
+const $ = id => document.getElementById(id);
+
+// Things in the lake. kg adds to line load; pts adds to score.
+const TYPES = {
+  minnow: { name: 'Minnow', kg: 1, pts: 1, w: 26, h: 12, d: [330, 480], v: [70, 110], col: '#c9d6df', fin: '#8fa3b1', p: 30 },
+  perch:  { name: 'Perch',  kg: 2, pts: 3, w: 40, h: 18, d: [380, 620], v: [60, 90],  col: '#e2b23a', fin: '#d0572c', p: 24 },
+  bass:   { name: 'Bass',   kg: 4, pts: 6, w: 56, h: 24, d: [500, 740], v: [45, 70],  col: '#6d9a45', fin: '#3e6127', p: 16 },
+  pike:   { name: 'Pike',   kg: 7, pts: 12, w: 86, h: 22, d: [640, 810], v: [80, 120], col: '#8fa37a', fin: '#55663f', p: 9 },
+  golden: { name: 'Golden carp', kg: 2, pts: 15, w: 36, h: 17, d: [660, 810], v: [150, 190], col: '#ffd23f', fin: '#ff9a1f', p: 4 },
+  boot:   { name: 'Old boot', kg: 5, pts: 0, w: 34, h: 30, d: [360, 800], v: [25, 40], col: '#5a4632', fin: '#3a2c1e', p: 9 },
+  spool:  { name: 'Spare line', kg: 0, pts: 0, w: 26, h: 26, d: [400, 760], v: [35, 50], col: '#e9e2cf', fin: '#2f8fd8', p: 5, bonus: 10 },
+};
+const TYPE_KEYS = Object.keys(TYPES);
+const TOTAL_P = TYPE_KEYS.reduce((s, k) => s + TYPES[k].p, 0);
+
+// Legend on title
+(() => {
+  const lg = $('legend');
+  for (const k of TYPE_KEYS) {
+    const t = TYPES[k];
+    const a = document.createElement('span'); a.textContent = t.name;
+    const b = document.createElement('b'); b.textContent = t.bonus ? '+' + t.bonus + ' kg line' : t.pts + ' pts';
+    const c = document.createElement('span'); c.textContent = t.kg ? t.kg + ' kg' : '';
+    lg.append(a, b, c);
+  }
+})();
+
+let S; // game state
+let mode = 'title'; // title | play | over
+let lastInputAt = 0;
+
+function newGame() {
+  S = {
+    score: 0, weight: 0, strength: START_STRENGTH, catches: 0, misses: 0,
+    phase: 0, hook: { x: PIVOT.x, y: PIVOT.y + 150 },
+    state: 'swing', // swing | drop | reel | snap
+    caught: null, reelFrom: null, reelT: 0, reelDur: 0,
+    fish: [], spawnT: 0, floats: [], snapT: 0, fallV: 0, t: 0,
+  };
+  for (let i = 0; i < 9; i++) spawnFish(true);
+}
+
+function rnd(a, b) { return a + Math.random() * (b - a); }
+function pickType() {
+  let r = Math.random() * TOTAL_P;
+  for (const k of TYPE_KEYS) { r -= TYPES[k].p; if (r <= 0) return k; }
+  return 'minnow';
+}
+function spawnFish(anywhere) {
+  const k = pickType(), t = TYPES[k];
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  const x = anywhere ? rnd(20, W - 20) : (dir > 0 ? -t.w : W + t.w);
+  S.fish.push({ k, t, x, y: rnd(t.d[0], t.d[1]), vx: dir * rnd(t.v[0], t.v[1]), wob: Math.random() * 6 });
+}
+
+// Swing shape depends on the weight on the line: heavier = slower and wider.
+function swingParams() {
+  const f = Math.min(1, S.weight / 35);
+  return { amp: 0.55 + 0.6 * f, r: 150 + 60 * f, period: 1.5 + 1.4 * f };
+}
+function swingPos() {
+  const p = swingParams();
+  const th = p.amp * Math.sin(S.phase);
+  return { x: PIVOT.x + p.r * Math.sin(th), y: PIVOT.y + p.r * Math.cos(th) };
+}
+
+function addFloat(x, y, text, col) { S.floats.push({ x, y, text, col, t: 0 }); }
+
+function input() {
+  const now = performance.now();
+  if (now - lastInputAt < 120) return;
+  lastInputAt = now;
+  if (mode === 'title') { start(); return; }
+  if (mode === 'play' && S.state === 'swing' && now - S.startedAt > 250) {
+    S.state = 'drop';
+  }
+}
+
+function start() {
+  newGame();
+  S.startedAt = performance.now();
+  mode = 'play';
+  $('title').classList.add('hidden');
+  $('over').classList.add('hidden');
+}
+
+function snap() {
+  S.state = 'snap'; S.snapT = 0; S.fallV = 0;
+  addFloat(S.hook.x, S.hook.y - 30, 'SNAP!', '#ff5a4e');
+}
+
+function update(dt) {
+  S.t += dt;
+  // fish
+  for (const f of S.fish) { f.x += f.vx * dt; f.wob += dt * 8; }
+  S.fish = S.fish.filter(f => f.x > -f.t.w - 10 && f.x < W + f.t.w + 10);
+  S.spawnT -= dt;
+  if (S.fish.length < 9 && S.spawnT <= 0) { spawnFish(false); S.spawnT = rnd(0.3, 0.9); }
+  for (const fl of S.floats) { fl.t += dt; fl.y -= 30 * dt; }
+  S.floats = S.floats.filter(fl => fl.t < 1.4);
+
+  const h = S.hook;
+  if (S.state === 'swing') {
+    S.phase += dt * 2 * Math.PI / swingParams().period;
+    const p = swingPos(); h.x = p.x; h.y = p.y;
+  } else if (S.state === 'drop') {
+    // move in small steps so a slow frame can't skip the hook past a thin fish
+    const steps = Math.max(1, Math.ceil(680 * dt / 8));
+    for (let i = 0; i < steps; i++) {
+      h.y += 680 * dt / steps;
+      if (h.y > SURFACE) {
+        for (const f of S.fish) {
+          if (Math.abs(f.x - h.x) < f.t.w / 2 + 3 && Math.abs(f.y - h.y) < f.t.h / 2 + 4) { hookFish(f); return; }
+        }
+      }
+      if (h.y >= BOTTOM) { h.y = BOTTOM; miss(); return; }
+    }
+  } else if (S.state === 'reel') {
+    S.reelT += dt;
+    const k = Math.min(1, S.reelT / S.reelDur);
+    const to = swingPos();
+    h.x = S.reelFrom.x + (to.x - S.reelFrom.x) * k;
+    h.y = S.reelFrom.y + (to.y - S.reelFrom.y) * k;
+    if (S.caught) { S.caught.x = h.x; S.caught.y = h.y + S.caught.t.w / 2 + 4; }
+    if (k >= 1) {
+      S.caught = null; S.state = 'swing';
+      if (S.weight >= S.strength) snap();
+    }
+  } else if (S.state === 'snap') {
+    S.snapT += dt; S.fallV += 900 * dt; h.y += S.fallV * dt;
+    if (S.caught) { S.caught.y += S.fallV * dt; }
+    if (S.snapT > 1.3) gameOver();
+  }
+}
+
+function hookFish(f) {
+  S.fish.splice(S.fish.indexOf(f), 1);
+  const t = f.t;
+  S.caught = { t, x: S.hook.x, y: S.hook.y, k: f.k };
+  if (t.bonus) {
+    S.strength += t.bonus;
+    addFloat(S.hook.x, S.hook.y - 20, '+' + t.bonus + ' kg line!', '#7fd3ff');
+  } else {
+    S.weight += t.kg;
+    if (S.weight > S.strength) { // too heavy: snaps right here
+      S.weight = S.strength;
+      snap(); return;
+    }
+    S.score += t.pts; S.catches++;
+    addFloat(S.hook.x, S.hook.y - 20, t.pts ? '+' + t.pts : 'junk +' + t.kg + 'kg', t.pts ? '#ffd23f' : '#d7b48a');
+  }
+  beginReel();
+}
+function miss() {
+  S.misses++;
+  S.strength = Math.max(0, S.strength - FRAY);
+  addFloat(Math.min(W - 130, Math.max(130, S.hook.x)), SURFACE + 70, 'Miss! Line frayed: limit -' + FRAY + ' kg', '#ffb0a6');
+  S.caught = null;
+  if (S.weight >= S.strength) { snap(); return; }
+  beginReel();
+}
+function beginReel() {
+  S.state = 'reel'; S.reelT = 0;
+  S.reelFrom = { x: S.hook.x, y: S.hook.y };
+  S.reelDur = Math.max(0.35, (S.hook.y - PIVOT.y) / 900);
+}
+
+// ---------- drawing ----------
+function draw() {
+  // sky
+  let g = ctx.createLinearGradient(0, 0, 0, SURFACE);
+  g.addColorStop(0, '#f6b26b'); g.addColorStop(1, '#ffe2a8');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, SURFACE);
+  ctx.fillStyle = '#ffd88a'; ctx.beginPath(); ctx.arc(390, 210, 46, 0, 7); ctx.fill();
+  ctx.fillStyle = '#2e5e4e';
+  ctx.beginPath(); ctx.moveTo(0, SURFACE); ctx.lineTo(0, 230); ctx.lineTo(70, 200); ctx.lineTo(150, 240); ctx.lineTo(260, 215); ctx.lineTo(360, 250); ctx.lineTo(480, 225); ctx.lineTo(480, SURFACE); ctx.fill();
+  // water
+  g = ctx.createLinearGradient(0, SURFACE, 0, H);
+  g.addColorStop(0, '#2a8cc4'); g.addColorStop(1, '#0b2c48');
+  ctx.fillStyle = g; ctx.fillRect(0, SURFACE, W, H - SURFACE);
+  const t = S ? S.t : performance.now() / 1000;
+  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let x = 0; x <= W; x += 8) ctx.lineTo(x, SURFACE + Math.sin(x / 30 + t * 2) * 2);
+  ctx.stroke();
+  // lake bed
+  ctx.fillStyle = '#3b3322'; ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 40) ctx.lineTo(x, BOTTOM + 6 + Math.sin(x * 0.7) * 5);
+  ctx.lineTo(W, H); ctx.fill();
+  // rod
+  ctx.strokeStyle = '#6b3f1d'; ctx.lineCap = 'round';
+  ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(-10, 175); ctx.lineTo(120, 110); ctx.stroke();
+  ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(120, 110); ctx.lineTo(PIVOT.x, PIVOT.y); ctx.stroke();
+  ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(30, 155, 9, 0, 7); ctx.fill();
+
+  if (!S) return;
+  for (const f of S.fish) drawThing(f.k, f.x, f.y, f.vx > 0 ? 1 : -1, f.wob);
+
+  const h = S.hook;
+  const ten = S.strength ? S.weight / S.strength : 1;
+  // line
+  if (S.state !== 'snap') {
+    ctx.strokeStyle = ten > 0.8 ? '#ffb3a8' : '#f4f8fb'; ctx.lineWidth = 1.5 + ten;
+    ctx.beginPath(); ctx.moveTo(PIVOT.x, PIVOT.y); ctx.lineTo(h.x, h.y - 22); ctx.stroke();
+  } else {
+    ctx.strokeStyle = '#f4f8fb'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(PIVOT.x, PIVOT.y); ctx.lineTo(PIVOT.x + (h.x - PIVOT.x) * 0.2, PIVOT.y + 40 + S.snapT * 60); ctx.stroke();
+  }
+  // bobber + hook
+  ctx.save(); ctx.translate(h.x, h.y);
+  ctx.fillStyle = '#ff5a4e'; ctx.beginPath(); ctx.arc(0, -22, 9, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, -22, 9, 0, Math.PI); ctx.fill();
+  ctx.fillStyle = '#222'; ctx.fillRect(-9, -23, 18, 2);
+  ctx.strokeStyle = '#cfd8de'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, -13); ctx.lineTo(0, -2); ctx.arc(-4, -2, 4, 0, Math.PI * 0.9); ctx.stroke();
+  ctx.restore();
+  if (S.caught) {
+    ctx.save(); ctx.translate(S.caught.x, S.caught.y); ctx.rotate(Math.PI / 2);
+    drawThing(S.caught.k, 0, 0, -1, S.t * 20, true); ctx.restore();
+  }
+  // floats
+  ctx.textAlign = 'center'; ctx.font = 'bold 22px system-ui, sans-serif';
+  for (const fl of S.floats) {
+    ctx.globalAlpha = Math.max(0, 1 - fl.t / 1.4);
+    ctx.lineWidth = 4; ctx.strokeStyle = '#0a2234'; ctx.strokeText(fl.text, fl.x, fl.y);
+    ctx.fillStyle = fl.col; ctx.fillText(fl.text, fl.x, fl.y);
+  }
+  ctx.globalAlpha = 1;
+  if (mode === 'play' && S.state === 'swing' && S.catches + S.misses === 0) { // first-drop hint
+    ctx.globalAlpha = 0.6 + 0.4 * Math.sin(S.t * 5);
+    ctx.font = 'bold 20px system-ui, sans-serif'; ctx.lineWidth = 4; ctx.strokeStyle = '#0a2234';
+    const msg = 'Tap, click or Space to drop';
+    ctx.strokeText(msg, W / 2, SURFACE + 36); ctx.fillStyle = '#fff'; ctx.fillText(msg, W / 2, SURFACE + 36);
+    ctx.globalAlpha = 1;
+  }
+  drawHud(ten);
+}
+
+function drawThing(k, x, y, dir, wob, local) {
+  const t = TYPES[k];
+  ctx.save(); if (!local) ctx.translate(x, y); ctx.scale(dir, 1);
+  const w = t.w, hh = t.h;
+  if (k === 'boot') {
+    ctx.fillStyle = t.col;
+    ctx.beginPath(); ctx.moveTo(-w / 2, -hh / 2); ctx.lineTo(-w / 2 + w * 0.45, -hh / 2); ctx.lineTo(-w / 2 + w * 0.45, hh / 2 - 12);
+    ctx.quadraticCurveTo(w / 2, hh / 2 - 14, w / 2, hh / 2); ctx.lineTo(-w / 2, hh / 2); ctx.fill();
+    ctx.fillStyle = '#c9b48f'; ctx.fillRect(-w / 2 - 2, -hh / 2, w * 0.45 + 4, 4);
+    ctx.fillStyle = t.fin; ctx.fillRect(-w / 2, hh / 2 - 4, w, 4);
+  } else if (k === 'spool') {
+    ctx.fillStyle = t.col; ctx.fillRect(-w / 2, -hh / 2, w, 5); ctx.fillRect(-w / 2, hh / 2 - 5, w, 5);
+    ctx.fillStyle = t.fin; ctx.fillRect(-w / 2 + 3, -hh / 2 + 5, w - 6, hh - 10);
+    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let i = -hh / 2 + 8; i < hh / 2 - 5; i += 3) { ctx.moveTo(-w / 2 + 3, i); ctx.lineTo(w / 2 - 3, i + 2); } ctx.stroke();
+    ctx.scale(dir, 1); ctx.fillStyle = '#fff'; ctx.font = 'bold 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('+kg', 0, -hh / 2 - 3);
+  } else {
+    const tail = Math.sin(wob) * hh * 0.25;
+    ctx.fillStyle = t.fin;
+    ctx.beginPath(); ctx.moveTo(-w / 2 + 4, 0); ctx.lineTo(-w / 2 - hh * 0.6, -hh / 2 + tail); ctx.lineTo(-w / 2 - hh * 0.6, hh / 2 + tail); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-w * 0.1, -hh / 2 + 2); ctx.lineTo(w * 0.1, -hh / 2 - hh * 0.35); ctx.lineTo(w * 0.2, -hh / 2 + 3); ctx.fill();
+    ctx.fillStyle = t.col; ctx.beginPath(); ctx.ellipse(0, 0, w / 2, hh / 2, 0, 0, 7); ctx.fill();
+    if (k === 'perch') { ctx.fillStyle = 'rgba(60,40,0,.45)'; for (let i = -1; i <= 1; i++) ctx.fillRect(i * 9 - 2, -hh / 2 + 2, 4, hh - 4); }
+    if (k === 'golden') { ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.beginPath(); ctx.ellipse(-3, -3, w / 5, hh / 6, 0, 0, 7); ctx.fill(); }
+    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(w / 2 - Math.min(8, w * 0.18), -hh * 0.12, Math.max(1.8, hh * 0.09), 0, 7); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawHud(ten) {
+  ctx.textAlign = 'left'; ctx.fillStyle = '#0d2f47';
+  ctx.font = 'bold 15px system-ui, sans-serif'; ctx.fillText('SCORE', 14, 24);
+  ctx.font = 'bold 34px system-ui, sans-serif'; ctx.fillText(String(S.score), 14, 58);
+  ctx.font = '14px system-ui, sans-serif'; ctx.fillText(S.catches + ' landed · ' + S.misses + ' missed', 14, 78);
+  // tension meter
+  const bx = 300, by = 12, bw = 166, bh = 20;
+  ctx.textAlign = 'right'; ctx.font = 'bold 14px system-ui, sans-serif'; ctx.fillStyle = '#0d2f47';
+  ctx.fillText('LINE TENSION', bx + bw, by + bh + 18);
+  ctx.font = '14px system-ui, sans-serif';
+  ctx.fillText('load ' + S.weight + ' kg of ' + S.strength + ' kg limit', bx + bw, by + bh + 36);
+  ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.fillRect(bx, by, bw, bh);
+  const k = Math.min(1, ten);
+  ctx.fillStyle = k < 0.6 ? '#3cb371' : k < 0.85 ? '#f0a020' : '#e8412f';
+  ctx.fillRect(bx + 2, by + 2, (bw - 4) * k, bh - 4);
+  ctx.strokeStyle = '#0d2f47'; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh);
+}
+
+// ---------- loop & layout ----------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (mode === 'play' && S) update(dt);
+  else if (S && mode === 'over') { for (const f of S.fish) f.x += f.vx * dt; S.t += dt; }
+  draw();
+  requestAnimationFrame(frame);
+}
+function layout() {
+  const s = Math.min(innerWidth / W, innerHeight / H);
+  stage.style.width = W * s + 'px'; stage.style.height = H * s + 'px';
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(W * s * dpr); cv.height = Math.round(H * s * dpr);
+  ctx.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
+  const fs = Math.max(0.6, Math.min(1, s * 1.15));
+  for (const o of document.querySelectorAll('.ov')) o.style.zoom = fs;
+}
+addEventListener('resize', layout); layout();
+
+// ---------- input ----------
+cv.addEventListener('pointerdown', e => { e.preventDefault(); input(); });
+$('title').addEventListener('pointerdown', e => { e.preventDefault(); input(); });
+addEventListener('keydown', e => {
+  if (e.target && e.target.tagName === 'INPUT') { if (e.key === 'Enter') saveScore(); return; }
+  if (e.code === 'Space' || e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault();
+    if (e.repeat) return;
+    if (mode === 'over') { if (performance.now() - overAt > 600) start(); return; }
+    input();
+  }
+});
+
+// ---------- game over & leaderboard ----------
+let overAt = 0, saved = false;
+function gameOver() {
+  mode = 'over'; overAt = performance.now(); saved = false;
+  $('final').textContent = S.score + (S.score === 1 ? ' point' : ' points');
+  $('finalSub').textContent = S.catches + ' catches, ' + S.misses + ' misses, line held ' + S.weight + ' kg';
+  $('msg').textContent = S.score > 0 ? 'Enter a short name to save your score.' : 'Score at least 1 point to get on the board.';
+  $('saveBtn').disabled = S.score <= 0;
+  $('over').classList.remove('hidden');
+  showBoard('board2');
+}
+async function saveScore() {
+  if (saved || mode !== 'over' || S.score <= 0) return;
+  const name = $('name').value.trim().slice(0, 12);
+  if (!name) { $('msg').textContent = 'Type a name first.'; $('name').focus(); return; }
+  $('saveBtn').disabled = true; $('msg').textContent = 'Saving…';
+  try {
+    Office.save('name', name).catch(() => {});
+    const r = await Office.submitScore(BOARD, name, S.score);
+    saved = true;
+    $('msg').textContent = r && r.improved === false ? 'Saved. Your best is still ' + r.best + '.' : 'Saved!';
+    $('name').blur();
+    showBoard('board2');
+  } catch (err) {
+    $('saveBtn').disabled = false;
+    $('msg').textContent = 'Could not save: ' + (err && err.message ? err.message : err);
+  }
+}
+async function showBoard(id) {
+  const ol = $(id);
+  try {
+    const rows = await Office.leaderboard(BOARD, { limit: 8 });
+    ol.textContent = '';
+    if (!rows || !rows.length) { const li = document.createElement('li'); li.textContent = 'No scores yet. Be the first!'; ol.append(li); return; }
+    for (const r of rows) {
+      const li = document.createElement('li'); if (r.you) li.className = 'you';
+      const a = document.createElement('span'); a.textContent = r.rank + '.';
+      const n = document.createElement('span'); n.className = 'n'; n.textContent = r.name;
+      const s = document.createElement('span'); s.textContent = r.score;
+      li.append(a, n, s); ol.append(li);
+    }
+  } catch (err) {
+    ol.textContent = ''; const li = document.createElement('li'); li.textContent = 'Leaderboard unavailable right now.'; ol.append(li);
+  }
+}
+$('saveBtn').addEventListener('click', saveScore);
+$('retry').addEventListener('click', () => start());
+for (const el of [$('over')]) el.addEventListener('pointerdown', e => e.stopPropagation());
+
+Office.load('name', '').then(n => { if (n && !$('name').value) $('name').value = n; }).catch(() => {});
+showBoard('board1');
+requestAnimationFrame(frame);
+window.__bobber = { get state() { return S; }, get mode() { return mode; } };
+})();
+</script>
+</body>
+</html>

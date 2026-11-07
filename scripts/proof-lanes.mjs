@@ -66,6 +66,7 @@ async function job(lane, { company, boss: bossName, tap, reply, go, minutes = 45
   if (!process.env.ANTHROPIC_API_KEY || !process.env.OPENROUTER_API_KEY) throw new Error('keys are not set');
   const { db, app } = await makeApp(true);
   const engine = app.engine;
+  if (resuming) engine.setGlobalPause(false);  // the watcher may have stopped the last run; it watches this one too
   const watch = setInterval(() => {
     const s = spent(db);
     if ((s.anthropic >= ANTHROPIC_MAX || s.openrouter >= OPENROUTER_MAX) && !engine.globalPaused()) { log('PROOF LIMIT REACHED, pausing the building', JSON.stringify(s)); engine.setGlobalPause(true); }
@@ -105,7 +106,7 @@ async function job(lane, { company, boss: bossName, tap, reply, go, minutes = 45
     s = await say(tap, 'tap', 180000);
     out.tapStartedWork = s.tasks.length > 0;
     out.firstReply = s.messages.filter((m) => m.role === 'manager').at(-1)?.text;
-    if (reply) s = await say(reply, 'reply', 180000);
+    if (reply) { s = await say(reply, 'reply', 180000); out.replyStartedWork = s.tasks.length > 0; out.replyAnswer = s.messages.filter((m) => m.role === 'manager').at(-1)?.text; }
     s = await say(go, 'go', minutes * 60000);
   }
   out.projects = s.projects.map((p) => ({ slug: p.slug, title: p.title, kind: p.kind, private: p.private, url: `http://${appLabel(db, floor, p.slug)}.apps.localhost:${PORT}/`, sources: p.sources?.length, check: p.launchCheck ? { errors: p.launchCheck.errors, claims: p.launchCheck.claims, warnings: p.launchCheck.warnings, reason: p.launchCheck.reason } : null, review: p.designReview?.verdict || null, reported: !!p.launchReport }));
@@ -158,7 +159,7 @@ async function helpTrip() {
 }
 
 const JOBS = {
-  game: { company: process.env.PROOF_COMPANY || 'Pocket Arcade', boss: 'Sam', tap: 'Let\'s do a game. What could we build?', go: 'Go with your favourite of those. Keep it small and cheap.' },
+  game: { company: process.env.PROOF_COMPANY || 'Pocket Arcade', boss: 'Sam', tap: 'Let\'s do a game. What could we build?', reply: 'Something with fishing and only one button would be fun.', go: 'Go, keep it small and cheap.' },
   website: { company: process.env.PROOF_COMPANY || 'Corner Spokes', boss: 'Maya', tap: 'Let\'s do a website. What do you need from me?', reply: 'It is for my Saturday bike repair stand, Corner Spokes, in my neighbourhood. People should find out what I fix and join a list so I can tell them when I am next out. I have not settled a location or prices yet, so do not make any up.', go: 'Go, keep it small and cheap.' },
   business: { company: process.env.PROOF_COMPANY || 'Second Shelf', boss: 'Priya', tap: 'Let\'s do a small business. Help me work it out.', reply: 'I want to start a monthly subscription box of second-hand paperback novels picked by theme, for people in the US who read a lot on a budget. Nothing exists yet. I have no customers and no supplier.', go: 'Go. Use the Analyst for the numbers, and keep it cheap.' },
 };
@@ -169,6 +170,8 @@ async function look() {
   const results = []; let fail = 0;
   const check = (name, ok, detail = '') => { results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); if (!ok) fail++; console.log(results.at(-1)); };
   const b = await launch();
+  // Office.load on a first visit gets a 404 for a save that doesn't exist yet, which Chrome logs. That is the office's client asking, not the page breaking.
+  const realErrors = (p) => p.errors.filter((e) => !/404 \(Not Found\) \S+\/_data\/v1\/save\//.test(e));
   const open = async (f, slug, tag, opts = {}) => {
     const url = `http://${appLabel(db, f, slug)}.apps.localhost:${PORT}/`;
     const p = await b.newPage(opts);
@@ -186,19 +189,28 @@ async function look() {
       check('game: a Tester played it', r.game.tasks.some((t) => t.role === 'tester' && ['done', 'review'].includes(t.status)));
       if (slug) {
         const { p, text } = await open(f, slug, 'game-desktop', { width: 1280, height: 800 });
-        check('game: no console errors on load', p.errors.length === 0, p.errors.join(' | ').slice(0, 300));
+        check('game: no console errors on load', realErrors(p).length === 0, realErrors(p).join(' | ').slice(0, 300));
         check('game: it has something to play on', await p.ev('!!document.querySelector("canvas") || document.querySelectorAll("button").length > 0'));
         for (const key of ['Space', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', ' ']) { await p.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key === ' ' ? 'Space' : key }); await sleep(120); await p.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key === ' ' ? 'Space' : key }); await sleep(120); }
         await sleep(1500);
         await p.shot(join(MEDIA, 'lanes-game-playing.jpg'));
-        check('game: still no errors after real key presses', p.errors.length === 0, p.errors.join(' | ').slice(0, 300));
+        check('game: still no errors after real key presses', realErrors(p).length === 0, realErrors(p).join(' | ').slice(0, 300));
         const files = all(db, 'SELECT path,content FROM published_files WHERE floor_id=? AND project=?', f.id, slug).filter((x) => /\.(html|js)$/.test(x.path)).map((x) => String(x.content)).join('');
         check('game: it uses the saved high score', /submitScore/.test(files) && /leaderboard/.test(files));
+        // Against the real data API on the project's own origin, which no staff member could reach from a computer.
+        const board = files.match(/submitScore\(\s*["'`]([^"'`]+)/)?.[1] || files.match(/BOARD\s*=\s*["'`]([^"'`]+)/)?.[1] || 'best';
+        const saved = await p.ev(`Office.submitScore(${JSON.stringify(board)}, 'Proof', 7).then(() => Office.leaderboard(${JSON.stringify(board)}, { limit: 5 })).then((r) => JSON.stringify(r))`).catch((e) => `error: ${e.message}`);
+        check('game: a score really saves to the shared board on its own origin', /"name":"Proof"/.test(saved) && !!get(db, "SELECT 1 x FROM app_scores WHERE floor_id=? AND name='Proof'", f.id), `${board}: ${saved}`.slice(0, 160));
         check('game: nothing invented on the page', !invented.test(text), text.slice(0, 200));
         const phone = await open(f, slug, 'game-phone', { mobile: true });
         check('game: fits a phone', await phone.p.ev('document.documentElement.scrollWidth <= window.innerWidth + 1'));
-        check('game: no errors on a phone', phone.p.errors.length === 0, phone.p.errors.join(' | ').slice(0, 300));
+        check('game: no errors on a phone', realErrors(phone.p).length === 0, realErrors(phone.p).join(' | ').slice(0, 300));
       }
+    }
+    if (r.gameFirst) {
+      const f = get(db, 'SELECT * FROM floors WHERE slug=?', r.gameFirst.floor);
+      const slug = r.gameFirst.projects.find((x) => x.kind === 'game')?.slug;
+      if (slug) { const { p } = await open(f, slug, 'game-first-desktop', { width: 1280, height: 800 }); check('first game: no console errors', realErrors(p).length === 0, realErrors(p).join(' | ').slice(0, 200)); }
     }
     if (r.website) {
       const f = get(db, 'SELECT * FROM floors WHERE slug=?', r.website.floor);
@@ -207,7 +219,7 @@ async function look() {
       check('website: a tap started no work', r.website.tapStartedWork === false);
       if (slug) {
         const { p, text } = await open(f, slug, 'website-desktop', { width: 1280, height: 800 });
-        check('website: no console errors', p.errors.length === 0, p.errors.join(' | ').slice(0, 300));
+        check('website: no console errors', realErrors(p).length === 0, realErrors(p).join(' | ').slice(0, 300));
         check('website: nothing invented on the page', !invented.test(text), text.slice(0, 200));
         const html = await p.ev('document.documentElement.outerHTML');
         for (const [n, re] of [['title', /<title>[^<]{3,}/], ['description', /name="description"/], ['og:title', /og:title/], ['favicon', /rel="[^"]*icon/], ['lang', /<html[^>]*lang=/]]) check(`website: has ${n}`, re.test(html));
@@ -228,11 +240,11 @@ async function look() {
       check('business: the report went to the boss', !!page?.reported);
       if (page) {
         const { p, text } = await open(f, page.slug, 'business-landing', { width: 1280, height: 800 });
-        check('business: no console errors', p.errors.length === 0, p.errors.join(' | ').slice(0, 300));
+        check('business: no console errors', realErrors(p).length === 0, realErrors(p).join(' | ').slice(0, 300));
         check('business: nothing invented on the page', !invented.test(text), text.slice(0, 200));
         check('business: the page says it is not open yet', /not open|isn.t open|not (yet )?(live|launched|shipping|started)|coming|before we|waitlist|haven.t (started|launched|shipped)/i.test(text), text.slice(0, 200));
         const before = get(db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=?', f.id).n;
-        const form = await p.ev(`(async()=>{const e=document.querySelector('input[type=email],input[name=email]');if(!e)return 'no email input';e.value='friend@example.com';e.dispatchEvent(new Event('input',{bubbles:true}));const fm=e.closest('form');if(!fm)return 'no form';fm.requestSubmit();await new Promise(r=>setTimeout(r,1500));return document.body.innerText.slice(-500)})()`);
+        const form = await p.ev(`(async()=>{const e=document.querySelector('input[type=email],input[name=email]');if(!e)return 'no email input';e.value='friend${Date.now()}@example.com';e.dispatchEvent(new Event('input',{bubbles:true}));const fm=e.closest('form');if(!fm)return 'no form';fm.requestSubmit();await new Promise(r=>setTimeout(r,1500));return document.body.innerText.slice(-500)})()`);
         check('business: the waitlist form stores a real entry', get(db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=?', f.id).n === before + 1, String(form).slice(0, 200));
         await p.shot(join(MEDIA, 'lanes-business-waitlist.jpg'));
         check('business: the thank-you promises no automatic email', !/check your (email|inbox)|we.ve sent|confirmation email/i.test(String(form)), String(form).slice(0, 200));

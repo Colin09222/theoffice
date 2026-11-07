@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Second Shelf: a monthly box of second-hand paperback novels, picked by theme</title>
+<meta name="description" content="Second Shelf is a planned monthly box of 3 second-hand paperback novels, picked around one theme, for US readers who read a lot on a budget. Not open yet. Join the free waitlist.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Second Shelf: second-hand paperbacks, picked by theme">
+<meta property="og:description" content="A planned monthly box of 3 used paperback novels around one theme, for US readers on a budget. Not open yet. The waitlist is free.">
+<meta property="og:image" content="og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Second Shelf: second-hand paperbacks, picked by theme">
+<meta name="twitter:description" content="A planned monthly box of 3 used paperback novels around one theme, for US readers on a budget. Not open yet. The waitlist is free.">
+<meta name="twitter:image" content="og.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+  :root { --paper:#f7f1e6; --ink:#2b2420; --muted:#6b5f55; --accent:#b4532a; --line:#e2d6c3; --card:#fffaf1; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.6 Georgia, "Iowan Old Style", "Times New Roman", serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:0 22px; }
+  header { padding:22px 0; display:flex; align-items:center; gap:10px; font-weight:bold; letter-spacing:.02em; }
+  header img { width:30px; height:30px; }
+  .hero { padding:36px 0 28px; }
+  .tag { display:inline-block; font:600 13px/1 system-ui, sans-serif; text-transform:uppercase; letter-spacing:.08em; color:var(--accent); border:1px solid var(--accent); border-radius:99px; padding:6px 12px; }
+  h1 { font-size:clamp(32px, 6vw, 50px); line-height:1.12; margin:18px 0 14px; }
+  .lede { font-size:20px; color:var(--muted); margin:0 0 24px; }
+  .btn { display:inline-block; background:var(--accent); color:#fff; border:0; border-radius:8px; padding:13px 22px; font:600 16px system-ui, sans-serif; text-decoration:none; cursor:pointer; }
+  .btn:hover { background:#963f1c; }
+  .note { font:15px/1.5 system-ui, sans-serif; color:var(--muted); margin-top:14px; }
+  section { padding:30px 0; border-top:1px solid var(--line); }
+  h2 { font-size:28px; margin:0 0 18px; }
+  ol.steps { list-style:none; padding:0; margin:0; display:grid; gap:14px; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); counter-reset:s; }
+  ol.steps li { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; counter-increment:s; }
+  ol.steps li::before { content:counter(s); display:inline-grid; place-items:center; width:30px; height:30px; border-radius:50%; background:var(--ink); color:var(--paper); font:600 15px system-ui, sans-serif; margin-bottom:8px; }
+  ol.steps strong { display:block; }
+  ul.themes { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
+  ul.themes li { background:var(--card); border-left:4px solid var(--accent); padding:12px 16px; border-radius:0 8px 8px 0; }
+  ul.themes em { font-style:normal; font-weight:bold; }
+  .price { background:var(--card); border:1px dashed var(--accent); border-radius:10px; padding:18px; }
+  .price b { font-size:24px; }
+  form { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:22px; display:grid; gap:14px; font-family:system-ui, sans-serif; }
+  label { font-weight:600; font-size:15px; display:grid; gap:6px; }
+  label span { font-weight:400; color:var(--muted); }
+  input, select { font:16px system-ui, sans-serif; padding:11px 12px; border:1px solid #cdbfa9; border-radius:8px; background:#fff; color:var(--ink); }
+  .hp { position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
+  #msg { margin:0; font-size:15px; }
+  #msg.err { color:#a3241a; }
+  .thanks { background:#eaf3e6; border:1px solid #b8d3ac; border-radius:12px; padding:22px; font-family:system-ui, sans-serif; }
+  .thanks h3 { margin:0 0 6px; font-family:Georgia, serif; font-size:22px; }
+  footer { padding:28px 0 40px; border-top:1px solid var(--line); font:14px system-ui, sans-serif; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><img src="favicon.svg" alt="">Second Shelf</header>
+
+  <div class="hero">
+    <span class="tag">Not open yet · waitlist is free</span>
+    <h1>Three good used paperbacks a month, picked around one theme.</h1>
+    <p class="lede">Second Shelf is a planned monthly box of second-hand paperback novels for US readers who get through a lot of books and would rather pay used-book prices than new.</p>
+    <a class="btn" href="#waitlist">Join the waitlist</a>
+    <p class="note">Not open yet, so there's nothing to order. Joining the waitlist is free, with no commitment.</p>
+  </div>
+
+  <section>
+    <h2>How it works</h2>
+    <ol class="steps">
+      <li><strong>See the theme</strong>One theme a month, shared ahead of time.</li>
+      <li><strong>We pick 3 novels</strong>Used paperbacks across genres: maybe a mystery, a literary novel and a romance.</li>
+      <li><strong>Open your box</strong>Three books plus a card on why each one made the cut.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Example themes</h2>
+    <p class="note" style="margin-top:-8px">Ideas only, to show the kind of thing we have in mind. Real themes will depend on the books we find.</p>
+    <ul class="themes">
+      <li><em>Islands and Lighthouses</em>: stories set on the edge of the sea</li>
+      <li><em>Letters and Diaries</em>: novels told in letters or journals</li>
+      <li><em>Small Towns, Big Secrets</em></li>
+      <li><em>Strangers on a Train</em>: journeys that go wrong</li>
+      <li><em>Book Club Favorites from 20 Years Ago</em></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Planned price</h2>
+    <div class="price">
+      <b>$17.99 a month (proposed)</b><br>
+      For 3 paperback novels with US shipping included, about $6 a book. This is a planned price, not final, and nothing is on sale yet.
+    </div>
+  </section>
+
+  <section id="waitlist">
+    <h2>Join the waitlist</h2>
+    <p>Leave your email and, if you like, your favourite genre. It helps us decide which themes to start with.</p>
+    <form id="wl" novalidate>
+      <label>Email
+        <input type="email" name="email" required autocomplete="email" placeholder="you@example.com">
+      </label>
+      <label>Favourite genre <span>(optional)</span>
+        <select name="genre">
+          <option value="">Choose one, or leave blank</option>
+          <option>Mystery &amp; crime</option>
+          <option>Thriller &amp; suspense</option>
+          <option>Literary fiction</option>
+          <option>Romance</option>
+          <option>Historical fiction</option>
+          <option>Science fiction</option>
+          <option>Fantasy</option>
+          <option>Horror</option>
+          <option>Classics</option>
+          <option>A bit of everything</option>
+        </select>
+      </label>
+      <div class="hp" aria-hidden="true"><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+      <button class="btn" type="submit">Join the waitlist (free)</button>
+      <p id="msg" role="status"></p>
+    </form>
+    <div class="thanks" id="thanks" hidden>
+      <h3>Thank you, you're on the list.</h3>
+      <p style="margin:0">Your details went to the founder, who will be in touch personally. Second Shelf isn't open yet, and you haven't been charged or signed up for anything.</p>
+    </div>
+  </section>
+
+  <footer>Second Shelf · a planned monthly box of second-hand paperback novels for US readers · not open yet</footer>
+</div>
+<script src="_office/client.js"></script>
+<script>
+  const form = document.getElementById('wl');
+  const msg = document.getElementById('msg');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    msg.className = ''; msg.textContent = '';
+    const email = form.email.value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      msg.className = 'err'; msg.textContent = 'Please enter a valid email address.'; form.email.focus(); return;
+    }
+    const btn = form.querySelector('button');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const genre = form.genre.value;
+      await Office.submitForm('waitlist', {
+        email,
+        genre,
+        message: genre ? 'Favourite genre: ' + genre : '',
+        website: form.website.value
+      });
+      form.hidden = true;
+      document.getElementById('thanks').hidden = false;
+    } catch (err) {
+      msg.className = 'err';
+      msg.textContent = (err && err.message) ? err.message : 'Something went wrong. Please try again.';
+      btn.disabled = false; btn.textContent = 'Join the waitlist (free)';
+    }
+  });
+</script>
+</body>
+</html>
