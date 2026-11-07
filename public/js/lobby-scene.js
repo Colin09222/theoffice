@@ -470,7 +470,7 @@ function makeCity(density) {
   const balGeo = new THREE.BoxGeometry(1, 1, 1); balGeo.translate(0, 0.5, 0);
   const balMesh = new THREE.InstancedMesh(balGeo, new THREE.MeshStandardMaterial({ color: '#f1e9dc', roughness: 0.9 }), Math.max(1, balconies.length));
   balconies.forEach((b, i) => { m.makeScale(b[3], 0.1, b[4]); m.setPosition(b[0], b[1], b[2]); balMesh.setMatrixAt(i, m); });
-  const railMesh = new THREE.InstancedMesh(balGeo, new THREE.MeshStandardMaterial({ color: '#4c5560', roughness: 0.6 }), Math.max(1, balconies.length));
+  const railMesh = new THREE.InstancedMesh(balGeo, new THREE.MeshStandardMaterial({ color: '#8d8176', roughness: 0.7 }), Math.max(1, balconies.length));
   balconies.forEach((b, i) => { const [, , , w, d, fx, fz] = b; m.makeScale(fz ? w : 0.04, 0.42, fz ? 0.04 : d); m.setPosition(b[0] + fx * 0.2, b[1] + 0.1, b[2] + fz * 0.2); railMesh.setMatrixAt(i, m); });
   balMesh.frustumCulled = railMesh.frustumCulled = false; balMesh.castShadow = true; balMesh.count = railMesh.count = balconies.length;
 
@@ -678,12 +678,12 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   slabs.frustumCulled = false; slabs.castShadow = true; slabs.receiveShadow = true;
   group.add(slabs);
 
-  // Planted terraces on every fourth floor, stacked in the same two bays on each face: a rhythm the eye can read, not scatter.
+  // Planted terraces on every eighth floor, stacked in the same two bays on each face: a rhythm the eye can read, not scatter.
   const balGeo = new THREE.BoxGeometry(1, 1, 1); balGeo.translate(0, 0.5, 0);
   const terraces = [];
-  for (let i = 2; i < floorCount; i += 4) for (const [fx, fz] of (i - 2) % 8 ? [[1, 0], [-1, 0]] : [[0, 1], [0, -1]]) for (const off of [-half * 0.75, half * 0.75]) terraces.push([i, fx, fz, off]);
+  for (let i = 3; i < floorCount; i += 8) for (const [fx, fz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const off of [-half * 0.75, half * 0.75]) terraces.push([i, fx, fz, off]);
   const nBal = Math.max(1, terraces.length);
-  const balSlab = new THREE.InstancedMesh(balGeo, stone, nBal), balRail = new THREE.InstancedMesh(balGeo, new THREE.MeshStandardMaterial({ color: '#d9dcd8', roughness: 0.25, metalness: 0.2, transparent: true, opacity: 0.4, envMap: env }), nBal), balPlant = new THREE.InstancedMesh(balGeo, green, nBal);
+  const balSlab = new THREE.InstancedMesh(balGeo, stone, nBal), balRail = new THREE.InstancedMesh(balGeo, new THREE.MeshStandardMaterial({ color: '#b9b4a8', roughness: 0.3, metalness: 0.2, transparent: true, opacity: 0.25, envMap: env }), nBal), balPlant = new THREE.InstancedMesh(balGeo, green, nBal);
   terraces.forEach(([i, fx, fz, off], idx) => {
     const y = GROUND + i * FLOOR_H + 0.07;
     const w = fz ? 2.0 : 0.3, d = fz ? 0.3 : 2.0;

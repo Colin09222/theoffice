@@ -86,7 +86,7 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; }
 .topbar { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: max(20px, env(safe-area-inset-top)) 28px 0; pointer-events: none; }
 .topbar > * { pointer-events: auto; }
 .wordmark { font-family: var(--serif); font-size: 21px; font-style: italic; letter-spacing: .01em; text-shadow: 0 1px 14px rgba(10, 16, 30, .55); }
-.hero { position: absolute; left: 28px; top: 50%; transform: translateY(-50%); width: min(38vw, 520px); text-shadow: 0 2px 28px rgba(10, 16, 30, .55), 0 1px 3px rgba(10, 16, 30, .35); }
+.hero { position: absolute; left: 28px; top: 50%; transform: translateY(-50%); width: min(38vw, 520px); text-shadow: 0 2px 28px rgba(24, 12, 16, .65), 0 1px 3px rgba(24, 12, 16, .45); }
 .hero h1 { font-size: clamp(44px, 5.3vw, 80px); line-height: 1.01; font-weight: 400; letter-spacing: -.022em; }
 .hero h1 em { font-weight: 300; color: #ffe9c9; }
 .hero p { margin: 20px 0 0; font-size: 16.5px; line-height: 1.55; color: rgba(255, 247, 235, .9); max-width: 27em; }
@@ -120,7 +120,7 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 500; margin: 0; }
 .pill-go { font-family: var(--serif); font-size: 20px; }
 .pill-arrow { width: 42px; height: 42px; border-radius: 50%; background: var(--ink); color: #1d1b2c; display: grid; place-items: center; font-size: 19px; }
 .hints { position: absolute; left: 28px; bottom: 22px; margin: 0; font: 10.5px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: rgba(255, 247, 235, .86); text-shadow: 0 1px 8px rgba(10, 16, 30, .9); max-width: 250px; }
-body[data-page="lobby"] #ui::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(30, 18, 24, .66), rgba(30, 18, 24, .3) 30%, rgba(30, 18, 24, 0) 52%), linear-gradient(0deg, rgba(24, 16, 22, .42), rgba(24, 16, 22, 0) 24%); }
+body[data-page="lobby"] #ui::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, rgba(30, 18, 24, .72), rgba(30, 18, 24, .42) 30%, rgba(30, 18, 24, 0) 54%), linear-gradient(0deg, rgba(24, 16, 22, .42), rgba(24, 16, 22, 0) 24%); }
 .banner { position: absolute; top: 70px; left: 28px; margin: 0; padding: 8px 14px; border-radius: 999px; background: rgba(242, 189, 93, .2); border: 1px solid rgba(242, 189, 93, .5); }
 .floor-tip { position: fixed; top: 0; left: 0; padding: 6px 11px; border-radius: 9px; background: rgba(16, 22, 34, .88); font: 12px var(--mono); pointer-events: none !important; white-space: nowrap; z-index: 6; box-shadow: 0 6px 20px rgba(10, 16, 30, .3); }
 
