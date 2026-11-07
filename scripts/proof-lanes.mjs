@@ -105,7 +105,7 @@ async function job(lane, { company, boss: bossName, tap, reply, go, minutes = 45
     s = await say(tap, 'tap', 180000);
     out.tapStartedWork = s.tasks.length > 0;
     out.firstReply = s.messages.filter((m) => m.role === 'manager').at(-1)?.text;
-    if (reply) s = await say(reply, 'reply', 180000);
+    if (reply) { s = await say(reply, 'reply', 180000); out.replyStartedWork = s.tasks.length > 0; out.replyAnswer = s.messages.filter((m) => m.role === 'manager').at(-1)?.text; }
     s = await say(go, 'go', minutes * 60000);
   }
   out.projects = s.projects.map((p) => ({ slug: p.slug, title: p.title, kind: p.kind, private: p.private, url: `http://${appLabel(db, floor, p.slug)}.apps.localhost:${PORT}/`, sources: p.sources?.length, check: p.launchCheck ? { errors: p.launchCheck.errors, claims: p.launchCheck.claims, warnings: p.launchCheck.warnings, reason: p.launchCheck.reason } : null, review: p.designReview?.verdict || null, reported: !!p.launchReport }));
@@ -158,7 +158,7 @@ async function helpTrip() {
 }
 
 const JOBS = {
-  game: { company: process.env.PROOF_COMPANY || 'Pocket Arcade', boss: 'Sam', tap: 'Let\'s do a game. What could we build?', go: 'Go with your favourite of those. Keep it small and cheap.' },
+  game: { company: process.env.PROOF_COMPANY || 'Pocket Arcade', boss: 'Sam', tap: 'Let\'s do a game. What could we build?', reply: 'Something with fishing and only one button would be fun.', go: 'Go, keep it small and cheap.' },
   website: { company: process.env.PROOF_COMPANY || 'Corner Spokes', boss: 'Maya', tap: 'Let\'s do a website. What do you need from me?', reply: 'It is for my Saturday bike repair stand, Corner Spokes, in my neighbourhood. People should find out what I fix and join a list so I can tell them when I am next out. I have not settled a location or prices yet, so do not make any up.', go: 'Go, keep it small and cheap.' },
   business: { company: process.env.PROOF_COMPANY || 'Second Shelf', boss: 'Priya', tap: 'Let\'s do a small business. Help me work it out.', reply: 'I want to start a monthly subscription box of second-hand paperback novels picked by theme, for people in the US who read a lot on a budget. Nothing exists yet. I have no customers and no supplier.', go: 'Go. Use the Analyst for the numbers, and keep it cheap.' },
 };
@@ -232,7 +232,7 @@ async function look() {
         check('business: nothing invented on the page', !invented.test(text), text.slice(0, 200));
         check('business: the page says it is not open yet', /not open|isn.t open|not (yet )?(live|launched|shipping|started)|coming|before we|waitlist|haven.t (started|launched|shipped)/i.test(text), text.slice(0, 200));
         const before = get(db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=?', f.id).n;
-        const form = await p.ev(`(async()=>{const e=document.querySelector('input[type=email],input[name=email]');if(!e)return 'no email input';e.value='friend@example.com';e.dispatchEvent(new Event('input',{bubbles:true}));const fm=e.closest('form');if(!fm)return 'no form';fm.requestSubmit();await new Promise(r=>setTimeout(r,1500));return document.body.innerText.slice(-500)})()`);
+        const form = await p.ev(`(async()=>{const e=document.querySelector('input[type=email],input[name=email]');if(!e)return 'no email input';e.value='friend${Date.now()}@example.com';e.dispatchEvent(new Event('input',{bubbles:true}));const fm=e.closest('form');if(!fm)return 'no form';fm.requestSubmit();await new Promise(r=>setTimeout(r,1500));return document.body.innerText.slice(-500)})()`);
         check('business: the waitlist form stores a real entry', get(db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=?', f.id).n === before + 1, String(form).slice(0, 200));
         await p.shot(join(MEDIA, 'lanes-business-waitlist.jpg'));
         check('business: the thank-you promises no automatic email', !/check your (email|inbox)|we.ve sent|confirmation email/i.test(String(form)), String(form).slice(0, 200));

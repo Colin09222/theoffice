@@ -21,7 +21,8 @@ function stripTags(h) {
   return out.join('').replace(/&[a-z#0-9]{1,12};/gi, ' ');
 }
 const hostOf = (u) => u.replace(/^https?:\/\//i, '').split(/[/:?#]/)[0];
-const metaOf = (h, attr, name) => new RegExp(`<meta\\b[^>]{0,600}\\b${attr}\\s*=\\s*["']${name}["'][^>]{0,600}>`, 'i').exec(h)?.[0]?.match(/\bcontent\s*=\s*["']([^"']{0,2000})["']/i)?.[1] ?? '';
+// Matched to its own kind of quote, so an apostrophe in a description doesn't end it.
+const metaOf = (h, attr, name) => { const m = new RegExp(`<meta\\b[^>]{0,600}\\b${attr}\\s*=\\s*["']${name}["'][^>]{0,600}>`, 'i').exec(h)?.[0]?.match(/\bcontent\s*=\s*(?:"([^"]{0,2000})"|'([^']{0,2000})')/i); return m?.[1] ?? m?.[2] ?? ''; };
 
 const CLAIMS = [
   [/testimonial|what\s+(our\s+)?(people|customers|clients|users|parents|guests|members|readers)\s+(say|are\s+saying|think)|customer\s+(stories|reviews)|success\s+stories|hear\s+from\s+our/i, 'testimonials or customer quotes'],

@@ -19,7 +19,7 @@ describe('the manager\'s playbooks', () => {
   test('it knows the three lanes, and that a tap starts a short conversation and no work', () => {
     assert.deepEqual(LANES, ['game', 'website', 'business']);
     for (const h of [/^GAME$/m, /^WEBSITE$/m, /^BUSINESS$/m]) assert.match(full, h);
-    assert.match(full, /keep your first reply short/); assert.match(full, /two quick questions at most or three concrete suggestions/); assert.match(full, /No work starts until they say go/); assert.match(full, /set lane on every assign_task/);
+    assert.match(full, /keep your first reply short/); assert.match(full, /two quick questions at most or three concrete suggestions/); assert.match(full, /No work starts until they say go/); assert.match(full, /answering your questions is not a go/); assert.match(full, /set lane on every assign_task/);
   });
   test('the game lane goes concept, build, Tester in a real browser, fix, publish, with a saved score', () => {
     const game = full.slice(full.indexOf('GAME\n'), full.indexOf('WEBSITE\n'));
@@ -152,6 +152,17 @@ describe('working papers', () => {
       assert.equal(publishSnapshot(t.db, f.id, 's', 1e7, 'dist'), 1, 'a build folder publishes the same way');
       assert.equal(get(t.db, "SELECT content FROM files WHERE floor_id=? AND path='projects/s/notes/copy.md'", f.id).content, 'draft words', 'still on the drive');
     } finally { await t.close(); }
+  });
+});
+
+describe('the checklist, as a real Builder found', () => {
+  test('an apostrophe in a description doesn\'t end it', async () => {
+    const { checkSite } = await import('../server/launch-check.js');
+    const page = (desc) => `<!doctype html><html lang="en"><head><title>Corner</title><meta name="viewport" content="width=device-width"><meta name="description" content=${desc}></head><body>x</body></html>`;
+    const warned = (desc) => checkSite({ files: [{ path: 'index.html', data: page(desc) }] }).warnings.some((w) => /meta name="description"/.test(w));
+    assert.equal(warned('"Maya\'s Saturday repair stand for riders in the neighbourhood."'), false);
+    assert.equal(warned("'A \"plain\" description that is long enough to count as one.'"), false);
+    assert.equal(warned('"Too short."'), true);
   });
 });
 

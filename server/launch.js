@@ -94,7 +94,8 @@ export function composeReport(f, headline, nextSteps) {
   lines.push(`**Domain:** ${f.domain ? `${f.domain}` : 'none yet; it is on its project address'}`);
   lines.push(`**Taking money:** ${f.hasPayment ? 'yes, through your Stripe Payment Link' : 'no. Paste your Stripe Payment Link on the project card to switch it on'}`);
   lines.push(`**Sign-ups so far:** ${f.signups}`, `**Visitors so far:** ${f.stats.uniques} (${f.stats.views} page views)`);
-  if (f.review) lines.push(`**Design review:** ${f.review.verdict || 'done'}, by ${f.review.model}`); else lines.push('**Design review:** not done');
+  // The reviewer is blunt and only sees one screenshot, so "fix first" needs a pointer to what it said, or it is a dead end for the boss.
+  if (f.review) lines.push(`**Design review:** ${f.review.verdict === 'fix first' ? 'the last review wanted changes first. Its notes are under Report on the project card' : f.review.verdict || 'done'}, by ${f.review.model}`); else lines.push('**Design review:** not done');
   if (!c) lines.push('**Checklist:** not run');
   else {
     if (c.passed?.length) lines.push(`**Checklist passed:** ${c.passed.join(', ')}`);
