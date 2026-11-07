@@ -811,7 +811,7 @@ class FloorPage {
     on('message', (d) => {
       if (!this.state.messages) return;
       if (this.state.messages.some((m) => m.id === d.id)) return;
-      const m = { id: d.id, role: d.role, agentId: d.agentId, text: d.text, createdAt: d.createdAt };
+      const m = { id: d.id, role: d.role, agentId: d.agentId, text: d.text, createdAt: d.createdAt, ...(Array.isArray(d.attachments) ? { attachments: d.attachments } : {}) };
       this.state.messages.push(m);
       if (d.role === 'manager') { this.streamBuf = ''; this.showStream(); }
       if (d.role === 'boss') this.dropLanes();
