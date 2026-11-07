@@ -90,7 +90,8 @@ export const PLANS = {
   pods: {
     label: 'Pods', blurb: 'Teams of four, back to back, with a corner glass room.',
     windows: [[-9.8, -6.0], [-4.9, 2.1]],
-    desks: [[-4.95, 1.95, HALF], [-2.25, 1.95, HALF], [-4.95, 3.65, 0], [-2.25, 3.65, 0], [2.05, 1.95, HALF], [4.75, 1.95, HALF], [2.05, 3.65, 0], [4.75, 3.65, 0]],
+    // Filled pod by pod in turn, so a small team doesn't all sit at one end of the room.
+    desks: [[-4.95, 1.95, HALF], [2.05, 1.95, HALF], [-2.25, 3.65, 0], [4.75, 3.65, 0], [-2.25, 1.95, HALF], [4.75, 1.95, HALF], [-4.95, 3.65, 0], [2.05, 3.65, 0]],
     manager: [-7.9, -3.9, 0], boss: [-1.4, -3.9, 0],
     board: 6.2,
     meet: { table: [6.2, -4.75], glass: { x0: 3.2, x1: 9.2, z0: -6.8, z1: -3.0, door: [5.0, 7.4] }, size: [1.5, 1.5], block: [3.4, 1.3],

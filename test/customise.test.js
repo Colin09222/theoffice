@@ -383,7 +383,7 @@ describe('looks and the room', () => {
     assert.equal(d.layout, undefined, 'nothing is filled in behind the boss\'s back'); assert.equal(planFor(d.layout), PLANS.open, 'and no plan means the original room');
     assert.equal(hasSofa(planFor(d.layout), 4), true);
     assert.deepEqual(validLook(oldLook, oldLook), oldLook, 'an old look stays as it was');
-    assert.equal(validLook({ wear: 'cape' }, oldLook).extra, 'cape');
+    assert.equal(validLook({ wear: 'cape' }, oldLook).wear, 'cape');
     // The old route still works too.
     assert.equal((await a.post(`/api/floors/${a.slug}/settings`, { name: 'Still Fine' })).status, 200);
   });
