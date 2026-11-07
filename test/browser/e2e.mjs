@@ -290,7 +290,7 @@ async function run(label, opts, t, adminCode) {
     await p.click('[data-orders-form] button[type=submit]');
     await p.until('document.querySelector("article.order[data-order]") !== null', 'order card');
     const card = await p.ev('document.querySelector("article.order").textContent');
-    if (!/Every day at 07:30/.test(card) || !/Next run/.test(card) || !/a run/.test(card)) throw new Error(`card text: ${card.slice(0, 160)}`);
+    if (!/Every day at 07:30/.test(card) || !/Next run/.test(card) || !/Not run yet/.test(card) || /\$/.test(card)) throw new Error(`card text: ${card.slice(0, 160)}`);
     await sleep(300); await p.shot(join(OUT, `plus-orders-${label}.jpg`));
     await p.click('article.order [data-run]');
     await p.until('window.__office.state.tasks.some((x) => x.status === "doing" || x.status === "review" || x.status === "done")', 'order run started through the engine', 20000);
