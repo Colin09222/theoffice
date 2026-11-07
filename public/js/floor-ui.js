@@ -470,6 +470,7 @@ class FloorPage {
     const norm = (x) => (x.status === 'blocked' ? 'doing' : x.status);
     for (const [key, title] of COLUMNS) {
       const col = t.filter((x) => norm(x) === key);
+      if (!col.length && t.length && key !== 'todo') continue;  // an empty column is just bare cork
       const shown = key === 'done' ? col.slice(-12).reverse() : col;
       board.append(h('section.col', {}, h('h3', {}, title, h('span', {}, String(col.length))),
         ...shown.map((x) => h(`article.card.${x.status}`, {}, h('b', {}, x.title),

@@ -52,7 +52,7 @@ async function develop() {
     scene.add(new THREE.HemisphereLight('#fff4e0', '#9f8f7a', 2.2));
     const key = new THREE.DirectionalLight('#fff0d8', 2.6); key.position.set(1.5, 3, 4); scene.add(key);
     const cam = new THREE.PerspectiveCamera(18, W / H, 0.1, 40);
-    const at = new THREE.Vector3();
+    const at = new THREE.Vector3(), box = new THREE.Box3();
     while (waiting.size) {
       const [k, job] = waiting.entries().next().value;
       waiting.delete(k);
@@ -60,10 +60,14 @@ async function develop() {
       const mc = await loadModelCharacter(job.look, { accent: job.accent, scale: 2.5 });
       if (document.hidden) await new Promise((r) => setTimeout(r, 200));
       mc.update?.(0.016);
-      mc.group.rotation.y = Math.PI - 0.32;
+      mc.group.rotation.y = 0.32;  // a three-quarter turn toward the lens
       scene.add(mc.group); mc.group.updateMatrixWorld(true);
-      (mc.head || mc.group).getWorldPosition(at);
-      cam.position.set(at.x + 0.15, at.y + 0.5, at.z + 4.4); cam.lookAt(at.x, at.y + 0.22, at.z);
+      // Frame head and shoulders from the person's own height, so a top hat or a short stature both fit.
+      box.setFromObject(mc.group); box.getCenter(at);
+      const tall = box.max.y - box.min.y, top = box.max.y;
+      const view = tall * 0.5, aimY = top - view * 0.47;
+      cam.position.set(at.x + 0.12, aimY + tall * 0.04, at.z + view / 2 / Math.tan(THREE.MathUtils.degToRad(9)) + 0.4);
+      cam.lookAt(at.x, aimY, at.z);
       renderer.render(scene, cam);
       const url = canvas.toDataURL('image/webp', 0.86);
       scene.remove(mc.group); mc.dispose?.();
