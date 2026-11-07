@@ -11,11 +11,13 @@ const MANAGER_DESK = [-6.6, -3.9], BOSS_DESK = [6.8, -3.9];
 const BOARD = [-0.4, -6.25];
 const SHELF = [-10.2, 2.4], COFFEE = [10.1, 2.4], ARCADE = [10.1, -1.4], SOFA = [6.9, 5.1];
 const CELL = 0.5;
+const HOLD = 0.7;  // seconds each character state stays on stage before the next one shows
 const WORLD_SCALE = ROOM_W / TOWER_W;  // the room is one tower floor, blown up to walk around in
 const SUN_DIR = new THREE.Vector3(0.78, 0.58, -0.26).normalize();
 
 const box = new THREE.BoxGeometry(1, 1, 1);
 const cyl = new THREE.CylinderGeometry(1, 1, 1, 14);
+const cone = new THREE.ConeGeometry(1, 1, 12); const ico = new THREE.IcosahedronGeometry(0.5, 0);
 const mats = new Map();
 function lam(color) { let m = mats.get(color); if (!m) { m = new THREE.MeshLambertMaterial({ color }); mats.set(color, m); } return m; }
 function piece(parent, color, w, hh, d, x, y, z, { cast = true, recv = true, geo = box, mat } = {}) {
@@ -36,12 +38,12 @@ function seeded(seed) { let s = seed; return () => { s = (s * 1664525 + 10139042
 function floorTexture(style) {
   const r = seeded(7);
   if (style === 'wood') return canvasTex(512, 512, (x, w, h) => {
-    x.fillStyle = '#a97c54'; x.fillRect(0, 0, w, h);
+    x.fillStyle = '#8a5f3c'; x.fillRect(0, 0, w, h);
     for (let row = 0; row < 8; row++) {
       let px = -(row % 2) * 90;
       while (px < w) {
         const len = 150 + r() * 90; const l = 44 + r() * 14;
-        x.fillStyle = `hsl(${26 + r() * 6},${40 + r() * 8}%,${l}%)`; x.fillRect(px, row * 64, len, 63);
+        x.fillStyle = `hsl(${24 + r() * 7},${44 + r() * 10}%,${l - 10}%)`; x.fillRect(px, row * 64, len, 63);
         x.strokeStyle = 'rgba(70,40,20,.13)';
         for (let g = 0; g < 4; g++) { x.beginPath(); const gy = row * 64 + r() * 60; x.moveTo(px, gy); x.bezierCurveTo(px + len / 3, gy + 3, px + len / 2, gy - 3, px + len, gy); x.stroke(); }
         px += len + 1;
@@ -49,7 +51,7 @@ function floorTexture(style) {
     }
   }, [3, 2]);
   if (style === 'carpet') return canvasTex(256, 256, (x, w, h) => {
-    x.fillStyle = '#5b6277'; x.fillRect(0, 0, w, h);
+    x.fillStyle = '#4e5a74'; x.fillRect(0, 0, w, h);
     for (let i = 0; i < 9000; i++) { x.fillStyle = `rgba(${r() < 0.5 ? '255,255,255' : '0,0,0'},${r() * 0.08})`; x.fillRect(r() * w, r() * h, 2, 2); }
     x.strokeStyle = 'rgba(0,0,0,.14)'; x.lineWidth = 2; x.strokeRect(0, 0, w, h);
   }, [6, 4]);
@@ -63,7 +65,7 @@ function floorTexture(style) {
     }
   }, [3, 2]);
   return canvasTex(512, 512, (x, w, h) => {
-    x.fillStyle = '#9b9a97'; x.fillRect(0, 0, w, h);
+    x.fillStyle = '#8c8b88'; x.fillRect(0, 0, w, h);
     for (let i = 0; i < 5000; i++) { x.fillStyle = `rgba(${r() < 0.5 ? '255,255,255' : '0,0,0'},${r() * 0.05})`; x.fillRect(r() * w, r() * h, 3, 3); }
     x.strokeStyle = 'rgba(40,40,40,.22)'; x.lineWidth = 2; x.strokeRect(1, 1, w - 2, h - 2);
   }, [3, 2]);
@@ -144,6 +146,16 @@ function makeDesk(parent, x, z, brand, { big = false } = {}) {
   screen.position.set(0, 1.6, -0.51); g.add(screen);
   piece(g, '#e7e2d6', 0.72, 0.03, 0.24, 0, 1.02, 0.05);
   piece(g, '#ece6d8', 0.2, 0.14, 0.2, -0.82, 1.02, -0.2);
+  piece(g, brand, 0.12, 0.13, 0.12, 0.74, 1.02, 0.1, { geo: cyl, cast: false });
+  if (big) {
+    piece(g, '#2a2c33', 0.22, 0.03, 0.22, -W / 2 + 0.35, 1.02, -0.4, { geo: cyl, cast: false });
+    piece(g, '#2a2c33', 0.03, 0.5, 0.03, -W / 2 + 0.35, 1.05, -0.4, { cast: false });
+    const shade = piece(g, '#d9b86a', 0.3, 0.16, 0.3, -W / 2 + 0.35, 1.5, -0.4, { geo: cone });
+    shade.rotation.z = 0;
+  } else if (Math.abs(x) > 4) {
+    piece(g, '#b86a4b', 0.16, 0.14, 0.16, -0.88, 1.02, 0.12, { geo: cyl, cast: false });
+    piece(g, '#5e9160', 0.2, 0.2, 0.2, -0.88, 1.14, 0.12, { geo: ico });
+  }
   // Chair, in the brand colour.
   piece(g, '#2c2c33', 0.08, 0.5, 0.08, 0, 0, 0.72);
   piece(g, brand, 0.7, 0.13, 0.66, 0, 0.5, 0.72);
@@ -185,6 +197,8 @@ export class Actor {
     this.group = this.char.group;
     this.group.position.copy(this.pos);
     this.heading = Math.PI; this.path = []; this.speed = 0; this.queue = []; this.action = null; this.seated = true; this.state = 'idle'; this.lastShelf = -99; this.idleTimer = 4 + Math.random() * 16;
+    this.shadow = new THREE.Mesh(view.discGeo, view.discMat); this.shadow.rotation.x = -Math.PI / 2; this.shadow.position.y = 0.015; this.shadow.scale.setScalar(1.4);
+    this.group.add(this.shadow);
     view.scene.add(this.group);
     this.sitDown();
     this.tag = document.createElement('div'); this.tag.className = 'char-tag';
@@ -237,11 +251,23 @@ export class Actor {
     if (!this.seated) return;
     this.char.setAnim(s === 'typing' || s === 'browsing' ? 'type' : s === 'thinking' || s === 'queued' ? 'think' : s === 'talking' ? 'talk' : s === 'reading' ? 'type' : 'sit');
   }
-  // Real events can flip faster than the eye. Each visible state gets a moment on stage; the newest one waits its turn.
+  // Real events can flip faster than the eye. Each visible state gets a moment on stage, and the ones behind it wait their
+  // turn in a short queue. Paced on the wall clock, so a slow frame rate never swallows states that arrive at real-time speed.
   setState(state, activity) {
-    const now = this.view.time;
-    if (this.stateSince !== undefined && now - this.stateSince < 1.1 && state !== this.state) { this.pending = [state, activity]; return; }
-    this.pending = null;
+    const now = performance.now() / 1000;
+    const held = this.stateSince !== undefined && now - this.stateSince < HOLD;
+    if (this.pending?.length || (held && state !== this.state)) {
+      this.pending ||= [];
+      const last = this.pending.at(-1);
+      if (last && last[0] === state) { last[1] = activity; return; }
+      this.pending.push([state, activity]);
+      if (this.pending.length > 4) {
+        // Too far behind: drop a filler state first, so the visible work (typing, reading, talking) still gets shown.
+        const filler = this.pending.findIndex(([st]) => st === 'thinking' || st === 'queued');
+        this.pending.splice(filler >= 0 ? filler : 0, 1);
+      }
+      return;
+    }
     this.stateSince = now;
     this.applyState(state, activity);
   }
@@ -271,8 +297,8 @@ export class Actor {
     }
   }
   update(dt) {
-    const g = this.group, time = this.view.time;
-    if (this.pending && time - this.stateSince >= 1.1) { const [st, ac] = this.pending; this.pending = null; this.stateSince = time; this.applyState(st, ac); }
+    const g = this.group, time = this.view.time, wall = performance.now() / 1000;
+    if (this.pending?.length && wall - this.stateSince >= HOLD) { const [st, ac] = this.pending.shift(); if (!this.pending.length) this.pending = null; this.stateSince = wall; this.applyState(st, ac); }
     let moving = 0;
     if (this.path.length) {
       const [tx, tz] = this.path[0];
@@ -324,6 +350,9 @@ export class OfficeView {
     this.tv = new THREE.Vector3();
     this.codeTex = screenTexture('code', this.colors.primary);
     this.pageTex = screenTexture('page', this.colors.primary);
+    // A soft disc under every character: a touch of contact shadow where the shadow map is coarse or off.
+    this.discGeo = new THREE.CircleGeometry(0.5, 20);
+    this.discMat = new THREE.MeshBasicMaterial({ map: canvasTex(64, 64, (x, w, h) => { const g = x.createRadialGradient(32, 32, 2, 32, 32, 32); g.addColorStop(0, 'rgba(20,24,40,.5)'); g.addColorStop(0.6, 'rgba(20,24,40,.22)'); g.addColorStop(1, 'rgba(20,24,40,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }), transparent: true, depthWrite: false });
     this.buildRoom();
     this.buildWorld();
     this.syncAgents(state);
@@ -342,8 +371,8 @@ export class OfficeView {
   }
   buildRoom() {
     const s = this.scene; const { primary, accent } = this.colors; const d = this.decor;
-    s.add(new THREE.HemisphereLight('#c4daf2', '#b5a690', 0.62));
-    const sun = new THREE.DirectionalLight('#fff0d8', 2.3);
+    s.add(new THREE.HemisphereLight('#d2e3f5', '#c9bba6', 1.35));
+    const sun = new THREE.DirectionalLight('#fff0d8', 2.6);
     sun.position.copy(SUN_DIR).multiplyScalar(44); sun.target.position.set(0, 0, 0);
     const size = stage.q?.shadow || 0;
     sun.castShadow = size > 0;
@@ -627,7 +656,7 @@ export class OfficeView {
   enter() {
     const r = stage.renderer;
     r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = !stage.lowEnd; r.shadowMap.needsUpdate = true;
-    r.toneMappingExposure = 0.98;
+    r.toneMappingExposure = 1.04;
     const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WORLD_SCALE); w.group.position.set(0, this.worldLift, 0);
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
   }
@@ -644,10 +673,10 @@ export class OfficeView {
     this.actors.clear();
     this.scene.remove(this.world.group);  // shared with the lobby, so never disposed here
     for (const root of [this.room, this.stub.group]) root.traverse((o) => {
-      if (o.geometry && o.geometry !== box && o.geometry !== cyl && !o.geometry.parameters?.shared) o.geometry.dispose?.();
+      if (o.geometry && o.geometry !== box && o.geometry !== cyl && o.geometry !== cone && o.geometry !== ico && !o.geometry.parameters?.shared) o.geometry.dispose?.();
       if (o.material?.map) o.material.map.dispose();
     });
-    this.codeTex.dispose(); this.pageTex.dispose();
+    this.codeTex.dispose(); this.pageTex.dispose(); this.discGeo.dispose(); this.discMat.map.dispose(); this.discMat.dispose();
   }
   resize(w, h) {
     this.w = w; this.h = h;

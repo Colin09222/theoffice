@@ -79,7 +79,7 @@ class Stage {
     const saveData = navigator.connection?.saveData === true;
     this.gpu = gpu;
     this.lowEnd = mobile || cores <= 4;
-    this.tier = software || saveData || (mobile && (cores <= 4 || mem <= 3)) ? 'low' : mobile || cores <= 6 || mem <= 4 ? 'mid' : 'high';
+    this.tier = software || saveData || (mobile && (cores <= 2 || mem <= 3)) ? 'low' : mobile || cores <= 4 || mem <= 4 ? 'mid' : 'high';
     const forced = new URLSearchParams(location.search).get('q');  // ?q=high|mid|low, for testing a look on any machine
     if (TIERS[forced]) this.tier = forced;
     this.q = { ...TIERS[this.tier] };

@@ -3,7 +3,7 @@
 The code is finished and passes every gate that could run on the build machine. See the status section for what was still unproven at build time.
 
 ## What's built
-- **Lobby:** procedural dusk city and tower (drag to turn, scroll to ride), glass directory with search, lift buttons, "Open an office". All original assets and wording.
+- **Lobby:** procedural daylight harbour city and tower (drag to turn, scroll to ride), with a real sun shadow map, distance haze, streets, parks, trees, balconies and traffic; glass directory with search, lift buttons, "Open an office". All original assets and wording. The office floor sits on top of the same city at its real height. Rendering adapts in three quality tiers (shadows, post-processing, density, pixel ratio) and steps down if frames drop; `?q=high|mid|low` forces a tier for testing.
 - **Codes:** `node scripts/admin.mjs code [--floor N]` issues one-time hashed codes. Claiming sets company, colours, boss and character, and gives a one-year cookie plus a rotating recovery code.
 - **Customising:** company, boss, staff names and looks, decor.
 - **Chain of command:** streamed chat with the manager, who brainstorms, then plans, assigns, reviews and reports, and can hire within a cap. Staff can ask the boss a question. The boss can pause, resume, stop or redirect.

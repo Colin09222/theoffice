@@ -7,7 +7,7 @@ import { stage } from './stage.js';
 
 export const FLOOR_H = 1.0, TOWER_W = 8.6, GROUND = 3.6;
 const SUN = new THREE.Vector3(0.78, 0.58, -0.26).normalize();
-const FOG = '#c9d8e4';
+const FOG = '#cfdde8';
 const GRID = 9, LOT = 3.3, CELLS = 36;
 
 function rng(seed) { let s = seed; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
@@ -51,7 +51,7 @@ function makeSky() {
     fragmentShader: `varying vec3 vDir; uniform float uTime; ${GLSL_COMMON}
       void main(){
         vec3 d = normalize(vDir); float y = clamp(d.y, -0.02, 1.0);
-        vec3 zen = s2l(vec3(0.30, 0.54, 0.86)), mid = s2l(vec3(0.58, 0.74, 0.90)), hor = s2l(vec3(0.80, 0.86, 0.90));
+        vec3 zen = s2l(vec3(0.34, 0.58, 0.90)), mid = s2l(vec3(0.62, 0.78, 0.93)), hor = s2l(vec3(0.84, 0.89, 0.93));
         vec3 c = mix(hor, mid, smoothstep(0.0, 0.12, y));
         c = mix(c, zen, smoothstep(0.10, 0.6, y));
         vec3 sunDir = normalize(vec3(${SUN.x.toFixed(3)}, ${SUN.y.toFixed(3)}, ${SUN.z.toFixed(3)}));
@@ -625,8 +625,8 @@ export class LobbyView {
     this.scene.fog = new THREE.FogExp2(FOG, 0.0024);
     this.grade = { vignette: 0.3, grain: 0.022 };
     this.camera = new THREE.PerspectiveCamera(34, 1, 0.5, 1400);
-    this.hemi = new THREE.HemisphereLight('#b9d2ee', '#b8a894', 0.8); this.scene.add(this.hemi);
-    const sun = new THREE.DirectionalLight('#fff0d8', 3.3); sun.position.copy(SUN).multiplyScalar(160); sun.target.position.set(0, 0, 0);
+    this.hemi = new THREE.HemisphereLight('#bcd6f2', '#bfae98', 1.05); this.scene.add(this.hemi);
+    const sun = new THREE.DirectionalLight('#fff0d8', 3.5); sun.position.copy(SUN).multiplyScalar(160); sun.target.position.set(0, 0, 0);
     Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 80, bottom: -60, near: 20, far: 340 });
     sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.08; sun.shadow.camera.updateProjectionMatrix();
     this.sun = sun; this.scene.add(sun, sun.target);
@@ -694,7 +694,7 @@ export class LobbyView {
     this.active = true; this.flying = null; this.camera.clearViewOffset();
     this.scene.add(this.world.group); this.world.group.position.set(0, 0, 0); this.world.group.scale.setScalar(1);
     const r = stage.renderer; r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = true; r.shadowMap.needsUpdate = true;
-    r.toneMappingExposure = 1.0;
+    r.toneMappingExposure = 1.08;
   }
   leave() { this.active = false; this.setHover(-1); }
   resize(w, h) {

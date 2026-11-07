@@ -154,7 +154,8 @@ async function run(label, opts, t, adminCode) {
     if (!seen.bubbles) throw new Error('no speech bubbles');
     const spend = await p.ev('window.__office.state.spend.today');
     if (!(spend > 0)) throw new Error('no spend recorded');
-    if (!/\$0\.\d+ of \$2\.00 today/.test(await p.ev('document.querySelector(".spend").textContent'))) throw new Error('spend label');
+    const cap = t.cfg.floorDailyUsd.toFixed(2);
+    if (!new RegExp(`\\$0\\.\\d+ of \\$${cap.replace('.', '\\.')} today`).test(await p.ev('document.querySelector(".spend").textContent'))) throw new Error('spend label');
   });
   await step(tag('purchase requests show as pending, with no way to pay'), async () => {
     await p.click('[data-tab=requests]');

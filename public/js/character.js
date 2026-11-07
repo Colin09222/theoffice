@@ -173,11 +173,15 @@ export function createPreview(canvas, look, accent) {
   let renderer;
   try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); } catch { canvas.hidden = true; return { update() {}, dispose() {} }; }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.1;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const rect = canvas.getBoundingClientRect();
   renderer.setSize(rect.width || 200, rect.height || 240, false);
   const scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight('#fff3e0', '#5a4a66', 2.1));
-  const sun = new THREE.DirectionalLight('#ffe2c0', 2.2); sun.position.set(2, 4, 3); scene.add(sun);
+  scene.add(new THREE.HemisphereLight('#d2e3f5', '#c9bba6', 1.5));
+  const sun = new THREE.DirectionalLight('#fff0d8', 2.6); sun.position.set(2.5, 4, 3); sun.castShadow = true; sun.shadow.mapSize.set(512, 512);
+  Object.assign(sun.shadow.camera, { left: -2, right: 2, top: 3, bottom: -1, near: 1, far: 12 }); sun.shadow.camera.updateProjectionMatrix(); sun.shadow.bias = -0.0005; scene.add(sun);
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(1.1, 28), new THREE.ShadowMaterial({ opacity: 0.22 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
   const cam = new THREE.PerspectiveCamera(26, (rect.width || 200) / (rect.height || 240), 0.1, 30);
   cam.position.set(0, 1.5, 5.2); cam.lookAt(0, 0.92, 0);
   let ch = new Character(look, { accent }); scene.add(ch.group);
@@ -193,6 +197,6 @@ export function createPreview(canvas, look, accent) {
   raf = requestAnimationFrame(loop);
   return {
     update(next, acc = accent) { ch.dispose(); ch = new Character(next, { accent: acc }); scene.add(ch.group); },
-    dispose() { dead = true; cancelAnimationFrame(raf); renderer.dispose(); renderer.forceContextLoss?.(); },
+    dispose() { dead = true; cancelAnimationFrame(raf); floor.geometry.dispose(); renderer.dispose(); renderer.forceContextLoss?.(); },
   };
 }
