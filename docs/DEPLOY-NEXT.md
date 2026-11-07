@@ -113,6 +113,7 @@ All of it runs by itself at first boot. There is no script to run.
 
 | What | Effect | Undo |
 |---|---|---|
+| New column `standing_orders.set_by` | Orders already there count as the boss's. From now on one the manager sets fires as an office note, not as the boss's words | Older code ignores it |
 | New columns `ledger.provider`, `floors.budget_out`, `floors.identity`, `floors.crew`, `agents.persona`, `purchases.notify`, `tasks.lane` | Older code ignores them | None needed |
 | New tables `budget_holds`, `help_requests` | Older code ignores them | None needed |
 | `ledger.provider` filled in for old rows, from the model id and kind. Bare `claude-*`, `managed-session` and `search` count as Anthropic. A slashed id, `image` and `review` count as OpenRouter. Domains count towards neither | Sets how much of each limit is already gone | Recomputed if blank |
