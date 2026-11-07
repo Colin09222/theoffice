@@ -1,7 +1,7 @@
 // Dialogs for getting a floor: entering a code, setting up the company and boss, and signing back in with a recovery code.
 import { h, api, modal, refreshMe, BASE, session, ApiError } from './dom.js';
 import { characterBuilder, swatches } from './builder.js';
-import { DEFAULT_LOOK, DEFAULT_COLORS } from './looks.js';
+import { DEFAULT_LOOK, DEFAULT_COLORS, slugFrom } from './looks.js';
 
 const BRAND = ['#d9774a', '#c8455a', '#7a4bb5', '#2f7ec7', '#23937f', '#6f8f3a', '#e0a526', '#3b3f4f'];
 const ACCENT = ['#f4c95d', '#ff9f7a', '#8fd3c7', '#a9c4ff', '#f2a7c3', '#e8e0d0'];
@@ -80,13 +80,6 @@ export function recoveryBox(code) {
   const copy = h('button.btn.ghost', { type: 'button', onclick: async () => { try { await navigator.clipboard.writeText(code); copy.textContent = 'Copied'; } catch { copy.textContent = 'Select and copy it'; } } }, 'Copy');
   return h('div.recovery', {}, h('code', { 'data-recovery': true }, code), copy);
 }
-
-/** What people actually type for "floor address": the name as they remember it, the slug, or the whole link. */
-export const slugFrom = (text) => {
-  const t = String(text || '').trim();
-  const fromLink = t.match(/\/floor\/([a-z0-9-]+)/i);
-  return (fromLink ? fromLink[1] : t).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-};
 
 export function openLogin(slugHint = '') {
   let back = null;

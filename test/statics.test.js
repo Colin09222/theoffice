@@ -8,6 +8,8 @@ import { boot } from './helpers.js';
 import { buildStatics, pickEncoding, wantBrotli } from '../server/statics.js';
 import { ROOT } from '../server/config.js';
 import { layoutLabels } from '../public/js/labels.js';
+import { slugFrom } from '../public/js/looks.js';
+import { slugify } from '../server/workspace.js';
 
 const PUB = join(ROOT, 'public');
 const statics = buildStatics(PUB, '/theoffice');
@@ -146,5 +148,18 @@ describe('labels in a huddle', () => {
     const items = [person('a', 50, 96, 1, 400)];
     const solved = layoutLabels(items, { width: 100 });
     assert.equal(solved.get('a').bubble, false);
+  });
+});
+
+describe('signing in by name', () => {
+  test('a company name typed the way people remember it reaches the same floor as the server\'s slug', () => {
+    for (const name of ['Night Bakery', 'night bakery ', 'Cafés & Co.', 'Tiny   Teacups!', 'A very long company name that goes well past the forty character limit', 'Ünïcode Ünlimited']) {
+      assert.equal(slugFrom(name), slugify(name), name);
+    }
+  });
+  test('the whole link works, and so does the bare slug', () => {
+    assert.equal(slugFrom('https://iscolinfree.com/theoffice/floor/night-bakery'), 'night-bakery');
+    assert.equal(slugFrom('https://iscolinfree.com/theoffice/floor/night-bakery/?x=1'), 'night-bakery');
+    assert.equal(slugFrom('night-bakery'), 'night-bakery');
   });
 });

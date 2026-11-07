@@ -26,3 +26,10 @@ export function seededLook(seed) {
     hat: seed % 5 === 0 ? pick(HAT.slice(1), 61) : 'none', glasses: seed % 4 === 1 ? 'round' : 'none',
   };
 }
+
+/** What people actually type for their floor when signing in: the name as they remember it, the slug, or the whole link. The same rules as the server's slugify. */
+export const slugFrom = (text) => {
+  const t = String(text || '').trim();
+  const fromLink = t.match(/\/floor\/([a-z0-9-]+)/i);
+  return (fromLink ? fromLink[1] : t).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
+};
