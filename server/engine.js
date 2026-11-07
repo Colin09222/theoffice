@@ -165,7 +165,8 @@ export class Engine {
         }).catch((e) => {
           // An aborted or broken stream still cost something. Charge an estimate so the ledger cannot be dodged.
           const sent = Math.max(chars.n, e?.streamedChars || 0);
-          if (sent > 0) this.charge(floorId, agent, role.model, Math.ceil(JSON.stringify(messages).length / 4), Math.ceil(sent / 4), (JSON.stringify(messages).length / 4 * pricing.prompt + sent / 4 * pricing.completion) / 1e6, ctx);
+          // That includes a call aborted before its first token: the provider has already started on it.
+          if (sent > 0 || signal?.aborted) this.charge(floorId, agent, role.model, Math.ceil(JSON.stringify(messages).length / 4), Math.ceil(sent / 4), (JSON.stringify(messages).length / 4 * pricing.prompt + sent / 4 * pricing.completion) / 1e6, ctx);
           throw e;
         });
         this.charge(floorId, agent, role.model, res.usage.prompt, res.usage.completion, res.usage.cost, ctx);
@@ -417,7 +418,7 @@ export class Engine {
     const open = get(this.db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked')", floor.id).n;
     if (open >= MAX_OPEN_TASKS) throw new ToolError('too many open tasks; let some finish first');
     if (get(this.db, 'SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND created_at>=?', floor.id, this.now() - 86400000).n >= MAX_TASKS_PER_DAY) throw new ToolError('this floor has hit its task limit for today');
-    const project = wanted || (floor.default_private ? 'private-work' : '');
+    const project = wanted || (priv || floor.default_private ? 'private-work' : '');
     if (project) this.upsertProject(floor, project, { title: project, makePrivate: priv });
     const deps = dependsOn.map(Number).filter((n) => Number.isInteger(n)).slice(0, 10);
     if (afterPrevious) {
@@ -651,8 +652,13 @@ export function viewEvent(db, ev, viewer) {
   if (viewer.owner) return ev;
   if (ev.ownerOnly) return null;
   if (ev.type === 'question' || ev.type === 'question_answered' || ev.type === 'purchase') return null;
-  if (ev.chat || ev.type === 'message' || ev.type === 'token' || ev.type === 'token_reset') return viewer.publicChat ? ev : null;
-  const isPrivate = ev.project && get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', ev.floorId, ev.project)?.private;
+  // Visitors on a public-chat floor get whole messages only. A private name split across two tokens could not be redacted.
+  if (ev.type === 'token' || ev.type === 'token_reset') return null;
+  if (ev.chat || ev.type === 'message') return viewer.publicChat ? { ...ev, data: { ...ev.data, text: redactChat(db, ev.floorId, ev.data.text) } } : null;
+  // On a default-private floor, anything not tied to a public project counts as private. Office notices carry no agent.
+  const isPrivate = ev.project
+    ? get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', ev.floorId, ev.project)?.private
+    : viewer.defaultPrivate && (ev.type === 'task' || ev.type === 'agent' || (ev.type === 'feed' && ev.data.agent !== null));
   if (ev.type === 'task') {
     const { brief: _b, result: _r, costUsd: _c, ...pub } = ev.data;
     return { ...ev, project: isPrivate ? '' : ev.project, data: isPrivate ? { ...pub, title: 'Private task', plan: '', project: '' } : pub };
@@ -662,5 +668,17 @@ export function viewEvent(db, ev, viewer) {
   if (ev.type === 'agent') return { ...ev, project: '', data: { ...ev.data, activity: PRIVATE_TEXT, taskId: null } };
   if (ev.type === 'project') return null;
   return { ...ev, project: '' };
+}
+
+/** Takes private project names and task titles out of chat that visitors can read. It can't catch a paraphrase, and the setting says so. */
+export function redactChat(db, floorId, text) {
+  const terms = new Set();
+  const priv = all(db, 'SELECT slug,title FROM projects WHERE floor_id=? AND private=1', floorId);
+  for (const p of priv) { terms.add(p.slug); terms.add(p.title); }
+  if (priv.length) for (const t of all(db, 'SELECT title,project FROM tasks WHERE floor_id=? ORDER BY id DESC LIMIT 200', floorId)) if (priv.some((p) => p.slug === t.project)) terms.add(t.title);
+  const list = [...terms].filter((x) => x && x.length >= 3).sort((a, b) => b.length - a.length);
+  if (!list.length) return text;
+  const re = new RegExp(list.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+  return String(text).replace(re, 'private');
 }
 export { PRIVATE_TEXT };

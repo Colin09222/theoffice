@@ -19,7 +19,7 @@ for (const [a, p] of [
   ['2001:db8::', 32], ['2001::', 32], ['2001:10::', 28], ['2001:20::', 28], ['3fff::', 20], ['5f00::', 16],
 ]) v6.addSubnet(a, p, 'ipv6');
 
-function expandV6(ip) {
+export function expandV6(ip) {
   let s = ip.split('%')[0].toLowerCase();
   const dotted = s.match(/(\d+\.\d+\.\d+\.\d+)$/);
   if (dotted) {
@@ -93,14 +93,39 @@ export function guardedLookup(blocked = isBlockedIp, resolver = dns.lookup) {
   };
 }
 
+// Hand-rolled because the obvious regexes go quadratic on input like "<<<<" or "<script <script", and this runs on hostile pages.
+function stripBlocks(html) {
+  const lower = html.toLowerCase();
+  const out = [];
+  let pos = 0;
+  for (;;) {
+    const open = lower.indexOf('<', pos);
+    if (open < 0) { out.push(html.slice(pos)); break; }
+    out.push(html.slice(pos, open));
+    let end = -1;
+    if (lower.startsWith('<!--', open)) {
+      const close = lower.indexOf('-->', open + 4);
+      end = close < 0 ? lower.length : close + 3;
+    } else {
+      const tag = BLOCK_TAGS.find((t) => lower.startsWith(t, open + 1) && !/[a-z0-9-]/.test(lower[open + 1 + t.length] || ' '));
+      if (tag) {
+        const close = lower.indexOf(`</${tag}`, open + 1);
+        if (close < 0) end = lower.length;
+        else { const gt = lower.indexOf('>', close); end = gt < 0 ? lower.length : gt + 1; }
+      }
+    }
+    if (end < 0) { out.push('<'); pos = open + 1; } else { out.push(' '); pos = end; }
+  }
+  return out.join('');
+}
+const BLOCK_TAGS = ['script', 'style', 'noscript', 'svg', 'iframe', 'template'];
+
 export function htmlToText(html) {
-  return html
-    .replace(/<(script|style|noscript|svg|iframe|template)\b[\s\S]*?<\/\1\s*>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<\/(p|div|li|h[1-6]|tr|section|article|br)\s*>|<br\s*\/?>/gi, '\n')
-    .replace(/<[^>]*>/g, ' ')
+  return stripBlocks(html)
+    .replace(/<\/(?:p|div|li|h[1-6]|tr|section|article|br)[ \t]*>|<br[ \t]*\/?>/gi, '\n')
+    .replace(/<[^<>]*>/g, ' ')
     .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-    .replace(/[ \t\r\f]+/g, ' ').replace(/\n\s*\n\s*/g, '\n\n').trim();
+    .replace(/[ \t\r\f]+/g, ' ').replace(/\n[ \n]*\n */g, '\n\n').trim();
 }
 
 function once(url, opts) {

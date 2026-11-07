@@ -7,9 +7,11 @@ import { get, all, run, tx } from './db.js';
 import { ROOT } from './config.js';
 import * as A from './auth.js';
 import { Bus } from './bus.js';
-import { Engine, agentView, taskView, PRIVATE_TEXT } from './engine.js';
+import { Engine, agentView, taskView, PRIVATE_TEXT, redactChat } from './engine.js';
 import { slugify, slugPattern, cleanPath, TEXT_EXT, listFiles, readFile, floorBytes, WorkspaceError } from './workspace.js';
 import { publicUrl } from './tools.js';
+import { embeddedV4, expandV6 } from './safefetch.js';
+import { isIP } from 'node:net';
 import { renderMarkdown, esc } from '../public/js/markdown.js';
 import { LOOK_FIELDS, DEFAULT_LOOK, DEFAULT_DECOR, DEFAULT_COLORS, FLOOR_STYLES, PETS } from '../public/js/looks.js';
 import { createOpenRouterClient, scrub } from './llm.js';
@@ -23,7 +25,7 @@ const BASE_HEADERS = {
   'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex, nofollow, noarchive',
   'referrer-policy': 'same-origin', 'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
 };
-const LIMITS = { code: [8, 60000], login: [6, 60000], admin: [5, 60000], chat: [20, 60000], mutate: [90, 60000], read: [900, 60000], publicSite: [600, 60000], sse: [40, 60000] };
+const LIMITS = { code: [8, 60000], login: [6, 60000], admin: [5, 60000], adminAll: [60, 60000], chat: [20, 60000], mutate: [90, 60000], read: [900, 60000], publicSite: [600, 60000], sse: [40, 60000] };
 const MAX_CHAT = 4000;
 const RESERVED = new Set(['api', 'admin', 'f', 'floor', 'js', 'css', 'vendor', 'robots', 'www', 'static', 'assets']);
 
@@ -75,11 +77,14 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- request helpers ----
   const ipOf = (req) => {
     // Only the configured gate may speak for the client. The rightmost XFF hop is the one our own proxy appended.
+    let ip = req.socket.remoteAddress || 'unknown';
     if (cfg.trustProxy) {
       const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
-      if (xff.length) return xff[xff.length - 1].slice(0, 64);
+      if (xff.length) ip = xff[xff.length - 1].slice(0, 64);
     }
-    return req.socket.remoteAddress || 'unknown';
+    // One IPv6 customer usually holds a whole /64, so that's the unit a limit has to count.
+    if (isIP(ip) === 6) return embeddedV4(ip) || `${expandV6(ip).slice(0, 4).map((w) => w.toString(16)).join(':')}::/64`;
+    return ip;
   };
   const limit = (bucket, key) => {
     const [n, w] = LIMITS[bucket];
@@ -136,7 +141,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   }
   const viewerFor = (req, floor) => {
     const s = sessionOf(req);
-    return { owner: !!s && s.floor_id === floor.id, publicChat: !!floor.public_chat };
+    return { owner: !!s && s.floor_id === floor.id, sessionHash: s?.hash, publicChat: !!floor.public_chat, defaultPrivate: !!floor.default_private };
   };
 
   // ---- views ----
@@ -148,6 +153,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const privateSet = (f) => new Set(all(db, 'SELECT slug FROM projects WHERE floor_id=? AND private=1', f.id).map((p) => p.slug));
   function snapshot(f, viewer) {
     const hidden = viewer.owner ? new Set() : privateSet(f);
+    if (!viewer.owner && viewer.defaultPrivate) hidden.add(''); // nothing untagged is public on a default-private floor
     const agents = all(db, 'SELECT * FROM agents WHERE floor_id=? ORDER BY id', f.id).map((a) => {
       const v = agentView(a);
       if (hidden.has(a.project)) { v.activity = PRIVATE_TEXT; v.taskId = null; }
@@ -163,13 +169,13 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const feedRows = all(db, "SELECT * FROM events WHERE floor_id=? AND type='feed' ORDER BY id DESC LIMIT 120", f.id).reverse();
     const feed = feedRows.map((e) => {
       const d = JSON.parse(e.data);
-      return { id: e.id, ...d, text: hidden.has(e.project) ? PRIVATE_TEXT.toLowerCase() : d.text };
+      return { id: e.id, ...d, text: hidden.has(e.project) && d.agent !== null ? PRIVATE_TEXT.toLowerCase() : d.text };
     });
     const out = {
       viewer: { owner: viewer.owner }, floor: { number: f.number, slug: f.slug, name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), boss: JSON.parse(f.boss), decor: JSON.parse(f.decor), publicChat: !!f.public_chat, defaultPrivate: !!f.default_private, ...engine.floorState(f.id) },
       agents, tasks, projects, feed, spend: { today: engine.spentToday(f.id), cap: cfg.floorDailyUsd }, lastEventId: get(db, 'SELECT COALESCE(MAX(id),0) n FROM events WHERE floor_id=?', f.id).n,
     };
-    if (viewer.owner || viewer.publicChat) out.messages = all(db, "SELECT id,role,agent_id agentId,text,created_at createdAt FROM messages WHERE floor_id=? AND role!='note' ORDER BY id DESC LIMIT 120", f.id).reverse();
+    if (viewer.owner || viewer.publicChat) out.messages = all(db, "SELECT id,role,agent_id agentId,text,created_at createdAt FROM messages WHERE floor_id=? AND role!='note' ORDER BY id DESC LIMIT 120", f.id).reverse().map((m) => (viewer.owner ? m : { ...m, text: redactChat(db, f.id, m.text) }));
     if (viewer.owner) {
       out.questions = all(db, 'SELECT q.id,q.text,a.name agentName FROM questions q LEFT JOIN agents a ON a.id=q.agent_id WHERE q.floor_id=? AND q.answer IS NULL ORDER BY q.id', f.id);
       out.purchases = all(db, 'SELECT p.id,p.item,p.price,p.why,p.link,p.status,p.created_at createdAt,a.name agentName FROM purchases p LEFT JOIN agents a ON a.id=p.agent_id WHERE p.floor_id=? ORDER BY p.id DESC LIMIT 50', f.id);
@@ -248,7 +254,6 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     limit('login', ip);
     const b = await readJson(req, 2048);
     const slug = String(b.slug ?? '').trim().toLowerCase();
-    limit('login', `slug:${slug.slice(0, 60)}`);
     const f = slugPattern.test(slug) ? get(db, 'SELECT * FROM floors WHERE slug=?', slug) : null;
     const code = A.normalizeCode(b.recoveryCode);
     // scrypt runs whether or not the floor exists, so timing doesn't reveal which slugs are real.
@@ -279,7 +284,13 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     res.writeHead(200, { ...BASE_HEADERS, 'content-security-policy': APP_CSP, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     res.socket?.setNoDelay?.(true);
     const write = (ev) => {
-      const v = engine.publicView(ev, { owner: viewer.owner, publicChat: !!get(db, 'SELECT public_chat c FROM floors WHERE id=?', f.id)?.c });
+      // A revoked or expired session stops being the owner at once. The browser reconnects as a visitor.
+      if (viewer.owner) {
+        const live = get(db, 'SELECT expires_at e FROM sessions WHERE hash=?', viewer.sessionHash);
+        if (!live || live.e < now()) { res.end(); return; }
+      }
+      const fl = get(db, 'SELECT public_chat c, default_private d FROM floors WHERE id=?', f.id);
+      const v = engine.publicView(ev, { owner: viewer.owner, publicChat: !!fl?.c, defaultPrivate: !!fl?.d });
       if (!v) return;
       res.write(`${v.id ? `id: ${v.id}\n` : ''}event: ${v.type}\ndata: ${JSON.stringify({ ...v.data, _ts: v.ts, _id: v.id || undefined })}\n\n`);
     };
@@ -400,7 +411,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- admin ----
   POST('/api/admin/login', async ({ req, res, ip }) => {
     limit('admin', ip);
-    limit('admin', 'all');
+    limit('adminAll', 'all'); // high enough that one attacker's IP can't lock the real admin out
     const b = await readJson(req, 2048);
     if (!adminHash || !A.verifySecret(String(b.password ?? '').slice(0, 300), adminHash)) throw new HttpError(401, 'bad_login', 'Wrong password.');
     const s = A.createSession(db, 'admin', null, A.ADMIN_MAX_AGE, now());
@@ -454,6 +465,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   });
 
   // ---- published sites ----
+  const docCache = new Map();
   function renderDoc(f, pr, md) {
     const colors = JSON.parse(f.colors);
     const sources = JSON.parse(pr.sources);
@@ -507,7 +519,14 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     } else if (safe === 'index.html' || safe.endsWith('/index.html')) {
       row = get(db, 'SELECT content FROM published_files WHERE floor_id=? AND project=? AND path=?', f.id, pr.slug, safe.replace(/index\.html$/, 'index.md'));
       if (!row) return miss();
-      type = 'text/html; charset=utf-8'; body = renderDoc(f, pr, row.content);
+      type = 'text/html; charset=utf-8';
+      const key = `${f.id}|${pr.slug}|${pr.published_at}|${safe}|${f.name}|${f.number}|${f.colors}|${pr.title}|${pr.sources}`;
+      body = docCache.get(key);
+      if (body === undefined) {
+        body = renderDoc(f, pr, row.content);
+        if (docCache.size >= 40) docCache.delete(docCache.keys().next().value);
+        docCache.set(key, body);
+      }
     } else return miss();
     res.writeHead(200, { ...SITE, 'content-type': type });
     res.end(req.method === 'HEAD' ? undefined : body);

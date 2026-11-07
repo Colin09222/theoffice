@@ -43,7 +43,8 @@ const DEFS = {
 };
 
 export const STAFF_TOOLS = ['write_file', 'read_file', 'list_files', 'publish_project', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request'];
-export const MANAGER_TOOLS = [...STAFF_TOOLS, 'assign_task', 'review_task', 'cancel_task', 'hire_staff'];
+// The manager has no web tools. It reads every staff result and knows private titles, so it must have no way to send anything out.
+export const MANAGER_TOOLS = ['write_file', 'read_file', 'list_files', 'publish_project', 'ask_boss', 'file_purchase_request', 'assign_task', 'review_task', 'cancel_task', 'hire_staff'];
 
 export const toolDefs = (names, cfg) => names.filter((n) => n !== 'web_search' || cfg.webSearchKey).map((n) => DEFS[n]);
 
@@ -62,27 +63,36 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     if (slug && get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', c.floor.id, slug)?.private) return slug;
     return c.project || slug || '';
   };
+  const isPrivate = (c, slug) => !!(slug && get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', c.floor.id, slug)?.private);
+  const pathProject = (path) => String(path).match(/^projects\/([^/]+)\//)?.[1] || '';
+  // An agent hijacked by a web page must not be able to carry private work out through a public task.
+  // Only an agent on a private task can touch private projects, and everything it publishes stays private.
+  const offLimits = (c, path) => isPrivate(c, pathProject(path)) && !isPrivate(c, c.project);
   const handlers = {
     write_file(c, a) {
       const content = typeof a.content === 'string' ? a.content : '';
+      if (offLimits(c, a.path)) throw new WorkspaceError('that project is private, and this task can\'t change it');
       const r = writeFile(db, c.floor.id, str(a, 'path', 300), content, c.agent.id, cfg.quotaBytes);
+      const fresh = pathProject(r.path);
+      if (fresh && isPrivate(c, c.project)) engine.upsertProject(c.floor, fresh, { title: fresh, makePrivate: true });
       c.say('typing', `Writing ${r.path}`, `wrote ${r.path} (${Math.ceil(r.size / 1024)} KB)`, { project: tagFor(c, r.path) });
       return `Saved ${r.path} (${r.size} bytes).`;
     },
     read_file(c, a) {
       const f = readFile(db, c.floor.id, str(a, 'path', 300));
-      if (!f) throw new WorkspaceError('no such file');
+      if (!f || offLimits(c, f.path)) throw new WorkspaceError('no such file');
       c.say('reading', `Reading ${f.path}`, `read ${f.path}`, { project: tagFor(c, f.path) });
       return wrapUntrusted(`workspace:${f.path}`, f.content.slice(0, 40000));
     },
     list_files(c, a) {
-      const files = listFiles(db, c.floor.id, typeof a.prefix === 'string' ? a.prefix : '');
+      const files = listFiles(db, c.floor.id, typeof a.prefix === 'string' ? a.prefix : '').filter((f) => !offLimits(c, f.path));
       c.say('reading', 'Checking the shared drive', 'looked through the shared drive');
       return files.length ? files.map((f) => `${f.path} (${f.size} bytes)`).join('\n') : 'The workspace is empty.';
     },
     publish_project(c, a) {
       const slug = str(a, 'project', 60);
       if (!slugPattern.test(slug)) throw new WorkspaceError('project must be lowercase letters, digits and hyphens');
+      if (isPrivate(c, slug) && !isPrivate(c, c.project)) throw new WorkspaceError('that project is private, and this task can\'t change it');
       const kind = ['site', 'doc', 'research'].includes(a.kind) ? a.kind : 'site';
       const prefix = `projects/${slug}/`;
       const has = (n) => get(db, 'SELECT 1 x FROM files WHERE floor_id=? AND path=?', c.floor.id, prefix + n);

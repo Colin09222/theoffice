@@ -12,7 +12,10 @@ export function safeUrl(raw) {
   return u || null;
 }
 
+const MAX_INLINE = 6000; // beyond this a line is shown as plain text, which keeps rendering linear on hostile input
+
 function inline(text) {
+  if (String(text).length > MAX_INLINE) return esc(text);
   const codes = []; const links = [];
   let s = String(text).replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0001${codes.length - 1}\u0001`; });
   s = esc(s);
@@ -56,7 +59,7 @@ export function renderMarkdown(src) {
       const tag = ordered ? 'ol' : 'ul';
       out.push(`<${tag}>${buf.map((b) => `<li>${inline(b)}</li>`).join('')}</${tag}>`); continue;
     }
-    if (/\|/.test(l) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && /-/.test(lines[i + 1])) {
+    if (/\|/.test(l) && i + 1 < lines.length && /^[\s:|-]+$/.test(lines[i + 1]) && /-/.test(lines[i + 1])) {
       const cells = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => inline(c.trim()));
       const head = cells(l); i += 2; const rows = [];
       while (i < lines.length && /\|/.test(lines[i])) rows.push(cells(lines[i++]));

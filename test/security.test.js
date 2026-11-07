@@ -5,7 +5,8 @@ import http from 'node:http';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { boot, Client, claim, adminClient, floorState, waitDone, until, sse, sleep } from './helpers.js';
-import { safeFetch, FetchBlocked, guardedLookup, isBlockedIp } from '../server/safefetch.js';
+import { safeFetch, FetchBlocked, guardedLookup, isBlockedIp, htmlToText } from '../server/safefetch.js';
+import { renderMarkdown } from '../public/js/markdown.js';
 import { MANAGER_TOOLS, STAFF_TOOLS } from '../server/tools.js';
 import { ROOT } from '../server/config.js';
 import { managerPrompt, staffPrompt } from '../server/prompts.js';
@@ -598,6 +599,137 @@ describe('5. CSRF, rate limits, input limits, logging, noindex', () => {
   });
   test('purchase requests have no payment path, and no card integration exists', async () => {
     for (const f of srcFiles()) assert.doesNotMatch(readFileSync(f, 'utf8'), /stripe\.com|paypal|card_number|\bcheckout\b/i, f);
+  });
+});
+
+describe('independent review: regressions', () => {
+  const ctxFor = (t, slug, role, project = '', tools = STAFF_TOOLS) => {
+    const floor = t.db.prepare('SELECT * FROM floors WHERE slug=?').get(slug);
+    const agent = t.db.prepare('SELECT * FROM agents WHERE floor_id=? AND role=?').get(floor.id, role);
+    return { ctx: t.app.engine.toolCtx(floor, agent, project ? { project } : null, tools), floor, agent };
+  };
+  const timed = (fn) => { const t0 = performance.now(); fn(); return performance.now() - t0; };
+
+  test('hostile markdown renders in linear time', () => {
+    const n = 400 * 1024;
+    const inputs = [`a|b\n${' '.repeat(n)}x`, `a|b\n${' '.repeat(n)}`, `${'['.repeat(n)}`, `${'[x]('.repeat(n / 4)}`, `${'**a'.repeat(n / 3)}`, `${' *a'.repeat(n / 3)}`, `${' _a'.repeat(n / 3)}`, `${'`'.repeat(n)}`, `${'a|b\n-|-\n'.repeat(n / 8)}`, `${' '.repeat(n)}`, `${'- '.repeat(n / 2)}`, `${'> '.repeat(n / 2)}`, `${'#'.repeat(n)}`, `${'[a](b '.repeat(n / 6)}`];
+    for (const i of inputs) { const ms = timed(() => renderMarkdown(i)); assert.ok(ms < 700, `${JSON.stringify(i.slice(0, 12))} took ${Math.round(ms)}ms`); }
+  });
+  test('hostile HTML converts in linear time, and still strips active content', () => {
+    const n = 512 * 1024;
+    for (const i of [`${'<'.repeat(n)}`, `${'<script '.repeat(n / 8)}`, `${'<!--'.repeat(n / 4)}`, `${'</p '.repeat(n / 4)}`, `${'<a '.repeat(n / 3)}`, `\n${' '.repeat(n)}`, `${'\n '.repeat(n / 2)}`, `${'<style>'.repeat(n / 7)}`]) {
+      const ms = timed(() => htmlToText(i)); assert.ok(ms < 700, `${JSON.stringify(i.slice(0, 12))} took ${Math.round(ms)}ms`);
+    }
+    const t = htmlToText('a<SCRIPT src=x>evil()</ScRiPt >b<!-- no --><svg><text>no</text></svg><scripty>keep</scripty><style>no');
+    assert.doesNotMatch(t, /evil|no\b/); assert.match(t, /keep/); assert.match(t, /a\s*b/);
+  });
+  test('an agent on a public task cannot read, list, change or republish a private project', async () => {
+    const t = await boot(); const a = await claim(t, 'Vault');
+    const { floor, agent } = ctxFor(t, a.slug, 'writer');
+    t.app.engine.upsertProject(floor, 'secret', { title: 'secret', makePrivate: true });
+    writeFile(t.db, floor.id, 'projects/secret/plan.md', 'THE-SECRET', agent.id, 1e6);
+    writeFile(t.db, floor.id, 'projects/open/index.md', 'hello', agent.id, 1e6);
+    const run = (ctx, tool, args) => t.app.engine.tools.exec(ctx, tool, JSON.stringify(args));
+    for (const [role, tools] of [['writer', STAFF_TOOLS], ['manager', MANAGER_TOOLS]]) {
+      const pub = ctxFor(t, a.slug, role, '', tools).ctx;
+      assert.match(await run(pub, 'read_file', { path: 'projects/secret/plan.md' }), /no such file/, role);
+      const list = await run(pub, 'list_files', {});
+      assert.doesNotMatch(list, /secret/, role); assert.match(list, /open/, role);
+      assert.match(await run(pub, 'write_file', { path: 'projects/secret/x.md', content: 'x' }), /private/, role);
+      assert.match(await run(pub, 'publish_project', { project: 'secret', title: 'x', kind: 'doc' }), /private/, role);
+    }
+    const inside = ctxFor(t, a.slug, 'writer', 'secret').ctx;
+    assert.match(await run(inside, 'read_file', { path: 'projects/secret/plan.md' }), /THE-SECRET/);
+    // A spin-off written from inside private work is private before it is ever published.
+    assert.match(await run(inside, 'write_file', { path: 'projects/secret-notes/index.md', content: 'THE-SECRET' }), /Saved/);
+    assert.match(await run(ctxFor(t, a.slug, 'writer').ctx, 'read_file', { path: 'projects/secret-notes/index.md' }), /no such file/);
+    await t.close();
+  });
+  test('the manager has no way to send anything off the floor', () => {
+    assert.ok(!MANAGER_TOOLS.includes('fetch_url')); assert.ok(!MANAGER_TOOLS.includes('web_search'));
+  });
+  test('private:true with no project is still private', async () => {
+    const t = await boot(); const a = await claim(t, 'Forgetful');
+    const { floor, agent: mgr } = ctxFor(t, a.slug, 'manager');
+    t.app.engine.assignTask(floor, mgr, { to: 'writer', title: 'ACQUIRE-ZETACORP', brief: 'b', plan: 'ZETA-PLAN', project: '', private: true, dependsOn: [] });
+    const v = JSON.stringify((await new Client(t).get(`/api/floors/${a.slug}`)).data);
+    assert.doesNotMatch(v, /ZETACORP|ZETA-PLAN/);
+    await t.close();
+  });
+  test('default-private floors hide untagged activity, in snapshots and on the live stream', async () => {
+    const t = await boot(); const a = await claim(t, 'Hush');
+    await a.post(`/api/floors/${a.slug}/settings`, { defaultPrivate: true });
+    const vis = sse(new Client(t), a.slug); await sleep(30);
+    const { ctx, floor } = ctxFor(t, a.slug, 'manager', '', MANAGER_TOOLS);
+    await t.app.engine.tools.exec(ctx, 'write_file', JSON.stringify({ path: 'notes/merger-with-zetacorp.md', content: 'x' }));
+    t.app.engine.pauseFloor(floor.id, 'Paused by the boss');
+    await sleep(50);
+    const snap = (await new Client(t).get(`/api/floors/${a.slug}`)).data;
+    for (const hay of [JSON.stringify(vis.events), JSON.stringify(snap)]) assert.doesNotMatch(hay, /zetacorp|merger/i);
+    assert.ok(snap.feed.some((f) => /Floor paused/.test(f.text)), 'office notices still show');
+    assert.match(JSON.stringify((await a.get(`/api/floors/${a.slug}`)).data), /zetacorp/, 'the owner still sees it');
+    await vis.close(); await t.close();
+  });
+  test('public chat hides private names, in snapshots and live, and never streams raw tokens to visitors', async () => {
+    const t = await boot(); const a = await claim(t, 'Chat Co');
+    await a.post(`/api/floors/${a.slug}/settings`, { publicChat: true });
+    const vis = sse(new Client(t), a.slug); await sleep(30);
+    await a.post(`/api/floors/${a.slug}/chat`, { text: 'go build hushproject [private]' });
+    await waitDone(a);
+    await until(async () => /All done/.test(JSON.stringify((await new Client(t).get(`/api/floors/${a.slug}`)).data.messages)), { what: 'report' });
+    await sleep(50);
+    const owner = await floorState(a);
+    const slug = owner.projects.find((p) => p.kind === 'site').slug;
+    assert.ok(JSON.stringify(owner.messages).includes(slug), 'the owner sees the real name');
+    const snap = (await new Client(t).get(`/api/floors/${a.slug}`)).data;
+    assert.ok(snap.messages.length > 2);
+    assert.ok(!JSON.stringify(snap.messages).includes(slug));
+    // Live messages sent after the project became private are redacted too; the first plan message predates nothing.
+    const report = vis.events.filter((e) => e.type === 'message' && /All done/.test(e.data.text));
+    assert.ok(report.length); assert.ok(!JSON.stringify(report).includes(slug));
+    assert.ok(!vis.events.some((e) => e.type === 'token'));
+    await vis.close(); await t.close();
+  });
+  test('an attacker cannot lock out the right admin password or a real recovery code', async () => {
+    const t = await boot({ rateScale: 1, trustProxy: true }); const a = await claim(t, 'Lockout');
+    const from = (ip) => ({ headers: { 'x-forwarded-for': ip } });
+    for (let i = 0; i < 12; i++) await new Client(t).post('/api/admin/login', { password: 'wrong' }, from('6.6.6.6'));
+    for (let i = 0; i < 12; i++) await new Client(t).post('/api/login', { slug: a.slug, recoveryCode: 'wrong' }, from('6.6.6.6'));
+    assert.equal((await new Client(t).post('/api/admin/login', { password: 'correct horse battery' }, from('7.7.7.7'))).status, 200);
+    assert.equal((await new Client(t).post('/api/login', { slug: a.slug, recoveryCode: a.recovery }, from('7.7.7.7'))).status, 200);
+    await t.close();
+  });
+  test('rate limits count a whole IPv6 /64 as one client, and unwrap mapped IPv4', async () => {
+    const t = await boot({ rateScale: 1, trustProxy: true });
+    const go = (ip) => new Client(t).post('/api/claim/check', { code: 'OFFICE-NOPE' }, { headers: { 'x-forwarded-for': ip } });
+    let last; for (let i = 1; i <= 10; i++) last = await go(`2001:4860:1:2::${i.toString(16)}`);
+    assert.equal(last.status, 429);
+    assert.equal((await go('2001:4860:1:3::1')).status, 404, 'the next /64 is someone else');
+    let m; for (let i = 0; i < 10; i++) m = await go(i % 2 ? '::ffff:9.8.7.6' : '9.8.7.6');
+    assert.equal(m.status, 429);
+    await t.close();
+  });
+  test('a call aborted before its first token is still charged', async () => {
+    const t = await boot({}, { llm: { chat: ({ signal }) => new Promise((_, rej) => { signal.addEventListener('abort', () => rej(signal.reason)); }) } });
+    const a = await claim(t, 'Dodger');
+    await a.post(`/api/floors/${a.slug}/chat`, { text: 'hello' });
+    await until(() => t.app.engine.runs.size === 1 && t.app.engine.limiter.active === 1, { what: 'call in flight' });
+    await sleep(20);
+    await a.post(`/api/floors/${a.slug}/control`, { action: 'pause' });
+    await until(() => t.db.prepare('SELECT COUNT(*) n FROM ledger').get().n === 1, { what: 'ledger row' });
+    assert.ok(t.db.prepare('SELECT cost_usd c FROM ledger').get().c > 0);
+    await t.close();
+  });
+  test('a revoked session loses its open stream', async () => {
+    const t = await boot(); const a = await claim(t, 'Revoked');
+    const old = sse(a, a.slug); await sleep(30);
+    const fresh = new Client(t);
+    const r = await fresh.post('/api/login', { slug: a.slug, recoveryCode: a.recovery }); fresh.csrf = r.data.csrf;
+    await fresh.post(`/api/floors/${a.slug}/chat`, { text: 'for the new device only' });
+    await until(async () => (await fresh.get(`/api/floors/${a.slug}`)).data.messages.some((m) => /Three angles/.test(m.text)), { what: 'reply' });
+    assert.doesNotMatch(JSON.stringify(old.events), /new device only|Three angles/);
+    await until(() => t.app.bus.total === 0, { what: 'stream closed' });
+    await old.close(); await t.close();
   });
 });
 

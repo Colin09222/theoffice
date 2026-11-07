@@ -345,7 +345,7 @@ class FloorPage {
             h('label.field', {}, h('span', {}, 'Tagline'), h('input', { value: draft.tagline, maxlength: 120, oninput: (e) => { draft.tagline = e.target.value; } })),
             h('label.field', {}, h('span', {}, 'Main colour'), h('input', { type: 'color', value: draft.colors.primary, oninput: (e) => { draft.colors.primary = e.target.value; } })),
             h('label.field', {}, h('span', {}, 'Accent colour'), h('input', { type: 'color', value: draft.colors.accent, oninput: (e) => { draft.colors.accent = e.target.value; } })),
-            h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.publicChat, onchange: (e) => { draft.publicChat = e.target.checked; } }), h('span', {}, 'Visitors can read my chat with the manager')),
+            h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.publicChat, onchange: (e) => { draft.publicChat = e.target.checked; } }), h('span', {}, 'Visitors can read my chat with the manager. Private project names are hidden, but anything else said about them isn\'t')),
             h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.defaultPrivate, onchange: (e) => { draft.defaultPrivate = e.target.checked; } }), h('span', {}, 'New projects start private')),
             h('button.btn.primary.wide', { type: 'submit' }, 'Save'),
             h('button.btn.ghost.wide', { type: 'button', onclick: async () => { try { await api('/logout', { method: 'POST' }); await refreshMe(); close(); window.officeGo('/'); } catch (e) { toast(e.message, 'bad'); } } }, 'Sign out of this floor')));
