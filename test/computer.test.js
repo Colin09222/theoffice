@@ -10,7 +10,8 @@ import { boot, claim, until, sleep, floorState, sse, Client } from './helpers.js
 const open = [];
 async function start(script = {}, overrides = {}) {
   const sessions = createMockSessions({}, script);
-  const t = await boot({ computerEnabled: true, outputLagMs: 0, ...overrides }, { sessions });
+  // These count the ledger row by row, so the people's own chatter (people.test.js) stays out.
+  const t = await boot({ computerEnabled: true, outputLagMs: 0, peopleTalk: false, ...overrides }, { sessions });
   open.push(t);
   // The manager would approve finished work straight away. These tests look at the staff's side of it.
   t.app.engine.runManager = async () => {};

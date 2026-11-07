@@ -161,7 +161,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- views ----
   const floorCard = (f) => {
     const busy = get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status='doing'", f.id).n;
-    const card = { number: f.number, slug: f.slug, name: f.name || 'New company', tagline: f.tagline, colors: JSON.parse(f.colors), status: f.status, busy, ...(f.name ? {} : { setup: true }) };
+    const card = { number: f.number, slug: f.slug, name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), status: f.status, busy, ...(f.name ? {} : { setup: true }) };
     applyHooks(hooks.floorCard, f, card);
     return card;
   };
@@ -262,7 +262,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const name = clean(b.name, 60); const tagline = clean(b.tagline, 120); const bossName = clean(b.bossName, 30);
     // A name is optional now: without one the manager works out the company with the boss in the chat. One letter is still a typo.
     if (name.length === 1) throw new HttpError(400, 'bad_name', 'Give your company a name.');
-    if (!bossName) throw new HttpError(400, 'bad_boss', 'What should the staff call you?');
+    // The old form names both. A code on its own opens a floor that is set up in the chat, boss's name and all.
+    if (name && !bossName) throw new HttpError(400, 'bad_boss', 'What should the staff call you?');
     const colors = validColors(b.colors); const look = validLook(b.look); const decor = validDecor({});
     const given = slugify(name, 'floor');
     const recovery = A.newRecoveryCode(); const recoveryHash = A.hashSecret(recovery);
@@ -285,7 +286,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const mgrName = get(db, "SELECT name FROM agents WHERE floor_id=? AND role='manager'", floorId)?.name || 'your office manager';
     engine.managerSays(floorId, name
       ? `Welcome to the building, ${bossName}. I'm your office manager and everyone's at their desks. What should ${name} start on? Tap one below, or just tell me what's on your mind.`
-      : `${bossName}, hi. I'm ${mgrName}, your office manager. The staff are at their desks and nobody knows what company this is yet, so that's our first job. What should it do? A rough idea is plenty, or say "you pick" and I'll pitch you one.`);
+      : `${bossName ? `${bossName}, hi` : 'Hi'}. I'm ${mgrName}, your office manager. The staff are at their desks and nobody knows what company this is yet, so that's our first job. ${bossName ? '' : 'What should we call you, and what'}${bossName ? 'What' : ''} should it do? A rough idea is plenty, or say "you pick" and I'll pitch you one.`);
     engine.people.castFloor(floorId);
     log('info', 'floor claimed', { floor: f.number });
     json(res, 201, { slug: f.slug, number: f.number, recoveryCode: recovery, csrf: s.csrf }, { 'set-cookie': A.cookieHeader(A.COOKIE, s.token, A.OWNER_MAX_AGE) });

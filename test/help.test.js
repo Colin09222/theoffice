@@ -371,7 +371,7 @@ describe('guidance bypasses nothing', () => {
     const calls = [];
     const { createMockClient } = await import('../server/mock.js');
     const t0 = await boot(); const inner = createMockClient(t0.cfg); await t0.close();
-    const t = await boot({ helpTickMs: 5, floorDailyUsd: 0.05 }, { llm: { chat(x) { calls.push(x.meta.kind); return inner.chat(x); } } });
+    const t = await boot({ helpTickMs: 5, floorDailyUsd: 0.05, peopleTalk: false }, { llm: { chat(x) { calls.push(x.meta.kind); return inner.chat(x); } } });
     try {
       const a = await claim(t, 'Skint'); const floor = floorOf(t, a);
       await ask(t, floor);

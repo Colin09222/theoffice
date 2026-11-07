@@ -194,9 +194,10 @@ export function installCustomise(ext) {
       const decor = { ...(vibe?.decor || {}), ...(typeof i.layout === 'string' ? { layout: i.layout } : {}) };
       const tone = typeof i.tone === 'string' && Object.hasOwn(TONE_NAMES, i.tone) ? i.tone : vibe?.tone;
       const about = typeof i.what_it_does === 'string' ? i.what_it_does : undefined;
-      if (!i.name && typeof i.tagline !== 'string' && !Object.keys(colors).length && !Object.keys(decor).length && !tone && about === undefined) throw new WorkspaceError('say what to change');
+      const bossName = typeof i.boss_name === 'string' ? settingText(i.boss_name, 30) : '';
+      if (!i.name && !bossName && typeof i.tagline !== 'string' && !Object.keys(colors).length && !Object.keys(decor).length && !tone && about === undefined) throw new WorkspaceError('say what to change');
       tx(db, () => {
-        saveSettings(f, { name: i.name, ...(typeof i.tagline === 'string' ? { tagline: i.tagline } : {}), ...(Object.keys(colors).length ? { colors } : {}), ...(Object.keys(decor).length ? { decor } : {}) });
+        saveSettings(f, { name: i.name, ...(bossName ? { boss: { name: bossName } } : {}), ...(typeof i.tagline === 'string' ? { tagline: i.tagline } : {}), ...(Object.keys(colors).length ? { colors } : {}), ...(Object.keys(decor).length ? { decor } : {}) });
         if (tone || about !== undefined) run(db, 'UPDATE floors SET identity=? WHERE id=?', JSON.stringify(validIdentity({ ...(tone ? { tone } : {}), ...(about !== undefined ? { about } : {}) }, parse(f.identity, {}))), f.id);
       });
       const now = get(db, 'SELECT name,tagline FROM floors WHERE id=?', f.id);

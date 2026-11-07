@@ -35,7 +35,24 @@ describe('a company made by talking', () => {
     assert.match(s.floor.slug, /^floor-\d+$/);
     assert.match(s.messages[0].text, /Sam/); assert.match(s.messages[0].text, /What should it do/);
     const lobby = (await new Client(t).get('/api/floors')).data.floors.find((f) => f.slug === c.slug);
-    assert.equal(lobby.setup, true); assert.ok(lobby.name.length > 1, 'the lobby has something to show');
+    assert.equal(lobby.setup, true); assert.equal(lobby.name, '', 'the lobby shows its own placeholder');
+  });
+
+  test('a code on its own is enough: the boss\'s name comes out in the chat too', async () => {
+    const c = new Client(t);
+    const r = await c.post('/api/claim', { code: t.code() });
+    assert.equal(r.status, 201); assert.ok(r.data.recoveryCode && r.data.csrf);
+    c.csrf = r.data.csrf; c.slug = r.data.slug;
+    const s = await floorState(c);
+    assert.equal(s.floor.setup, true); assert.match(s.messages[0].text, /^Hi\. .*What should we call you/);
+    const card = (await new Client(t).get('/api/floors')).data.floors.find((f) => f.slug === c.slug);
+    assert.equal(card.name, ''); assert.equal(card.setup, true);
+    const f = row(t, c.slug);
+    const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", f.id);
+    assert.match(managerPrompt(f, JSON.parse(f.boss), { manager: mgr.name }, {}), /don't know your boss's name yet/);
+    const ctx = t.app.engine.toolCtx(f, mgr, null, toolsForRole('manager')); ctx.bossTurn = true;
+    await t.app.engine.tools.exec(ctx, 'set_company', JSON.stringify({ boss_name: 'Robin' }));
+    assert.equal((await floorState(c)).floor.boss.name, 'Robin');
   });
 
   test('old floors and named claims are unaffected', async () => {
@@ -43,7 +60,7 @@ describe('a company made by talking', () => {
     const s = await floorState(c);
     assert.equal(s.floor.setup, false); assert.equal(s.floor.name, 'Already Named');
     assert.equal((await new Client(t).post('/api/claim', { code: t.code(), name: 'x', bossName: 'B' })).status, 400);
-    assert.equal((await new Client(t).post('/api/claim', { code: t.code(), bossName: '' })).status, 400);
+    assert.equal((await new Client(t).post('/api/claim', { code: t.code(), name: 'Named', bossName: '' })).status, 400, 'the old form still needs both');
   });
 
   test('the manager works it out in chat, and it lands live on the floor event for a visitor too', async () => {

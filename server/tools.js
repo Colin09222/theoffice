@@ -69,6 +69,7 @@ const DEFS = {
   set_company: fn('set_company', 'Set who this company is. Use it only because the boss asked or agreed. Leave out what isn\'t changing. It shows on the floor at once.', {
     name: S('Company name, 2 to 60 characters'), tagline: S('Short tagline, up to 120 characters'), what_it_does: S('What the company does and for whom, up to 300 characters. Only the staff read this.'),
     tone: { type: 'string', enum: Object.keys(TONES), description: 'How everyone here writes' }, primary_color: S('Main colour as #rrggbb'), accent_color: S('Accent colour as #rrggbb'),
+    boss_name: S('What the boss wants to be called, if they said'),
     vibe: { type: 'string', enum: Object.keys(VIBES), description: 'A whole look for the office: floor, walls, furniture and default colours' }, layout: { type: 'string', enum: LAYOUTS, description: 'How the office is laid out. Overrides the one the vibe brings.' },
   }, []),
   update_staff: fn('update_staff', 'Rename, retitle or restyle one member of staff, or rewrite who they are. Use it only because the boss asked. Leave out what isn\'t changing.', {

@@ -14,7 +14,7 @@ const GLYPH = { site: '◆', app: '▣', game: '▲', simulation: '◎', doc: '�
 const KIND_WORD = { site: 'Site', app: 'App', game: 'Game', simulation: 'Simulation', doc: 'Doc', research: 'Research' };
 
 const num = (v, d, lo, hi) => { const n = Number.parseInt(String(v ?? ''), 10); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
-const floorInfo = (f) => ({ number: f.number, slug: f.slug, name: f.name || 'New company', colors: JSON.parse(f.colors) });
+const floorInfo = (f) => ({ number: f.number, slug: f.slug, name: f.name, colors: JSON.parse(f.colors) });
 const key = (floorId, slug) => `${floorId}/${slug}`;
 
 export function installBuilding(ext) {
