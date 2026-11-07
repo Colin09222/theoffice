@@ -68,7 +68,7 @@ describe('the settings change what the bots write', () => {
 
     // And that came from the prompt, not from the floor's name: every agent on the floor read it, and only its own floor's.
     const sf = floorRow(t, silly).id, rf = floorRow(t, serious).id;
-    const sillyCalls = llm.calls.filter((c) => c.floorId === sf), seriousCalls = llm.calls.filter((c) => c.floorId === rf);
+    const sillyCalls = llm.calls.filter((c) => c.floorId === sf && c.kind !== 'talk'), seriousCalls = llm.calls.filter((c) => c.floorId === rf && c.kind !== 'talk');
     for (const role of ['researcher', 'writer', 'builder', 'designer']) assert.ok(sillyCalls.some((c) => c.role === role), `${role} ran`);
     for (const c of sillyCalls) { assert.equal(voiceOf([{ content: c.system }]).tone, 'silly', `${c.kind} ${c.role || ''}`); assert.match(c.system, /tiny games about pigeons/); assert.doesNotMatch(c.system, /advise small firms/); }
     for (const c of seriousCalls) { assert.equal(voiceOf([{ content: c.system }]).tone, 'serious'); assert.doesNotMatch(c.system, /pigeons/); }
@@ -118,7 +118,7 @@ describe('the settings change what the bots write', () => {
     await waitDone(a);
     const doc = await page(t, `/f/${a.slug}/ruler-brief/`);
     assert.doesNotMatch(doc, /Enjoy the thing/);
-    for (const c of llm.calls.filter((x) => x.floorId === floorRow(t, a).id)) { assert.match(c.system, /House rules: Metric units only\./); assert.match(c.system, /Always avoid: Enjoy the thing/); }
+    for (const c of llm.calls.filter((x) => x.floorId === floorRow(t, a).id && x.kind !== 'talk')) { assert.match(c.system, /House rules: Metric units only\./); assert.match(c.system, /Always avoid: Enjoy the thing/); }
     assert.doesNotMatch(doc, /Metric units only/, 'house rules are not quoted in published work');
   });
 
@@ -247,7 +247,7 @@ describe('nothing typed here can get out of its box', () => {
     const pub = await visitor.get(`/api/floors/${c.slug}`);
     assert.equal(pub.data.identity, undefined); assert.equal(pub.data.hiring, undefined);
     const vw = staffOf(pub.data, 'writer');
-    assert.equal(vw.persona, undefined); assert.equal(vw.title, 'Chief Noise Officer'); assert.equal(vw.vibe, 'Hype');
+    assert.equal(vw.customise, undefined); assert.equal(vw.title, 'Chief Noise Officer'); assert.equal(vw.vibe, 'Hype');
     assert.equal(pub.data.floor.decor.layout, 'garage'); assert.equal(pub.data.floor.decor.pet, 'robot');
     const everything = JSON.stringify([pub.data, stream.events, (await visitor.get('/api/floors')).data, (await visitor.get('/api/building/ticker')).data, (await visitor.get('/api/building/launched')).data, await page(t, `/f/${c.slug}/noise/`), await page(t, `/f/${c.slug}/noise-brief/`)]);
     for (const s of secrets) assert.ok(!everything.includes(s), `${s} leaked to a visitor`);
@@ -255,7 +255,7 @@ describe('nothing typed here can get out of its box', () => {
     assert.match(await page(t, `/f/${c.slug}/noise/`), /made loud/);
     // The boss, on the other hand, gets it all back to edit.
     const own = await floorState(c);
-    assert.equal(own.identity.rules, secrets[1]); assert.equal(staffOf(own, 'writer').persona.notes, secrets[3]);
+    assert.equal(own.identity.rules, secrets[1]); assert.equal(staffOf(own, 'writer').customise.notes, secrets[3]);
   });
 
   test('a filler company and a closed floor take no settings', async () => {
@@ -289,9 +289,9 @@ describe('staff: names, titles, hiring and letting go', () => {
     const r = await a.post(`/api/floors/${a.slug}/customise`, { staff: [{ id: w.id, name: '<img src=x onerror=alert(1)>', title: `<script>${'t'.repeat(99)}`, persona: { vibe: '__proto__', notes: `<b>${'n'.repeat(999)}`, focus: `${'f'.repeat(999)}>` }, look: { hat: 'evil', body: '../../etc', wear: 'cape', skin: 'red' } }] });
     assert.equal(r.status, 200, JSON.stringify(r.data));
     const n = staffOf(await floorState(a), 'writer');
-    assert.doesNotMatch(n.name + n.title + n.persona.notes + n.persona.focus, /[<>]/);
-    assert.ok(n.name.length <= BRIEF_LIMITS.name); assert.ok(n.title.length <= BRIEF_LIMITS.title); assert.ok(n.persona.notes.length <= BRIEF_LIMITS.personality); assert.ok(n.persona.focus.length <= BRIEF_LIMITS.focus);
-    assert.equal(n.persona.vibe, ''); assert.equal(n.vibe, '');
+    assert.doesNotMatch(n.name + n.title + n.customise.notes + n.customise.focus, /[<>]/);
+    assert.ok(n.name.length <= BRIEF_LIMITS.name); assert.ok(n.title.length <= BRIEF_LIMITS.title); assert.ok(n.customise.notes.length <= BRIEF_LIMITS.personality); assert.ok(n.customise.focus.length <= BRIEF_LIMITS.focus);
+    assert.equal(n.customise.vibe, ''); assert.equal(n.vibe, '');
     assert.equal(n.look.hat, w.look.hat); assert.notEqual(n.look.body, '../../etc'); assert.equal(n.look.wear, 'cape'); assert.equal(n.look.skin, w.look.skin);
   });
 
@@ -375,7 +375,7 @@ describe('looks and the room', () => {
     const s = await floorState(a);
     assert.deepEqual(s.floor.decor, oldDecor);
     assert.equal(s.identity.tone, '');
-    assert.equal(s.agents[0].persona.vibe, '');
+    assert.equal(s.agents[0].customise.vibe, '');
     // Saving something else leaves it all alone, and a partial save fills in only what is asked for.
     assert.equal((await a.post(`/api/floors/${a.slug}/customise`, { decor: { pet: 'cat' } })).status, 200);
     const d = (await floorState(a)).floor.decor;

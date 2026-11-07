@@ -27,7 +27,8 @@ function scripted({ manager, staff } = {}) {
   } };
 }
 async function floor(llm, overrides = {}, deps = {}) {
-  const t = await boot(overrides, { ...(llm ? { llm } : {}), ...deps });
+  // These count every cent and every call, so the people's own chatter (tested in people.test.js) stays out of them.
+  const t = await boot({ peopleTalk: false, ...overrides }, { ...(llm ? { llm } : {}), ...deps });
   open.push(t);
   const c = await claim(t, `Busy ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);

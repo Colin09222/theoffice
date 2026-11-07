@@ -106,7 +106,7 @@ export function createPeople(engine) {
   /** One call to the cheap model. Null when it can't or shouldn't happen, and everything here has an answer to null. */
   async function cheap(floorId, agent, { purpose, system, user, maxTokens = 500, meta = {}, signal = ctl.signal }) {
     const s = spec();
-    if (!s || !speakable(floorRow(floorId))) return null;
+    if (!s || cfg.peopleTalk === false || !speakable(floorRow(floorId))) return null;
     const provider = s.provider === 'anthropic' ? 'anthropic' : 'openrouter';
     const pricing = s.pricing || {};
     const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];

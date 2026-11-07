@@ -59,6 +59,7 @@ export class Engine {
     this.media = media || (cfg.mediaMock ? createMockMedia(brokers) : real && cfg.openrouterKey && brokers.image ? createMedia({ cfg, tools: brokers, httpFetch: httpFetch || fetch }) : null);
     this.search = search || (cfg.searchMock ? createMockSearch() : real && cfg.anthropicKey && brokers.search ? createSearch({ cfg, tool: brokers.search }) : null);
     this.runs = new Map();      // agentId -> { ctl, floorId, promise }
+    this.bossRead = new Map();  // floorId -> the newest boss message a manager's turn has read
     this.reserved = new Map();  // floorId -> dollars reserved by in-flight calls
     this.reservedTotal = 0;
     this.tickQueued = false;
@@ -366,7 +367,10 @@ export class Engine {
     const ctx = this.toolCtx(floor, mgr, null, names);
     ctx.signal = signal;
     // Who the company is and who works here changes only because the boss just asked. A report or a page read while reviewing can't start that.
-    ctx.bossTurn = !!meta.isFreshBoss;
+    // A boss who sent a second line while the last turn was running has had an answer to the first one in between, so this looks for anything from them that no turn has read yet.
+    const newestBoss = get(this.db, "SELECT MAX(id) n FROM messages WHERE floor_id=? AND role='boss'", floorId).n ?? 0;
+    ctx.bossTurn = !!meta.isFreshBoss || newestBoss > (this.bossRead.get(floorId) ?? Infinity);
+    this.bossRead.set(floorId, newestBoss);
     const call = { floorId, agent: mgr, signal, project: '' };
     const maxSteps = this.cfg.maxManagerSteps;
     const opening = messages.length;

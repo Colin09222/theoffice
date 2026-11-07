@@ -272,7 +272,8 @@ describe('budget, concurrency and provider failure', () => {
     await t0.close();
     let broken = true;
     const llm = { chat(args) { calls++; if (broken) return Promise.reject(new ProviderError('Model provider said 503', { retryable: true, status: 503 })); return inner.chat(args); } };
-    const t = await boot({}, { llm });
+    // Calls are counted here, so the people's chatter (people.test.js) stays out.
+    const t = await boot({ peopleTalk: false }, { llm });
     const a = await claim(t, 'Fragile');
     await a.post(`/api/floors/${a.slug}/chat`, { text: 'hello' });
     const s = await until(async () => { const x = await floorState(a); return x.floor.paused ? x : null; }, { what: 'pause' });
@@ -290,7 +291,7 @@ describe('budget, concurrency and provider failure', () => {
   test('a non-retryable provider error pauses right away', async () => {
     const { ProviderError } = await import('../server/llm.js');
     let calls = 0;
-    const t = await boot({}, { llm: { chat() { calls++; return Promise.reject(new ProviderError('Model provider said 402', { status: 402 })); } } });
+    const t = await boot({ peopleTalk: false }, { llm: { chat() { calls++; return Promise.reject(new ProviderError('Model provider said 402', { status: 402 })); } } });
     const a = await claim(t, 'Broke');
     await a.post(`/api/floors/${a.slug}/chat`, { text: 'hello' });
     await until(async () => (await floorState(a)).floor.paused, { what: 'pause' });

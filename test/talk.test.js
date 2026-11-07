@@ -7,7 +7,7 @@ import { talkLine, PRIVATE_TALK, BOSS_ONLY_TALK } from '../server/talk.js';
 import { FloorLife, SMALL_TALK, planProgress, readingTime } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
 
-const talkOf = (s, kind) => s.talk.filter((l) => !kind || l.kind === kind);
+const talkOf = (s, kind) => s.talk.filter((l) => !kind || (l.beat || l.kind) === kind);
 const live = (st) => st.events.filter((e) => e.type === 'talk').map((e) => e.data);
 const floorRow = (t, slug) => get(t.db, 'SELECT * FROM floors WHERE slug=?', slug);
 
@@ -69,7 +69,7 @@ describe('talk events from the engine', () => {
   test('the colleague a task builds on walks over and hands on their real report', async () => {
     const f = await floorState(c);
     const builder = f.agents.find((a) => a.role === 'builder'), designer = f.agents.find((a) => a.role === 'designer');
-    const passed = f.talk.find((l) => l.kind === 'handoff' && l.to === builder.id);
+    const passed = f.talk.find((l) => l.beat === 'handoff' && l.to === builder.id);
     assert.ok(passed, 'no handoff to the builder');
     assert.equal(passed.from, designer.id);
     assert.equal(passed.text, talkLine(f.tasks.find((x) => x.agentId === designer.id).result));
@@ -79,11 +79,11 @@ describe('talk events from the engine', () => {
     await r.post(`/api/floors/${r.slug}/chat`, { text: 'go build a thing [revise]' });
     const f = await waitDone(r);
     const writer = f.agents.find((a) => a.role === 'writer');
-    const toWriter = f.talk.filter((l) => l.kind === 'review' && l.to === writer.id);
+    const toWriter = f.talk.filter((l) => l.beat === 'review' && l.to === writer.id);
     assert.ok(toWriter.length >= 2, `only ${toWriter.length} reviews`);
     assert.ok(toWriter.every((l) => l.text === 'Looks good.'));
     const builder = f.agents.find((a) => a.role === 'builder');
-    assert.equal(f.talk.filter((l) => l.kind === 'handoff' && l.to === builder.id).length, 1);
+    assert.equal(f.talk.filter((l) => l.beat === 'handoff' && l.to === builder.id).length, 1);
   });
   test('a tester\'s report is marked as findings', async () => {
     const q = await claim(t, 'Talk Tester');
@@ -95,7 +95,7 @@ describe('talk events from the engine', () => {
     run(t.db, "UPDATE tasks SET status='doing' WHERE id=?", id);
     t.app.engine.finishTask(row, tester, id, 'review', 'The back button does nothing on the second page.');
     const f = await floorState(q);
-    const line = f.talk.find((l) => l.kind === 'findings');
+    const line = f.talk.find((l) => l.beat === 'findings');
     assert.ok(line); assert.equal(line.text, 'The back button does nothing on the second page.'); assert.equal(line.to, mgr.id);
     run(t.db, "UPDATE tasks SET status='done' WHERE floor_id=?", row.id);
   });
@@ -105,17 +105,17 @@ describe('talk events from the engine', () => {
     const vs = sse(visitor, q.slug); await sleep(20);
     await q.post(`/api/floors/${q.slug}/chat`, { text: 'go build a thing [ask]' });
     const asked = await until(async () => { const s = await floorState(q); return s.questions?.length ? s : null; }, { what: 'the question' });
-    const line = asked.talk.find((l) => l.kind === 'question');
+    const line = asked.talk.find((l) => l.beat === 'question');
     assert.equal(line.text, asked.questions[0].text); assert.equal(line.to, 'boss');
     await q.post(`/api/floors/${q.slug}/questions/${asked.questions[0].id}/answer`, { text: 'Silly, with a hidden moose' });
     const done = await waitDone(q);
-    const ans = done.talk.find((l) => l.kind === 'answer');
+    const ans = done.talk.find((l) => l.beat === 'boss_answer');
     assert.equal(ans.text, 'Silly, with a hidden moose'); assert.equal(ans.from, 'boss');
     const v = await floorState(visitor, q.slug);
     const body = JSON.stringify(v.talk) + JSON.stringify(live(vs));
     assert.ok(!body.includes(line.text), 'a visitor read the question'); assert.ok(!body.includes('hidden moose'), 'a visitor read the answer');
-    assert.equal(v.talk.find((l) => l.kind === 'question').text, BOSS_ONLY_TALK.question);
-    assert.equal(v.talk.find((l) => l.kind === 'answer').text, BOSS_ONLY_TALK.answer);
+    assert.equal(v.talk.find((l) => l.beat === 'question').text, BOSS_ONLY_TALK.question);
+    assert.equal(v.talk.find((l) => l.beat === 'boss_answer').text, BOSS_ONLY_TALK.boss_answer);
     await vs.close();
   });
   test('a private project is hidden from a visitor in the snapshot, the live stream and a replay; the boss still reads it', async () => {
@@ -189,7 +189,7 @@ describe('filler floors read from a script', () => {
       const floors = t.db.prepare('SELECT * FROM floors WHERE filler=1').all();
       assert.ok(floors.length >= 1, 'no filler floors');
       const visitor = new Client(t);
-      const talk = await until(async () => { const s = await floorState(visitor, floors[0].slug); return ['assign', 'handoff', 'review'].every((k) => s.talk.some((l) => l.kind === k)) ? s.talk : null; }, { what: 'scripted lines', timeout: 20000 });
+      const talk = await until(async () => { const s = await floorState(visitor, floors[0].slug); return ['assign', 'handoff', 'review'].every((k) => s.talk.some((l) => l.beat === k)) ? s.talk : null; }, { what: 'scripted lines', timeout: 20000 });
       assert.ok(!/\$\s?\d/.test(JSON.stringify(talk)));
       assert.ok(talk.every((l) => l.fromName && l.text.length > 2));
       assert.equal(get(t.db, 'SELECT COUNT(*) n FROM ledger').n, 0);

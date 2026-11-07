@@ -22,7 +22,8 @@ import { toolDefs, toolsForRole, COMPUTER_TOOL_DEFS } from '../server/tools.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const open = [];
 after(async () => { for (const t of open) await t.close(); });
-const start = async (over = {}, deps = {}) => { const t = await boot(over, deps); open.push(t); return t; };
+// These count every cent of the work, so the people's own chatter (tested in people.test.js) stays out of them.
+const start = async (over = {}, deps = {}) => { const t = await boot({ peopleTalk: false, ...over }, deps); open.push(t); return t; };
 const floorOf = (t, c) => get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
 const managerOf = (t, floor) => get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", floor.id);
 const MODEL = { anthropic: 'claude-opus-5-5', openrouter: 'google/gemini-3.1-pro-preview' };
@@ -38,7 +39,7 @@ const taskOf = (t, id) => get(t.db, 'SELECT * FROM tasks WHERE id=?', id);
 function fileBuilding(dir) {
   const up = async (over = {}, deps = {}) => {
     const db = openDb(dir);
-    const cfg = loadConfig({ AI_MODE: 'mock', ADMIN_PASSWORD: 'correct horse battery', MOCK_DELAY_MS: '2', RETRY_BASE_MS: '1' }, { rateScale: 1000, ...over });
+    const cfg = loadConfig({ AI_MODE: 'mock', ADMIN_PASSWORD: 'correct horse battery', MOCK_DELAY_MS: '2', RETRY_BASE_MS: '1' }, { rateScale: 1000, peopleTalk: false, ...over });
     const app = createApp({ db, cfg, models: loadModels(), log: () => {}, ...deps });
     await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
     const host = `127.0.0.1:${app.server.address().port}`;

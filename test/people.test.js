@@ -7,7 +7,6 @@ import { createMockClient } from '../server/mock.js';
 import { toolsForRole, wrapUntrusted, COMPUTER_TOOL_DEFS } from '../server/tools.js';
 import { managerPrompt, staffPrompt } from '../server/prompts.js';
 import { personBlock, readMemory } from '../server/people.js';
-import { seedFillers } from '../server/filler.js';
 
 const row = (t, slug) => get(t.db, 'SELECT * FROM floors WHERE slug=?', slug);
 const claimBare = async (t, bossName = 'Sam') => {
@@ -52,7 +51,7 @@ describe('a company made by talking', () => {
     const visitor = new Client(t);
     const live = sse(visitor, c.slug); await sleep(20);
     await c.post(`/api/floors/${c.slug}/chat`, { text: 'hi, not sure yet' });
-    await until(async () => (await floorState(c)).messages.some((m) => /you pick/i.test(m.text)), { what: 'a question back' });
+    await until(async () => (await floorState(c)).messages.some((m) => /what should we call it/i.test(m.text)), { what: 'a question back' });
     assert.equal((await floorState(c)).floor.setup, true, 'nothing is set until the manager knows enough');
     await c.post(`/api/floors/${c.slug}/chat`, { text: 'a soup rating site called Ladle Up.' });
     await until(async () => (await floorState(c)).floor.name === 'Ladle Up', { what: 'the company name' });
@@ -432,9 +431,8 @@ describe('what a visitor can read', () => {
 describe('filler floors', () => {
   test('scripted lines of every kind and scripted characters, with no model call at all', async () => {
     const seen = [];
-    const t = await boot({ fillerTickMs: 5, towerFloors: 60 }, { llm: recording(seen) });
+    const t = await boot({ fillerCompanies: true, fillerTickMs: 5, towerFloors: 60 }, { llm: recording(seen) });
     try {
-      seedFillers(t.db, { cfg: t.cfg, models: t.app.engine.models, engine: t.app.engine });
       const f = get(t.db, 'SELECT * FROM floors WHERE filler=1 LIMIT 1');
       const v = new Client(t);
       const st = sse(v, f.slug);

@@ -10,7 +10,8 @@ const fillerFloors = (t) => t.db.prepare('SELECT * FROM floors WHERE filler=1 OR
 describe('filler companies', () => {
   let t; const llmCalls = { n: 0 };
   // A model that explodes if anyone so much as looks at it. Filler floors must never get this far.
-  const llm = { chat() { llmCalls.n++; throw new Error('a filler floor called the model'); } };
+  // A real floor in the same building may cast its people. Any call for a filler floor is the failure.
+  const llm = { chat(x) { if (x?.meta?.kind === 'talk' && !t.db.prepare('SELECT filler FROM floors WHERE id=?').get(x.meta.floorId)?.filler) throw new Error('no model in this test'); llmCalls.n++; throw new Error('a filler floor called the model'); } };
   before(async () => { t = await boot({ fillerCompanies: true, fillerTickMs: 20 }, { llm }); });
   after(() => t.close());
 

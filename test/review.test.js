@@ -54,7 +54,7 @@ describe('the Talk tab keeps private work from visitors', () => {
     const { t, c, f, mgr, wr } = await setup();
     t.app.engine.talk(f.id, mgr, wr, 'Please write the launch post for the soup site.', { kind: 'assign' });
     const l = (await new Client(t).get(`/api/floors/${c.slug}`)).data.talk.at(-1);
-    assert.equal(l.text, 'Please write the launch post for the soup site.'); assert.equal(l.kind, 'assign');
+    assert.equal(l.text, 'Please write the launch post for the soup site.'); assert.equal(l.kind, 'work'); assert.equal(l.beat, 'assign');
   });
   test('with the chat closed, the manager quoting the boss doesn\'t show a visitor what the boss typed', async () => {
     const { t, c, f, mgr, wr } = await setup();
