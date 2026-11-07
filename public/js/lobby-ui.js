@@ -4,13 +4,64 @@ import { h, api, session, isPhone, toast, clear, put } from './dom.js';
 import { LobbyView } from './lobby-scene.js';
 import { openClaim, openLogin } from './claim.js';
 
-let view = null, poll = null, keepFloors = [], tip = null;
+let view = null, poll = null, keepFloors = [], tip = null, tickerPoll = null;
+
+// ---- the building, live: a ticker of public happenings across every floor ----
+function tickerItem(it, fresh) {
+  return h(`${it.url ? 'a' : 'button'}.ticker-item${fresh ? '.fresh' : ''}${it.kind === 'published' ? '.published' : ''}${it.filler ? '.chatter' : ''}`,
+    it.url ? { href: it.url, target: '_blank', rel: 'noopener noreferrer', 'data-id': it.id, title: `Open ${it.text}` }
+      : { type: 'button', 'data-id': it.id, title: `Walk into ${it.floor.name}`, onclick: () => window.officeGo(`/floor/${it.floor.slug}`) },
+    h('span.ticker-chip', { css: { '--brand': it.floor.colors.primary } }, h('b', {}, String(it.floor.number)), it.floor.name),
+    h('span.ticker-text', {}, it.text));
+}
+function buildTicker() {
+  const rail = h('div.ticker-rail');
+  const strip = h('section.ticker', { 'aria-label': 'The building, live', 'data-ticker': 'empty' },
+    h('span.ticker-label', {}, h('i.live-dot'), 'The building, live'),
+    h('div.ticker-track', {}, rail));
+  let items = []; let latest = 0;
+  const paint = (freshIds) => {
+    clear(rail);
+    strip.dataset.ticker = items.length ? 'live' : 'empty';
+    if (!items.length) { rail.append(h('span.ticker-quiet', {}, 'All quiet. Open an office and give the building something to talk about.')); return; }
+    const shown = items.slice(0, 20);
+    for (const it of shown) rail.append(tickerItem(it, freshIds.has(it.id)));
+    // A second copy makes the loop seamless; it carries no meaning of its own.
+    for (const it of shown) { const g = tickerItem(it, false); g.className = g.className.replace('ticker-item', 'ticker-ghost'); g.setAttribute('aria-hidden', 'true'); g.tabIndex = -1; rail.append(g); }
+    rail.style.setProperty('--dur', `${Math.max(18, shown.length * 5)}s`);
+  };
+  const refresh = async (first) => {
+    const data = await api(`/building/ticker?limit=20${latest && !first ? `&since=${latest}` : ''}`);
+    if (!data.items.length) { if (first) paint(new Set()); return; }
+    const freshIds = new Set(first ? [] : data.items.map((i) => i.id));
+    items = first ? data.items : [...data.items, ...items].slice(0, 20);
+    latest = Math.max(latest, ...items.map((i) => i.id));
+    paint(freshIds);
+  };
+  refresh(true).catch(() => paint(new Set()));
+  tickerPoll = setInterval(() => refresh(false).catch(() => { /* retried next time */ }), 10000);
+  return strip;
+}
+
+// ---- the launched wall: every public project in the building ----
+function wallCard(pr, onFloor) {
+  const floor = keepFloors.find((f) => f.slug === pr.floor.slug) || pr.floor;
+  return h('article.wall-card', { 'data-project': pr.slug, 'data-floor': pr.floor.slug, css: { '--brand': pr.floor.colors.primary } },
+    h('a.wall-thumb', { href: pr.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Open ${pr.title}` }, h('img', { src: pr.thumb, alt: '', loading: 'lazy', width: '480', height: '300' })),
+    h('div.wall-body', {},
+      h('div.wall-meta', {}, h('span.wall-floor', {}, h('b', {}, String(pr.floor.number)), pr.floor.name), h('span.wall-kind', {}, pr.kind)),
+      h('h4', {}, pr.title),
+      pr.description ? h('p', {}, pr.description) : null,
+      h('div.wall-acts', {},
+        h('a.btn.small.primary', { href: pr.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open'),
+        h('button.btn.small', { type: 'button', onclick: () => onFloor(floor) }, 'Visit floor'))));
+}
 
 function directoryRow(card, onEnter, onHover) {
   return h('button.dir-row', { type: 'button', 'data-floor': card.number, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => onHover(card.number) },
     h('span.dir-num', {}, String(card.number)),
     h('span.dir-mark', { 'aria-hidden': 'true' }, (card.name.trim()[0] || '?').toUpperCase()),
-    h('span.dir-text', {}, h('b', {}, card.name), h('small', {}, card.status === 'suspended' ? 'Closed by the building manager' : card.tagline || 'A tiny company')),
+    h('span.dir-text', {}, h('b', {}, card.name), card.filler ? h('span.demo-tag', { title: 'A fictional demo company. Nothing here is real.' }, 'demo') : null, h('small', {}, card.status === 'suspended' ? 'Closed by the building manager' : card.tagline || 'A tiny company')),
     card.busy ? h('span.dir-busy', { title: `${card.busy} at work` }, h('i'), String(card.busy)) : null);
 }
 
@@ -71,11 +122,43 @@ export async function showLobby(root) {
   };
   renderList();
 
+  // The launched wall shares the panel with the directory. The directory's own list is left exactly as it is.
+  const wall = h('div.wall', { 'data-wall': 'grid', hidden: true });
+  const wallCount = h('span.dir-count');
+  const wallHead = h('div.dir-head.wall-head', { hidden: true }, h('span', {}, h('i.live-dot'), 'Launched'), wallCount);
+  let wallOn = false, wallItems = null;
+  const renderWall = () => {
+    const q = search.value.trim().toLowerCase();
+    clear(wall);
+    if (!wallItems) { wall.append(h('p.dir-empty', {}, 'Looking down the corridors…')); return; }
+    const shown = wallItems.filter((p) => !q || `${p.title} ${p.description} ${p.floor.name} ${p.kind}`.toLowerCase().includes(q));
+    wallCount.textContent = `${wallItems.length} ${wallItems.length === 1 ? 'launch' : 'launches'}`;
+    if (!wallItems.length) { wall.append(h('p.dir-empty', {}, 'Nothing has launched yet. The first site, game or doc to go public shows up here.')); return; }
+    if (!shown.length) { wall.append(h('p.dir-empty', {}, 'Nothing launched by that name.')); return; }
+    wall.append(h('div.wall-grid', {}, shown.map((p) => wallCard(p, enterFloor))));
+  };
+  const loadWall = async () => {
+    try { wallItems = (await api('/building/launched?limit=60')).projects; } catch { wallItems = wallItems || []; }
+    if (wallOn) renderWall();
+  };
+  const toggle = h('button.wall-toggle', { type: 'button', 'data-wall': 'toggle', 'aria-pressed': 'false', title: 'Everything the building has launched' }, h('i', { 'aria-hidden': 'true' }, '◆'), 'Launched');
+  const setWall = (on) => {
+    wallOn = on;
+    toggle.setAttribute('aria-pressed', String(on));
+    panel.classList.toggle('showing-wall', on);
+    list.hidden = on; head.hidden = on; wall.hidden = !on; wallHead.hidden = !on;
+    search.placeholder = on ? 'Find a launch' : 'Find a company or what it does';
+    if (on) { if (isPhone()) panel.classList.add('open'); renderWall(); loadWall(); } else renderList();
+  };
+  toggle.addEventListener('click', () => setWall(!wallOn));
+  search.addEventListener('input', () => { if (wallOn) renderWall(); });
+
+  const head = h('div.dir-head', {}, h('span', {}, h('i.live-dot'), 'The Office'), count);
   const panel = h('aside.directory.glass', { 'aria-label': 'Floor directory' },
     h('button.sheet-grip', { type: 'button', 'aria-label': 'Show or hide the directory', onclick: () => panel.classList.toggle('open') }, h('i'), h('span.grip-label', {}, 'Directory')),
-    h('div.dir-search', {}, search),
-    h('div.dir-head', {}, h('span', {}, h('i.live-dot'), 'The Office'), count),
-    list,
+    h('div.dir-search', {}, search, toggle),
+    head, wallHead,
+    list, wall,
     h('p.dir-hint', {}, 'Anyone can walk in and watch'));
 
   const account = session.floor
@@ -92,6 +175,7 @@ export async function showLobby(root) {
       h('span.pill-status', {}, h('i.live-dot'), data.vacant ? `Floor ${data.vacant} is empty` : 'Building full'),
       h('span.pill-go', {}, 'Open an office'), h('span.pill-arrow', { 'aria-hidden': 'true' }, '↗')),
     h('p.hints', {}, isPhone() ? 'Drag to turn and ride. Tap a floor.' : 'Drag to turn. Scroll to ride. Click a floor to walk in.'),
+    buildTicker(),
     data.globalPause ? h('p.banner', {}, 'The building manager has paused all work for now.') : null,
     tip = h('div.floor-tip', { hidden: true }),
   );
@@ -101,6 +185,7 @@ export async function showLobby(root) {
       const fresh = await api('/floors');
       keepFloors = fresh.floors; view?.setFloors(fresh.floors);
       if (document.activeElement !== search) renderList();
+      if (wallOn) loadWall();
     } catch { /* retried next time */ }
   }, 20000);
 }
@@ -116,4 +201,5 @@ function showTip(n, x, y) {
 
 export function hideLobby() {
   clearInterval(poll); poll = null; tip = null;
+  clearInterval(tickerPoll); tickerPoll = null;
 }

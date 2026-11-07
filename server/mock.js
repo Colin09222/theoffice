@@ -1,6 +1,6 @@
 // AI_MODE=mock: deterministic scripted model. It speaks the same interface as the real client and returns real tool calls,
 // so every test drives the actual tool loop, ledger, limiter and SSE paths with no key and no spend.
-// Keywords in the boss's message pick scenarios: [ask] [mgrask] [buy] [hire] [fail] [private] [spendy] [slow] [ssrf] [traverse] [inject] [revise] [web].
+// Keywords in the boss's message pick scenarios: [ask] [mgrask] [buy] [hire] [fail] [private] [spendy] [slow] [ssrf] [traverse] [inject] [revise] [web] [standing] [cancelorder].
 import { ProviderError } from './llm.js';
 
 const sleep = (ms, signal) => new Promise((res, rej) => {
@@ -21,9 +21,22 @@ const CSS = `:root{--ink:#1d2433;--paper:#f7f1e3;--hot:#d9774a}*{box-sizing:bord
 const JS = `let n=0;const o=document.getElementById('o');document.getElementById('b').addEventListener('click',()=>{n++;o.textContent=n+(n===1?' clap':' claps')});`;
 const EVIL = `<!doctype html><title>probe</title><h1 id="r">probe</h1><script>let c='none';try{c=document.cookie}catch(e){c='blocked:'+e.name}document.getElementById('r').textContent=c</script>`;
 
-function managerStep(meta) {
+function managerStep(meta, messages = []) {
   const boss = meta.lastBoss || '';
   const slug = meta.slugFor(boss);
+  // Standing orders (floors-plus). These come before everything else: the boss's words may also hold an action word.
+  if (/\[standing\]/.test(boss) && meta.isFreshBoss && !meta.toReview.length) {
+    if (meta.step === 0) return { toolCalls: [call('set_standing_order', { instruction: boss.replace(/\[standing\]/g, '').trim() || 'Tidy the drive', every: 'day', at: '09:00' })] };
+    return { content: 'Done, boss. That is now a standing order, every day at 09:00 UTC, and it shows under **Orders** where you can change or delete it.' };
+  }
+  if (/\[cancelorder\]/.test(boss) && meta.isFreshBoss && !meta.toReview.length) {
+    if (meta.step === 0) return { toolCalls: [call('list_standing_orders', {})] };
+    // A model reads its tool results; the mock reads the last one for the first order's id.
+    const last = [...messages].reverse().find((m) => m.role === 'tool')?.content || '';
+    const id = meta.step === 1 ? last.match(/#(\d+)/)?.[1] : null;
+    if (id) return { toolCalls: [call('cancel_standing_order', { id: Number(id) })] };
+    return { content: meta.step === 1 ? 'There are no standing orders to cancel, boss.' : 'Cancelled, boss. It will not run again.' };
+  }
   if (meta.toReview.length) {
     const sendBack = (t) => /\[revise\]/.test(t.brief) && t.revisions === 0;
     if (meta.step === 0) return { toolCalls: meta.toReview.map((t, i) => call('review_task', { task_id: t.id, verdict: sendBack(t) ? 'revise' : 'approve', notes: 'Looks good.' }, i)) };
@@ -103,7 +116,7 @@ export function createMockClient(cfg) {
       const delay = /\[slow\]/.test(boss) || /\[slow\]/.test(meta.allBoss || '') ? Math.max(cfg.mockDelayMs, 120) * 4 : cfg.mockDelayMs;
       await sleep(delay / 2, signal);
       if (/\[fail\]/.test(meta.allBoss || '') && !failed.has(meta.floorId)) { failed.add(meta.floorId); throw new ProviderError('Model provider said 503: mock outage', { status: 503, retryable: true }); }
-      const r = meta.kind === 'manager' ? managerStep(meta) : staffStep(meta);
+      const r = meta.kind === 'manager' ? managerStep(meta, messages) : staffStep(meta);
       const content = r.content || '';
       if (r.toolCalls?.length) onToolCall?.(r.toolCalls[0].name);
       await sleep(delay / 2, signal);

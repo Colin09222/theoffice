@@ -79,6 +79,17 @@ export function loadConfig(env = process.env, overrides = {}) {
     // The iOS foundation is off until the owner's Apple and Expo accounts exist. The token itself lives in a Managed Agents vault, never here.
     iosEnabled: env.IOS_ENABLED === '1',
     iosVaultId: env.IOS_VAULT_ID || '',
+    // Standing orders (floors-plus): recurring jobs the boss sets. They run through the ordinary engine and its caps; these only shape the schedule.
+    ordersPerFloor: num(env.ORDERS_PER_FLOOR, 3),
+    ordersMinHours: num(env.ORDERS_MIN_HOURS, 24),
+    ordersIdleDays: num(env.ORDERS_IDLE_DAYS, 14),
+    ordersMaxFails: num(env.ORDERS_MAX_FAILS, 3),
+    ordersRunTimeoutMin: num(env.ORDERS_RUN_TIMEOUT_MIN, 180),
+    ordersTickMs: num(env.ORDERS_TICK_MS, 30000),
+    ordersEstimateUsd: num(env.ORDERS_ESTIMATE_USD, 0.6),
+    // Filler companies (floors-plus): scripted floors that look busy and never call a model. Off unless asked for.
+    fillerCompanies: env.FILLER_COMPANIES === '1',
+    fillerTickMs: num(env.FILLER_TICK_MS, 9000),
     ...overrides,
   };
 }

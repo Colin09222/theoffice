@@ -70,7 +70,7 @@ class FloorPage {
   }
   renderHeader() {
     const s = this.state; const f = s.floor;
-    this.titleEl.textContent = f.name; this.tagEl.textContent = f.tagline;
+    this.titleEl.textContent = f.name; this.tagEl.textContent = f.filler ? `${f.tagline} · A fictional demo company` : f.tagline;
     let label = 'Open', cls = 'ok';
     const working = s.agents.some((a) => a.state !== 'idle');
     if (working) { label = 'Working'; cls = 'busy'; }
@@ -99,8 +99,8 @@ class FloorPage {
         h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, 'Customise'));
     } else {
       put(this.controlsEl,
-        h('span.visitor-note', {}, 'You\'re visiting. Watch all you like.'),
-        session.floor ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'));
+        h('span.visitor-note', {}, f.filler ? 'A demo company: scripted, fictional, nobody\'s. Watch all you like.' : 'You\'re visiting. Watch all you like.'),
+        session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'));
     }
   }
   async control(action, text) {
@@ -152,6 +152,7 @@ class FloorPage {
     if (this.owner) {
       const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domains || []).filter((d) => d.status === 'awaiting_boss').length + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length;
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
+      tabs.push(['orders', 'Orders']);  // floors-plus: standing orders, after every existing tab
     }
     return tabs;
   }
@@ -170,6 +171,7 @@ class FloorPage {
     if (this.tab === 'tasks') this.renderTasks();
     if (this.tab === 'projects') this.renderProjects();
     if (this.tab === 'requests') this.renderRequests();
+    if (this.tab === 'orders') this.renderOrders();
   }
   renderBanner() {
     const f = this.state.floor;
@@ -212,8 +214,9 @@ class FloorPage {
     const who = m.role === 'boss' ? this.state.floor.boss.name : this.state.agents.find((a) => a.id === m.agentId)?.name || 'Office Manager';
     const body = h('div.msg-body');
     body.innerHTML = renderMarkdown(m.text); // renderMarkdown escapes all input first, and the CSP forbids inline script regardless
-    const cls = m.role === 'boss' ? 'boss' : m.role === 'office' ? 'manager.notice' : 'manager';
-    return h(`div.msg.${cls}`, { 'data-id': m.id }, h('span.msg-who', {}, who), body);
+    // A report (launch report, standing-order report) is the manager's, for the boss alone, and gets its own look.
+    const cls = m.role === 'boss' ? 'boss' : m.role === 'office' ? 'manager.notice' : m.role === 'report' ? 'manager.report' : 'manager';
+    return h(`div.msg.${cls}`, { 'data-id': m.id, 'data-role': m.role }, h('span.msg-who', {}, who), body);
   }
   renderQuestions() {
     if (!this.questionsEl) return;
@@ -418,6 +421,90 @@ class FloorPage {
     this.bodyEl.append(list);
   }
 
+  // ---- standing orders (floors-plus) ----
+  async refreshOrders() {
+    try {
+      const r = await api(`/floors/${this.slug}/orders`);
+      if (this.dead) return;
+      this.state.orders = r.orders; this.state.orderLimits = r.limits;
+      if (this.tab === 'orders') this.renderBody();
+    } catch { /* the next full reload brings it */ }
+  }
+  renderOrders() {
+    const orders = this.state.orders || []; const lim = this.state.orderLimits || {};
+    const wrap = h('div.orders', { 'data-orders': String(orders.length) });
+    wrap.append(h('p.lede', {}, `Standing orders run on their own while you're away, through the same manager, staff and daily budget as anything you ask for in chat. Up to ${lim.perFloor ?? 3} per floor, at most once a day.`));
+    if (!orders.length) wrap.append(h('p.empty', {}, 'No standing orders yet. Set one below, or ask your manager for something "every morning".'));
+    for (const o of orders) wrap.append(this.orderCard(o));
+    if (orders.length < (lim.perFloor ?? 3)) wrap.append(this.orderForm());
+    wrap.append(h('p.fineprint', {}, `An order waits while the floor is busy, paused or out of budget. It pauses itself after ${lim.maxFails ?? 3} failed runs in a row, or if you haven't opened the floor in ${lim.idleDays ?? 14} days; opening it switches those back on.`));
+    this.bodyEl.append(wrap);
+  }
+  orderCard(o) {
+    const act = async (path, body, okText) => {
+      try { await api(`/floors/${this.slug}/orders/${o.id}${path}`, { method: 'POST', body: body || {} }); if (okText) toast(okText); await this.refreshOrders(); } catch (e) { toast(e.message, 'bad'); }
+    };
+    const cls = o.running ? 'running' : o.status;
+    const statusText = o.running ? 'Running now' : o.status === 'paused' ? (o.pauseReason || 'Paused') : 'Active';
+    const last = o.history.find((r) => r.status !== 'running');
+    return h(`article.order.${cls}`, { 'data-order': o.id, 'data-status': o.status },
+      h('p.order-text', {}, o.text),
+      h('span.order-status', {}, statusText),
+      h('div.order-meta', {},
+        h('span', {}, h('b', {}, o.scheduleText)),
+        h('span', {}, o.status === 'active' ? `Next run ${timeUntil(o.nextRunAt)}` : 'Not scheduled while paused'),
+        h('span', {}, `About ${money(o.estUsd)} a run`),
+        last ? h('span', {}, `Last run ${money(last.costUsd)}${last.status === 'failed' ? ', did not finish' : ''}`) : h('span', {}, 'Not run yet')),
+      h('div.order-acts', {},
+        o.status === 'active'
+          ? h('button.btn.ghost', { type: 'button', 'data-pause': o.id, onclick: () => act('', { status: 'paused' }, 'Paused') }, 'Pause')
+          : h('button.btn.ghost', { type: 'button', 'data-resume': o.id, onclick: () => act('', { status: 'active' }, 'Back on') }, 'Resume'),
+        h('button.btn.ghost', { type: 'button', 'data-edit': o.id, onclick: () => this.editOrder(o) }, 'Edit'),
+        h('button.btn.ghost', { type: 'button', 'data-run': o.id, disabled: o.running, onclick: () => act('/run', {}, 'Started. The report lands in the chat when it is done.') }, 'Run now'),
+        h('button.btn.ghost', { type: 'button', 'data-delete': o.id, onclick: () => { if (window.confirm('Delete this standing order? Its run history goes with it.')) act('/delete', {}, 'Deleted'); } }, 'Delete')),
+      o.history.length ? h('details.order-history', {}, h('summary', {}, `Last ${o.history.length} ${o.history.length === 1 ? 'run' : 'runs'}`), h('ul.order-runs', {}, ...o.history.map((r) => this.orderRun(r)))) : null);
+  }
+  orderRun(r) {
+    const doc = h('div.doc');
+    if (r.report) doc.innerHTML = renderMarkdown(r.report); // renderMarkdown escapes its input, and the CSP forbids inline script regardless
+    const label = r.status === 'running' ? 'running' : r.status === 'done' ? 'done' : 'did not finish';
+    return h(`li.order-run.${r.status}`, { 'data-run': r.id }, h('small', {}, `${new Date(r.startedAt).toLocaleString()} · ${label} · ${money(r.costUsd)} (estimated ${money(r.estUsd)})`), r.report ? doc : h('span', {}, 'Working on it...'));
+  }
+  // The schedule controls, shared by the new-order form and the edit dialog. read() gives the body the API wants.
+  orderFields(draft = {}) {
+    const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const s = draft.schedule || {};
+    const text = h('textarea', { rows: 3, maxlength: 2000, placeholder: 'Every morning, write a short post about something we learned yesterday and publish it.', 'aria-label': 'What to do', name: 'order' }, draft.text || '');
+    const every = h('select', { 'aria-label': 'How often', name: 'every' }, h('option', { value: 'day', selected: s.every !== 'week' }, 'Every day'), h('option', { value: 'week', selected: s.every === 'week' }, 'Every week'));
+    const weekday = h('select', { 'aria-label': 'Weekday', name: 'weekday' }, ...WEEKDAYS.map((d, i) => h('option', { value: String(i), selected: (s.weekday ?? 1) === i }, d)));
+    const dayWrap = h('label', { hidden: s.every !== 'week' }, h('span', {}, 'On'), weekday);
+    every.addEventListener('change', () => { dayWrap.hidden = every.value !== 'week'; });
+    const at = h('input', { type: 'time', value: s.at || '09:00', required: true, 'aria-label': 'Time', name: 'at' });
+    const tz = h('input', { value: s.tz && s.tz !== 'UTC' ? s.tz : '', placeholder: 'UTC', maxlength: 64, 'aria-label': 'Time zone', name: 'tz' });
+    const el = h('div.order-when', {}, h('label', {}, h('span', {}, 'How often'), every), dayWrap, h('label', {}, h('span', {}, 'At'), at), h('label', {}, h('span', {}, 'Time zone'), tz));
+    return { text, el, read: () => ({ text: text.value, schedule: { every: every.value, at: at.value, weekday: Number(weekday.value), tz: tz.value.trim() || undefined } }) };
+  }
+  orderForm() {
+    const f = this.orderFields();
+    const submit = async (e) => {
+      e.preventDefault();
+      const body = f.read();
+      if (body.text.trim().length < 3) { toast('Say what the staff should do.', 'bad'); return; }
+      try { await api(`/floors/${this.slug}/orders`, { method: 'POST', body }); toast('Standing order set'); await this.refreshOrders(); } catch (x) { toast(x.message, 'bad'); }
+    };
+    return h('section.order-new', { 'data-orders-form': '' }, h('h3', {}, 'New standing order'),
+      h('form.order-form', { onsubmit: submit }, f.text, f.el, h('button.btn.primary', { type: 'submit' }, 'Set it up')));
+  }
+  editOrder(o) {
+    modal('Edit standing order', (body, close) => {
+      const f = this.orderFields(o);
+      body.append(h('form.stack.order-form', { onsubmit: async (e) => {
+        e.preventDefault();
+        try { await api(`/floors/${this.slug}/orders/${o.id}`, { method: 'POST', body: f.read() }); toast('Saved'); close(); await this.refreshOrders(); } catch (x) { toast(x.message, 'bad'); }
+      } }, h('label.field', {}, h('span', {}, 'What to do'), f.text), f.el, h('button.btn.primary.wide', { type: 'submit' }, 'Save')));
+    });
+  }
+
   // ---- customise ----
   openCustomise(tab = 'company', agentId) {
     const s = this.state;
@@ -529,7 +616,10 @@ class FloorPage {
       this.state.messages.push(m);
       if (d.role === 'manager') { this.streamBuf = ''; this.showStream(); }
       if (this.tab === 'chat' && this.chatList) { this.chatList.insertBefore(this.messageEl(m), this.questionsEl); this.scrollChat(); }
+      // floors-plus: a report means an order ran, so the Orders tab and its history are stale.
+      if (d.role === 'report') { if (this.tab !== 'chat') toast('A report from your manager is in the chat'); if (this.owner) this.refreshOrders(); }
     });
+    on('orders', () => { if (this.owner) this.refreshOrders(); });
     on('question', () => this.reload());
     on('question_answered', () => this.reload());
     on('purchase', () => { this.reload(); toast('A purchase request has gone to the building manager'); });
@@ -615,6 +705,14 @@ class FloorPage {
   }
 }
 const b64url = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+// "in 6 hours": the forward-looking twin of timeAgo, for a standing order's next run.
+function timeUntil(ms) {
+  const s = (ms - Date.now()) / 1000;
+  if (s < 60) return 'any moment now';
+  if (s < 3600) return `in ${Math.round(s / 60)} minutes`;
+  if (s < 86400) { const n = Math.round(s / 3600); return `in ${n} ${n === 1 ? 'hour' : 'hours'}`; }
+  const d = Math.round(s / 86400); return `in ${d} ${d === 1 ? 'day' : 'days'}`;
+}
 const safeHref = (u) => (/^https?:\/\//i.test(u) ? u : '#');
 
 export async function showFloor(root, slug) {

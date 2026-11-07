@@ -1,1 +1,8 @@
 /* floors-plus: filler */
+/* Filler companies: scripted demo floors. The admin table marks them and offers one button to take them down. */
+.filler-badge { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 99px; font: 10px var(--mono, ui-monospace, monospace); letter-spacing: .1em; text-transform: uppercase; color: #f4c95d; background: rgba(244, 201, 93, .14); border: 1px solid rgba(244, 201, 93, .35); vertical-align: middle; }
+.admin-table tr[data-filler] td { color: rgba(255, 255, 255, .72); }
+.admin-table tr[data-filler] td a { color: inherit; }
+.btn.filler-remove { white-space: nowrap; }
+/* "demo" tag next to a filler company's name in the directory */
+.demo-tag{display:inline-block;margin-left:.45em;padding:.08em .5em;border-radius:99px;font:600 10px/1.5 ui-sans-serif,system-ui,sans-serif;letter-spacing:.08em;text-transform:uppercase;background:rgba(255,255,255,.14);color:inherit;opacity:.75;vertical-align:middle}

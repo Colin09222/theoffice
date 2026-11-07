@@ -255,6 +255,33 @@ async function run(label, opts, t, adminCode) {
     await p.until('window.__office.state.tasks.every((x) => ["done", "cancelled", "failed"].includes(x.status))', 'all stopped', 15000);
     await p.until('[...document.querySelectorAll(".msg.notice")].some((m) => /stopped/.test(m.textContent))', 'stop notice');
   });
+  await step(tag('standing orders: set one in the UI, see its schedule, run it now, read the report, pause and delete'), async () => {
+    await p.click('[data-tab=orders]');
+    await p.until('document.querySelector("[data-orders-form]") !== null', 'orders tab');
+    await p.type('[data-orders-form] textarea', 'Every morning, check the bakery site still loads and write a one-line note');
+    await p.ev('(() => { const at = document.querySelector("[data-orders-form] input[name=at]"); at.value = "07:30"; at.dispatchEvent(new Event("input")); })()');
+    await p.click('[data-orders-form] button[type=submit]');
+    await p.until('document.querySelector("article.order[data-order]") !== null', 'order card');
+    const card = await p.ev('document.querySelector("article.order").textContent');
+    if (!/Every day at 07:30/.test(card) || !/Next run/.test(card) || !/a run/.test(card)) throw new Error(`card text: ${card.slice(0, 160)}`);
+    await sleep(300); await p.shot(join(OUT, `plus-orders-${label}.jpg`));
+    await p.click('article.order [data-run]');
+    await p.until('window.__office.state.tasks.some((x) => x.status === "doing" || x.status === "review" || x.status === "done")', 'order run started through the engine', 20000);
+    await p.until('(() => { const o = (window.__office.state.orders || [])[0]; return !!o && o.history.length > 0 && o.history[0].status !== "running"; })()', 'run finished and recorded', 40000);
+    const run = await p.ev('JSON.stringify(window.__office.state.orders[0].history[0])');
+    const r = JSON.parse(run);
+    if (!r.report || typeof r.costUsd !== 'number' || typeof r.estUsd !== 'number') throw new Error(`run record: ${run.slice(0, 200)}`);
+    await p.click('[data-tab=chat]');
+    await p.until('document.querySelector(".msg.report") !== null', 'report in the chat');
+    await p.click('[data-tab=orders]');
+    await p.until('document.querySelector("article.order .order-history") !== null', 'history shown');
+    await sleep(200); await p.shot(join(OUT, `plus-orders-report-${label}.jpg`));
+    await p.click('article.order [data-pause]');
+    await p.until('document.querySelector("article.order[data-status=paused]") !== null', 'paused');
+    await p.ev('window.confirm = () => true');
+    await p.click('article.order [data-delete]');
+    await p.until('document.querySelector("article.order") === null', 'deleted');
+  });
   await step(tag('walking out and back in shows it as it was, with no duplicates'), async () => {
     await p.click('.back');
     await p.until('document.body.dataset.page === "lobby"', 'lobby');
@@ -264,6 +291,60 @@ async function run(label, opts, t, adminCode) {
     await p.until('document.querySelectorAll(".msg").length > 3', 'chat restored');
     const ids = await p.ev('[...document.querySelectorAll(".msg")].map((m) => m.dataset.id)');
     if (new Set(ids).size !== ids.length) throw new Error('duplicate messages');
+  });
+  const siteSlug = siteUrl.split('/').filter(Boolean).at(-1);
+  await step(tag('lobby ticker shows this floor\'s launch, live, with no private work'), async () => {
+    await p.goto(base);
+    await p.until('document.documentElement.classList.contains("ready")', 'ready');
+    await p.until('document.querySelector(".ticker[data-ticker=live]") !== null', 'ticker live');
+    await p.until(`[...document.querySelectorAll(".ticker-item.published")].some((i) => i.textContent.includes(${q(companyName)}) && /launched/.test(i.textContent))`, 'launch in the ticker');
+    const info = await p.ev(`(() => {
+      const items = [...document.querySelectorAll(".ticker-item")];
+      const pub = items.find((i) => i.classList.contains("published") && i.textContent.includes(${q(companyName)}));
+      const r = document.querySelector(".ticker").getBoundingClientRect();
+      const hit = (a, b) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+      const over = [".hero h1", ".open-pill", ".sheet-grip", ".directory", ".hints", ".topbar .btn"].filter((s) => { const e = document.querySelector(s); if (!e) return false; const b = e.getBoundingClientRect(); return b.width > 0 && getComputedStyle(e).opacity !== "0" && hit(r, b); });
+      return { n: items.length, href: pub?.getAttribute("href"), rel: pub?.getAttribute("rel"), target: pub?.getAttribute("target"), text: items.map((i) => i.textContent).join(" | "), onScreen: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight, over, anim: getComputedStyle(document.querySelector(".ticker-rail")).animationName };
+    })()`);
+    if (!info.n || info.n > 20) throw new Error(`${info.n} ticker items`);
+    if (!/\/theoffice\/f\/.+\/$/.test(info.href || '') || info.rel !== 'noopener noreferrer' || info.target !== '_blank') throw new Error(`launch link ${info.href} ${info.rel} ${info.target}`);
+    if (/working on something private|Private task/i.test(info.text)) throw new Error('private text in the ticker');
+    if (info.text.includes(`${siteSlug}: launch brief`) || info.text.includes(`${siteSlug}-brief`)) throw new Error('the doc that was made private is in the ticker');
+    if (!info.onScreen) throw new Error('ticker off screen');
+    if (info.over.length) throw new Error(`ticker overlaps ${info.over.join(', ')}`);
+    if (info.anim !== 'ticker-roll') throw new Error(`ticker not rolling: ${info.anim}`);
+    await sleep(600);
+    await p.shot(join(OUT, `plus-lobby-ticker-${label}.jpg`));
+  });
+  await step(tag('the launched wall lists the floor\'s public site with a thumbnail, and opens it'), async () => {
+    if (phone) { await p.click('.sheet-grip'); await p.until('document.querySelector(".directory").classList.contains("open")', 'sheet open'); await sleep(600); }
+    // A headless phone under a 3D scene can still be mid-slide when the tap lands, so the toggle is tapped until it takes.
+    for (let i = 0; ; i++) {
+      await p.click('[data-wall=toggle]');
+      try { await p.until('document.querySelector("[data-wall=toggle]").getAttribute("aria-pressed") === "true"', 'wall toggled on', 2500); break; } catch (e) { if (i >= 3) throw e; await sleep(400); }
+    }
+    await p.until('document.querySelector("[data-wall=grid]:not([hidden]) .wall-card") !== null', `wall cards (${await p.ev('document.querySelector("[data-wall=grid]")?.textContent.slice(0, 120)')})`);
+    await p.until(`[...document.querySelectorAll(".wall-card")].some((c) => c.textContent.includes(${q(companyName)}) && c.dataset.project === ${q(siteSlug)})`, 'our card');
+    await p.until(`(() => { const img = document.querySelector('.wall-card[data-project=${q(siteSlug)}] img'); return img && img.complete && img.naturalWidth > 0; })()`, 'thumbnail loaded');
+    const wall = await p.ev(`(() => {
+      const cards = [...document.querySelectorAll(".wall-card")];
+      const ours = cards.find((c) => c.dataset.project === ${q(siteSlug)});
+      const open = ours.querySelector("a.btn");
+      const visit = [...ours.querySelectorAll("button")].find((b) => /Visit floor/.test(b.textContent));
+      const vw = innerWidth; const bad = cards.filter((c) => { const r = c.getBoundingClientRect(); return r.left < -1 || r.right > vw + 1; }).length;
+      return { n: cards.length, slugs: cards.map((c) => c.dataset.project), text: cards.map((c) => c.textContent).join(" | "), href: open?.getAttribute("href"), rel: open?.getAttribute("rel"), target: open?.getAttribute("target"), visit: !!visit, bad, dirRows: document.querySelectorAll(".dir-list:not([hidden]) .dir-row").length, thumb: ours.querySelector("img").getAttribute("src") };
+    })()`);
+    if (!wall.href || wall.rel !== 'noopener noreferrer' || wall.target !== '_blank') throw new Error(`open link ${wall.href} ${wall.rel}`);
+    if (!wall.visit) throw new Error('no Visit floor button');
+    if (wall.text.includes(`${siteSlug}: launch brief`) || wall.slugs.includes(`${siteSlug}-brief`)) throw new Error('private doc on the wall');
+    if (wall.bad) throw new Error(`${wall.bad} cards off the sides`);
+    if (wall.dirRows) throw new Error('directory rows still showing under the wall');
+    if (!/\/api\/building\/thumb\//.test(wall.thumb)) throw new Error(`thumb ${wall.thumb}`);
+    await sleep(400);
+    await p.shot(join(OUT, `plus-launched-wall-${label}.jpg`));
+    await p.click('[data-wall=toggle]');
+    await p.until('document.querySelectorAll(".dir-row").length > 0 && document.querySelector("[data-wall=grid]").hidden', 'directory back');
+    if (phone) { await p.click('.sheet-grip'); await sleep(450); }
   });
   await step(tag('a lift button rides up and walks into a floor'), async () => {
     await p.goto(base);
@@ -366,7 +447,8 @@ async function runAdmin(t) {
   }
 }
 
-const t = await boot({ mockDelayMs: Number(process.env.E2E_DELAY || 260), rateScale: 50 });
+// FILLER_COMPANIES=1 runs the same suite with the demo companies seeded, so their floors can't break the lobby or the counts.
+const t = await boot({ mockDelayMs: Number(process.env.E2E_DELAY || 260), rateScale: 50, fillerCompanies: process.env.FILLER_COMPANIES === '1', fillerTickMs: 1500, ordersTickMs: 1200 });
 await claim(t, 'Hat Museum', { body: { tagline: 'A history of hats', colors: { primary: '#2f7ec7', accent: '#a9c4ff' } } });
 const seed = await claim(t, 'Soup Finder', { body: { tagline: 'Every soup, ranked', colors: { primary: '#c8455a', accent: '#f4c95d' } } });
 await seed.post(`/api/floors/${seed.slug}/chat`, { text: 'go build soup finder [buy]' });

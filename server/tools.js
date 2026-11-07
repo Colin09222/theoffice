@@ -7,6 +7,7 @@ import { ProviderError } from './llm.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './media.js';
 import { runCheck, saveCheck, gateProblem, launchFacts, composeReport } from './launch.js';
 import { formatReport } from './launch-check.js';
+import { OrderError } from './orders.js';
 
 const str = (o, k, max, req = true) => {
   const v = o?.[k];
@@ -58,6 +59,13 @@ const DEFS = {
   ios_start: fn('ios_start', 'Put the Expo iPhone app template into a project. Free.', { project: S('Project slug'), app_name: S('The name on the home screen') }),
   ios_request: fn('ios_request', 'Ask the boss to allow an iPhone build, or to send a finished build to TestFlight. Nothing happens until they click.', { project: S('Project slug'), kind: { type: 'string', enum: ['build', 'submit'] }, build_id: S('For submit: the EAS build id') }, ['project', 'kind']),
   hire_staff: fn('hire_staff', 'Hire another staff member, within this floor\'s limit.', { role: S('Role to hire'), name: S('Optional first name') }, ['role']),
+  // Standing orders (floors-plus). An order fires as an ordinary boss message on its schedule; it can't spend beyond the floor's normal caps.
+  set_standing_order: fn('set_standing_order', 'Set a recurring job for the floor: the instruction is handed to you again on a schedule, every day or every week, when the floor is quiet. Use it when the boss asks for something regular ("every morning", "weekly"). It shows to the boss under Orders, where they can edit, pause or delete it.', {
+    instruction: S('What to do each time, written as the boss would say it'), every: { type: 'string', enum: ['day', 'week'] }, at: S('Time of day as HH:MM, 24-hour'),
+    weekday: { type: 'integer', description: 'For weekly orders: 0 Sunday to 6 Saturday' }, tz: S('Optional IANA time zone such as Europe/London; UTC if left out'),
+  }, ['instruction', 'every', 'at']),
+  list_standing_orders: fn('list_standing_orders', 'List this floor\'s standing orders with their ids, schedules and next run.', {}, []),
+  cancel_standing_order: fn('cancel_standing_order', 'Delete a standing order the boss no longer wants.', { id: { type: 'integer', description: 'Order id from list_standing_orders' } }),
 };
 
 export const STAFF_TOOLS = ['write_file', 'read_file', 'list_files', 'publish_project', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request'];
@@ -66,7 +74,7 @@ export const MANAGER_TOOLS = ['write_file', 'read_file', 'list_files', 'publish_
 
 // Beyond the common set, by job. A tool nobody needs is a tool a hijacked agent can't use. Approving a purchase is not on this list for anyone: it isn't a tool at all.
 const ROLE_EXTRAS = {
-  manager: ['web_search', 'check_domain', 'request_domain', 'launch_check', 'launch_report', 'ios_start', 'ios_request'],
+  manager: ['web_search', 'check_domain', 'request_domain', 'launch_check', 'launch_report', 'ios_start', 'ios_request', 'set_standing_order', 'list_standing_orders', 'cancel_standing_order'],
   builder: ['generate_image', 'review_design', 'launch_check'], designer: ['generate_image', 'review_design'], illustrator: ['generate_image', 'review_design'],
   tester: ['review_design', 'launch_check'], marketer: ['check_domain'],
 };
@@ -384,6 +392,27 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     review_task(c, a) { return engine.reviewTask(c.floor, c.agent, Number(a.task_id), a.verdict === 'revise' ? 'revise' : 'approve', str(a, 'notes', 2000, false)); },
     cancel_task(c, a) { return engine.cancelTask(c.floor, Number(a.task_id)); },
     hire_staff(c, a) { return engine.hireStaff(c.floor, str(a, 'role', 40).toLowerCase(), str(a, 'name', 24, false)); },
+    // Standing orders. The same limits as the boss's own form; a failure comes back as a plain tool error.
+    set_standing_order(c, a) {
+      if (!engine.orders) throw new WorkspaceError('standing orders are not available');
+      const schedule = { every: a.every, at: a.at, weekday: a.weekday, tz: str(a, 'tz', 64, false) || undefined };
+      let o;
+      try { o = engine.orders.create(c.floor, { text: str(a, 'instruction', 2000), schedule }); } catch (e) { if (e instanceof OrderError) throw new WorkspaceError(e.message); throw e; }
+      return `Standing order #${o.id} set: ${o.scheduleText}. First run ${new Date(o.nextRunAt).toISOString().slice(0, 16).replace('T', ' ')} UTC, when the floor is quiet. Tell the boss it shows under Orders, where they can change or delete it.`;
+    },
+    list_standing_orders(c) {
+      if (!engine.orders) throw new WorkspaceError('standing orders are not available');
+      const rows = engine.orders.list(c.floor.id);
+      if (!rows.length) return 'There are no standing orders on this floor.';
+      return rows.map((o) => `#${o.id} [${o.status}${o.pauseReason ? `: ${o.pauseReason}` : ''}] ${o.scheduleText}; next ${new Date(o.nextRunAt).toISOString().slice(0, 16).replace('T', ' ')} UTC; ${o.runs} runs so far: ${o.text.slice(0, 200)}`).join('\n');
+    },
+    cancel_standing_order(c, a) {
+      if (!engine.orders) throw new WorkspaceError('standing orders are not available');
+      const id = Number(a.id);
+      if (!Number.isInteger(id) || id <= 0) throw new WorkspaceError('id must be a standing order id from list_standing_orders');
+      try { engine.orders.remove(c.floor, id); } catch (e) { if (e instanceof OrderError) throw new WorkspaceError(e.message); throw e; }
+      return `Standing order #${id} cancelled.`;
+    },
   };
 
   return {

@@ -1,1 +1,32 @@
-/* floors-plus: office */
+/* floors-plus: office. Labels for the walk-in floor: a small name pill above the head, the activity bubble off to the side
+   with a pointer, so neither ever covers the person it belongs to. Class names are read by floor-ui and the e2e tests. */
+#labels .char-tag { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 0; will-change: transform; }
+#labels .char-name {
+  font: 600 10.5px/1.5 var(--sans); letter-spacing: .01em; padding: 0 7px; border-radius: 99px;
+  background: rgba(14, 18, 30, .62); color: #fff; white-space: nowrap; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 1px 6px rgba(10, 16, 30, .28), inset 0 0 0 1px rgba(255, 255, 255, .12);
+}
+#labels .char-bubble {
+  position: absolute; left: 58%; bottom: calc(100% + 6px); display: flex; align-items: center; gap: 5px;
+  max-width: 160px; padding: 4px 9px; border-radius: 12px 12px 12px 3px; background: #fffaf0; color: #24222f;
+  font: 500 11px/1.25 var(--sans); box-shadow: 0 4px 12px rgba(5, 5, 20, .3), 0 0 0 1px rgba(40, 30, 10, .08);
+}
+#labels .char-bubble::after {
+  content: ''; position: absolute; left: 0; bottom: -7px; width: 0; height: 0;
+  border-left: 1px solid transparent; border-right: 8px solid transparent; border-top: 8px solid #fffaf0;
+}
+#labels .char-tag[data-side="left"] .char-bubble { left: auto; right: 58%; border-radius: 12px 12px 3px 12px; }
+#labels .char-tag[data-side="left"] .char-bubble::after { left: auto; right: 0; border-right: 1px solid transparent; border-left: 8px solid transparent; }
+#labels .char-bubble[hidden] { display: none; }
+#labels .char-bubble > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#labels .char-bubble[data-state="typing"] { border-left: 3px solid var(--brand); }
+#labels .char-bubble[data-state="queued"] { color: #6a6c78; background: #f3efe6; }
+#labels .dots { display: inline-flex; gap: 2px; flex: none; }
+#labels .dots b { width: 3.5px; height: 3.5px; border-radius: 50%; background: var(--brand); animation: dot 1s infinite; }
+#labels .dots b:nth-child(2) { animation-delay: .15s; } #labels .dots b:nth-child(3) { animation-delay: .3s; }
+@media (max-width: 760px) {
+  #labels .char-name { font-size: 9px; padding: 0 5px; }
+  #labels .char-bubble { font-size: 9.5px; padding: 2px 6px; gap: 3px; max-width: 112px; bottom: calc(100% + 4px); }
+  #labels .char-bubble::after { bottom: -6px; border-top-width: 6px; border-right-width: 6px; }
+  #labels .dots b { width: 3px; height: 3px; }
+}
