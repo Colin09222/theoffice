@@ -710,7 +710,7 @@ test('a database from before these features is brought up to date at boot', asyn
   const { openDb } = await import('../server/db.js');
   const dir = mkdtempSync(join(tmpdir(), 'officemig-'));
   const old = new DatabaseSync(join(dir, 'office.db'));
-  old.exec('CREATE TABLE tasks (id INTEGER PRIMARY KEY, floor_id INTEGER, title TEXT); CREATE TABLE app_scores (floor_id INTEGER, project TEXT, board TEXT, player TEXT, name TEXT, score REAL, updated_at INTEGER, PRIMARY KEY (floor_id, project, board, player)); INSERT INTO tasks (id,floor_id,title) VALUES (1,1,\'kept\');');
+  old.exec('CREATE TABLE tasks (id INTEGER PRIMARY KEY, floor_id INTEGER, title TEXT, status TEXT); CREATE TABLE app_scores (floor_id INTEGER, project TEXT, board TEXT, player TEXT, name TEXT, score REAL, updated_at INTEGER, PRIMARY KEY (floor_id, project, board, player)); INSERT INTO tasks (id,floor_id,title) VALUES (1,1,\'kept\');');
   old.close();
   const db = openDb(dir);
   const cols = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
