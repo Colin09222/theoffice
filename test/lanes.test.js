@@ -16,21 +16,21 @@ const BARE = { aiMode: 'live' };
 
 describe('the manager\'s playbooks', () => {
   const full = managerPrompt(floor, BOSS, ROSTER, FULL);
-  test('it knows the three lanes, and that a tap starts a short conversation and no work', () => {
+  test('it knows the three lanes, and that ideas come only when asked for', () => {
     assert.deepEqual(LANES, ['game', 'website', 'business']);
     for (const h of [/^GAME$/m, /^WEBSITE$/m, /^BUSINESS$/m]) assert.match(full, h);
-    assert.match(full, /keep your first reply short/); assert.match(full, /two quick questions at most or three concrete suggestions/); assert.match(full, /No work starts until they say go/); assert.match(full, /answering your questions is not a go/); assert.match(full, /set lane on every assign_task/);
+    assert.match(full, /If they ask for ideas or have nothing yet, give three ideas, one line each/); assert.match(full, /Set lane on every assign_task/);
   });
   test('the game lane goes concept, build, Tester in a real browser, fix, publish, with a saved score', () => {
     const game = full.slice(full.indexOf('GAME\n'), full.indexOf('WEBSITE\n'));
-    assert.match(game, /three small original ideas/); assert.match(game, /Never a copy of a named game/);
+    assert.match(game, /choose it yourself/); assert.match(game, /Three ideas, one line each, only if the boss asks/); assert.match(game, /Never a copy of a named game/);
     assert.match(game, /playable version/); assert.match(game, /Say in the brief not to publish yet/); assert.match(game, /saved high score/);
     assert.match(game, /Hire a Tester/); assert.match(game, /play it in a real browser/); assert.match(game, /fix small clear bugs themselves and retest/); assert.match(game, /what nobody has replayed/);
     assert.match(game, /send the Builder's task back with review_task/); assert.match(game, /call publish_project yourself/);
   });
   test('the website lane goes brief, copy, named design, build, review_design, publish', () => {
     const site = full.slice(full.indexOf('WEBSITE\n'), full.indexOf('BUSINESS\n'));
-    assert.match(site, /Brief, in chat/); assert.match(site, /real words/); assert.match(site, /named choices/); assert.match(site, /review_design/); assert.match(site, /publishes/); assert.match(site, /never made up/);
+    assert.match(site, /If you know what the site is about, start/); assert.match(site, /real words/); assert.match(site, /named choices/); assert.match(site, /review_design/); assert.match(site, /publishes/); assert.match(site, /never made up/);
   });
   test('the business lane covers research, estimates, plan, page, checklist and what only a human can do, and says what nobody here can do', () => {
     const biz = full.slice(full.indexOf('BUSINESS\n'), full.indexOf('Security rules'));

@@ -71,7 +71,8 @@ describe('filler companies', () => {
     assert.ok(states.has('idle') && [...states].some((x) => ['typing', 'browsing', 'reading', 'thinking', 'talking'].includes(x)), [...states].join());
     const types = new Set(stream.events.map((e) => e.type));
     assert.ok(types.has('feed') && types.has('task') && types.has('agent'), [...types].join());
-    const feedLines = stream.events.filter((e) => e.type === 'feed').map((e) => e.data.text);
+    // The scene runs on its own clock, so on a busy machine the assigning can happen before this stream connects. What it wrote to the feed still counts.
+    const feedLines = [...stream.events.filter((e) => e.type === 'feed').map((e) => e.data.text), ...(await floorState(c, f.slug)).feed.map((x) => x.text)];
     assert.ok(feedLines.some((x) => /^started "/.test(x)) && feedLines.some((x) => /^gave \w+ a task: "/.test(x)), feedLines.join('|'));
     assert.equal(llmCalls.n, 0);
     assert.equal(t.app.engine.runs.size, 0);

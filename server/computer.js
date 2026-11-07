@@ -12,7 +12,7 @@ import { MIN_ROOM_USD } from './budget.js';
 import { costOf } from './anthropic.js';
 import { packTgz, unpackTgz, TarError } from './tarball.js';
 import { applySync, baselineOf, projectFiles, publishSnapshot, WorkspaceError } from './workspace.js';
-import { COMPUTER_TOOL_DEFS, computerToolName, publicUrl, toolsForRole } from './tools.js';
+import { COMPUTER_TOOL_DEFS, computerToolName, toolsForRole } from './tools.js';
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { IOS_HOSTS } from './ios.js';
 import { computerPrompt, computerBriefing } from './prompts.js';
@@ -22,7 +22,9 @@ const OUTPUT_WAIT_MS = 30000;
 const STALL_MS = 90_000;
 const STOP_GRACE_MS = 120_000;
 const MAX_FIX_TURNS = 2, MAX_LOST = 2, MAX_STREAM_FAILURES = 5;
-const WARN_STEPS_LEFT = 5;
+const WARN_STEPS_LEFT = 5, SPEND_WARN = 0.8;
+// A small job told to aim for 15 steps will still polish for 40 if nothing says stop. The hard limits stay for the jobs that really need them.
+const WRAP_UP = { change: 12, tester: 16, default: 22 };
 const MAX_ARCHIVE_BYTES = 40 * 1024 * 1024, MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hash = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16);
@@ -166,7 +168,7 @@ export class Computer {
       }
       task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       if (!task.transcript) {
-        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], task, e.cfg) }]), task.id);
+        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }) }, e.cfg) }]), task.id);
         task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       }
       st = this.newState(floor, agent, task, signal);
@@ -203,7 +205,7 @@ export class Computer {
     return {
       id: task.session_id || '', floorId: floor.id, floor, agent, taskId: task.id, project: task.project, signal, room: null,
       // History counts towards the steps, so a restart can't reset them. A round of fixes the manager asked for gets its own, or the fix never fits; the dollar caps still hold.
-      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), warned: false, limit: '', lastText: '', lastFeed: '',
+      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), wrapUpAt: task.lane || e.isLive(floor.id, task.project) ? (e.isLive(floor.id, task.project) && agent.role !== 'tester' ? WRAP_UP.change : WRAP_UP[agent.role] || WRAP_UP.default) * (1 + (task.revisions || 0)) : 0, warned: false, limit: '', lastText: '', lastFeed: '',
       pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
       publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
       ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design')]), signal },
@@ -403,6 +405,10 @@ export class Computer {
             this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: `You have ${WARN_STEPS_LEFT} steps left on this computer. Finish up now: save your work with .office/save.sh, publish if you are going to, and reply with your summary.` }] }]).catch(() => {});
           }
           if (left <= 0) this.stopFor(st, 'steps');
+          if (st.wrapUpAt && st.steps >= st.wrapUpAt && !st.wrappedUp) {
+            st.wrappedUp = true;
+            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: `That is ${st.wrapUpAt} steps, which is what this job should take. Stop polishing and finish now: leave it working, run .office/save.sh, publish if you are going to, and reply with your summary, including anything still rough.` }] }]).catch(() => {});
+          }
         }
         return null;
       case 'span.model_request_end':
@@ -410,6 +416,11 @@ export class Computer {
         if (live && ev.model_usage) {
           const u = costOf(ev.model_usage, st.pricing);
           this.charge(st, st.model, u.prompt, u.completion, u.cost);
+          // A session stopped by its budget keeps only what was saved, and the platform gives no warning. It isn't told why, because a bot has no business knowing there is a limit.
+          if (!st.warnedSpend && st.room && st.charged >= st.room.usd * SPEND_WARN) {
+            st.warnedSpend = true;
+            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: 'Your time on this computer is nearly up. Save your work now with .office/save.sh, publish if you are going to, and reply with your summary.' }] }] ).catch(() => {});
+          }
         }
         return null;
       case 'agent.thinking':
@@ -499,7 +510,7 @@ export class Computer {
     const entry = { project: slug, title: String(a.title || slug).slice(0, 120), description: String(a.description || '').slice(0, 300), kind, directory, reason: String(a.claims_ok_because || '').slice(0, 300) };
     st.publish = [...st.publish.filter((p) => p.project !== slug), entry];
     run(this.engine.db, 'UPDATE tasks SET session_publish=? WHERE id=?', JSON.stringify(st.publish), st.taskId);
-    return `Noted. ${directory ? `${directory}/` : 'The project folder'} goes live at ${publicUrl(st.floor.slug, slug)} once you have run .office/save.sh and ended your turn. Save first, and do it last, so the newest files are the ones published.`;
+    return `Noted. ${directory ? `${directory}/` : 'The project folder'} goes live at ${this.engine.liveUrl(st.floor, slug)} once you have run .office/save.sh and ended your turn. Save first, and do it last, so the newest files are the ones published.`;
   }
   /** Sends user messages the session hasn't had yet: the first briefing, the manager's notes, the boss's answers, or a fix request. */
   async sendPending(st) {
@@ -541,14 +552,16 @@ export class Computer {
     }
     await this.reconcile(st);
     const links = result.published?.length ? `\n\nPublished: ${result.published.join(', ')}` : '';
+    // The manager decides what to do about a stopped task, and can't without this: what was being said when it stopped, and whether the work survived.
+    const soFar = `${st.lastText ? `\n\nLast thing it said: ${st.lastText.slice(0, 800)}` : ''}${result.ok ? e.savedSoFar(floor.id, { project: st.project }) : ' Its last save could not be read, so anything since the task began may be lost.'}`;
     if (outcome === 'budget') {
       // Stopped by what was left of the building's total or of the day. Over if the money is really gone; otherwise it goes back in line for what other sessions give back.
       if (st.room.building) throw new e.Halt(e.budget.out('anthropic') ? 'building_budget' : 'wait');
       if (st.room.daily) throw new e.Halt(e.spentOver(floor.id, MIN_ROOM_USD) ? 'budget' : 'wait');
-      return e.finishTask(floor, agent, taskId, 'failed', `Stopped: this task reached its limit.${links}`);
+      return e.finishTask(floor, agent, taskId, 'failed', `Stopped: this task reached its limit.${links}${soFar}`);
     }
-    if (st.limit === 'steps') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of steps before finishing.${links}`);
-    if (st.limit === 'time') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of time before finishing.${links}`);
+    if (st.limit === 'steps') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of steps before finishing.${links}${soFar}`);
+    if (st.limit === 'time') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of time before finishing.${links}${soFar}`);
     if (!result.ok) return e.finishTask(floor, agent, taskId, 'failed', `The work could not be saved: ${result.problem}`);
     return e.finishTask(floor, agent, taskId, 'review', `${(st.lastText || 'Finished.').slice(0, 1800)}${links}`);
   }
@@ -612,7 +625,7 @@ export class Computer {
       try {
         const n = publishSnapshot(e.db, floor.id, p.project, e.cfg.quotaBytes, p.directory);
         e.upsertProject(floor, p.project, { title: p.title, description: p.description, kind: p.kind, sources: [], published: true });
-        published.push(publicUrl(floor.slug, p.project));
+        published.push(e.liveUrl(floor, p.project));
         e.feed(floor.id, agent, `published ${p.project} (${n} files)`, p.project);
         e.emitProject(floor.id, p.project);
       } catch (err) {

@@ -274,14 +274,16 @@ describe('the launch report', () => {
     await h.publish();
     assert.match(await h.tool('manager', 'launch_report', { project: 'teacups', headline: 'Tiny Teacups is live.', next_steps: 'Share it.' }), /Sent to the boss/);
     const msg = get(h.t.db, "SELECT text FROM messages WHERE role='report' ORDER BY id DESC LIMIT 1").text;
-    assert.match(msg, /Launch report/); assert.match(msg, /Live at:.*teacups--/); assert.match(msg, /Design review:\*\* not done/); assert.match(msg, /Sign-ups so far:\*\* 0/);
-    assert.match(msg, /Taking money:\*\* no/);
-    assert.ok(get(h.t.db, "SELECT launch_report r FROM projects WHERE slug='teacups'").r);
+    assert.match(msg, /^\*\*.* is live:\*\* .*teacups--/); assert.match(msg, /Tiny Teacups is live\./); assert.match(msg, /Share it\./); assert.match(msg, /under Report on the project card/);
+    // The rest of what's on record is one click away, on the project card.
+    const full = get(h.t.db, "SELECT launch_report r FROM projects WHERE slug='teacups'").r;
+    assert.match(full, /Launch report/); assert.match(full, /Live at:.*teacups--/); assert.match(full, /Design review:\*\* not done/); assert.match(full, /Sign-ups so far:\*\* 0/);
+    assert.match(full, /Taking money:\*\* no/);
     // For the boss alone, even on a floor with public chat.
     await h.c.post(`/api/floors/${h.c.slug}/settings`, { publicChat: true });
     const seen = await new Client(h.t).get(`/api/floors/${h.c.slug}`);
-    assert.ok(Array.isArray(seen.data.messages)); assert.ok(!JSON.stringify(seen.data).includes('Launch report'));
-    assert.ok((await floorState(h.c)).messages.some((m) => /Launch report/.test(m.text)));
+    assert.ok(Array.isArray(seen.data.messages)); assert.ok(!JSON.stringify(seen.data).includes('is live:'));
+    assert.ok((await floorState(h.c)).messages.some((m) => /is live:/.test(m.text)));
     const { messages } = h.t.app.engine.managerContext(get(h.t.db, 'SELECT * FROM floors WHERE id=?', h.floor.id), h.agent('manager'));
     assert.doesNotMatch(JSON.stringify(messages), /Launch report: /);
   });
@@ -461,7 +463,7 @@ describe('web search', () => {
     assert.equal(reqs[2].messages.length, 3, 'each paused turn appended, nothing else');
     assert.equal(reqs[2].messages.filter((m) => m.role === 'user').length, 1);
     assert.equal(reqs[0].tools[0].type, 'web_search_20260209');
-    assert.ok(Math.abs(r.usage.cost - (3 * ((100 * 4 + 50 * 20) / 1e6) + 6 * 0.01)) < 1e-9);
+    assert.ok(Math.abs(r.usage.cost - (3 * ((100 * 2 + 50 * 10) / 1e6) + 6 * 0.01)) < 1e-9);
     assert.equal(r.searches, 6);
     assert.equal(JSON.stringify(reqs[0].messages).match(/tiny companies/g).length, 1);
     assert.equal(reqs[0].system, undefined, 'the search call holds nothing but the query');
