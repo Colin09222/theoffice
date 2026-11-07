@@ -123,6 +123,7 @@ async function run(label, opts, t, adminCode) {
     await p.until('window.__office.state.floor.decor.floor === "terrazzo" && window.__office.state.floor.decor.pet === "dog" && window.__office.state.floor.decor.arcade === true', 'decor saved');
     await p.until('document.querySelector(".modal") === null', 'dialog closed');
     await p.click('.staff-chip[data-agent]:nth-child(2)');
+    await p.click('[data-profile-edit]');
     await p.until('document.querySelector(".modal .staff-pick") !== null', 'staff editor');
     await p.type('.modal form input', 'Sir Crumb');
     await sleep(300);

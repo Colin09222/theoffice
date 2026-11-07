@@ -24,10 +24,13 @@ function planThumb(id, primary) {
   return c;
 }
 
+// The owner's own settings for a person. `persona` became a public sentence, and the settings moved to `customise`; an older server still sends the object.
+const settings = (a) => a.customise || (a.persona && typeof a.persona === 'object' ? a.persona : {});
+
 export function openCustomisePanel(page, tab = 'vibe', agentId) {
   const s = page.state;
   let cleanup = () => {}, saved = false, timer = null;
-  const staffDraft = (a) => ({ id: a.id, role: a.role, name: a.name, title: a.title, persona: { vibe: a.persona?.vibe || '', notes: a.persona?.notes || '', focus: a.persona?.focus || '' }, look: { ...a.look } });
+  const staffDraft = (a) => ({ id: a.id, role: a.role, name: a.name, title: a.title, persona: { vibe: settings(a).vibe || '', notes: settings(a).notes || '', focus: settings(a).focus || '' }, look: { ...a.look } });
   const draft = {
     name: s.floor.name, tagline: s.floor.tagline, colors: { ...s.floor.colors }, decor: { ...DEFAULT_DECOR, ...s.floor.decor }, publicChat: s.floor.publicChat, defaultPrivate: s.floor.defaultPrivate,
     boss: { name: s.floor.boss.name, look: { ...s.floor.boss.look } },

@@ -1,25 +1,14 @@
-// The furniture of the floor page around the room: the company card on the left, the floor scrubber on the right, and the round pins over
+// The furniture of the floor page around the room: the door plaque on the left, the lift panel on the right, and the map pins over
 // the rooms. All of it reads the same state as the panels, and everything a visitor sees here is already filtered by the server.
 import { h, api, clear, put, toast, BASE } from './dom.js';
 
-const SVG = 'http://www.w3.org/2000/svg';
-const ICONS = {
-  chat: 'M4 5h16v11H9l-5 4z',
-  talk: 'M3 5h12v8H7l-4 3zM18 9h3v8l-3-2.5h-7V13',
-  tasks: 'M5 6l2 2 3-3M12 7h8M5 13l2 2 3-3M12 14h8M5 19.5h15',
-  projects: 'M4 6h6l2 2h8v11H4z',
-  requests: 'M5 4h14v16l-3-2-2 2-2-2-2 2-2-2-3 2zM9 9h6M9 13h6',
-  orders: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 7v5l3.5 2',
-  up: 'M6 15l6-6 6 6', down: 'M6 9l6 6 6-6', share: 'M12 15V4M8 8l4-4 4 4M5 13v7h14v-7',
-};
-export function icon(name) {
-  const svg = document.createElementNS(SVG, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', 'ico');
-  const p = document.createElementNS(SVG, 'path'); p.setAttribute('d', ICONS[name] || ''); svg.append(p);
-  return svg;
-}
+import { icon } from './icons.js';
+import { portrait } from './portrait.js';
 
-const initials = (name) => String(name || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('').toUpperCase() || '?';
+const TAB_ICONS = { chat: 'phone-call', talk: 'chats-teardrop', work: 'notebook', tasks: 'push-pin', projects: 'archive', requests: 'receipt', orders: 'calendar-check', about: 'identification-badge' };
+export const tabIcon = (tab) => icon(TAB_ICONS[tab] || 'file-text');
+
+export { portrait };
 
 /** What's on the company card below the name, redrawn as the floor changes: who is here, what they are at, what they've made. */
 export function renderCard(page) {
@@ -39,11 +28,12 @@ export function renderCard(page) {
     made.length ? h('div.card-made', {}, h('h3', {}, 'Made here'), ...made.map((p) => h('button.card-project', { type: 'button', 'data-card-project': p.slug, onclick: () => page.openProject(p) }, h('span', {}, p.title), h('small', {}, p.kind)))) : null,
     h('div.card-actions', {},
       site ? h('a.btn.primary', { href: site.appUrl || site.url, target: '_blank', rel: 'noopener noreferrer', 'data-visit': '' }, 'Visit website') : null,
-      h('button.btn.ghost', { type: 'button', 'data-share': '', onclick: () => shareFloor(page) }, icon('share'), 'Share')),
+      h('button.btn.ghost', { type: 'button', 'data-share': '', onclick: () => shareFloor(page) }, icon('share-fat'), 'Share')),
   );
   if (page.logoEl) {
     clear(page.logoEl);
-    if (s.floor.logoUrl) page.logoEl.append(h('img', { src: s.floor.logoUrl, alt: '' })); else page.logoEl.textContent = initials(s.floor.name);
+    page.logoEl.classList.toggle('has-logo', !!s.floor.logoUrl);
+    if (s.floor.logoUrl) page.logoEl.append(h('img', { src: s.floor.logoUrl, alt: '' }));
   }
 }
 
@@ -56,37 +46,37 @@ async function shareFloor(page) {
   } catch (e) { if (e?.name !== 'AbortError') toast(url); }
 }
 
-/** The floor scrubber: up and down through the floors that are open, and a tick for each of them. */
+/** The lift panel: a lit display, up and down, and one lit button for every floor that's open. */
 export function buildScrubber(page) {
   const here = page.state.floor.number;
-  const up = h('button.scrub-btn', { type: 'button', 'aria-label': 'Floor above', 'data-scrub': 'up' }, icon('up'));
-  const down = h('button.scrub-btn', { type: 'button', 'aria-label': 'Floor below', 'data-scrub': 'down' }, icon('down'));
+  const up = h('button.scrub-btn', { type: 'button', 'aria-label': 'Floor above', 'data-scrub': 'up' }, icon('caret-up'));
+  const down = h('button.scrub-btn', { type: 'button', 'aria-label': 'Floor below', 'data-scrub': 'down' }, icon('caret-down'));
   const track = h('div.scrub-track', { role: 'list' });
-  const name = h('span.scrub-name', {}, `Floor ${here} · ${page.state.floor.name}`);
-  track.append(name);
-  const el = h('nav.floor-scrubber.glass', { 'aria-label': 'Other floors' }, up, track, down);
+  const name = h('span.scrub-name', {}, `Floor ${here} · ${page.state.floor.name || 'Moving in'}`);
+  const el = h('nav.floor-scrubber', { 'aria-label': 'The lift: other floors' }, h('span.lift-display', { 'aria-hidden': 'true' }, String(here)), up, track, down, name);
   const load = async () => {
     const d = await api('/floors').catch(() => null);
     if (!d || page.dead) return;
     const list = d.floors.filter((f) => f.status === 'active').sort((a, b) => b.number - a.number);
     const go = (f) => { if (f) window.officeGo(`/floor/${f.slug}`); };
     const above = [...list].reverse().find((f) => f.number > here), below = list.find((f) => f.number < here);
-    const wire = (btn, f, word) => { btn.disabled = !f; btn.title = f ? `${word}: floor ${f.number}, ${f.name}` : `No open floor ${word.toLowerCase()}`; btn.onclick = () => go(f); };
+    const wire = (btn, f, word) => { btn.disabled = !f; btn.title = f ? `${word}: floor ${f.number}, ${f.name || 'moving in'}` : `No open floor ${word.toLowerCase()}`; btn.onclick = () => go(f); };
     wire(up, above, 'Up'); wire(down, below, 'Down');
-    clear(track); track.append(name);
-    const top = Math.max(d.towerFloors || 40, here), span = Math.max(1, top - 1);
-    const at = (n) => `${(1 - (n - 1) / span) * 100}%`;
-    name.style.setProperty('--at', at(here));
+    clear(track);
+    let lit = null;
     for (const f of list) {
-      track.append(h(`button.scrub-tick${f.number === here ? '.on' : ''}`, { type: 'button', role: 'listitem', 'aria-label': `Floor ${f.number}, ${f.name}`, title: `Floor ${f.number}, ${f.name}`, css: { top: at(f.number) }, onclick: () => { if (f.number !== here) go(f); } }));
+      const b = h(`button.scrub-tick${f.number === here ? '.on' : ''}`, { type: 'button', role: 'listitem', 'aria-label': `Floor ${f.number}, ${f.name || 'moving in'}`, title: `Floor ${f.number}, ${f.name || 'moving in'}`, onclick: () => { if (f.number !== here) go(f); } }, String(f.number));
+      if (f.number === here) lit = b;
+      track.append(b);
     }
+    if (lit) track.scrollTop = Math.max(0, lit.offsetTop - track.offsetTop - track.clientHeight / 2);
     page.floorList = list;
   };
   load();
   return el;
 }
 
-/** The round pins over the rooms. Each one is a shortcut to a panel tab and floats where that tab's work happens. */
+/** The map pins over the rooms. Each one is a shortcut to a panel tab and floats where that tab's work happens. */
 export function buildPins(page) {
   const defs = [];
   if (page.canSeeChat) defs.push(['chat', page.owner ? 'Manager' : 'Chat']);
@@ -96,7 +86,7 @@ export function buildPins(page) {
   page.pinEls = {};
   for (const [tab, label] of defs) {
     const badge = h('i.pin-badge', { hidden: true });
-    const el = h('button.pin', { type: 'button', 'data-pin': tab, 'aria-label': `Open ${label}`, title: label, onclick: () => page.setTab(tab, { fromPin: true }) }, icon(tab), h('span.pin-label', {}, label), badge);
+    const el = h('button.pin', { type: 'button', 'data-pin': tab, 'aria-label': `Open ${label}`, title: label, onclick: () => page.setTab(tab, { fromPin: true }) }, tabIcon(tab), h('span.pin-label', {}, label), badge);
     el.badge = badge;
     page.pinEls[tab] = el;
     layer.append(el);

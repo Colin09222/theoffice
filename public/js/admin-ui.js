@@ -18,7 +18,7 @@ export function hideAdmin() { clearInterval(timer); timer = null; }
 function renderLogin(wrap) {
   const pw = h('input', { type: 'password', name: 'password', required: true, autocomplete: 'current-password', autofocus: true });
   const err = h('p.form-error', { role: 'alert', hidden: true });
-  clear(wrap).append(h('form.admin-login.glass', { onsubmit: async (e) => {
+  clear(wrap).append(h('form.admin-login', { onsubmit: async (e) => {
     e.preventDefault(); err.hidden = true;
     try {
       const r = await api('/admin/login', { method: 'POST', body: { password: pw.value } });

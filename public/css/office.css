@@ -1,45 +1,36 @@
-/* floors-plus: office. Labels for the walk-in floor: a small name pill above the head, the activity bubble off to the side
-   with a pointer, so neither ever covers the person it belongs to. Class names are read by floor-ui and the e2e tests. */
-#labels .char-tag { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 0; will-change: transform; }
-#labels .char-name {
-  font: 600 10.5px/1.5 var(--sans); letter-spacing: .01em; padding: 0 7px; border-radius: 99px;
-  background: rgba(14, 18, 30, .62); color: #fff; white-space: nowrap; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
-  box-shadow: 0 1px 6px rgba(10, 16, 30, .28), inset 0 0 0 1px rgba(255, 255, 255, .12);
-}
+/* What floats over the people: a name tag, the work bubble with a pointer, and speech like a comic. Class names are read by the scene and the e2e tests. */
+#labels .char-tag { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; will-change: transform; }
+#labels .char-name { font: 700 13.5px/1.35 var(--cond); padding: 0 6px; border-radius: 3px; background: var(--white); color: var(--ink); white-space: nowrap; box-shadow: 0 2px 0 rgba(28, 23, 18, .6); }
 #labels .char-bubble {
-  position: absolute; left: 58%; bottom: calc(100% + 6px); display: flex; align-items: center; gap: 5px;
-  max-width: 160px; padding: 4px 9px; border-radius: 12px 12px 12px 3px; background: #fffaf0; color: #24222f;
-  font: 500 11px/1.25 var(--sans); box-shadow: 0 4px 12px rgba(5, 5, 20, .3), 0 0 0 1px rgba(40, 30, 10, .08);
+  position: absolute; left: 58%; bottom: calc(100% + 7px); display: flex; align-items: center; gap: 5px; max-width: 176px; padding: 5px 9px; border-radius: 9px 9px 9px 2px;
+  background: #fff; color: var(--ink); border: 2px solid var(--ink); font: 700 13.5px/1.15 var(--cond); box-shadow: 0 3px 0 rgba(28, 23, 18, .4);
   transform: translate(var(--bx, 0px), var(--by, 0px)); transition: transform .28s ease;
 }
-#labels .char-bubble::after {
-  content: ''; position: absolute; left: 0; bottom: -7px; width: 0; height: 0;
-  border-left: 1px solid transparent; border-right: 8px solid transparent; border-top: 8px solid #fffaf0;
-}
-#labels .char-tag[data-side="left"] .char-bubble { left: auto; right: 58%; border-radius: 12px 12px 3px 12px; }
-#labels .char-tag[data-side="left"] .char-bubble::after { left: auto; right: 0; border-right: 1px solid transparent; border-left: 8px solid transparent; }
+#labels .char-bubble::after { content: ''; position: absolute; left: -2px; bottom: -9px; width: 0; height: 0; border-right: 9px solid transparent; border-top: 9px solid var(--ink); }
+#labels .char-tag[data-side="left"] .char-bubble { left: auto; right: 58%; border-radius: 9px 9px 2px 9px; }
+#labels .char-tag[data-side="left"] .char-bubble::after { left: auto; right: -2px; border-right: 0; border-left: 9px solid transparent; }
 #labels .char-bubble[hidden], #labels .char-tag.crowded .char-bubble { display: none; }
 #labels .char-bubble > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#labels .char-bubble[data-state="typing"] { border-left: 3px solid var(--brand); }
-#labels .char-bubble[data-state="queued"] { color: #6a6c78; background: #f3efe6; }
+#labels .char-bubble[data-state="typing"] { background: #fff4b0; }
+#labels .char-bubble[data-state="queued"] { background: #e9e2d0; }
 #labels .dots { display: inline-flex; gap: 2px; flex: none; }
-#labels .dots b { width: 3.5px; height: 3.5px; border-radius: 50%; background: var(--brand); animation: dot 1s infinite; }
+#labels .dots b { width: 4px; height: 4px; border-radius: 50%; background: var(--tomato); animation: dot 1s infinite; }
 #labels .dots b:nth-child(2) { animation-delay: .15s; } #labels .dots b:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 30% { transform: translateY(-3px); } }
+/* speech and task notes */
+#labels .char-bubble.task-pill { max-width: 196px; padding-right: 8px; overflow: visible; background: #ffe45c; }
+#labels .char-bubble.task-pill::before { content: ''; position: absolute; left: 0; bottom: 0; height: 3px; width: var(--done, 0); background: var(--tomato); border-radius: 2px; }
+#labels .char-bubble .pill-done { flex: none; font: 700 12.5px var(--cond); font-style: normal; color: #fff; background: var(--ink); border-radius: 3px; padding: 0 4px; }
+#labels .char-bubble.speech { display: block; width: max-content; max-width: 240px; padding: 7px 11px; font: 700 15px/1.2 var(--cond); z-index: 3; }
+#labels .char-bubble.speech > span { display: block; white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+#labels .char-bubble.speech.small-talk { background: var(--teal-l); font-weight: 600; }
+#labels .char-tag:has(.speech) { z-index: 9000 !important; }
 @media (max-width: 760px) {
-  #labels .char-name { font-size: 10.5px; padding: 0 6px; }
-  #labels .char-bubble { font-size: 10.5px; padding: 2px 7px; gap: 3px; max-width: 124px; bottom: calc(100% + 4px); }
-  #labels .char-bubble::after { bottom: -6px; border-top-width: 6px; border-right-width: 6px; }
+  #labels .char-name { font-size: 12.5px; padding: 0 4px; }
+  #labels .char-bubble { font-size: 12.5px; padding: 2px 6px; gap: 3px; max-width: 128px; bottom: calc(100% + 6px); }
+  #labels .char-bubble::after { bottom: -7px; border-top-width: 7px; border-right-width: 7px; }
   #labels .dots b { width: 3px; height: 3px; }
+  #labels .char-bubble.speech { max-width: 172px; font-size: 13.5px; padding: 5px 8px; }
+  #labels .char-bubble.task-pill { max-width: 132px; }
+  #labels .char-bubble .pill-done { font-size: 11.5px; padding: 0 3px; }
 }
-/* lanes: the three ways in on a new floor, and the help line. */
-.lanes { display: flex; flex-direction: column; gap: 8px; }
-.lane { display: flex; flex-direction: column; gap: 1px; text-align: left; padding: 10px 14px; border-radius: 13px; background: rgba(255, 255, 255, .08); border: 1px solid var(--glass-line); color: var(--ink); cursor: pointer; }
-.lane b { font-weight: 600; font-size: 15px; } .lane span { color: var(--ink-2); font-size: 13px; line-height: 1.3; }
-.lane:hover:not(:disabled) { border-color: var(--brand-2); background: rgba(255, 255, 255, .13); }
-.lane:disabled { opacity: .55; cursor: default; }
-.lanes .fineprint { padding: 0 3px; }
-.card.help { border-left-color: #a9c4ff; } .card.help.pending { border-left-color: var(--brand-2); } .card.help.expired, .card.help.declined { border-left-color: var(--warn); }
-.help-line .untrusted { font: 12.5px/1.45 var(--mono); overflow-wrap: anywhere; }
-.help-line .fineprint { margin-bottom: 8px; }
-.msg.help .msg-body { background: rgba(169, 196, 255, .12); border: 1px solid rgba(169, 196, 255, .32); }
-.msg.help .msg-who::after { content: ' · help line'; color: #a9c4ff; }

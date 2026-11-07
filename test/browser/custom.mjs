@@ -103,6 +103,7 @@ for (const [label, opts, q] of [['desktop', { width: 1440, height: 900 }, 'low']
   await step(tag('staff: rename, job title, personality; it shows in the strip and over their head'), async () => {
     const w = await p.ev('window.__office.state.agents.find((a) => a.role === "writer").id');
     await p.click(`.staff-chip[data-agent="${w}"]`);
+    await p.click(`[data-profile-edit="${w}"]`);
     await p.until('document.querySelector(".modal .staff-pick") !== null', 'staff editor');
     await p.until('document.querySelector(".modal .char-preview") !== null', 'preview');
     await p.type('.modal [name=staff-name]', 'Sir Crumb');
@@ -120,6 +121,7 @@ for (const [label, opts, q] of [['desktop', { width: 1440, height: 900 }, 'low']
   await step(tag('a clash is refused in plain words and nothing is lost'), async () => {
     const w = await p.ev('window.__office.state.agents.find((a) => a.role === "writer").id');
     await p.click(`.staff-chip[data-agent="${w}"]`);
+    await p.click(`[data-profile-edit="${w}"]`);
     await p.until('document.querySelector(".modal [name=staff-name]") !== null', 'staff editor');
     await p.type('.modal [name=staff-name]', 'builder');
     await p.click('.custom-foot button[type=submit]');

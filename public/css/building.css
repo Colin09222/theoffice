@@ -1,81 +1,152 @@
-/* floors-plus: building */
-/* The building, live: a ticker across the bottom of the lobby, and the launched wall inside the directory panel. */
+/* The lobby: an enamel sign outside, a felt letter board in a walnut frame, a brass lift panel, a To Let board and an LED news strip. */
 
-/* ---- ticker ---- */
-.ticker { position: absolute; left: 28px; right: 404px; bottom: 86px; display: flex; align-items: stretch; height: 40px; border-radius: 999px; background: rgba(22, 26, 40, .62); border: 1px solid var(--glass-line); -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3); box-shadow: 0 12px 36px rgba(10, 16, 30, .32); overflow: hidden; }
-.ticker-label { display: flex; align-items: center; gap: 8px; padding: 0 14px 0 16px; font: 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap; border-right: 1px solid var(--glass-line); background: rgba(10, 14, 24, .3); flex: none; }
-.ticker-track { flex: 1; min-width: 0; overflow: hidden; display: flex; align-items: center; -webkit-mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 24px), transparent); }
-.ticker-rail { display: flex; align-items: center; gap: 22px; padding: 0 22px; width: max-content; animation: ticker-roll var(--dur, 40s) linear infinite; will-change: transform; }
+/* ---- the sign ---- */
+.topbar { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: max(16px, env(safe-area-inset-top)) 24px 0; pointer-events: none; }
+.topbar > * { pointer-events: auto; }
+.topbar-right { position: absolute; right: 424px; top: max(16px, env(safe-area-inset-top)); display: flex; gap: 8px; align-items: flex-start; }
+.wordmark { display: none; }
+.hero { position: absolute; left: 26px; top: 26px; width: min(36vw, 430px); }
+.hero h1 { position: relative; padding: 18px 24px 20px; background: var(--tomato); color: #fff8e6; font-size: clamp(44px, 4.6vw, 68px); line-height: 1; border-radius: 14px; box-shadow: inset 0 0 0 5px #fff8e6, inset 0 0 0 7px var(--tomato-d), 0 8px 0 var(--tomato-d), 0 22px 34px rgba(0, 0, 0, .3); transform: rotate(-1.4deg); }
+.hero h1 span { display: block; margin-top: 8px; color: var(--sun); font-size: .4em; line-height: 1.1; }
+.hero p { margin: 18px 0 0 12px; padding: 13px 16px; max-width: 26em; background: var(--paper); color: var(--ink); font-size: 16.5px; line-height: 1.38; border-radius: 4px; box-shadow: 0 4px 0 var(--line), 0 12px 20px rgba(0, 0, 0, .25); transform: rotate(.5deg); }
+.hints { position: absolute; left: 26px; bottom: 18px; margin: 0; padding: 6px 11px; background: var(--felt); color: #fff4d8; font: 600 15px var(--cond); border-radius: 6px; max-width: 280px; }
+.banner { position: absolute; top: 240px; left: 28px; margin: 0; padding: 10px 14px; background: var(--sun); color: var(--ink); font-weight: 700; border-radius: 8px; box-shadow: 0 4px 0 var(--sun-d); }
+.floor-tip { position: fixed; top: 0; left: 0; padding: 6px 12px; background: var(--felt); color: #ffb52e; font: 700 17px var(--cond); letter-spacing: .03em; pointer-events: none !important; white-space: nowrap; z-index: 6; border-radius: 6px; box-shadow: 0 0 0 3px var(--brass); }
+
+/* ---- the directory board ---- */
+.directory { position: absolute; right: 20px; top: 16px; bottom: 16px; width: 384px; display: flex; flex-direction: column; overflow: hidden; padding: 12px; border-radius: 14px; background: #4d2c16 url(/theoffice/assets/tex/wood.png) 0 0 / 256px; box-shadow: inset 0 0 0 2px rgba(255, 220, 170, .28), 0 7px 0 #2c1608, 0 24px 44px rgba(0, 0, 0, .42); }
+.sheet-grip { display: none; }
+.dir-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex: none; order: -1; margin-bottom: 9px; padding: 8px 14px; border-radius: 6px; background: linear-gradient(180deg, var(--brass-l), var(--brass) 55%, #b98f38); color: #33240a; font: 400 21px/1 var(--display); box-shadow: 0 2px 0 var(--brass-d), inset 0 1px 0 rgba(255, 255, 255, .6); }
+.dir-head span:first-child { display: flex; align-items: center; gap: 8px; }
+.dir-count { font: 700 15px var(--cond); color: #33240a; white-space: nowrap; }
+.live-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #39d364; box-shadow: 0 0 0 2px rgba(0, 0, 0, .4), 0 0 8px #39d364; flex: none; }
+.dir-search { display: flex; gap: 8px; align-items: center; flex: none; padding-bottom: 9px; }
+.dir-search input { flex: 1; min-width: 0; min-height: 44px; border: 0; border-radius: 6px; background: var(--paper); font-weight: 700; box-shadow: inset 0 3px 0 rgba(28, 23, 18, .25); }
+.wall-toggle { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border-radius: 8px; border: 0; background: var(--sun); color: var(--ink); font: 700 15px var(--sans); white-space: nowrap; box-shadow: 0 4px 0 var(--sun-d); margin-bottom: 4px; transition: transform .07s, box-shadow .07s; }
+.wall-toggle:hover { filter: brightness(1.06); }
+.wall-toggle:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--sun-d); }
+.wall-toggle[aria-pressed="true"] { background: var(--tomato); color: #fff; box-shadow: 0 4px 0 var(--tomato-d); }
+/* Black felt with its grooves and white push-in letters, the way a real lobby board looks. */
+.dir-list { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 8px 6px; border-radius: 5px; -webkit-overflow-scrolling: touch; background: var(--felt) repeating-linear-gradient(180deg, #221c16 0 3px, #120e0a 3px 7px); box-shadow: inset 0 3px 6px #000, inset 0 0 0 2px #000; scrollbar-color: var(--brass) transparent; }
+.dir-row { display: grid; grid-template-columns: 34px 6px 1fr auto; gap: 9px; align-items: center; width: 100%; padding: 9px 8px; min-height: 56px; border: 0; background: none; border-radius: 4px; text-align: left; color: #fffdf4; transition: background .1s, color .1s, transform .07s; }
+.dir-row:hover, .dir-row:focus-visible { background: #2f2a1c; color: var(--sun); }
+.dir-row:active { transform: translateX(3px); }
+.dir-num { font: 700 25px/1 var(--cond); text-align: right; color: var(--sun); }
+.dir-mark { width: 6px; height: 36px; border-radius: 2px; background: var(--brand); display: block; overflow: hidden; }
+.dir-text { min-width: 0; display: flex; flex-direction: column; }
+.dir-text b { font: 700 21px/1.08 var(--cond); letter-spacing: .05em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dir-text small { font: 600 15.5px/1.15 var(--cond); letter-spacing: .01em; color: #e6dcc6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dir-busy { display: flex; align-items: center; gap: 5px; font: 700 16px var(--cond); color: #5cf08a; }
+.dir-busy i { width: 9px; height: 9px; border-radius: 50%; background: #39d364; box-shadow: 0 0 7px #39d364; animation: pulse 1.3s infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+.dir-empty { padding: 16px 10px; color: #fffdf4; font: 700 19px/1.25 var(--cond); margin: 0; }
+.dir-hint { margin: 8px 0 0; flex: none; color: #ffe9c2; font: 600 15px var(--cond); text-align: center; }
+
+/* ---- the lift panel ---- */
+.lift-wrap { margin: 12px 0 2px; padding: 12px; border-radius: 8px; background: linear-gradient(160deg, var(--brass-l), var(--brass) 45%, #ad8531); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .7), 0 3px 0 var(--brass-d); color: #33240a; }
+.lift-wrap h3 { font: 400 19px/1 var(--display); display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 11px; }
+.lift-wrap small { font: 700 15px var(--cond); }
+.lift { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; }
+.lift-btn { aspect-ratio: 1; min-height: 36px; border-radius: 50%; border: 3px solid #6e5216; background: radial-gradient(circle at 50% 38%, #f2eee2, #b7b1a1); color: #2b2316; font: 700 15px/1 var(--cond); padding: 0; display: grid; place-items: center; box-shadow: 0 3px 0 #5f4610; transition: transform .07s, box-shadow .07s, filter .1s; }
+.lift-btn:hover { filter: brightness(1.12); transform: translateY(-1px); }
+.lift-btn:active { transform: translateY(3px); box-shadow: 0 0 0 #5f4610; }
+.lift-btn.lit { background: radial-gradient(circle at 50% 42%, #fff3b4, #ffb31f 72%); color: #2b1a00; border-color: #7a4d00; box-shadow: 0 3px 0 #5f4610, 0 0 12px 2px rgba(255, 186, 40, .85); }
+
+/* ---- the To Let board ---- */
+.open-pill { position: absolute; left: 40%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: stretch; gap: 0; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--white); box-shadow: 0 6px 0 #a9976d, 0 16px 28px rgba(0, 0, 0, .35); white-space: nowrap; transition: transform .08s, box-shadow .08s; }
+.open-pill:hover { transform: translateX(-50%) translateY(-2px); box-shadow: 0 8px 0 #a9976d, 0 18px 30px rgba(0, 0, 0, .35); }
+.open-pill:active { transform: translateX(-50%) translateY(4px); box-shadow: 0 2px 0 #a9976d; }
+.pill-status { display: flex; flex-direction: column; justify-content: center; padding: 9px 16px; background: var(--tomato); color: #fff; font: 400 24px/1 var(--display); }
+.pill-status small { font: 700 15px/1.1 var(--cond); }
+.pill-go { display: flex; align-items: center; padding: 0 12px 0 16px; font: 400 24px/1 var(--display); color: var(--ink); }
+.pill-arrow { display: grid; place-items: center; width: 56px; background: var(--sun); color: var(--ink); }
+.pill-arrow .ico { width: 28px; height: 28px; }
+
+/* ---- the news strip ---- */
+.ticker { position: absolute; left: 26px; right: 424px; bottom: 96px; display: flex; align-items: stretch; height: 44px; border-radius: 7px; background: #0d0a07; box-shadow: 0 0 0 4px #30343a, 0 5px 0 4px #15171a; overflow: hidden; }
+.ticker-label { display: flex; align-items: center; gap: 8px; padding: 0 12px; font: 400 17px/1 var(--display); color: var(--ink); background: var(--sun); white-space: nowrap; flex: none; }
+.ticker-track { flex: 1; min-width: 0; overflow: hidden; display: flex; align-items: center; }
+.ticker-rail { display: flex; align-items: center; gap: 28px; padding: 0 22px; width: max-content; animation: ticker-roll var(--dur, 40s) linear infinite; will-change: transform; }
 .ticker-track:hover .ticker-rail, .ticker-track:focus-within .ticker-rail { animation-play-state: paused; }
 .ticker[data-ticker="empty"] .ticker-rail { animation: none; width: auto; }
 @keyframes ticker-roll { to { transform: translateX(-50%); } }
-.ticker-item, .ticker-ghost { display: inline-flex; align-items: center; gap: 9px; border: 0; background: none; padding: 0; color: var(--ink); font: 13.5px/1.2 var(--sans); white-space: nowrap; text-decoration: none; cursor: pointer; border-radius: 999px; transition: color .15s; }
+.ticker-item, .ticker-ghost { display: inline-flex; align-items: center; gap: 9px; border: 0; background: none; padding: 0; color: #ffb52e; font: 600 18.5px/1.2 var(--cond); letter-spacing: .02em; white-space: nowrap; text-decoration: none; cursor: pointer; }
 .ticker-item:hover, .ticker-ghost:hover { color: #fff; }
-.ticker-item:hover .ticker-text, .ticker-ghost:hover .ticker-text { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: rgba(255, 244, 225, .45); }
-.ticker-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 4px; border-radius: 999px; background: color-mix(in srgb, var(--brand) 26%, rgba(255, 255, 255, .06)); border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent); font: 11.5px/1 var(--sans); font-weight: 600; letter-spacing: .01em; color: var(--ink); }
-.ticker-chip b { display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: var(--brand); color: #fff; font: 10px var(--mono); font-weight: 700; }
-.ticker-text { color: var(--ink-2); }
-.published .ticker-text { color: #ffe9c9; }
-.published .ticker-text::before { content: "↗ "; color: var(--brand-2); }
-.chatter .ticker-chip { opacity: .8; }
-.chatter .ticker-text { font-style: italic; color: var(--ink-3); }
+.ticker-chip { display: inline-flex; align-items: center; gap: 6px; font: 700 18.5px/1 var(--cond); color: #fff; }
+.ticker-chip b { color: var(--ink); background: var(--brand-2); padding: 2px 5px; border-radius: 3px; font-size: 15px; background: #ffb52e; }
+.published .ticker-text { color: #6dffa0; }
+.chatter .ticker-text { color: #e6c98e; }
 .ticker-item.fresh { animation: ticker-fresh 2.4s ease-out; }
-@keyframes ticker-fresh { 0% { background: rgba(244, 201, 93, .4); box-shadow: 0 0 0 6px rgba(244, 201, 93, .4); } 100% { background: transparent; box-shadow: 0 0 0 6px transparent; } }
-.ticker-quiet { padding: 0 4px; font: 13px var(--sans); color: var(--ink-3); white-space: nowrap; }
+@keyframes ticker-fresh { 0% { color: #fff; } }
+.ticker-quiet { padding: 0 4px; font: 600 18px var(--cond); color: #ffb52e; white-space: nowrap; }
 body.flying .ticker { opacity: 0; transition: opacity .2s; }
-
 @media (prefers-reduced-motion: reduce) {
   .ticker-rail { animation: none; }
-  .ticker-track { overflow-x: auto; scrollbar-width: none; mask-image: none; -webkit-mask-image: none; }
-  .ticker-track::-webkit-scrollbar { display: none; }
+  .ticker-track { overflow-x: auto; scrollbar-width: none; }
   .ticker-ghost { display: none; }
-  .ticker-item.fresh { animation: none; background: rgba(244, 201, 93, .18); padding: 2px 6px 2px 0; }
 }
 
-/* ---- launched wall ---- */
-.dir-search { display: flex; gap: 8px; align-items: center; }
-.dir-search input { flex: 1; min-width: 0; }
-.wall-toggle { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--glass-line); background: rgba(255, 255, 255, .08); color: var(--ink); font: 13px var(--sans); font-weight: 550; white-space: nowrap; transition: background .15s, color .15s; }
-.wall-toggle i { font-style: normal; color: var(--brand-2); font-size: 11px; }
-.wall-toggle:hover { background: rgba(255, 255, 255, .15); }
-.wall-toggle[aria-pressed="true"] { background: var(--brand-2); border-color: transparent; color: #241a08; }
-.wall-toggle[aria-pressed="true"] i { color: #241a08; }
-.wall { flex: 1; overflow-y: auto; padding: 10px; min-height: 0; -webkit-overflow-scrolling: touch; }
+/* ---- launched: a noticeboard of posters ---- */
+.wall { flex: 1; overflow-y: auto; padding: 10px; min-height: 0; -webkit-overflow-scrolling: touch; border-radius: 5px; background: #b98a52 url(/theoffice/assets/tex/cork.png) 0 0 / 200px; box-shadow: inset 0 3px 6px rgba(0, 0, 0, .55); }
 .directory [hidden] { display: none !important; }
-.wall-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
-.wall-card { display: flex; flex-direction: column; border-radius: 16px; overflow: hidden; background: rgba(10, 14, 24, .34); border: 1px solid var(--glass-line); transition: transform .14s, background .14s; }
-.wall-card:hover { background: rgba(255, 255, 255, .07); transform: translateY(-1px); }
-.wall-thumb { display: block; aspect-ratio: 16 / 10; background: color-mix(in srgb, var(--brand) 35%, #1a2230); overflow: hidden; }
+.wall .dir-empty { color: var(--ink); background: var(--paper); padding: 12px; border-radius: 3px; }
+.wall-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+.wall-card { display: flex; flex-direction: column; overflow: hidden; background: var(--white); color: var(--ink); border-radius: 3px; box-shadow: 0 4px 0 rgba(58, 36, 12, .55), 0 10px 14px rgba(0, 0, 0, .25); transition: transform .1s; }
+.wall-card:nth-child(even) { transform: rotate(.6deg); } .wall-card:nth-child(odd) { transform: rotate(-.5deg); }
+.wall-card:hover { transform: translateY(-2px) rotate(0); }
+.wall-thumb { display: block; aspect-ratio: 16 / 10; background: var(--brand); overflow: hidden; }
 .wall-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.wall-body { padding: 10px 13px 12px; display: flex; flex-direction: column; gap: 6px; }
+.wall-body { padding: 10px 13px 10px; display: flex; flex-direction: column; gap: 6px; }
 .wall-meta { display: flex; justify-content: space-between; align-items: center; gap: 6px 8px; flex-wrap: wrap; }
-.wall-floor { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px 2px 3px; border-radius: 999px; background: color-mix(in srgb, var(--brand) 26%, rgba(255, 255, 255, .05)); border: 1px solid color-mix(in srgb, var(--brand) 55%, transparent); font: 11.5px var(--sans); font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wall-floor b { display: grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 999px; background: var(--brand); color: #fff; font: 9.5px var(--mono); font-weight: 700; }
-.wall-kind { font: 10.5px var(--mono); letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); }
-.wall-card h4 { margin: 0; font-family: var(--serif); font-size: 19px; font-weight: 500; line-height: 1.2; overflow-wrap: anywhere; }
-.wall-card p { margin: 0; font-size: 13.5px; line-height: 1.4; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.wall-floor { display: inline-flex; align-items: center; gap: 6px; font: 700 16px var(--cond); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wall-floor b { padding: 1px 5px; border-radius: 3px; background: var(--ink); color: var(--sun); }
+.wall-kind { font: 700 15px var(--cond); color: var(--teal); text-transform: capitalize; }
+.wall-card h4 { margin: 0; font: 400 21px/1.15 var(--display); overflow-wrap: anywhere; }
+.wall-card p { margin: 0; font-size: 15px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .wall-acts { display: flex; gap: 8px; margin-top: 4px; }
 .wall-acts .btn { flex: 1; }
 .directory.showing-wall .dir-hint { display: none; }
 
-@media (min-width: 1700px) { .wall-grid { grid-template-columns: 1fr 1fr; } }
-
-/* ---- phones: the ticker sits just above the pill, down in the city, so the tower stands clear ---- */
+/* ---- phones ---- */
 @media (max-width: 760px) {
-  .ticker { left: 12px; right: 12px; bottom: calc(190px + env(safe-area-inset-bottom)); height: 36px; border-radius: 12px; }
-  .ticker-label { padding: 0 10px; font-size: 10px; letter-spacing: .08em; }
-  .ticker-label .live-dot { display: none; }
-  .ticker-item, .ticker-ghost { font-size: 13px; }
-  .wall-toggle { min-height: 36px; padding: 0 11px; }
-  .wall { padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); }
-  .wall-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
-  .wall-card h4 { font-size: 16px; }
-  .wall-card p { font-size: 12.5px; -webkit-line-clamp: 2; }
-  .wall-body { padding: 8px 10px 10px; gap: 5px; }
-  .wall-acts .btn.small { padding: 3px 8px; font-size: 12.5px; min-height: 36px; }
-  .wall-floor { max-width: 100%; }
-  #ui .directory.open ~ .ticker { opacity: 0; pointer-events: none; }
+  .topbar-right { right: max(12px, env(safe-area-inset-right)); top: max(10px, env(safe-area-inset-top)); }
+  .topbar-right .btn { width: 46px; padding: 0; }
+  .topbar-right .btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .hero { left: 12px; top: max(10px, env(safe-area-inset-top)); width: min(58vw, 240px); }
+  .hero h1 { font-size: 27px; padding: 11px 14px 13px; border-radius: 10px; box-shadow: inset 0 0 0 3px #fff8e6, 0 5px 0 var(--tomato-d), 0 12px 20px rgba(0, 0, 0, .3); }
+  .hero p, .hints, .floor-tip { display: none; }
+  .banner { top: 130px; left: 12px; right: 12px; }
+  .directory { left: 0; right: 0; bottom: 0; top: auto; width: 100%; height: 66vh; height: 66dvh; padding: 0 10px 0; border-radius: 16px 16px 0 0; box-shadow: inset 0 2px 0 rgba(255, 220, 170, .3), 0 -5px 0 #2c1608; transform: translateY(calc(100% - 126px - env(safe-area-inset-bottom))); transition: transform .3s cubic-bezier(.2, 1.1, .4, 1); }
+  .directory.open { transform: translateY(calc(-1 * var(--kb, 0px))); }
+  .sheet-grip { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 34px; padding: 6px 0; background: none; border: 0; flex: none; order: -2; color: #ffe9c2; }
+  .sheet-grip i { width: 46px; height: 6px; background: var(--brass); border-radius: 3px; box-shadow: 0 2px 0 var(--brass-d); }
+  .grip-label { display: none; }
+  .dir-head { margin-bottom: 8px; font-size: 19px; padding: 7px 12px; }
+  .dir-search { padding-bottom: 8px; }
+  .dir-hint { display: none; }
+  .dir-list { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .wall { padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .lift { grid-template-columns: repeat(7, 1fr); gap: 7px; }
+  .lift-btn { font-size: 16px; min-height: 40px; }
+  .open-pill, .open-pill:hover, .open-pill:active { left: 12px; right: 12px; transform: none; bottom: calc(136px + env(safe-area-inset-bottom)); justify-content: stretch; }
+  .open-pill:active { transform: translateY(3px); }
+  .pill-status { font-size: 19px; padding: 8px 12px; }
+  .pill-status small { font-size: 14px; }
+  .pill-go { flex: 1; font-size: 20px; padding: 0 8px 0 12px; }
+  .pill-arrow { width: 50px; }
+  /* The #ui prefix matters: without it `#ui > *` wins, and the hidden board goes on catching taps meant for the open sheet beneath it. */
+  #ui .directory.open ~ .open-pill, #ui .directory.open ~ .ticker { opacity: 0; pointer-events: none; }
+  .ticker { left: 12px; right: 12px; bottom: calc(208px + env(safe-area-inset-bottom)); height: 38px; }
+  .ticker-label { display: none; }
+  .ticker-item, .ticker-ghost, .ticker-chip { font-size: 17px; }
 }
-
-/* ---- a phone on its side: no room for the ticker ---- */
-@media (max-height: 520px) and (min-width: 761px) { .ticker { display: none; } }
+@media (pointer: coarse) { .lift-btn { min-height: 42px; } .ticker-item, .ticker-ghost { min-height: 36px; } }
+/* A phone on its side, or any very short window. */
+@media (max-height: 520px) and (min-width: 761px) {
+  .hero { top: 8px; width: min(36vw, 320px); }
+  .hero h1 { font-size: 28px; padding: 10px 14px; }
+  .hero p, .hints, .ticker { display: none; }
+  .directory { top: 8px; bottom: 8px; width: 320px; right: max(10px, env(safe-area-inset-right)); padding: 8px; }
+  .topbar-right { right: 340px; top: 8px; }
+  .open-pill, .open-pill:hover, .open-pill:active { left: max(14px, env(safe-area-inset-left)); transform: none; bottom: max(10px, env(safe-area-inset-bottom)); }
+}

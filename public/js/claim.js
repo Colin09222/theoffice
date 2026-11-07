@@ -20,7 +20,16 @@ export function openClaim({ code = '' } = {}) {
       const form = h('form.stack', { onsubmit: async (ev) => {
         ev.preventDefault();
         e.hidden = true;
-        try { const r = await api('/claim/check', { method: 'POST', body: { code: input.value } }); state.code = input.value; state.floor = r.floor; stepCompany(); } catch (x) { showErr(e, x); }
+        try {
+          const r = await api('/claim/check', { method: 'POST', body: { code: input.value } }); state.code = input.value; state.floor = r.floor;
+          // No form: the office manager gets the company's name out of you on the phone. A server that still wants the form says so with a 400.
+          try {
+            const made = await api('/claim', { method: 'POST', body: { code: state.code } });
+            session.csrf = made.csrf;
+            await refreshMe();
+            stepRecovery(made);
+          } catch (x) { if (x instanceof ApiError && x.status === 400) stepCompany(); else throw x; }
+        } catch (x) { showErr(e, x); }
       } },
       h('p.lede', {}, 'Got a code from the building manager? It opens one office, once.'),
       input, e, h('button.btn.primary.wide', { type: 'submit' }, 'Unlock the door'),
@@ -67,10 +76,10 @@ export function openClaim({ code = '' } = {}) {
     const stepRecovery = (r) => {
       movedIn = r.slug;
       body.replaceChildren(h('div.stack', {},
-        h('p.lede', {}, 'Welcome to the building. Keep this recovery code somewhere safe: it is the only way back in from another device, and it won\'t be shown again.'),
+        h('p.lede', {}, 'The keys are yours. Keep this recovery code somewhere safe: it is the only way back in from another device, and it won\'t be shown again.'),
         recoveryBox(r.recoveryCode),
         h('p.fineprint', {}, `Your floor's address is ${location.origin}${BASE}/floor/${r.slug}`),
-        h('button.btn.primary.wide', { type: 'button', onclick: () => close() }, 'Walk in')));
+        h('button.btn.primary.wide', { type: 'button', onclick: () => close() }, 'Go up. Your manager is on the phone')));
     };
     stepCode();
   }, { wide: true, onClose: () => { if (movedIn) window.officeGo(`/floor/${movedIn}`); } });
