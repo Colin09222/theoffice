@@ -419,7 +419,8 @@ describe('computer sessions', () => {
 // Distinct values, so that any of them turning up anywhere is unmistakable.
 const CAPS = { floorDailyUsd: 7777.77, globalDailyUsd: 8888.88, taskMaxUsd: 6666.66, sessionMaxUsd: 5555.55, budgetAnthropicUsd: 4444.44, budgetOpenrouterUsd: 3333.33, ordersEstimateUsd: 2222.22, domainMaxUsd: 1111.11 };
 const SENTINELS = Object.values(CAPS).flatMap((n) => [String(n), n.toFixed(0), n.toFixed(3)]);
-const AMOUNT = /\$\s?\d/;
+// In figures or in words: the manager who started all this said "about 5 cents".
+const AMOUNT = /\$\s?\d|\b\d+(?:\.\d+)?\s?cents?\b/i;
 const MONEY_KEY = /cost|spen[dt]|usd|budget|estimate|cap$/i;
 const OWNER_KEYS = new Set(['budgetStopped', 'outOfBudget', 'priceUsd', 'chargedUsd']);
 function scan(value, where, { owner = false, spentValues = [], itemPrices = [] } = {}) {
