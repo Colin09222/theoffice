@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Corner Spokes | Saturday bike repairs in the neighbourhood</title>
+  <meta name="description" content="Corner Spokes is Maya&#39;s Saturday pop-up bike repair stand for local riders. Join the list to hear when and where she&#39;ll be out next.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Corner Spokes | Saturday bike repairs in the neighbourhood">
+  <meta property="og:description" content="Corner Spokes is Maya&#39;s Saturday pop-up bike repair stand for local riders. Join the list to hear when and where she&#39;ll be out next.">
+  <meta property="og:image" content="images/hero.jpg">
+  <meta property="og:image:alt" content="Illustration of a bike on a repair stand with a wrench and toolbox.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Corner Spokes | Saturday bike repairs in the neighbourhood">
+  <meta name="twitter:description" content="Corner Spokes is Maya&#39;s Saturday pop-up bike repair stand for local riders. Join the list to hear when and where she&#39;ll be out next.">
+  <meta name="twitter:image" content="images/hero.jpg">
+  <meta name="theme-color" content="#1E2A38">
+  <link rel="icon" href="images/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="_office/client.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <a class="wordmark" href="#main"><img src="images/favicon.svg" alt="" width="32" height="32">Corner Spokes</a>
+      <a class="btn btn-small" href="#join">Join the list</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="wrap">
+        <div>
+          <h1 id="hero-title">Bike repairs, right around the corner.</h1>
+          <p>I'm Maya. On Saturdays I set up a little repair stand in the neighbourhood and fix the small stuff that keeps you off your bike. Join the list and I'll let you know when I'm next out.</p>
+          <a class="btn btn-primary" href="#join">Join the list</a>
+        </div>
+        <figure class="hero-art">
+          <img src="images/hero.jpg" alt="Illustration of a bike on a repair stand with a wrench and toolbox." width="1200" height="896">
+        </figure>
+      </div>
+    </section>
+
+    <section id="fix" class="fix" aria-labelledby="fix-title">
+      <div class="wrap">
+        <h2 id="fix-title">What I fix</h2>
+        <p>The everyday fixes that fit a pop-up stand:</p>
+        <ul class="fix-list">
+          <li><strong>Flat tyres and tubes:</strong> patched or swapped so you can ride home.</li>
+          <li><strong>Brakes:</strong> adjusted so they stop smoothly and don't rub.</li>
+          <li><strong>Gears:</strong> tuned so they shift cleanly and stop skipping.</li>
+          <li><strong>Chain:</strong> cleaned and lubed so it runs quietly.</li>
+        </ul>
+        <p class="small-print">Not sure if your problem is on the list? Bring it along and ask. If it's a bigger job than a stand can handle, I'll tell you straight.</p>
+      </div>
+    </section>
+
+    <section id="how" class="how" aria-labelledby="how-title">
+      <div class="wrap">
+        <h2 id="how-title">How it works</h2>
+        <ol class="steps">
+          <li><strong>I pop up on Saturdays.</strong> Corner Spokes runs on Saturdays only.</li>
+          <li><strong>You join the list.</strong> Just your email (and your first name if you like).</li>
+          <li><strong>I let you know when and where.</strong> Before I head out, I'll tell you where I'll be and when.</li>
+        </ol>
+        <p class="note">Location and prices are coming soon. Join the list to hear first.</p>
+      </div>
+    </section>
+
+    <section id="join" class="signup" aria-labelledby="join-title">
+      <div class="wrap">
+        <div class="signup-card">
+          <h2 id="join-title">Join the list</h2>
+          <p>Hear when and where Corner Spokes is out next.</p>
+          <form id="signup-form" novalidate>
+            <div class="field">
+              <label for="name">First name (optional)</label>
+              <input id="name" name="name" type="text" autocomplete="given-name" placeholder="e.g. Sam">
+            </div>
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com" required>
+            </div>
+            <div class="hp" aria-hidden="true">
+              <label for="website">Website</label>
+              <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
+            </div>
+            <button class="btn btn-signup" type="submit">Join the list</button>
+            <div class="form-status" role="status" aria-live="polite"></div>
+          </form>
+          <p class="small-print">I'll only use your email to tell you about Corner Spokes.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p><strong>Corner Spokes</strong> · Saturday bike repairs in the neighbourhood, run by Maya.</p>
+      <p>Location and prices coming soon. Join the list to hear first.</p>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var form = document.getElementById('signup-form');
+      var btn = form.querySelector('button[type="submit"]');
+      var status = form.querySelector('.form-status');
+      var LABEL = 'Join the list';
+
+      function showError(detail) {
+        status.className = 'form-status is-error';
+        status.textContent = '';
+        var p = document.createElement('p');
+        p.textContent = "Sorry, that didn't go through. Please check your email and try again.";
+        status.appendChild(p);
+        if (detail) {
+          var d = document.createElement('p');
+          d.className = 'error-detail';
+          d.textContent = detail;
+          status.appendChild(d);
+        }
+      }
+
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var email = form.email.value.trim();
+        var name = form.name.value.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          showError('Please enter a valid email address.');
+          form.email.focus();
+          return;
+        }
+        btn.disabled = true;
+        btn.setAttribute('aria-busy', 'true');
+        btn.textContent = 'Adding you…';
+        status.className = 'form-status';
+        status.textContent = '';
+        try {
+          if (!window.Office || !Office.submitForm) throw new Error('The sign-up service is not available right now.');
+          await Office.submitForm('waitlist', { email: email, name: name, website: form.website.value });
+          form.reset();
+          status.className = 'form-status is-success';
+          var p = document.createElement('p');
+          p.textContent = "Thanks, you're on the list! I'll let you know when and where I'll be out next. See you on a Saturday.";
+          status.appendChild(p);
+        } catch (err) {
+          showError(err && err.message ? err.message : String(err));
+        } finally {
+          btn.disabled = false;
+          btn.removeAttribute('aria-busy');
+          btn.textContent = LABEL;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

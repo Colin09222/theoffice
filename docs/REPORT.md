@@ -11,6 +11,7 @@ The code is finished and passes every gate that could run on the build machine. 
 - **Outputs:** sanitised docs, research with sources, and static sites at `/theoffice/f/<slug>/<project>/`, with a per-floor gallery.
 - **Visitors:** read-only, with private work redacted. Reading the chat is opt-in per floor.
 - **Purchase requests:** recorded, and relayed to the owner's assistant through the admin API. Domains are the one exception. See the launch kit section.
+- **Lanes and help line:** Game, Website and Business buttons on a new floor, a playbook per lane, and a manager's tool for asking the owner's assistant for guidance. See that section.
 - **Admin:** all floors and spend, issue codes, suspend, reset, kill, global pause.
 
 Stack: Node 22, `@anthropic-ai/sdk` as the only dependency, `node:sqlite`. Agent workspaces are database rows, so agent paths never touch the real filesystem.
@@ -161,6 +162,66 @@ Bytes on the wire for a cold load (gzip, no cache): lobby 493 KB on a desktop (a
 **Tests on this branch** (Node 22, mock mode): `npm test` 440 of 440; `npm run e2e` 54 of 54 at 1440x900 and 390x844 (a first attempt died before its first step when headless Chrome failed to come up behind ten stray Chrome processes from earlier runs; it passed in full once those were killed); `npm run e2e:apps` 26 of 26; `npm run e2e:launch` 18 of 18; `node test/browser/floors.mjs` 14 of 14. Two test changes: the label test in `floors.mjs` reads each character's own head height instead of assuming the procedural one, and its whiteboard/screen/bubble check now samples from the moment the chat is sent, because at the high tier a software renderer is slow enough that a mock run could finish (and clear the board) before the old single-moment check ran; it failed that way twice before the change.
 
 **Still short of the reference.** The far shore and sky are still paler than theirs; our buildings are boxes with shader windows, not modelled facades, so close up they are simpler; the water is a flat plane with a shader; the people are the kit's chibi proportions, bigger-headed than their furniture suggests; FXAA is no substitute for MSAA at a pixel ratio of 1; and the whole look was tuned on screenshots from a software renderer, never on a real phone or a real GPU's frame times.
+
+## Lanes and the help line (branch `lanes`, not merged, not deployed)
+Owner's request: keep it simple, with floors making mini businesses and sites in three lanes (game, website, business), and a way for the bots to ask the owner's assistant for help when they are blocked. Steps and rollback are in `docs/DEPLOY-LANES.md`.
+
+**The lanes.** A boss on a new floor gets three buttons in the manager chat: Game, Website and Business. A tap is simply their first message, so typing still works, and the buttons go once they have spoken. The manager keeps its first reply short, and no work starts until the boss says go. The manager's prompt has a playbook per lane, and `assign_task` takes a `lane`, so each person gets their own part of it with their task (in the first message on a computer, since that system prompt is cached across floors):
+- **Game:** three small original ideas, the Builder makes a playable version, a hired Tester plays it in a real browser, fixes small bugs and replays it, anything big goes back to the Builder, then it is published with a saved high score. Without app origins the score lasts the session and the boss is told. Without computers the game goes out unplayed and the boss is told.
+- **Website:** a brief in chat, real words from the Writer, named palette, type and layout from the Designer, a build from those notes, `review_design`, publish. The notes sit in `notes/` in the project, which, like `TEST-REPORT.md`, never goes live.
+- **Business:** real research with cited sources and named competitors, target customer, offer and pricing marked as proposed, numbers marked Estimate with their assumptions, a short plan, a landing page with a waitlist when forms are available, the launch checklist, and "Only you can do these".
+
+Every agent is now told that nobody here can send email, post, run ads, contact anyone or spend money, and to say so rather than pretend. Everything a prompt promises depends on what is switched on, so iPhones, domains, pictures, search, saved data and browsers aren't mentioned where they don't exist.
+
+**Dead ends removed from the floor.** No Sign-ups button or search-engine switch without project origins, no payment link on a document, no domain wording or Buy button when domain buying is off. The payment dialog now says to ask the manager for a Buy button, because pasting a link doesn't add one. A launch report that says "fix first" now points to the reviewer's notes.
+
+**The help line.** The manager has `ask_buddehbot(question, what_was_tried)`: 800 characters each, refused whole if longer, 5 a floor per UTC day with a clear message at the limit, nothing on a filler floor, gone with `HELP_ENABLED=0`. Staff who are stuck say so in their report, and the manager decides. Requests are stored per floor as pending, answered, declined or expired. The Work feed shows "asked buddehbot for help", the board shows a card, the manager's chip says "Waiting on buddehbot", and the manager briefly takes a phone call. The manager doesn't wait. After 30 minutes (`HELP_TIMEOUT_MIN`) the request expires, and a new turn tells it to use its best judgment and tell the boss. An answer arrives as a new turn labelled as guidance from buddehbot, through the ordinary engine: on a floor that is out of budget or paused it simply waits, and no tool approves anything. It works across processes: the CLI only changes the row, and the server notices on its next tick, exactly once, across restarts.
+
+**Security.** A request holds only what the manager typed plus the floor's name and number. Hidden characters are stripped when it is stored: control codes, direction marks, zero-widths, Unicode tags, variation selectors and terminal escapes. Every listing, in the CLI and the admin view alike, wraps every floor-supplied string in a fence with a random mark made fresh for that listing, and neither half of a fence can be spelled from inside one. A question naming private work is refused, as for anything leaving the building. No route creates a request, and only the admin's routes list or answer one. No new credential exists anywhere.
+
+**Found and fixed in existing code on the way:**
+- **A leak on floors with public chat:** a stored event loses its owner-only flag on SSE catch-up, so a launch report could be replayed to a visitor. Reports and help answers are now judged by what they are.
+- **The checklist:** a real Builder found that an apostrophe cut a meta description short.
+
+### Measured with real models
+Run locally with `scripts/proof-lanes.mjs` (`AI_MODE=live`, computers on, project origins on `apps.localhost`, domain buying off), on real Claude, real Managed Agents containers, real search, real OpenRouter pictures and reviews. Costs are from the building's own ledger at list prices, not a provider invoice.
+
+| Job | Cost | Time | Who |
+|---|---|---|---|
+| Game 1, Paint the Dark, before the prompt fixes | $3.11 | 27 min | Builder $1.97 over two rounds, Tester $0.83, manager $0.31 |
+| Game 2, Bobber Drop, after them | $1.69 | 17 min | Builder $0.77, Tester $0.67, manager $0.26 |
+| Website, Corner Spokes | $1.04 | 5 min | Writer $0.07, Designer $0.32 (with a $0.04 picture), Builder $0.35, manager $0.29 |
+| Business, Second Shelf | $2.00 | 7 min | Researcher $1.00 (three searches $0.41), Analyst $0.14, Writer $0.20, Builder $0.32, manager $0.34 |
+| Help line round trip, answered through the real CLI | $0.09 | under 1 min | manager only |
+| **Total** | **Anthropic $7.83, OpenRouter $0.10** | | limits were $8 and $1 |
+
+A watcher paused the building at $7.71 during Game 2, with the Tester's work already saved. I restarted it with room for about $0.22 more so the manager could publish. That is why the total sits so close to the limit, and there was no money left for another real run.
+
+**What the real runs changed.**
+- **Game 1:** the Builder used most of its 40 steps and then ran out on the fix round, because the limit spanned rounds. A round the manager asks for now gets its own steps. The manager had also told the Tester not to fix anything, so four fixes were never replayed. The Tester now fixes small bugs and replays them, and Builders on these small jobs aim for about 15 steps. In Game 2 the Builder cost $0.77 against $1.97, and the Tester fixed five bugs and replayed the game.
+- **Website:** the manager started work as soon as the boss answered its questions, without a go. The prompt now says answering is not a go, and Game 2 held to it.
+
+**Reading the output.** All five floors' published work is in `docs/proof-lanes/`, with screenshots in `media/lanes-*.jpg`. 47 of 47 checks in real Chrome pass (`docs/proof-lanes/browser-checks.txt`), including a real waitlist entry and a real score on the shared board on the project's own origin. The "Proof" row on the game screenshots is that check's own score.
+- **Honesty held throughout.** Nothing invented turned up in what I read. The Business page says it isn't open, and its $17.99 is marked as proposed and planned. The plan marks every worked-out number, and says what it could not confirm (eBay blocked the page, so those lots come from a search summary). Its main finding is unflattering: the box loses money if books cost $4 each. Both Game managers said plainly what nobody had replayed. The Website manager flagged that the "What I fix" list was its own guess, and that the boss must email the list themselves.
+- **Citations:** I spot-checked two. Gallup's 12.6 books and 27% match the page. Used Books Monthly's offer (1, 2 or 4 used books by genre) matches, but the text I fetched did not show prices, so its prices are unconfirmed by me. The rest I read but did not check.
+
+### Tests on this branch
+Node 22, mock mode: TESTLINE
+
+### Still weak
+- **The design reviewer said "fix first" on all four projects it saw.** It is strict, it never said ship, and Builders take some of its advice and skip the rest. The report now points to its notes, but the Website manager didn't explain what was left, even though the prompt asks.
+- **A Game costs real money and time:** $1.69 to $3.11 and 17 to 27 minutes in these two runs. Almost all of it is the two computer sessions.
+- **The shared leaderboard can't be tested from a computer,** because the data API only exists on the published origin. Testers can only try the local copy, and they say so. My check tried the real one after the fact.
+- **Bobber Drop's layout:** a narrow column on desktop with empty margins. The Tester and the reviewer both flagged it and it shipped that way, with the boss told.
+- **A first-time player's console shows a 404** when `Office.load` asks for a save that doesn't exist yet. It is harmless, but a Tester has to recognise it.
+- **Help line:** nothing tells the assistant a request has arrived, so something must poll `help list --json`, or everything expires. A hijacked manager can still paste up to 1600 characters of whatever it read. It stays fenced, but it reaches a privileged reader. The private-name guard is the same denylist as before.
+
+### Unproven
+- Nothing on this branch has been deployed, or run on hz, with Docker, on a real phone, Safari or Firefox.
+- Real runs covered one configuration only, with computers and project origins on. The other prompt variants, and the hidden UI without project origins on the sandbox path, were only tested with mock models.
+- On a real model, I did not run a fix round under the new step rule, an expiry, a decline, or the admin view. Those ran in mock mode, and expiry on an injected clock. The 30 minutes were never actually waited out.
+- "Answering is not a go" and the Tester's fix-and-replay each held in one real run, on the Game lane. The plan's checklist was reworded after the Business run so it leaves out what is already in hand, and that wording has not met a real model.
+- Domain buying was off in every real run. Its code is unchanged, apart from the manager's prompt wording and the state message hiding it when off.
 
 ## Known limits
 - An interrupted task resumes from its last completed step, and the aborted call is charged as an estimate.

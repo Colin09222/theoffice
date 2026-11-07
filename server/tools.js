@@ -9,7 +9,7 @@ import { runCheck, saveCheck, gateProblem, launchFacts, composeReport } from './
 import { formatReport } from './launch-check.js';
 import { LANES } from './prompts.js';
 import { OrderError } from './orders.js';
-import { HelpError, HELP_LIMITS } from './help.js';
+import { HelpError, HELP_LIMITS, flatText } from './help.js';
 
 const str = (o, k, max, req = true) => {
   const v = o?.[k];
@@ -423,7 +423,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     ask_buddehbot(c, a) {
       if (!engine.help) throw new WorkspaceError('the help line is not available');
       if (typeof a.question !== 'string' || typeof a.what_was_tried !== 'string') throw new WorkspaceError('question and what_was_tried are both required, as text');
-      outbound(c, `${a.question} ${a.what_was_tried}`, 'question');
+      // Judged as it will be stored, so a hidden character can't split a private name past the guard.
+      outbound(c, flatText(`${a.question} ${a.what_was_tried}`), 'question');
       let r;
       try { r = engine.help.ask(c.floor, c.agent, { question: a.question, tried: a.what_was_tried }); } catch (e) { if (e instanceof HelpError) throw new WorkspaceError(e.message); throw e; }
       if (r.already) return `You already asked that (#${r.id}) and it is still waiting. Asking again changes nothing, so carry on with anything else you can do.`;

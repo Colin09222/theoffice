@@ -251,6 +251,7 @@ describe('injection-style text', () => {
     const before = rows(t, fc).length;
     assert.match(await ask(t, fc, 'How should I launch the Moon Cafe site?'), /would mention private work/);
     assert.match(await ask(t, fc, 'A generic question', 'I tried publishing moon-cafe'), /would mention private work/);
+    assert.match(await ask(t, fc, 'How should I launch the Mo\u200bon Ca\u200dfe site?'), /would mention private work/, 'a hidden character splits nothing');
     assert.equal(rows(t, fc).length, before);
     assert.match(await ask(t, fc, 'How do I publish a private project?'), /Sent to buddehbot/);
   });

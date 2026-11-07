@@ -66,6 +66,7 @@ async function job(lane, { company, boss: bossName, tap, reply, go, minutes = 45
   if (!process.env.ANTHROPIC_API_KEY || !process.env.OPENROUTER_API_KEY) throw new Error('keys are not set');
   const { db, app } = await makeApp(true);
   const engine = app.engine;
+  if (resuming) engine.setGlobalPause(false);  // the watcher may have stopped the last run; it watches this one too
   const watch = setInterval(() => {
     const s = spent(db);
     if ((s.anthropic >= ANTHROPIC_MAX || s.openrouter >= OPENROUTER_MAX) && !engine.globalPaused()) { log('PROOF LIMIT REACHED, pausing the building', JSON.stringify(s)); engine.setGlobalPause(true); }
@@ -169,6 +170,8 @@ async function look() {
   const results = []; let fail = 0;
   const check = (name, ok, detail = '') => { results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); if (!ok) fail++; console.log(results.at(-1)); };
   const b = await launch();
+  // Office.load on a first visit gets a 404 for a save that doesn't exist yet, which Chrome logs. That is the office's client asking, not the page breaking.
+  const realErrors = (p) => p.errors.filter((e) => !/404 \(Not Found\) \S+\/_data\/v1\/save\//.test(e));
   const open = async (f, slug, tag, opts = {}) => {
     const url = `http://${appLabel(db, f, slug)}.apps.localhost:${PORT}/`;
     const p = await b.newPage(opts);
@@ -186,19 +189,28 @@ async function look() {
       check('game: a Tester played it', r.game.tasks.some((t) => t.role === 'tester' && ['done', 'review'].includes(t.status)));
       if (slug) {
         const { p, text } = await open(f, slug, 'game-desktop', { width: 1280, height: 800 });
-        check('game: no console errors on load', p.errors.length === 0, p.errors.join(' | ').slice(0, 300));
+        check('game: no console errors on load', realErrors(p).length === 0, realErrors(p).join(' | ').slice(0, 300));
         check('game: it has something to play on', await p.ev('!!document.querySelector("canvas") || document.querySelectorAll("button").length > 0'));
         for (const key of ['Space', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', ' ']) { await p.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key === ' ' ? 'Space' : key }); await sleep(120); await p.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key === ' ' ? 'Space' : key }); await sleep(120); }
         await sleep(1500);
         await p.shot(join(MEDIA, 'lanes-game-playing.jpg'));
-        check('game: still no errors after real key presses', p.errors.length === 0, p.errors.join(' | ').slice(0, 300));
+        check('game: still no errors after real key presses', realErrors(p).length === 0, realErrors(p).join(' | ').slice(0, 300));
         const files = all(db, 'SELECT path,content FROM published_files WHERE floor_id=? AND project=?', f.id, slug).filter((x) => /\.(html|js)$/.test(x.path)).map((x) => String(x.content)).join('');
         check('game: it uses the saved high score', /submitScore/.test(files) && /leaderboard/.test(files));
+        // Against the real data API on the project's own origin, which no staff member could reach from a computer.
+        const board = files.match(/submitScore\(\s*["'`]([^"'`]+)/)?.[1] || files.match(/BOARD\s*=\s*["'`]([^"'`]+)/)?.[1] || 'best';
+        const saved = await p.ev(`Office.submitScore(${JSON.stringify(board)}, 'Proof', 7).then(() => Office.leaderboard(${JSON.stringify(board)}, { limit: 5 })).then((r) => JSON.stringify(r))`).catch((e) => `error: ${e.message}`);
+        check('game: a score really saves to the shared board on its own origin', /"name":"Proof"/.test(saved) && !!get(db, "SELECT 1 x FROM app_scores WHERE floor_id=? AND name='Proof'", f.id), `${board}: ${saved}`.slice(0, 160));
         check('game: nothing invented on the page', !invented.test(text), text.slice(0, 200));
         const phone = await open(f, slug, 'game-phone', { mobile: true });
         check('game: fits a phone', await phone.p.ev('document.documentElement.scrollWidth <= window.innerWidth + 1'));
-        check('game: no errors on a phone', phone.p.errors.length === 0, phone.p.errors.join(' | ').slice(0, 300));
+        check('game: no errors on a phone', realErrors(phone.p).length === 0, realErrors(phone.p).join(' | ').slice(0, 300));
       }
+    }
+    if (r.gameFirst) {
+      const f = get(db, 'SELECT * FROM floors WHERE slug=?', r.gameFirst.floor);
+      const slug = r.gameFirst.projects.find((x) => x.kind === 'game')?.slug;
+      if (slug) { const { p } = await open(f, slug, 'game-first-desktop', { width: 1280, height: 800 }); check('first game: no console errors', realErrors(p).length === 0, realErrors(p).join(' | ').slice(0, 200)); }
     }
     if (r.website) {
       const f = get(db, 'SELECT * FROM floors WHERE slug=?', r.website.floor);
@@ -207,7 +219,7 @@ async function look() {
       check('website: a tap started no work', r.website.tapStartedWork === false);
       if (slug) {
         const { p, text } = await open(f, slug, 'website-desktop', { width: 1280, height: 800 });
-        check('website: no console errors', p.errors.length === 0, p.errors.join(' | ').slice(0, 300));
+        check('website: no console errors', realErrors(p).length === 0, realErrors(p).join(' | ').slice(0, 300));
         check('website: nothing invented on the page', !invented.test(text), text.slice(0, 200));
         const html = await p.ev('document.documentElement.outerHTML');
         for (const [n, re] of [['title', /<title>[^<]{3,}/], ['description', /name="description"/], ['og:title', /og:title/], ['favicon', /rel="[^"]*icon/], ['lang', /<html[^>]*lang=/]]) check(`website: has ${n}`, re.test(html));
@@ -228,7 +240,7 @@ async function look() {
       check('business: the report went to the boss', !!page?.reported);
       if (page) {
         const { p, text } = await open(f, page.slug, 'business-landing', { width: 1280, height: 800 });
-        check('business: no console errors', p.errors.length === 0, p.errors.join(' | ').slice(0, 300));
+        check('business: no console errors', realErrors(p).length === 0, realErrors(p).join(' | ').slice(0, 300));
         check('business: nothing invented on the page', !invented.test(text), text.slice(0, 200));
         check('business: the page says it is not open yet', /not open|isn.t open|not (yet )?(live|launched|shipping|started)|coming|before we|waitlist|haven.t (started|launched|shipped)/i.test(text), text.slice(0, 200));
         const before = get(db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=?', f.id).n;
