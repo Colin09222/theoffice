@@ -122,6 +122,8 @@ const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: '
   projects: { payment_link: "TEXT NOT NULL DEFAULT ''", launch_check: "TEXT NOT NULL DEFAULT ''", launch_report: "TEXT NOT NULL DEFAULT ''", design_review: "TEXT NOT NULL DEFAULT ''", indexable: 'INTEGER NOT NULL DEFAULT 0' },
 };
 Object.assign(ADDED.tasks, { vault: 'INTEGER NOT NULL DEFAULT 0' });
+// floors-plus: filler companies are flagged in the row itself, and the last time the boss opened the floor decides whether standing orders keep running.
+ADDED.floors = { filler: 'INTEGER NOT NULL DEFAULT 0', last_opened_at: 'INTEGER NOT NULL DEFAULT 0' };
 
 export function openDb(dataDir) {
   let path = ':memory:';

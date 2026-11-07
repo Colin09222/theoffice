@@ -7,7 +7,7 @@ import { get, all, run, tx } from './db.js';
 import { ROOT } from './config.js';
 import * as A from './auth.js';
 import { Bus } from './bus.js';
-import { Engine, agentView, taskView, PRIVATE_TEXT, redactChat } from './engine.js';
+import { Engine, agentView, taskView, PRIVATE_TEXT, redactChat, viewEvent } from './engine.js';
 import { slugify, slugPattern, cleanPath, mimeOf, listFiles, readFile, floorBytes, WorkspaceError } from './workspace.js';
 import { publicUrl } from './tools.js';
 import { embeddedV4, expandV6 } from './safefetch.js';
@@ -23,6 +23,9 @@ import { appLabel, appOrigin, appHostLabel, lookupLabel, appHeaders, previewCook
 import { handleData, DataError, DATA_LIMITS, clearProjectData } from './appdata.js';
 import { recordVisit, projectStats, formEntries, formsCsv, formCount } from './launch.js';
 import { DomainRefused } from './domains.js';
+import { installOrders } from './orders.js';
+import { installFiller } from './filler.js';
+import { installBuilding } from './building.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any iscolinfree.com cookie, page or API.
@@ -157,10 +160,17 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     return { owner: !!s && s.floor_id === floor.id, sessionHash: s?.hash, publicChat: !!floor.public_chat, defaultPrivate: !!floor.default_private };
   };
 
+  // ---- extension hooks (floors-plus) ----
+  // Feature modules add rows to these. Each is called with the row being built and may add public fields to it.
+  const hooks = { floorCard: [], snapshot: [], adminFloor: [] };
+  const applyHooks = (list, ...args) => { for (const h of list) h(...args); };
+
   // ---- views ----
   const floorCard = (f) => {
     const busy = get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status='doing'", f.id).n;
-    return { number: f.number, slug: f.slug, name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), status: f.status, busy };
+    const card = { number: f.number, slug: f.slug, name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), status: f.status, busy };
+    applyHooks(hooks.floorCard, f, card);
+    return card;
   };
   const projectView = (f, p) => {
     const domain = engine.domains.liveFor(f.id, p.slug);
@@ -204,6 +214,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       out.storage = { used: floorBytes(db, f.id), quota: cfg.quotaBytes };
       out.files = listFiles(db, f.id).map((x) => ({ path: x.path, size: x.size, updatedAt: x.updated_at }));
     }
+    applyHooks(hooks.snapshot, f, viewer, out);
     return out;
   }
 
@@ -536,12 +547,16 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   });
   GET('/api/admin/overview', async ({ req, res }) => {
     requireAdmin(req);
-    const floors = all(db, 'SELECT * FROM floors ORDER BY number').map((f) => ({
-      id: f.id, number: f.number, slug: f.slug, name: f.name, status: f.status, paused: !!f.paused, createdAt: f.created_at,
-      spendToday: engine.spentToday(f.id), spendTotal: get(db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=?', f.id).n,
-      running: get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status='doing'", f.id).n, bytes: floorBytes(db, f.id),
-      projects: get(db, 'SELECT COUNT(*) n FROM projects WHERE floor_id=? AND published_at IS NOT NULL', f.id).n,
-    }));
+    const floors = all(db, 'SELECT * FROM floors ORDER BY number').map((f) => {
+      const row = {
+        id: f.id, number: f.number, slug: f.slug, name: f.name, status: f.status, paused: !!f.paused, createdAt: f.created_at,
+        spendToday: engine.spentToday(f.id), spendTotal: get(db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=?', f.id).n,
+        running: get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status='doing'", f.id).n, bytes: floorBytes(db, f.id),
+        projects: get(db, 'SELECT COUNT(*) n FROM projects WHERE floor_id=? AND published_at IS NOT NULL', f.id).n,
+      };
+      applyHooks(hooks.adminFloor, f, row);
+      return row;
+    });
     const domainsSpent = get(db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE kind='domain'").n;
     const domainOrders = engine.domains.adminList().slice(0, 40);
     const purchases = all(db, "SELECT p.id,p.item,p.price,p.why,p.link,p.status,f.name floor FROM purchases p JOIN floors f ON f.id=p.floor_id WHERE p.status='pending' ORDER BY p.id DESC LIMIT 100");
@@ -614,6 +629,14 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     else throw new HttpError(400, 'bad_action');
     json(res, 200, { ok: true });
   });
+
+  // ---- extensions (floors-plus) ----
+  // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
+  const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl };
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext)].filter(Boolean);
+  // Their timers run with the engine's: started by whoever starts the engine, stopped on close.
+  const engineStart = engine.start.bind(engine);
+  engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
 
   // ---- published sites ----
   const docCache = new Map();
@@ -904,6 +927,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     server, engine, bus, rates,
     async close() {
       rates.close();
+      for (const x of extensions) { try { await x.stop?.(); } catch (e) { log('error', 'extension stop', { err: scrub(e?.message, cfg) }); } }
       await engine.stop();
       bus.closeAll();
       await new Promise((r) => { server.close(() => r()); server.closeAllConnections?.(); });

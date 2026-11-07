@@ -92,7 +92,8 @@ export class Engine {
   // ---- scheduling ----
   tick() {
     if (this.stopped || this.globalPaused()) return;
-    const floors = all(this.db, `SELECT f.* FROM floors f WHERE f.status='active' AND f.paused=0
+    // A filler company is a scripted scene: nothing on it ever reaches a model, whatever its rows say.
+    const floors = all(this.db, `SELECT f.* FROM floors f WHERE f.status='active' AND f.paused=0 AND f.filler=0
       AND (f.manager_wake=1 OR EXISTS (SELECT 1 FROM tasks t WHERE t.floor_id=f.id AND t.status='todo'))`);
     for (const f of floors) this.tickFloor(f);
   }
