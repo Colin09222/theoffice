@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS app_scores (
 CREATE INDEX IF NOT EXISTS app_scores_rank ON app_scores(floor_id, project, board, score);
 `;
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS.
-const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: 'INTEGER NOT NULL DEFAULT 0', session_charged: 'REAL NOT NULL DEFAULT 0', session_baseline: "TEXT NOT NULL DEFAULT ''", session_publish: "TEXT NOT NULL DEFAULT '[]'", session_tries: 'INTEGER NOT NULL DEFAULT 0' } };
+const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: 'INTEGER NOT NULL DEFAULT 0', session_charged: 'REAL NOT NULL DEFAULT 0', session_baseline: "TEXT NOT NULL DEFAULT ''", session_publish: "TEXT NOT NULL DEFAULT '[]'", session_tries: 'INTEGER NOT NULL DEFAULT 0' }, app_scores: { lower: 'INTEGER NOT NULL DEFAULT 0' } };
 
 export function openDb(dataDir) {
   let path = ':memory:';

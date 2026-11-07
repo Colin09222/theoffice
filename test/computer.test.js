@@ -676,3 +676,47 @@ describe('found in independent review', () => {
     assert.ok(get(h.t.db, "SELECT 1 x FROM published_files WHERE floor_id=? AND path='a/b/c/d/e/f/deep.glb'", h.floor.id));
   });
 });
+
+describe('the whole floor, in mock mode', () => {
+  test('boss to manager to computer and back, across floors, with nothing left held or stuck', { timeout: 60000 }, async () => {
+    const { waitDone } = await import('./helpers.js');
+    const t = await boot({ computerEnabled: true, outputLagMs: 0 });
+    open.push(t);
+    const floors = [];
+    for (let i = 0; i < 8; i++) floors.push(await claim(t, `Busy Floor ${i}`));
+    for (const c of floors) assert.equal((await c.post(`/api/floors/${c.slug}/chat`, { text: 'go build it' })).status, 202);
+    for (const c of floors) {
+      const s = await waitDone(c);
+      assert.ok(s.tasks.every((x) => x.status === 'done'), JSON.stringify(s.tasks.map((x) => [x.title, x.status, x.result])));
+      const built = s.tasks.find((x) => x.title === 'Build the mini-site');
+      assert.match(built.result, /Published/);
+      assert.ok(s.projects.some((p) => p.kind === 'game'));
+      assert.ok(s.spend.today > 0);
+    }
+    await until(() => !t.app.engine.runs.size, { what: 'runs to end' });
+    assert.equal(t.app.engine.errors.length, 0, t.app.engine.errors.join('; '));
+    assert.ok(t.app.engine.reservedTotal < 1e-9, 'no budget left held');
+    assert.equal(t.app.engine.reserved.size, 0);
+    assert.equal(t.app.engine.computer.limiter.active, 0, 'no session slot left taken');
+    assert.ok(!t.logs.join('\n').match(/sk-ant|office_s=/));
+  });
+});
+
+test('a database from before these features is brought up to date at boot', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { openDb } = await import('../server/db.js');
+  const dir = mkdtempSync(join(tmpdir(), 'officemig-'));
+  const old = new DatabaseSync(join(dir, 'office.db'));
+  old.exec('CREATE TABLE tasks (id INTEGER PRIMARY KEY, floor_id INTEGER, title TEXT); CREATE TABLE app_scores (floor_id INTEGER, project TEXT, board TEXT, player TEXT, name TEXT, score REAL, updated_at INTEGER, PRIMARY KEY (floor_id, project, board, player)); INSERT INTO tasks (id,floor_id,title) VALUES (1,1,\'kept\');');
+  old.close();
+  const db = openDb(dir);
+  const cols = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+  assert.ok(cols('tasks').includes('session_id'));
+  assert.ok(cols('app_scores').includes('lower'));
+  assert.equal(get(db, 'SELECT title FROM tasks WHERE id=1').title, 'kept');
+  db.close();
+  rmSync(dir, { recursive: true, force: true });
+});

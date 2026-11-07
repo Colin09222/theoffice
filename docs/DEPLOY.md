@@ -1,5 +1,7 @@
 # Deploying The Office
 
+For app origins and real computers, follow this first, then [DEPLOY-REALBUILDS.md](DEPLOY-REALBUILDS.md).
+
 The app listens on `127.0.0.1:8083` in Docker, and the Bender HQ gate proxies `/theoffice` to it. Caddy already sends the whole domain to the gate, so it needs no change. Nothing here has been applied yet.
 
 Docker was not available on the build machine, so **the image has never been built**. Treat step 3 as the first real test of the Dockerfile.
