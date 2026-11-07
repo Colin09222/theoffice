@@ -7,6 +7,7 @@ import { openCustomisePanel } from './customise.js';
 import { openLogin } from './claim.js';
 import { renderCard, buildScrubber, buildPins, wirePins, tabIcon } from './floor-chrome.js';
 import { icon } from './icons.js';
+import { attachTray, attachmentEl, ACCEPT } from './attach.js';
 import { portrait } from './portrait.js';
 import { muteButton, sfx } from './sfx.js';
 import * as THREE from '../vendor/three/three.module.min.js';
@@ -305,6 +306,7 @@ class FloorPage {
   renderBody() {
     this.renderBanner();
     clear(this.bodyEl);
+    this.bodyEl.ondragover = this.bodyEl.ondragleave = this.bodyEl.ondrop = null;
     this.bodyEl.dataset.surface = this.tab;
     if (this.tab === 'chat') this.renderChat();
     if (this.tab === 'about') this.bodyEl.append(this.cardEl);
@@ -346,15 +348,27 @@ class FloorPage {
     this.chatList.append(...(this.lanesEl ? [this.lanesEl] : []), this.questionsEl, this.streamEl);
     if (this.owner) {
       const input = h('textarea', { rows: 1, maxlength: 4000, placeholder: s.floor.setup ? 'What should this company be?' : `Tell ${this.manager?.name || 'your manager'} what you want...`, 'aria-label': 'Message your office manager', name: 'chat' });
+      const tray = attachTray(this.slug, { onError: (m) => toast(m, 'bad') });
       const send = async () => {
-        const text = input.value.trim();
-        if (!text) return;
+        if (tray.busy()) await tray.wait();
+        const text = input.value.trim(), attachments = tray.ids();
+        if (!text && !attachments.length) return;
         input.value = ''; input.style.height = '';
-        try { await api(`/floors/${this.slug}/chat`, { method: 'POST', body: { text } }); this.view?.bossTalks(); } catch (e) { input.value = text; toast(e.message, 'bad'); }
+        const body = attachments.length ? { text, attachments } : { text };
+        try { await api(`/floors/${this.slug}/chat`, { method: 'POST', body }); tray.clear(); this.view?.bossTalks(); } catch (e) { input.value = text; toast(e.message, 'bad'); }
       };
+      const picker = h('input', { type: 'file', multiple: true, accept: ACCEPT, hidden: true, onchange: () => { tray.add([...picker.files]); picker.value = ''; } });
+      input.addEventListener('paste', (e) => { const files = [...(e.clipboardData?.files || [])]; if (files.length) { e.preventDefault(); tray.add(files); } });
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
       input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = `${Math.min(120, input.scrollHeight)}px`; });
-      this.bodyEl.append(h('form.chat-input', { onsubmit: (e) => { e.preventDefault(); send(); } }, input, h('button.btn.primary.send', { type: 'submit', 'aria-label': 'Send' }, icon('paper-plane-tilt'))));
+      const form = h('form.chat-input', { onsubmit: (e) => { e.preventDefault(); send(); } }, picker,
+        h('button.btn.attach', { type: 'button', 'aria-label': 'Attach a photo or file', 'data-attach': '', onclick: () => picker.click() }, icon('paperclip')),
+        input, h('button.btn.primary.send', { type: 'submit', 'aria-label': 'Send' }, icon('paper-plane-tilt')));
+      const drop = this.bodyEl;
+      drop.ondragover = (e) => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); drop.classList.add('dropping'); } };
+      drop.ondragleave = (e) => { if (e.target === drop) drop.classList.remove('dropping'); };
+      drop.ondrop = (e) => { drop.classList.remove('dropping'); if (e.dataTransfer?.files?.length) { e.preventDefault(); tray.add([...e.dataTransfer.files]); } };
+      this.bodyEl.append(tray.el, form);
     } else {
       this.bodyEl.append(h('p.readonly-note', {}, 'Only the boss of this floor can talk to the manager.'));
     }
@@ -380,7 +394,8 @@ class FloorPage {
     body.innerHTML = renderMarkdown(m.text); // renderMarkdown escapes all input first, and the CSP forbids inline script regardless
     // A report (launch report, standing-order report) or an answer from the help line is for the boss alone, and gets its own look.
     const cls = m.role === 'boss' ? 'boss' : m.role === 'office' || m.role === 'budget' ? 'manager.notice' : m.role === 'report' ? 'manager.report' : m.role === 'help' ? 'manager.help' : 'manager';
-    return h(`div.msg.${cls}`, { 'data-id': m.id, 'data-role': m.role }, h('span.msg-who', {}, who), body);
+    const files = this.owner && m.attachments?.length ? h('div.msg-attachments', {}, ...m.attachments.map((a) => attachmentEl(this.slug, a))) : null;
+    return h(`div.msg.${cls}`, { 'data-id': m.id, 'data-role': m.role }, h('span.msg-who', {}, who), body, files);
   }
   renderQuestions() {
     if (!this.questionsEl) return;
