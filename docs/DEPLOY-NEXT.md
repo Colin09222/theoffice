@@ -8,6 +8,15 @@
 - **Money already spent counts.** Every old ledger row counts against the new limits, so a provider already past its limit stops at first boot. Check step 5 straight away.
 - **The manager starts when asked.** A request to make something is now the go-ahead, with no "say go" step. This costs money sooner than before, and `lanes` and `ultra-workers` disagreed about it: see "Decisions for the owner".
 
+## What each branch needs
+
+| Branch | Environment | Database | On disk |
+|---|---|---|---|
+| `lanes` | `BUDGET_*`, `HELP_*`, all optional | Two tables, four columns, the first-boot scrub | Nothing new |
+| `ultra-workers` | None | None | Nothing new |
+| `ultra-custom` | None | `floors.identity`, `floors.crew`, `agents.persona`, added at boot | Nothing new |
+| `ultra-look` | None | None | Stamped URLs and brotli worked out at start-up, re-packed models. Expect a short CPU blip on the capped core just after start while assets compress. Gzip answers until each file lands |
+
 ## Environment
 
 Add these to `/opt/theoffice/.env`. All are optional, and these are the defaults. `docker-compose.yml` passes the whole file through `env_file`, so no compose change is needed. No new key, password or token.
@@ -97,6 +106,10 @@ ssh hz 'cd /opt/theoffice && docker compose up -d --build'
 - **Restore the backup only to get scrubbed wording back,** and accept losing everything since. Stop the container and copy `before-next.db` over `office.db`.
 - **Browsers are fine.** One holding the new stamped files just asks for the old ones.
 - **Part-way options:** `HELP_ENABLED=0` and a restart stops only the help line. To stop a provider's spending without a rollback, set its `BUDGET_*` to `0` and restart.
+
+## What a job costs, to help set the limits
+
+From real runs at list prices: a Website about $1.04, a Business about $2.00 and a Game $1.69 to $3.11. A help-line round trip is about $0.09. So $120 on the Claude API is very roughly 40 to 100 jobs, less whatever the ledger already holds.
 
 ## Going live again after a limit
 
