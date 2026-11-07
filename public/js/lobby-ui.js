@@ -99,7 +99,7 @@ export async function showLobby(root) {
     window.__lobbyDebug = view;  // read by the browser e2e tests
   }
 
-  const search = h('input', { type: 'search', placeholder: 'Find a company or what it does', 'aria-label': 'Search the directory', oninput: () => renderList() });
+  const search = h('input', { type: 'search', placeholder: 'Search the building', 'aria-label': 'Search the directory', oninput: () => renderList() });
   const list = h('div.dir-list', { tabindex: '-1' });
   const count = h('span.dir-count');
   const renderList = () => {
@@ -151,7 +151,7 @@ export async function showLobby(root) {
     toggle.setAttribute('aria-pressed', String(on));
     panel.classList.toggle('showing-wall', on);
     list.hidden = on; head.hidden = on; wall.hidden = !on; wallHead.hidden = !on;
-    search.placeholder = on ? 'Find a launch' : 'Find a company or what it does';
+    search.placeholder = on ? 'Search what launched' : 'Search the building';
     if (on) { if (isPhone()) panel.classList.add('open'); renderWall(); loadWall(); } else renderList();
   };
   toggle.addEventListener('click', () => setWall(!wallOn));
@@ -173,12 +173,12 @@ export async function showLobby(root) {
     h('header.topbar', {}, h('span.wordmark', {}, 'The Office'), account),
     h('section.hero', {},
       h('h1', {}, 'Clock in. ', h('em', {}, 'Someone else'), ' does the work.'),
-      h('p', {}, 'Each floor belongs to one friend, with an office manager and a small staff of AI agents who plan, research, write and build while you watch. Turn the tower, ride the floors, and walk in on anyone.')),
+      h('p', {}, 'Each floor belongs to one friend, with an office manager and a small staff of AI agents who plan, research, write and build while you watch. Spin the building, go up in the lift, and drop in on anyone.')),
     panel,
     h('button.open-pill', { type: 'button', onclick: () => openClaim() },
       h('span.pill-status', {}, h('i.live-dot'), data.vacant ? `Floor ${data.vacant} is empty` : 'Building full'),
       h('span.pill-go', {}, 'Open an office'), h('span.pill-arrow', { 'aria-hidden': 'true' }, '↗')),
-    h('p.hints', {}, isPhone() ? 'Drag to turn and ride. Tap a floor.' : 'Drag to turn. Scroll to ride. Click a floor to walk in.'),
+    h('p.hints', {}, isPhone() ? 'Drag to look around. Tap a lit floor.' : 'Drag to spin. Wheel goes up and down. Any lit floor is open.'),
     buildTicker(),
     data.globalPause ? h('p.banner', {}, 'The building manager has paused all work for now.') : null,
     tip = h('div.floor-tip', { hidden: true }),

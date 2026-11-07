@@ -10,6 +10,7 @@ const err = () => h('p.form-error', { role: 'alert', hidden: true });
 const showErr = (el, e) => { el.textContent = e instanceof ApiError ? e.message : 'Something went wrong. Try again.'; el.hidden = false; };
 
 export function openClaim({ code = '' } = {}) {
+  let movedIn = null;
   modal('Open an office', (body, close) => {
     const state = { code, floor: null, name: '', tagline: '', colors: { ...DEFAULT_COLORS }, bossName: '', look: { ...DEFAULT_LOOK } };
     let builder = null;
@@ -22,7 +23,9 @@ export function openClaim({ code = '' } = {}) {
         try { const r = await api('/claim/check', { method: 'POST', body: { code: input.value } }); state.code = input.value; state.floor = r.floor; stepCompany(); } catch (x) { showErr(e, x); }
       } },
       h('p.lede', {}, 'Got a code from the building manager? It opens one office, once.'),
-      input, e, h('button.btn.primary.wide', { type: 'submit' }, 'Unlock the door'));
+      input, e, h('button.btn.primary.wide', { type: 'submit' }, 'Unlock the door'),
+      h('p.fineprint', {}, 'No code yet? They are handed out by hand, so ask whoever sent you here. Anyone can still walk in and watch.'),
+      session.floor ? null : h('button.link', { type: 'button', onclick: () => { close(); openLogin(); } }, 'Already have a floor? Sign in'));
       body.replaceChildren(form);
       input.focus();
     };
@@ -62,14 +65,15 @@ export function openClaim({ code = '' } = {}) {
       name.focus();
     };
     const stepRecovery = (r) => {
+      movedIn = r.slug;
       body.replaceChildren(h('div.stack', {},
         h('p.lede', {}, 'Welcome to the building. Keep this recovery code somewhere safe: it is the only way back in from another device, and it won\'t be shown again.'),
         recoveryBox(r.recoveryCode),
         h('p.fineprint', {}, `Your floor's address is ${location.origin}${BASE}/floor/${r.slug}`),
-        h('button.btn.primary.wide', { type: 'button', onclick: () => { close(); window.officeGo(`/floor/${r.slug}`); } }, 'Walk in')));
+        h('button.btn.primary.wide', { type: 'button', onclick: () => close() }, 'Walk in')));
     };
     stepCode();
-  }, { wide: true });
+  }, { wide: true, onClose: () => { if (movedIn) window.officeGo(`/floor/${movedIn}`); } });
 }
 
 export function recoveryBox(code) {
@@ -77,24 +81,34 @@ export function recoveryBox(code) {
   return h('div.recovery', {}, h('code', { 'data-recovery': true }, code), copy);
 }
 
+/** What people actually type for "floor address": the name as they remember it, the slug, or the whole link. */
+export const slugFrom = (text) => {
+  const t = String(text || '').trim();
+  const fromLink = t.match(/\/floor\/([a-z0-9-]+)/i);
+  return (fromLink ? fromLink[1] : t).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+};
+
 export function openLogin(slugHint = '') {
+  let back = null;
   modal('Back to my floor', (body, close) => {
-    const slug = h('input', { name: 'slug', value: slugHint, placeholder: 'your-floor-name', maxlength: 60, required: true, autocomplete: 'username', autocapitalize: 'off' });
+    const slug = h('input', { name: 'slug', value: slugHint, placeholder: 'Your company name, or your floor\'s link', maxlength: 200, required: true, autocomplete: 'username', autocapitalize: 'off' });
     const code = h('input', { name: 'recovery', placeholder: 'RECOVER-XXXXX-XXXXX-...', maxlength: 64, required: true, autocomplete: 'off', autocapitalize: 'characters' });
     const e = err();
     body.append(h('form.stack', { onsubmit: async (ev) => {
       ev.preventDefault(); e.hidden = true;
       try {
-        const r = await api('/login', { method: 'POST', body: { slug: slug.value, recoveryCode: code.value } });
+        const r = await api('/login', { method: 'POST', body: { slug: slugFrom(slug.value), recoveryCode: code.value.trim() } });
         session.csrf = r.csrf;
         await refreshMe();
+        back = r.slug;
         body.replaceChildren(h('div.stack', {},
-          h('p.lede', {}, 'You\'re back in. Recovery codes work once, so here is your new one. Other devices have been signed out.'),
+          h('p.lede', {}, 'You\'re back in. Recovery codes work once, so here is your new one. Save it now: the old one has stopped working, and other devices have been signed out.'),
           recoveryBox(r.recoveryCode),
-          h('button.btn.primary.wide', { type: 'button', onclick: () => { close(); window.officeGo(`/floor/${r.slug}`); } }, 'Go to my floor')));
+          h('button.btn.primary.wide', { type: 'button', onclick: () => close() }, 'Go to my floor')));
       } catch (x) { showErr(e, x); }
     } },
-    h('label.field', {}, h('span', {}, 'Floor address'), slug), h('label.field', {}, h('span', {}, 'Recovery code'), code), e,
-    h('button.btn.primary.wide', { type: 'submit' }, 'Sign in')));
-  });
+    h('label.field', {}, h('span', {}, 'Your floor'), slug), h('label.field', {}, h('span', {}, 'Recovery code'), code), e,
+    h('button.btn.primary.wide', { type: 'submit' }, 'Sign in'),
+    h('p.fineprint', {}, 'Lost the recovery code? Only the building manager can help, so ask them.')));
+  }, { onClose: () => { if (back) window.officeGo(`/floor/${back}`); } });
 }

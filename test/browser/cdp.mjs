@@ -7,11 +7,12 @@ import { join } from 'node:path';
 const MAC = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function launch() {
+export async function launch({ args = [], noAngle = false } = {}) {
   const exe = process.env.CHROME || (existsSync(MAC) ? MAC : '/opt/pw-browsers/chromium');
   const port = 9300 + Math.floor(Math.random() * 400);
   const dir = mkdtempSync(join(tmpdir(), 'officecdp-'));
-  const proc = spawn(exe, ['--headless=new', '--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--mute-audio', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore' });
+  const gfx = noAngle ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
+  const proc = spawn(exe, ['--headless=new', '--no-sandbox', ...gfx, ...args, '--mute-audio', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore' });
   let list;
   for (let i = 0; i < 300; i++) { try { list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); if (list.find((x) => x.type === 'page')) break; } catch { /* still starting */ } await sleep(200); }
   return {

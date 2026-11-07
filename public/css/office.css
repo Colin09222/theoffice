@@ -10,6 +10,7 @@
   position: absolute; left: 58%; bottom: calc(100% + 6px); display: flex; align-items: center; gap: 5px;
   max-width: 160px; padding: 4px 9px; border-radius: 12px 12px 12px 3px; background: #fffaf0; color: #24222f;
   font: 500 11px/1.25 var(--sans); box-shadow: 0 4px 12px rgba(5, 5, 20, .3), 0 0 0 1px rgba(40, 30, 10, .08);
+  transform: translate(var(--bx, 0px), var(--by, 0px)); transition: transform .28s ease;
 }
 #labels .char-bubble::after {
   content: ''; position: absolute; left: 0; bottom: -7px; width: 0; height: 0;
