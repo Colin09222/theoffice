@@ -42,7 +42,7 @@ for (const [label, opts, q, budget] of [['desktop', { width: 1440, height: 900 }
   await step(tag('labels hang above heads, never over them'), async () => {
     const bad = await p.ev(`(() => { const v = window.__office.view; const out = []; const tv = new (v.camera.position.constructor)();
       for (const a of v.actors.values()) {
-        tv.copy(a.group.position); tv.y += 1.7 * 1.45; tv.project(v.camera);
+        tv.copy(a.group.position); tv.y += a.char.headTop ?? 1.7 * 1.45; tv.project(v.camera);
         const headTop = (-tv.y * 0.5 + 0.5) * innerHeight;
         const r = a.nameEl.getBoundingClientRect();
         if (r.bottom > headTop + 2) out.push(a.info.name + ' ' + Math.round(r.bottom - headTop));
@@ -51,6 +51,14 @@ for (const [label, opts, q, budget] of [['desktop', { width: 1440, height: 900 }
     if (bad.length) throw new Error(bad.join(', '));
   });
   await step(tag(`a busy floor stays under ${budget} draw calls`), async () => {
+    // Sampled from here on: a mock run finishes in seconds, and at the high tier a software renderer can be slower than that,
+    // so the board, screen and bubble checks below read what was seen while the work was open, not a single later moment.
+    await p.ev(`window.__samples = { board: 0, screen: 0, dots: 0 }; window.__samp = setInterval(() => { const v = window.__office?.view; if (!v) return;
+      const open = window.__office.state.tasks.some((t) => t.status !== 'done');
+      if (open && v.boardKey && v.boardKey !== '[]') window.__samples.board++;
+      const busy = [...v.actors.values()].find((a) => a.state !== 'idle');
+      if (busy && busy.seat.screenMat && busy.seat.screenMat.map !== v.idleTex) window.__samples.screen++;
+      if (busy && !busy.bubble.hidden && busy.bubble.querySelector('.dots')) window.__samples.dots++; }, 100); true`);
     await c.post(`/api/floors/${c.slug}/chat`, { text: `go build ${label === 'desktop' ? 'midnight rolls' : 'morning buns'}` });
     await p.until('window.__office.state.tasks.length >= 1', 'tasks', 20000);
     await p.until('[...window.__office.view.actors.values()].some((a) => a.state !== "idle")', 'someone working', 20000);
@@ -60,12 +68,11 @@ for (const [label, opts, q, budget] of [['desktop', { width: 1440, height: 900 }
     if (s.calls > budget) throw new Error(`${s.calls} calls`);
   });
   await step(tag('the whiteboard, screens and bubbles follow the real state'), async () => {
-    await p.until('[...window.__office.view.actors.values()].some((a) => !a.bubble.hidden)', 'bubble', 15000);
-    const st = await p.ev(`(() => { const v = window.__office.view; const busy = [...v.actors.values()].find((a) => a.state !== 'idle');
-      return { board: !!v.boardKey && v.boardKey !== '[]', screenOn: !!busy && busy.seat.screenMat.map !== v.idleTex, bubble: busy && busy.bubble.querySelector('.dots') !== null }; })()`);
-    if (!st.board) throw new Error('board empty while tasks exist');
-    if (!st.screenOn) throw new Error('screen stayed dark while working');
-    if (!st.bubble) throw new Error('bubble has no dots');
+    await p.until('(() => { const s = window.__samples; return s.board > 0 && s.screen > 0 && s.dots > 0; })()', 'board, screen and bubble seen', 20000).catch(() => {});
+    const st = await p.ev('(clearInterval(window.__samp), window.__samples)');
+    if (!st.board) throw new Error('board empty while tasks were open');
+    if (!st.screen) throw new Error('screen stayed dark while working');
+    if (!st.dots) throw new Error('bubble has no dots');
   });
   await step(tag('stepping the tier down hides detail and keeps rendering'), async () => {
     await p.ev('__stage.setTier("low"); true');

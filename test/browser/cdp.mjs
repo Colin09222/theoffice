@@ -25,7 +25,7 @@ async function openPage(port, { mobile = false, width = 1440, height = 900 } = {
   const made = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(made.webSocketDebuggerUrl);
   await new Promise((r) => ws.addEventListener('open', r, { once: true }));
-  let id = 0; const pending = new Map(); const errors = []; const failed = [];
+  let id = 0; const pending = new Map(); const errors = []; const failed = []; const urls = new Map(); const transfer = { total: 0, byUrl: new Map() };
   ws.addEventListener('message', (e) => {
     const m = JSON.parse(e.data);
     if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
@@ -33,6 +33,9 @@ async function openPage(port, { mobile = false, width = 1440, height = 900 } = {
     if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(`console: ${m.params.args.map((a) => a.value || a.description).join(' ')}`);
     if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') errors.push(`log: ${m.params.entry.text} ${m.params.entry.url || ''}`);
     if (m.method === 'Network.loadingFailed' && !m.params.canceled) failed.push(m.params.errorText);
+    // Bytes on the wire, per URL, so a run can report what a first load really costs.
+    if (m.method === 'Network.responseReceived') urls.set(m.params.requestId, m.params.response.url);
+    if (m.method === 'Network.loadingFinished') { const u = urls.get(m.params.requestId) || '?'; transfer.byUrl.set(u, (transfer.byUrl.get(u) || 0) + m.params.encodedDataLength); transfer.total += m.params.encodedDataLength; }
   });
   const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
   const ev = async (expression) => {
@@ -44,7 +47,7 @@ async function openPage(port, { mobile = false, width = 1440, height = 900 } = {
   await send('Emulation.setDeviceMetricsOverride', mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobile: true } : { width, height, deviceScaleFactor: 1, mobile: false });
   if (mobile) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   const page = {
-    send, ev, errors, failed,
+    send, ev, errors, failed, transfer,
     front() { return send('Page.bringToFront'); },
     async goto(url) { await send('Page.bringToFront'); await send('Page.navigate', { url }); await page.until('document.readyState === "complete"', 'page load'); },
     async until(expr, what = expr, timeout = 30000) {

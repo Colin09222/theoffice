@@ -61,13 +61,14 @@ const validColors = (i, base = DEFAULT_COLORS) => ({ primary: hex(i?.primary, ba
 
 function buildStatic() {
   const pub = join(ROOT, 'public'); const map = new Map();
-  const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml' };
+  // .glb and .png are the CC0 Kenney models under public/models (see public/models/NOTICE.txt). The binary models gzip to about a third.
+  const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary', '.png': 'image/png' };
   const walk = (d) => {
     for (const n of readdirSync(d)) {
       const p = join(d, n);
       if (statSync(p).isDirectory()) { walk(p); continue; }
       const ext = extname(n); if (!TYPES[ext]) continue;
-      const body = readFileSync(p); const compressible = ext !== '.woff2';
+      const body = readFileSync(p); const compressible = ext !== '.woff2' && ext !== '.png';
       map.set('/' + relative(pub, p).split('\\').join('/'), { body, gz: compressible ? gzipSync(body, { level: 9 }) : null, type: TYPES[ext] });
     }
   };

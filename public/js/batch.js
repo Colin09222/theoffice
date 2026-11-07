@@ -12,13 +12,24 @@ function pushGeometry(o, pos, nor, idx, uv, colors) {
   const g = o.geometry, p = g.getAttribute('position'), n = g.getAttribute('normal'), u = g.getAttribute('uv');
   const base = pos.length / 3;
   const shade = o.userData.shade;  // [yLow, yHigh, factorLow, factorHigh]: a baked vertical gradient, so walls and big slabs read as lit
-  if (colors) col.copy(o.material.color);
+  const multi = Array.isArray(o.material);
+  // A multi-material mesh (a glTF model with one material per part) keeps a colour per vertex from the group that uses it.
+  let vertColor = null;
+  if (colors && multi) {
+    vertColor = new Float32Array(p.count * 3);
+    for (const grp of g.groups) {
+      const c = o.material[grp.materialIndex]?.color || o.material[0].color;
+      const end = grp.count === Infinity ? (g.index ? g.index.count : p.count) : grp.start + grp.count;
+      for (let i = grp.start; i < end; i++) { const vi = g.index ? g.index.getX(i) : i; vertColor[vi * 3] = c.r; vertColor[vi * 3 + 1] = c.g; vertColor[vi * 3 + 2] = c.b; }
+    }
+  } else if (colors) col.copy(o.material.color);
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i).applyMatrix4(m); pos.push(v.x, v.y, v.z);
     if (colors) {
       let f = 1;
       if (shade) { const t = Math.max(0, Math.min(1, (v.y - shade[0]) / (shade[1] - shade[0]))); f = shade[2] + (shade[3] - shade[2]) * t; }
-      colors.push(col.r * f, col.g * f, col.b * f);
+      if (vertColor) colors.push(vertColor[i * 3] * f, vertColor[i * 3 + 1] * f, vertColor[i * 3 + 2] * f);
+      else colors.push(col.r * f, col.g * f, col.b * f);
     }
     v.fromBufferAttribute(n, i).applyMatrix3(nm).normalize(); nor.push(v.x, v.y, v.z);
     if (uv) { if (u) uv.push(u.getX(i), u.getY(i)); else uv.push(0, 0); }
@@ -69,8 +80,9 @@ export function mergeColored(root, material, keep = () => false) {
   inv.copy(root.matrixWorld).invert();
   const plain = new Map(), mapped = new Map();
   root.traverse((o) => {
-    if (o === root || !o.isMesh || o.isInstancedMesh || !o.visible || keep(o) || o.userData.keep) return;
-    const mt = o.material;
+    if (o === root || !o.isMesh || o.isInstancedMesh || o.isSkinnedMesh || !o.visible || keep(o) || o.userData.keep) return;
+    const mt = Array.isArray(o.material) ? (o.material.some((x) => x.transparent || x.map || !x.color) ? null : o.material[0]) : o.material;
+    if (!mt) return;
     if (mt.transparent || mt.map || mt.emissive?.getHex?.() || mt.vertexColors || !mt.color) {
       if (mt.map && !mt.transparent) { const k = `${mt.uuid}|${o.castShadow}|${o.receiveShadow}`; if (!mapped.has(k)) mapped.set(k, []); mapped.get(k).push(o); }
       return;

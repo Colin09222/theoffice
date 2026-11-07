@@ -2,12 +2,15 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { Character, HEAD_TOP } from './character.js';
+import { Character, HEAD_TOP, loadModelCharacter } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
 import { getWorld, makeTower, GROUND, FLOOR_H, TOWER_W } from './lobby-scene.js';
+import { furniture, place } from './models.js';
 
 const ROOM_W = 22, ROOM_D = 13.6, WALL_H = 4.6;
+const FS = 2.5;  // Kenney's furniture kit is about 0.4 of our room units; a desk comes out 0.96 high
+const SEAT_LEGACY = 0.65, SEAT_MODEL = 0.5;  // cushion heights of the stand-in chair and the kit's desk chair
 const DESKS = [[-6.6, 0.6], [-2.2, 0.6], [2.2, 0.6], [6.6, 0.6], [-6.6, 4.5], [-2.2, 4.5], [2.2, 4.5], [6.6, 4.5]];
 const MANAGER_DESK = [-6.9, -3.9], BOSS_DESK = [7.0, -3.9];
 const BOARD = [-0.4, -6.25];
@@ -17,7 +20,7 @@ const CELL = 0.5;
 const HOLD = 0.7;  // seconds each character state stays on stage before the next one shows
 const CHAR_SCALE = 1.45;
 const WORLD_SCALE = ROOM_W / TOWER_W;  // the room is one tower floor, blown up to walk around in
-const SUN_DIR = new THREE.Vector3(0.78, 0.58, -0.26).normalize();
+const SUN_DIR = new THREE.Vector3(0.74, 0.47, -0.32).normalize();
 
 const box = new THREE.BoxGeometry(1, 1, 1);
 const cyl = new THREE.CylinderGeometry(1, 1, 1, 16);
@@ -182,20 +185,25 @@ function makeChair(parent, x, z, color, { big = false, ry = 0 } = {}) {
   return g;
 }
 
-function makeDesk(parent, detail, x, z, chairColor, brand, accent, { big = false, seed = 1 } = {}) {
+/**
+ * A desk. The stand-in desk, monitor, keyboard, mouse and chair go into `legacy`, which the kit's models replace once they
+ * load; the screen face, its glow and the progress bar are ours and stay in the room either way.
+ */
+function makeDesk(parent, detail, legacy, x, z, chairColor, brand, accent, { big = false, seed = 1 } = {}) {
   const g = new THREE.Group(); g.position.set(x, 0, z); parent.add(g);
   const dg = new THREE.Group(); dg.position.set(x, 0, z); detail.add(dg);
+  const lg = new THREE.Group(); lg.position.set(x, 0, z); legacy.add(lg);
   const r = seeded(seed * 31 + 5);
   const W = big ? 3 : 2.3, D = big ? 1.4 : 1.1;
   const top = big ? '#6e4a33' : '#dcc7a7';
-  piece(g, top, W, 0.08, D, 0, 0.94, -0.2);
-  piece(g, shadeHex(top, 0.8), W, 0.03, D + 0.02, 0, 0.91, -0.2, { cast: false });
-  for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) piece(g, '#3d3b44', 0.07, 0.91, 0.07, lx * (W / 2 - 0.12), 0, -0.2 + lz * (D / 2 - 0.12));
-  piece(g, '#3d3b44', W - 0.3, 0.05, 0.05, 0, 0.3, -0.2 - D / 2 + 0.12, { cast: false });
+  piece(lg, top, W, 0.08, D, 0, 0.94, -0.2);
+  piece(lg, shadeHex(top, 0.8), W, 0.03, D + 0.02, 0, 0.91, -0.2, { cast: false });
+  for (const [lx, lz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) piece(lg, '#3d3b44', 0.07, 0.91, 0.07, lx * (W / 2 - 0.12), 0, -0.2 + lz * (D / 2 - 0.12));
+  piece(lg, '#3d3b44', W - 0.3, 0.05, 0.05, 0, 0.3, -0.2 - D / 2 + 0.12, { cast: false });
   // Monitor, keyboard, mouse.
-  piece(g, '#25262d', 0.3, 0.03, 0.2, 0, 1.02, -0.52, { cast: false });
-  piece(g, '#25262d', 0.1, 0.28, 0.08, 0, 1.03, -0.55);
-  piece(g, '#2a2b33', 1.1, 0.74, 0.06, 0, 1.24, -0.58);
+  piece(lg, '#25262d', 0.3, 0.03, 0.2, 0, 1.02, -0.52, { cast: false });
+  piece(lg, '#25262d', 0.1, 0.28, 0.08, 0, 1.03, -0.55);
+  piece(lg, '#2a2b33', 1.1, 0.74, 0.06, 0, 1.24, -0.58);
   const screenMat = new THREE.MeshBasicMaterial({ color: '#1a2030' });
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.64), screenMat);
   screen.position.set(0, 1.61, -0.545); g.add(screen);
@@ -203,9 +211,9 @@ function makeDesk(parent, detail, x, z, chairColor, brand, accent, { big = false
   glow.position.set(0, 1.56, -0.61); glow.visible = false; glow.userData.keep = true; g.add(glow);
   const bar = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.05), new THREE.MeshBasicMaterial({ color: accent }));
   bar.position.set(-0.5, 1.315, -0.54); bar.scale.x = 0.0001; bar.visible = false; bar.userData.keep = true; g.add(bar);
-  piece(g, '#e9e4d8', 0.74, 0.03, 0.25, 0, 1.02, 0.18);
-  piece(g, '#2a2b33', 0.68, 0.012, 0.19, 0, 1.05, 0.18, { cast: false });
-  piece(g, '#ece6d8', 0.12, 0.04, 0.18, 0.55, 1.02, 0.2, { geo: sph, cast: false });
+  piece(lg, '#e9e4d8', 0.74, 0.03, 0.25, 0, 1.02, 0.18);
+  piece(lg, '#2a2b33', 0.68, 0.012, 0.19, 0, 1.05, 0.18, { cast: false });
+  piece(lg, '#ece6d8', 0.12, 0.04, 0.18, 0.55, 1.02, 0.2, { geo: sph, cast: false });
   // Things people leave on desks: mug, papers, a sticky note, a pen pot, a photo, a small plant.
   piece(dg, r() > 0.5 ? accent : '#f3ead8', 0.14, 0.15, 0.14, -0.8 + r() * 0.1, 1.02, 0.12, { geo: cyl, cast: false });
   piece(dg, '#f6f3ea', 0.34, 0.012, 0.44, 0.78 + r() * 0.1, 1.02, -0.05, { cast: false, ry: (r() - 0.5) * 0.5 });
@@ -223,7 +231,7 @@ function makeDesk(parent, detail, x, z, chairColor, brand, accent, { big = false
     piece(dg, '#b86a4b', 0.16, 0.13, 0.16, -0.86, 1.02, -0.05, { geo: cyl, cast: false });
     piece(dg, r() > 0.5 ? '#5e9160' : '#4f7a54', 0.22, 0.22, 0.22, -0.86, 1.13, -0.05, { geo: ico });
   }
-  makeChair(g, 0, 0.84, chairColor, { big });
+  makeChair(lg, 0, 0.84, chairColor, { big });
   return { group: g, screenMat, glow, bar, seat: [x, z + 0.84] };
 }
 
@@ -302,12 +310,24 @@ export class Actor {
     this.bubble = document.createElement('span'); this.bubble.className = 'char-bubble'; this.bubble.hidden = true;
     this.tag.append(this.bubble, this.nameEl);
     view.labels.append(this.tag);
+    // The kit's model takes over from the stand-in when it lands; a failed load changes nothing.
+    loadModelCharacter(info.look, { accent: view.colors.accent }).then((mc) => this.swapChar(mc)).catch((e) => { if (!this.dead) console.warn('character model unavailable', e); });
   }
-  destroy() { this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); }
+  /** Same place, same pose, same props: the viewer only sees the person get a little more real. */
+  swapChar(next) {
+    if (this.dead) { next.dispose(); return; }
+    const old = this.char;
+    next.group.position.copy(old.group.position); next.group.rotation.copy(old.group.rotation);
+    next.setAnim(old.anim); next.paper.visible = old.paper.visible;
+    this.view.scene.remove(old.group); old.dispose();
+    this.char = next; this.group = next.group; this.view.scene.add(next.group);
+    if (this.seated) this.sitDown();
+  }
+  destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); }
   sitDown() {
     this.seated = true;
     // Hips land on the seat cushion; the legs hang in front of the chair.
-    this.group.position.set(this.seat.at[0], 0.65 - 0.365 * CHAR_SCALE, this.seat.at[1] - 0.06);
+    this.group.position.set(this.seat.at[0], this.char.seatedY(this.view.modelsOn ? SEAT_MODEL : SEAT_LEGACY), this.seat.at[1] - 0.06);
     this.heading = Math.PI; this.group.rotation.y = this.heading;
     this.applyStatePose();
   }
@@ -450,8 +470,11 @@ export class OfficeView {
     this.colors = state.floor.colors; this.decor = state.floor.decor;
     this.staffCount = state.agents.filter((a) => a.role !== 'manager').length;
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2('#c9d8e4', 0.0024 / WORLD_SCALE);
-    this.grade = { vignette: 0.24, grain: 0.018 };
+    // Linear fog with a long start: the room and the near city keep their full colour, only the far shore softens.
+    this.scene.fog = new THREE.Fog('#d7e1ea', 140 * WORLD_SCALE, 620 * WORLD_SCALE);
+    this.grade = { vignette: 0.22, grain: 0.016 };
+    this.ao = { radius: 0.9, intensity: 1.9, color: '#2b1b10', falloff: 1 };
+    this.bloom = 0.1;
     this.floorNumber = state.floor.number;
     this.camera = new THREE.PerspectiveCamera(24, 1, 1, 2600);
     this.time = 0; this.yaw = 0.5; this.targetYaw = 0.5; this.pitch = 0.86; this.zoom = 1; this.targetZoom = 1; this.intro = 0;
@@ -483,8 +506,8 @@ export class OfficeView {
   }
   buildRoom() {
     const s = this.scene; const { primary, accent } = this.colors; const d = this.decor;
-    s.add(new THREE.HemisphereLight('#dbe8f7', '#bfae98', 1.25));
-    const sun = new THREE.DirectionalLight('#fff1dc', 2.5);
+    s.add(new THREE.HemisphereLight('#cfe0f6', '#c4a98a', 1.1));
+    const sun = new THREE.DirectionalLight('#ffdcb4', 2.7);
     sun.position.copy(SUN_DIR).multiplyScalar(44); sun.target.position.set(0, 0, 0);
     const size = stage.q?.shadow || 0;
     sun.castShadow = size > 0;
@@ -494,10 +517,13 @@ export class OfficeView {
     sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.035;
     this.sun = sun;
     s.add(sun, sun.target);
-    const fill = new THREE.DirectionalLight('#e8f0ff', 0.32); fill.position.set(-12, 9, 16); s.add(fill);
+    const fill = new THREE.DirectionalLight('#bcd2f5', 0.55); fill.position.set(-12, 9, 16); s.add(fill);
     const env = getWorld().environment();
+    s.environment = env; s.environmentIntensity = 0.35;
     const room = new THREE.Group(); s.add(room); this.room = room; room.userData.glowTex = this.glowTex;
     const detail = new THREE.Group(); s.add(detail); this.detail = detail; detail.visible = this.detailOn;
+    // Stand-in furniture: shown at once, swapped for the kit's models when they arrive, kept if they never do.
+    const legacy = new THREE.Group(); s.add(legacy); this.legacy = legacy;
     const wallZ = -ROOM_D / 2, wallX = -ROOM_W / 2;
     const block = (x, z, w, dd, o) => this.nav.block(x, z, w, dd, o);
 
@@ -510,7 +536,7 @@ export class OfficeView {
     const rail = new THREE.MeshStandardMaterial({ color: '#cfe0ec', roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false, envMap: env });
     for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(room, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
     for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { piece(room, '#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); piece(room, '#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
-    this.floorMat = new THREE.MeshStandardMaterial({ roughness: d.floor === 'carpet' ? 0.95 : 0.6, metalness: 0 });
+    this.floorMat = new THREE.MeshStandardMaterial({ roughness: d.floor === 'carpet' ? 0.95 : 0.55, metalness: 0, envMapIntensity: 0.6 });
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), this.floorMat);
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.userData.keep = true; room.add(floor);
     this.floorTile = floorTile(d.floor);
@@ -566,13 +592,13 @@ export class OfficeView {
     piece(room, frame, MEET.x1 - MEET.x0, 0.1, 0.08, (MEET.x0 + MEET.x1) / 2, GH - 0.1, MEET.z1, { cast: false });
     piece(room, mix(primary, '#5a5a66', 0.55), MEET.x1 - MEET.x0 - 0.6, 0.02, MEET.z1 - MEET.z0 - 0.5, MEET.table[0], 0, MEET.table[1] + 0.2, { cast: false });
     const [tx, tz] = MEET.table;
-    piece(room, '#efe6d6', 3.2, 0.08, 1.1, tx, 0.86, tz); piece(room, '#cdbfa6', 3.2, 0.04, 1.1, tx, 0.82, tz, { cast: false });
-    piece(room, '#3d3b44', 0.14, 0.82, 0.8, tx - 1.3, 0, tz); piece(room, '#3d3b44', 0.14, 0.82, 0.8, tx + 1.3, 0, tz);
+    piece(legacy, '#efe6d6', 3.2, 0.08, 1.1, tx, 0.86, tz); piece(legacy, '#cdbfa6', 3.2, 0.04, 1.1, tx, 0.82, tz, { cast: false });
+    piece(legacy, '#3d3b44', 0.14, 0.82, 0.8, tx - 1.3, 0, tz); piece(legacy, '#3d3b44', 0.14, 0.82, 0.8, tx + 1.3, 0, tz);
     piece(detail, '#2a2b33', 0.42, 0.03, 0.3, tx + 0.2, 0.94, tz, { cast: false }); piece(detail, '#f6f3ea', 0.3, 0.012, 0.4, tx - 0.9, 0.94, tz + 0.1, { cast: false, ry: 0.2 });
     piece(detail, '#2c2c33', 0.1, 0.06, 0.1, tx - 0.2, 0.94, tz - 0.3, { geo: cyl, cast: false }); piece(detail, accent, 0.12, 0.13, 0.12, tx + 1.1, 0.94, tz + 0.25, { geo: cyl, cast: false });
     block(tx, tz, 3.4, 1.3);
     // Chairs at the ends and pushed in at the front: they sit inside the table's footprint, so the aisles stay open.
-    for (const [cx, cz, ry] of [[tx - 2.05, tz, Math.PI / 2], [tx + 2.05, tz, -Math.PI / 2], [tx - 1.0, tz + 0.8, Math.PI], [tx + 0.8, tz + 0.8, Math.PI]]) { makeChair(room, cx, cz, primary, { ry }); this.nav.footprints.push([cx, cz, 0.6, 0.6]); }
+    for (const [cx, cz, ry] of [[tx - 2.05, tz, Math.PI / 2], [tx + 2.05, tz, -Math.PI / 2], [tx - 1.0, tz + 0.8, Math.PI], [tx + 0.8, tz + 0.8, Math.PI]]) { makeChair(legacy, cx, cz, primary, { ry }); this.nav.footprints.push([cx, cz, 0.6, 0.6]); }
 
     // Whiteboard, where plans get made.
     const boardMat = new THREE.MeshBasicMaterial({ map: this.boardTexture([]) });
@@ -618,7 +644,7 @@ export class OfficeView {
       frame(4.9, 2.5, art, 1.4, 1.75); frame(-5.6, 2.6, art2, 1.5, 1.15);
     }
     // Bookshelf.
-    const shelf = new THREE.Group(); shelf.position.set(SHELF[0], 0, SHELF[1]); room.add(shelf);
+    const shelf = new THREE.Group(); shelf.position.set(SHELF[0], 0, SHELF[1]); legacy.add(shelf);
     piece(shelf, '#6f5136', 0.6, 3.1, 2.6, 0, 0, 0);
     piece(shelf, '#553d28', 0.66, 0.08, 2.7, 0.02, 3.02, 0, { cast: false });
     const r = seeded(17);
@@ -635,8 +661,8 @@ export class OfficeView {
     block(SHELF[0], SHELF[1], 0.9, 2.8);
     // The kitchen corner: counter with sink and coffee machine, a fridge and a tall cupboard on the open side.
     if (d.coffee) {
-      const c = new THREE.Group(); c.position.set(COFFEE[0], 0, COFFEE[1]); room.add(c);
-      const cd = new THREE.Group(); cd.position.set(COFFEE[0], 0, COFFEE[1]); detail.add(cd);
+      const c = new THREE.Group(); c.position.set(COFFEE[0], 0, COFFEE[1]); legacy.add(c);
+      const cd = new THREE.Group(); cd.position.set(COFFEE[0], 0, COFFEE[1]); legacy.add(cd);
       piece(c, '#5e4436', 1.0, 1.0, 3.6, 0, 0, 0); piece(c, '#4a3528', 0.03, 0.9, 3.4, -0.5, 0.05, 0, { cast: false });
       for (let i = 0; i < 4; i++) piece(c, '#d8c6a8', 0.02, 0.03, 0.3, -0.51, 0.55, -1.3 + i * 0.86, { cast: false });
       piece(c, '#e8e0d0', 1.1, 0.08, 3.7, 0, 1.0, 0);
@@ -648,10 +674,10 @@ export class OfficeView {
       for (let i = 0; i < 4; i++) piece(cd, ['#f3ead8', primary, accent, '#f3ead8'][i], 0.15, 0.15, 0.15, -0.22 + (i % 2) * 0.3, 1.08, 0.1 + Math.floor(i / 2) * 0.3, { geo: cyl, cast: false });
       piece(cd, '#f0e4c8', 0.3, 0.1, 0.3, 0.2, 1.08, -0.5, { cast: false }); piece(cd, '#e8b24a', 0.12, 0.12, 0.12, 0.2, 1.18, -0.5, { geo: sph, cast: false });
       block(COFFEE[0], COFFEE[1], 1.2, 3.8);
-      const f = new THREE.Group(); f.position.set(FRIDGE[0], 0, FRIDGE[1]); room.add(f);
+      const f = new THREE.Group(); f.position.set(FRIDGE[0], 0, FRIDGE[1]); legacy.add(f);
       piece(f, '#d9dde2', 0.95, 2.0, 0.9, 0, 0, 0); piece(f, '#c3c8ce', 0.02, 1.9, 0.86, -0.48, 0.05, 0, { cast: false }); piece(f, '#c3c8ce', 0.03, 0.02, 0.86, -0.49, 0.72, 0, { cast: false });
       piece(f, '#8e949c', 0.04, 0.5, 0.04, -0.5, 1.0, 0.33, { cast: false }); piece(f, '#8e949c', 0.04, 0.3, 0.04, -0.5, 0.3, 0.33, { cast: false });
-      piece(detail, '#f4c95d', 0.16, 0.16, 0.01, FRIDGE[0] - 0.5, 1.5, FRIDGE[1] - 0.2, { cast: false }); piece(detail, '#7ad1f0', 0.12, 0.14, 0.01, FRIDGE[0] - 0.5, 1.2, FRIDGE[1] + 0.1, { cast: false });
+      piece(f, '#f4c95d', 0.16, 0.16, 0.01, -0.5, 1.5, -0.2, { cast: false }); piece(f, '#7ad1f0', 0.12, 0.14, 0.01, -0.5, 1.2, 0.1, { cast: false });
       piece(f, '#5e4436', 0.95, 2.0, 0.9, 0, 0, 1.0); piece(f, '#4a3528', 0.02, 1.9, 0.86, -0.48, 0.05, 1.0, { cast: false }); piece(f, '#d8c6a8', 0.03, 0.3, 0.03, -0.49, 0.9, 1.0, { cast: false });
       block(FRIDGE[0], FRIDGE[1] + 0.5, 1.1, 2.0);
     }
@@ -672,9 +698,9 @@ export class OfficeView {
     // A lounge in the front corner, until a full staff needs that desk.
     if (this.staffCount < 8) {
       this.lounge = true;
-      const l = new THREE.Group(); l.position.set(SOFA[0], 0, SOFA[1]); room.add(l);
-      const ld = new THREE.Group(); ld.position.set(SOFA[0], 0, SOFA[1]); detail.add(ld);
-      if (d.rug) { piece(l, mix(accent, '#ffffff', 0.25), 5.6, 0.03, 3.4, 0, 0, -0.1, { cast: false }); piece(l, mix(primary, '#ffffff', 0.55), 5.0, 0.04, 2.8, 0, 0, -0.1, { cast: false }); }
+      const l = new THREE.Group(); l.position.set(SOFA[0], 0, SOFA[1]); legacy.add(l);
+      const ld = new THREE.Group(); ld.position.set(SOFA[0], 0, SOFA[1]); legacy.add(ld);
+      if (d.rug) { piece(room, mix(accent, '#ffffff', 0.25), 5.6, 0.03, 3.4, SOFA[0], 0, SOFA[1] - 0.1, { cast: false }); piece(room, mix(primary, '#ffffff', 0.55), 5.0, 0.04, 2.8, SOFA[0], 0, SOFA[1] - 0.1, { cast: false }); }
       const sofa = primary, sofaD = shadeHex(primary, 0.8);
       piece(l, sofaD, 3.8, 0.3, 1.2, 0, 0.1, 0.9); piece(l, sofa, 1.75, 0.3, 1.05, -0.9, 0.38, 0.85, { geo: sph }); piece(l, sofa, 1.75, 0.3, 1.05, 0.9, 0.38, 0.85, { geo: sph });
       piece(l, sofa, 3.8, 1.05, 0.36, 0, 0.1, 1.34); piece(l, sofaD, 3.6, 0.12, 0.3, 0, 1.12, 1.34, { geo: sph });
@@ -699,16 +725,16 @@ export class OfficeView {
     const spots = [[-10.1, -6.0, 0.8, 0.8], [10.2, -5.9, -0.8, 0.9], [-4.0, -2.5, 0.9, 0.6], [3.4, -2.5, -0.9, 0.6], [10.3, 5.9, -0.9, -0.6], [-4.4, 6.2, 0, -0.9], [-0.2, 6.2, 0, -0.9], [-10.2, -0.3, 0.9, 0]];
     for (let i = 0; i < d.plants; i++) {
       const [x, z] = spots[i];
-      const p = makePlant(room, x, z, i % 3, i < 2 ? 1.3 : 1);
+      const p = makePlant(legacy, x, z, i % 3, i < 2 ? 1.3 : 1);
       if (i < 2) { mergeColored(p.canopy, ROOM_MAT); p.canopy.children.forEach((m) => { m.userData.keep = true; }); this.sway.push(p.canopy); }
       block(x, z, 0.8, 0.8); this.plantSpots.push(spots[i]);
     }
 
     // Desks.
-    const mgr = makeDesk(room, detail, MANAGER_DESK[0], MANAGER_DESK[1], primary, primary, accent, { big: true, seed: 2 });
+    const mgr = makeDesk(room, detail, legacy, MANAGER_DESK[0], MANAGER_DESK[1], primary, primary, accent, { big: true, seed: 2 });
     block(MANAGER_DESK[0], MANAGER_DESK[1] - 0.2, 3.2, 1.6);
     this.managerSeat = { at: mgr.seat, screenMat: mgr.screenMat, glow: mgr.glow, bar: mgr.bar };
-    const bossDesk = makeDesk(room, detail, BOSS_DESK[0], BOSS_DESK[1], primary, primary, accent, { big: true, seed: 3 });
+    const bossDesk = makeDesk(room, detail, legacy, BOSS_DESK[0], BOSS_DESK[1], primary, primary, accent, { big: true, seed: 3 });
     block(BOSS_DESK[0], BOSS_DESK[1] - 0.2, 3.2, 1.6);
     this.bossSeat = { at: bossDesk.seat, screenMat: bossDesk.screenMat, glow: bossDesk.glow, bar: bossDesk.bar };
     piece(detail, '#e9b949', 0.8, 0.14, 0.2, BOSS_DESK[0] + 0.85, 1.02, BOSS_DESK[1] + 0.2);
@@ -719,7 +745,83 @@ export class OfficeView {
       this.pet.group.position.set(2, 0, -1.6);
       s.add(this.pet.group); this.petTarget = [2, -1.6]; this.petWait = 3;
     }
-    mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT);
+    mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT); mergeColored(legacy, ROOM_MAT);
+    this.loading = { settled: false };
+    this.loadModels().catch((e) => { console.warn('furniture models unavailable, keeping the stand-ins', e); }).finally(() => { this.loading.settled = true; });
+  }
+  /**
+   * The kit's furniture, placed where the stand-ins are and baked into a few draw calls, then swapped in. Positions and
+   * footprints match the stand-ins exactly, so the walking grid and the baked floor shadows are already right.
+   */
+  async loadModels() {
+    const { primary, accent } = this.colors; const d = this.decor;
+    const names = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'computerMouse', 'chairModernCushion', 'tableCross', 'bookcaseOpen', 'books', 'pottedPlant', 'plantSmall1', 'plantSmall2', 'plantSmall3', 'trashcan', 'cardboardBoxOpen', 'coatRackStanding', 'laptop'];
+    if (d.coffee) names.push('kitchenCabinet', 'kitchenSink', 'kitchenCoffeeMachine', 'kitchenMicrowave', 'kitchenFridgeLarge', 'stoolBar', 'kitchenBar');
+    if (this.lounge) names.push('loungeSofa', 'loungeChair', 'tableCoffee', 'lampRoundFloor', 'pillow', 'pillowBlue', 'speaker');
+    const got = await Promise.all(names.map((n) => furniture(n)));
+    if (this.dead) return;
+    const T = Object.fromEntries(names.map((n, i) => [n, got[i]]));
+    const models = new THREE.Group(); models.userData.fromKit = true;
+    let target = models;
+    const put = (name, o) => { const m = place(T[name], { scale: FS, ...o }); target.add(m); return m; };
+    const chairTint = (c) => ({ carpet: c, carpetBlue: c });
+    const desk = (x, z, chairColor, big) => {
+      const front = Math.PI;  // the kit's desk has its drawer at the back; turned, it faces the sitter
+      put('desk', { x, z: z - 0.2, ry: front, scale: big ? FS * 1.25 : FS * 1.1 });
+      put('computerScreen', { x, y: big ? 1.2 : 1.06, z: z - 0.58, ry: 0 });
+      put('computerKeyboard', { x, y: big ? 1.2 : 1.06, z: z + 0.16 });
+      put('computerMouse', { x: x + 0.56, y: big ? 1.2 : 1.06, z: z + 0.18 });
+      put('chairDesk', { x, z: z + 0.84, ry: Math.PI, tint: chairTint(chairColor), scale: big ? FS * 1.15 : FS });
+      if (big) put('laptop', { x: x + 1.05, y: big ? 1.2 : 1.06, z: z - 0.15, ry: 0.3 });
+    };
+    desk(MANAGER_DESK[0], MANAGER_DESK[1], primary, true);
+    desk(BOSS_DESK[0], BOSS_DESK[1], primary, true);
+    this.modelDesk = (x, z) => { const g = new THREE.Group(); g.userData.fromKit = true; target = g; desk(x, z, accent, false); target = models; mergeColored(g, ROOM_MAT); this.scene.add(g); this.extraModels.push(g); return g; };
+    const [tx, tz] = MEET.table;
+    put('tableCross', { x: tx, z: tz, scale: FS * 1.5 });
+    for (const [cx, cz, ry] of [[tx - 2.05, tz, Math.PI / 2], [tx + 2.05, tz, -Math.PI / 2], [tx - 1.0, tz + 0.8, Math.PI], [tx + 0.8, tz + 0.8, Math.PI]]) put('chairModernCushion', { x: cx, z: cz, ry, tint: chairTint(primary) });
+    // Bookcases against the left wall, with stacks of books on the shelves.
+    for (const [z, flip] of [[SHELF[1] - 0.55, 0], [SHELF[1] + 0.55, 1]]) {
+      put('bookcaseOpen', { x: SHELF[0] + 0.05, z, ry: Math.PI / 2 });
+      for (let s = 0; s < 4; s++) for (const dz of [-0.25, 0.1]) if ((s + flip + (dz > 0 ? 1 : 0)) % 3) put('books', { x: SHELF[0] + 0.05, y: 0.08 + s * 0.52, z: z + dz, ry: Math.PI / 2 + (s % 2) * 0.25, scale: FS * 0.95, tint: { carpetDarker: s % 2 ? primary : accent } });
+    }
+    // Plants: the big potted one at the first two spots, the small ones elsewhere.
+    for (let i = 0; i < d.plants; i++) {
+      const [x, z] = this.plantSpots[i];
+      if (i < 2) put('pottedPlant', { x, z, ry: i * 1.3, scale: FS * 1.7 });
+      else put(`plantSmall${(i % 3) + 1}`, { x, z, ry: i, scale: FS * 2.6 });
+    }
+    if (d.coffee) {
+      const [cx, cz] = COFFEE;
+      // The counter runs along the wall side, with the sink in the middle, the coffee machine and the microwave on top.
+      put('kitchenCabinet', { x: cx, z: cz - 1.25, ry: -Math.PI / 2 }); put('kitchenSink', { x: cx, z: cz - 0.15, ry: -Math.PI / 2 }); put('kitchenCabinet', { x: cx, z: cz + 0.95, ry: -Math.PI / 2 });
+      put('kitchenBar', { x: cx + 0.02, z: cz + 1.8, ry: -Math.PI / 2 });
+      put('kitchenCoffeeMachine', { x: cx + 0.05, y: 1.12, z: cz - 1.3, ry: -Math.PI / 2 }); put('kitchenMicrowave', { x: cx + 0.05, y: 1.12, z: cz + 1.0, ry: -Math.PI / 2 });
+      put('kitchenFridgeLarge', { x: FRIDGE[0], z: FRIDGE[1] + 0.2, ry: -Math.PI / 2 });
+      for (const dz of [-0.9, 0.3]) put('stoolBar', { x: cx - 1.05, z: cz + dz, ry: Math.PI / 2, tint: chairTint(accent) });
+    }
+    if (this.lounge) {
+      const [sx, sz] = SOFA;
+      put('loungeSofa', { x: sx - 0.3, z: sz + 1.05, ry: Math.PI, tint: chairTint(primary) });
+      put('loungeChair', { x: sx + 2.0, z: sz - 0.5, ry: -Math.PI / 2 - 0.3, tint: chairTint(primary) });
+      put('pillow', { x: sx - 1.0, y: 0.52, z: sz + 1.1, ry: Math.PI + 0.3, tint: { carpet: accent }, scale: FS * 0.9 });
+      put('pillowBlue', { x: sx + 0.5, y: 0.52, z: sz + 1.1, ry: Math.PI - 0.2, tint: { carpetBlue: '#f3ead8' }, scale: FS * 0.9 });
+      put('tableCoffee', { x: sx - 0.2, z: sz - 0.6, ry: 0 });
+      put('lampRoundFloor', { x: sx + 2.4, z: sz + 1.0, tint: { lamp: mix(accent, '#ffffff', 0.4) } });
+      put('speaker', { x: sx - 2.5, z: sz + 1.1, scale: FS * 1.1 });
+    }
+    put('trashcan', { x: PRINTER[0] + 1.1, z: PRINTER[1] + 0.3 });
+    put('cardboardBoxOpen', { x: PRINTER[0] + 0.1, z: PRINTER[1] - 1.1, ry: 0.4 });
+    put('coatRackStanding', { x: -ROOM_W / 2 + 0.9, z: -ROOM_D / 2 + 5.6 });
+    // Staff desks that already exist get theirs too.
+    this.models = models; this.extraModels = [];
+    for (const a of this.actors.values()) if (a.deskPos) this.modelDesk(a.deskPos[0], a.deskPos[1]);
+    mergeColored(models, ROOM_MAT);
+    this.scene.add(models);
+    this.scene.remove(this.legacy);
+    for (const a of this.actors.values()) if (a.seated) a.sitDown();
+    this.modelsOn = true;
+    if (!this.detailOn) models.traverse((o) => { if (o.isMesh) o.castShadow = false; });
   }
   /** The floor is one big texture: the tiles, a darker rim along the walls, soft contact shadows under every piece of furniture
    *  and warm pools of light in front of the windows. It costs nothing per frame, so the low tier gets grounded furniture too. */
@@ -833,10 +935,13 @@ export class OfficeView {
       if (this.actors.has(a.id)) return;
       const [x, z] = DESKS[Math.min(i, DESKS.length - 1)];
       const g = new THREE.Group(); this.room.add(g); const dg = new THREE.Group(); this.detail.add(dg); g.userData.glowTex = this.glowTex;
-      const desk = makeDesk(g, dg, x, z, this.colors.accent, this.colors.primary, this.colors.accent, { seed: i + 7 });
-      mergeColored(g, ROOM_MAT); mergeColored(dg, ROOM_MAT);
+      const lg = new THREE.Group(); (this.modelsOn ? g : this.legacy).add(lg);
+      const desk = makeDesk(g, dg, lg, x, z, this.colors.accent, this.colors.primary, this.colors.accent, { seed: i + 7 });
+      if (this.modelsOn) { lg.removeFromParent(); this.modelDesk(x, z); }
+      mergeColored(g, ROOM_MAT); mergeColored(dg, ROOM_MAT); if (!this.modelsOn) mergeColored(lg, ROOM_MAT);
       this.nav.block(x, z - 0.2, 2.5, 1.3);
       const actor = new Actor(this, a, { at: desk.seat, screenMat: desk.screenMat, glow: desk.glow, bar: desk.bar });
+      actor.deskPos = [x, z];
       this.actors.set(a.id, actor);
       actor.setState(a.state, a.activity);
       added++;
@@ -927,12 +1032,12 @@ export class OfficeView {
   }
   enter() {
     const r = stage.renderer;
-    r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = !stage.lowEnd; r.shadowMap.needsUpdate = true;
-    r.toneMappingExposure = 1.04;
+    r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true;  // the stage redraws it every other frame
+    r.toneMappingExposure = 0.92;
     const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WORLD_SCALE); w.group.position.set(0, this.worldLift, 0);
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
   }
-  leave() { const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; r.toneMappingExposure = 1.0; }
+  leave() { const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; r.toneMappingExposure = 0.84; }
   setTier(q) {
     this.sun.castShadow = q.shadow > 0;
     if (q.shadow > 0) { this.sun.shadow.mapSize.set(q.shadow, q.shadow); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null; }
@@ -943,12 +1048,14 @@ export class OfficeView {
     this.world.setDetail(q.density >= 0.6);
   }
   destroy() {
+    this.dead = true;
     this.unbind();
     for (const a of this.actors.values()) a.destroy();
     this.actors.clear();
     this.scene.remove(this.world.group);  // shared with the lobby, so never disposed here
-    for (const root of [this.room, this.detail, this.stub.group, this.pet?.group].filter(Boolean)) root.traverse((o) => {
-      if (o.geometry && o.geometry !== box && o.geometry !== cyl && o.geometry !== cone && o.geometry !== ico && o.geometry !== sph && !o.geometry.parameters?.shared) o.geometry.dispose?.();
+    for (const root of [this.room, this.detail, this.legacy, this.models, ...(this.extraModels || []), this.stub.group, this.pet?.group].filter(Boolean)) root.traverse((o) => {
+      // Model geometry is shared with the cached templates; only our own and the merged batches are disposed.
+      if (o.geometry && o.geometry !== box && o.geometry !== cyl && o.geometry !== cone && o.geometry !== ico && o.geometry !== sph && !o.geometry.parameters?.shared && (o.userData.merged || !root.userData.fromKit)) o.geometry.dispose?.();
       if (o.material?.map && o.material.map !== this.glowTex) o.material.map.dispose();
     });
     this.codeTex.dispose(); this.pageTex.dispose(); this.idleTex.dispose(); this.glowTex.dispose(); this.discGeo.dispose(); this.discMat.map.dispose(); this.discMat.dispose();
@@ -993,8 +1100,6 @@ export class OfficeView {
   update(dt) {
     this.time += dt; this.intro = Math.min(1, this.intro + dt / 1.35);
     this.world.update(dt, this.time);
-    // On phones the shadows redraw every third frame. Nobody can tell, and it saves about a third of the draw calls.
-    if (stage.lowEnd && (this.frame = (this.frame || 0) + 1) % 3 === 0) stage.renderer.shadowMap.needsUpdate = true;
     const e = 1 - Math.pow(1 - this.intro, 3);
     const k = 1 - Math.exp(-dt * 6);
     this.yaw += (this.targetYaw - this.yaw) * k;
@@ -1018,7 +1123,7 @@ export class OfficeView {
     this.updatePet(dt);
   }
   placeTag(a) {
-    const p = this.tv.copy(a.group.position); p.y += HEAD_TOP * CHAR_SCALE + 0.2;
+    const p = this.tv.copy(a.group.position); p.y += (a.char.labelY ?? HEAD_TOP * CHAR_SCALE) + 0.2;
     p.project(this.camera);
     const x = (p.x * 0.5 + 0.5) * this.w, y = (-p.y * 0.5 + 0.5) * this.h;
     a.tag.style.transform = `translate(-50%,-100%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;

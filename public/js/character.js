@@ -1,7 +1,12 @@
-// The little people. Everything is built from a few low-poly shapes with shared geometry, and every rigid part of a limb,
-// the torso or the head is baked into one vertex-coloured mesh, so a character is seven draw calls however it is dressed.
+// The little people. Two kinds share one interface (group, setAnim, update, paper/mug/phone, dispose, seatedY, labelY):
+// - Character: built from a few low-poly shapes, every rigid part baked into one vertex-coloured mesh. It appears at once and
+//   stays if a model never arrives.
+// - ModelCharacter: one of Kenney's CC0 mini characters (see /models/NOTICE.txt), a 7-bone rig with its own walk, idle and
+//   sit clips, recoloured to the saved look. The same procedural layers (typing, talking, carrying, cheering, thinking...)
+//   are added on top of the clips by turning the bones, so every agent state reads the same on both.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { mergeColored, disposeMerged } from './batch.js';
+import { character as loadCharacterAsset, accessory, skeletonUtils, ATLAS } from './models.js';
 
 const G = {
   head: new THREE.SphereGeometry(0.36, 20, 14),
@@ -71,6 +76,8 @@ function buildHat(head, look, accent) {
     head.add(part(G.cyl, '#23252b', -0.36, 0.04, 0, 0.11, 0.08, 0.11).rotateZ(Math.PI / 2)); head.add(part(G.cyl, '#23252b', 0.36, 0.04, 0, 0.11, 0.08, 0.11).rotateZ(Math.PI / 2));
   }
 }
+/** How far above the head's centre a hat reaches, in head units, so a name label clears it. */
+const HAT_TOP = { none: 0, cap: 0.1, beanie: 0.2, tophat: 0.75, crown: 0.58, party: 0.95, hardhat: 0.12, headphones: 0.42 };
 function buildOutfit(root, look, parts) {
   const c = look.outfitColor;
   const o = look.outfit;
@@ -93,6 +100,45 @@ const ANIMS = ['walk', 'sit', 'type', 'talk', 'carry', 'cheer', 'think', 'listen
 /** Unscaled height of the top of the head: where the name label hangs from. */
 export const HEAD_TOP = 1.7;
 
+/** The blend state every character keeps: which named poses are active, eased so nothing ever snaps. */
+function wantFor(anim, speed, carrying) {
+  const a = anim;
+  const seated = a === 'sit' || a === 'type' || a === 'think' || a === 'stretch';
+  return {
+    walk: speed > 0.01 ? 1 : 0, sit: seated ? 1 : 0, type: a === 'type' ? 1 : 0, talk: a === 'talk' ? 1 : 0,
+    carry: carrying ? 1 : 0, cheer: a === 'cheer' ? 1 : 0, think: a === 'think' ? 1 : 0, listen: a === 'listen' ? 1 : 0,
+    stretch: a === 'stretch' ? 1 : 0, sip: a === 'sip' ? 1 : 0, phone: a === 'phone' ? 1 : 0, pour: a === 'pour' ? 1 : 0,
+  };
+}
+/** Arm angles (x: forward swing, z: outward) and head turns for the current blend. Shared by both kinds of character. */
+function poseFor(b, t, dt, self) {
+  const swing = Math.sin(t * 9.5);
+  const typeL = Math.sin(t * 19) * 0.08, typeR = Math.sin(t * 17 + 1.3) * 0.08;
+  let aL = -swing * 0.58 * b.walk, aR = swing * 0.58 * b.walk;
+  let zL = -0.08, zR = 0.08;
+  aL += b.sit * (-0.35) + b.type * (-0.55 + typeL);
+  aR += b.sit * (-0.35) + b.type * (-0.55 + typeR);
+  zL += b.type * 0.22; zR -= b.type * 0.22;
+  aR += b.talk * (-1.25 + Math.sin(t * 5) * 0.32); zR += b.talk * 0.35; aL += b.talk * (-0.45 + Math.sin(t * 3.3) * 0.12);
+  aL += b.carry * (-1.15 - aL); aR += b.carry * (-1.15 - aR); zL += b.carry * 0.3; zR -= b.carry * 0.3;
+  aL += b.cheer * (-2.9 - aL + Math.sin(t * 11) * 0.2); aR += b.cheer * (-2.9 - aR - Math.sin(t * 11) * 0.2);
+  zL -= b.cheer * 0.25; zR += b.cheer * 0.25;
+  aR += b.think * (-2.25 - aR); zR += b.think * 0.62; aL += b.think * (-0.6 - aL); zL += b.think * 0.55;
+  aL += b.listen * (-0.5 - aL); aR += b.listen * (-0.5 - aR); zL += b.listen * 0.45; zR -= b.listen * 0.45;
+  const st = Math.min(1, Math.max(0, Math.sin(t * 1.1) * 0.5 + 0.5));
+  aL += b.stretch * (-2.6 - 0.4 * st - aL); aR += b.stretch * (-2.6 - 0.4 * st - aR); zL -= b.stretch * 0.3; zR += b.stretch * 0.3;
+  const sipUp = Math.sin(t * 1.4) > 0.3 ? 1 : 0; self.sipK = (self.sipK ?? 0) + (sipUp - (self.sipK ?? 0)) * Math.min(1, dt * 6);
+  aR += b.sip * (-1.5 - 0.75 * self.sipK - aR); zR += b.sip * 0.45; aL += b.sip * (-0.2 - aL);
+  aR += b.phone * (-1.55 - aR); zR += b.phone * 0.3; aL += b.phone * (-0.3 - aL);
+  aR += b.pour * (-1.0 - aR); zR -= b.pour * 0.35; aL += b.pour * (-0.25 - aL);
+  const nodWave = Math.sin(t * 1.7); const nod = nodWave > 0.75 ? (nodWave - 0.75) * 4 * Math.sin(t * 14) : 0;
+  const headX = b.type * (0.14 + Math.sin(t * 6) * 0.02) + Math.sin(t * 0.7) * 0.03 - b.think * 0.1 + b.talk * Math.sin(t * 3) * 0.08
+    + b.listen * nod * 0.12 - b.stretch * 0.3 + b.phone * 0.38 + b.pour * 0.22 - b.sip * self.sipK * 0.18;
+  const headY = Math.sin(t * 0.43) * 0.22 * (1 - b.type - b.listen * 0.8) + b.talk * Math.sin(t * 2.1) * 0.15;
+  const headZ = b.think * 0.18 + Math.sin(t * 0.31) * 0.025 + b.listen * Math.sin(t * 0.5) * 0.04;
+  return { aL, aR, zL, zR, headX, headY, headZ, swing };
+}
+
 export class Character {
   constructor(look, { accent = '#d9774a', scale = 1 } = {}) {
     this.group = new THREE.Group();
@@ -102,7 +148,11 @@ export class Character {
     this.nod = 0;
     this.build();
     this.group.scale.setScalar(scale);
+    this.headTop = HEAD_TOP * scale;
+    this.labelY = (HEAD_TOP + (HAT_TOP[look.hat] || 0) * 0.36) * scale;
   }
+  /** Group height that puts the hips on a seat whose cushion is `seatTop` high. */
+  seatedY(seatTop) { return seatTop - 0.365 * this.scale; }
   build() {
     const { look, accent } = this;
     const root = new THREE.Group(); root.position.y = 0.62;
@@ -160,55 +210,25 @@ export class Character {
   update(dt, speed = 0) {
     this.t += dt;
     const t = this.t, b = this.blend;
-    const a = this.anim;
-    const seatedAnim = a === 'sit' || a === 'type' || a === 'think' || a === 'stretch';
-    const want = {
-      walk: speed > 0.01 ? 1 : 0, sit: seatedAnim ? 1 : 0, type: a === 'type' ? 1 : 0, talk: a === 'talk' ? 1 : 0,
-      carry: this.paper.visible ? 1 : 0, cheer: a === 'cheer' ? 1 : 0, think: a === 'think' ? 1 : 0, listen: a === 'listen' ? 1 : 0,
-      stretch: a === 'stretch' ? 1 : 0, sip: a === 'sip' ? 1 : 0, phone: a === 'phone' ? 1 : 0, pour: a === 'pour' ? 1 : 0,
-    };
+    const want = wantFor(this.anim, speed, this.paper.visible);
     const k = Math.min(1, dt * 9);
     for (const n of ANIMS) b[n] += (want[n] - b[n]) * k;
     this.mug.visible = b.sip > 0.2 || b.pour > 0.2;
     this.phone.visible = b.phone > 0.2;
-    const swing = Math.sin(t * 9.5);
+    const p = poseFor(b, t, dt, this);
     const bob = Math.abs(Math.cos(t * 9.5)) * 0.05 * b.walk;
     const breathe = Math.sin(t * 2) * 0.008;
     // Legs: swing when walking, bent forward when sitting.
-    this.legL.rotation.x = swing * 0.66 * b.walk - b.sit * 1.5;
-    this.legR.rotation.x = -swing * 0.66 * b.walk - b.sit * 1.5;
+    this.legL.rotation.x = p.swing * 0.66 * b.walk - b.sit * 1.5;
+    this.legR.rotation.x = -p.swing * 0.66 * b.walk - b.sit * 1.5;
     this.root.position.y = 0.62 + bob + breathe - b.sit * 0.04 + Math.abs(Math.sin(t * 7)) * 0.14 * b.cheer;
     // A walker leans into the step and sways at the hips; a listener shifts weight now and then.
     this.root.rotation.x = b.walk * 0.07 - b.stretch * 0.1 + b.phone * 0.05;
     this.root.rotation.z = Math.sin(t * 4.75) * 0.035 * b.walk + Math.sin(t * 0.9) * 0.02 * b.listen;
-    // Arms: layered from walking, typing, talking, carrying, cheering and the idle moments.
-    const typeL = Math.sin(t * 19) * 0.08, typeR = Math.sin(t * 17 + 1.3) * 0.08;
-    let aL = -swing * 0.58 * b.walk, aR = swing * 0.58 * b.walk;
-    let zL = -0.08, zR = 0.08;
-    aL += b.sit * (-0.35) + b.type * (-0.55 + typeL);
-    aR += b.sit * (-0.35) + b.type * (-0.55 + typeR);
-    zL += b.type * 0.22; zR -= b.type * 0.22;
-    aR += b.talk * (-1.25 + Math.sin(t * 5) * 0.32); zR += b.talk * 0.35; aL += b.talk * (-0.45 + Math.sin(t * 3.3) * 0.12);
-    aL += b.carry * (-1.15 - aL); aR += b.carry * (-1.15 - aR); zL += b.carry * 0.3; zR -= b.carry * 0.3;
-    aL += b.cheer * (-2.9 - aL + Math.sin(t * 11) * 0.2); aR += b.cheer * (-2.9 - aR - Math.sin(t * 11) * 0.2);
-    zL -= b.cheer * 0.25; zR += b.cheer * 0.25;
-    aR += b.think * (-2.25 - aR); zR += b.think * 0.62; aL += b.think * (-0.6 - aL); zL += b.think * 0.55;
-    aL += b.listen * (-0.5 - aL); aR += b.listen * (-0.5 - aR); zL += b.listen * 0.45; zR -= b.listen * 0.45;
-    const st = Math.min(1, Math.max(0, Math.sin(t * 1.1) * 0.5 + 0.5));
-    aL += b.stretch * (-2.6 - 0.4 * st - aL); aR += b.stretch * (-2.6 - 0.4 * st - aR); zL -= b.stretch * 0.3; zR += b.stretch * 0.3;
-    const sipUp = Math.sin(t * 1.4) > 0.3 ? 1 : 0; this.sipK = (this.sipK ?? 0) + (sipUp - (this.sipK ?? 0)) * Math.min(1, dt * 6);
-    aR += b.sip * (-1.5 - 0.75 * this.sipK - aR); zR += b.sip * 0.45; aL += b.sip * (-0.2 - aL);
-    aR += b.phone * (-1.55 - aR); zR += b.phone * 0.3; aL += b.phone * (-0.3 - aL);
-    aR += b.pour * (-1.0 - aR); zR -= b.pour * 0.35; aL += b.pour * (-0.25 - aL);
-    this.armL.rotation.x = aL; this.armR.rotation.x = aR;
-    this.armL.rotation.z = zL; this.armR.rotation.z = zR;
+    this.armL.rotation.x = p.aL; this.armR.rotation.x = p.aR;
+    this.armL.rotation.z = p.zL; this.armR.rotation.z = p.zR;
     this.armR.rotation.y = b.pour * -0.6;
-    // Head: small life, looking down while typing or at a phone, tilting while thinking, nodding while talking or listening.
-    const nodWave = Math.sin(t * 1.7); const nod = nodWave > 0.75 ? (nodWave - 0.75) * 4 * Math.sin(t * 14) : 0;
-    this.head.rotation.x = b.type * (0.14 + Math.sin(t * 6) * 0.02) + Math.sin(t * 0.7) * 0.03 - b.think * 0.1 + b.talk * Math.sin(t * 3) * 0.08
-      + b.listen * nod * 0.12 - b.stretch * 0.3 + b.phone * 0.38 + b.pour * 0.22 - b.sip * this.sipK * 0.18;
-    this.head.rotation.y = Math.sin(t * 0.43) * 0.22 * (1 - b.type - b.listen * 0.8) + b.talk * Math.sin(t * 2.1) * 0.15;
-    this.head.rotation.z = b.think * 0.18 + Math.sin(t * 0.31) * 0.025 + b.listen * Math.sin(t * 0.5) * 0.04;
+    this.head.rotation.x = p.headX; this.head.rotation.y = p.headY; this.head.rotation.z = p.headZ;
     this.torso.rotation.z = Math.sin(t * 9.5) * 0.02 * b.walk;
     this.torso.rotation.y = b.talk * Math.sin(t * 2.1) * 0.08;
     // Blink.
@@ -218,24 +238,207 @@ export class Character {
   dispose() { disposeMerged(this.group); this.group.removeFromParent(); }
 }
 
-/** A turntable preview for the character builder, with its own small renderer. */
+// ---------- Kenney's mini characters ----------
+
+/** Which atlas cell ([column, row] of the 8x4 colormap) each variant uses for its skin, hair, top and trousers, measured from the meshes. */
+const VARIANTS = {
+  'character-male-a': { skin: [1, 2], hair: [3, 3], top: [4, 2], legs: [0, 1] },
+  'character-male-b': { skin: [2, 2], hair: [0, 2], top: [7, 2], legs: [0, 1] },
+  'character-male-c': { skin: [2, 2], hair: [0, 2], top: [3, 3], legs: [0, 1] },
+  'character-male-d': { skin: [2, 2], hair: [0, 2], top: [3, 3], legs: [3, 3] },
+  'character-male-e': { skin: [2, 2], hair: [1, 2], top: [7, 3], legs: [0, 3] },
+  'character-male-f': { skin: [0, 2], hair: [3, 3], top: [2, 2], legs: [4, 2] },
+  'character-female-a': { skin: [1, 2], hair: [3, 3], top: [0, 1], legs: [2, 1] },
+  'character-female-b': { skin: [2, 2], hair: [0, 2], top: [2, 1], legs: [0, 3] },
+  'character-female-c': { skin: [0, 2], hair: [1, 3], top: [0, 1], legs: [7, 2] },
+  'character-female-d': { skin: [2, 2], hair: [0, 2], top: [1, 3], legs: [3, 3] },
+  'character-female-e': { skin: [2, 2], hair: [3, 3], top: [7, 3], legs: [3, 3] },
+  'character-female-f': { skin: [2, 2], hair: [1, 2], top: [3, 3], legs: [0, 3] },
+};
+/** Outfits map to the variants whose clothes are closest; the hair style then picks a side, and the rest of the look picks within it. */
+const BY_OUTFIT = {
+  suit: ['character-male-d', 'character-female-d'], shirt: ['character-male-e', 'character-female-e'], hoodie: ['character-male-a', 'character-female-f'],
+  tee: ['character-male-b', 'character-female-a'], dress: ['character-female-d', 'character-female-b'], labcoat: ['character-male-e', 'character-female-e'],
+  overalls: ['character-male-c', 'character-female-b'],
+};
+const FEMALE_HAIR = ['long', 'bun', 'pigtails'], MALE_HAIR = ['short', 'side', 'mohawk'];
+const hashLook = (look) => { let h = 7; for (const ch of JSON.stringify([look.skin, look.hairColor, look.outfitColor, look.glasses, look.hat])) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
+export function variantFor(look) {
+  const cands = BY_OUTFIT[look.outfit] || BY_OUTFIT.tee;
+  const female = cands.map((c) => c.includes('female'));
+  let i = hashLook(look) % cands.length;
+  if (FEMALE_HAIR.includes(look.hair) && female.includes(true)) i = female.indexOf(true);
+  else if (MALE_HAIR.includes(look.hair) && female.includes(false)) i = female.indexOf(false);
+  return cands[i];
+}
+export const MODEL_SCALE = 2.45;  // model units are about 0.67 per person; the room's people stand about 1.65 tall, 1.7 desks
+
+/** Replaces the colours of chosen atlas cells, keeping each cell's light-to-dark shading. Uniforms live on the material so a clone keeps its look. */
+function tintMaterial(src, slots, means) {
+  const m = src.clone();
+  const cells = [], tints = [], meansU = [];
+  for (const [cell, color] of slots) {
+    cells.push(new THREE.Vector2(cell[0], cell[1]));
+    tints.push(new THREE.Color(color));
+    meansU.push(means[cell[1] * ATLAS.cols + cell[0]] || new THREE.Color(0.5, 0.5, 0.5));
+  }
+  while (cells.length < 4) { cells.push(new THREE.Vector2(-1, -1)); tints.push(new THREE.Color(1, 1, 1)); meansU.push(new THREE.Color(1, 1, 1)); }
+  m.userData.tint = { uCells: { value: cells }, uTints: { value: tints }, uMeans: { value: meansU }, uCount: { value: slots.length } };
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, m.userData.tint);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec2 uCells[4]; uniform vec3 uTints[4]; uniform vec3 uMeans[4]; uniform int uCount;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
+        { vec2 _cell = floor(vMapUv * vec2(${ATLAS.cols.toFixed(1)}, ${ATLAS.rows.toFixed(1)}));
+          for (int i = 0; i < 4; i++) { if (i >= uCount) break; if (_cell == uCells[i]) diffuseColor.rgb *= uTints[i] / max(uMeans[i], vec3(0.03)); } }`);
+  };
+  m.customProgramCacheKey = () => 'tinted-atlas';
+  m.roughness = 0.78; m.metalness = 0;
+  return m;
+}
+
+export class ModelCharacter {
+  /** `asset` is a loaded template from models.js; `utils` is SkeletonUtils; `glasses` an optional accessory scene to clone. */
+  constructor(asset, utils, look, { accent = '#d9774a', scale = MODEL_SCALE, variant, glasses = null } = {}) {
+    this.group = new THREE.Group();
+    this.look = look; this.accent = accent; this.scale = scale; this.variant = variant;
+    this.t = Math.random() * 10;
+    this.anim = 'stand'; this.blend = Object.fromEntries(ANIMS.map((n) => [n, 0]));
+    this.isModel = true;
+    const model = utils.clone(asset.scene);
+    this.model = model;
+    // The kit's people face -z (the hair sits at +z); ours face +z, so the model is turned inside its group and every
+    // relative turn below is mirrored to match.
+    model.rotation.y = Math.PI;
+    this.group.add(model);
+    this.group.scale.setScalar(scale);
+    const bone = (n) => { let b = null; model.traverse((o) => { if (o.name === n) b = o; }); return b; };
+    this.root = bone('root'); this.torso = bone('torso'); this.head = bone('head');
+    this.armL = bone('arm-left'); this.armR = bone('arm-right'); this.legL = bone('leg-left'); this.legR = bone('leg-right');
+    this.rest = new Map();
+    for (const b of [this.root, this.torso, this.head, this.armL, this.armR, this.legL, this.legR]) if (b) this.rest.set(b, { q: b.quaternion.clone(), p: b.position.clone() });
+    // Recolour: skin and hair on the head, skin, top and trousers on the body.
+    const v = VARIANTS[variant] || VARIANTS['character-male-a'];
+    const o = look.outfit;
+    const top = o === 'labcoat' ? '#f2f0ea' : look.outfitColor;
+    const legs = o === 'suit' ? darker(look.outfitColor, 0.85) : o === 'overalls' ? look.outfitColor : o === 'dress' ? look.outfitColor : null;
+    const headSlots = [[v.skin, look.skin], [v.hair, look.hair === 'none' ? look.skin : look.hairColor]];
+    const bodySlots = [[v.skin, look.skin], [v.top, top]];
+    if (legs && (v.legs[0] !== v.top[0] || v.legs[1] !== v.top[1])) bodySlots.push([v.legs, legs]);
+    this.materials = [];
+    model.traverse((obj) => {
+      if (!obj.isMesh) return;
+      obj.castShadow = true; obj.receiveShadow = false; obj.frustumCulled = false;
+      const slots = obj.name === 'head-mesh' ? headSlots : bodySlots;
+      if (asset.means && obj.material?.map) { obj.material = tintMaterial(obj.material, slots, asset.means); this.materials.push(obj.material); }
+    });
+    // Clips: idle, walk and sit from the kit, cross-faded by the same blend the procedural character uses.
+    this.mixer = new THREE.AnimationMixer(model);
+    const clip = (n) => asset.animations.find((c) => c.name === n);
+    this.actions = {};
+    for (const n of ['idle', 'walk', 'sit']) { const c = clip(n); if (c) { const a = this.mixer.clipAction(c); a.play(); a.setEffectiveWeight(n === 'idle' ? 1 : 0); this.actions[n] = a; } }
+    if (this.actions.walk) this.actions.walk.setEffectiveTimeScale(1.35);
+    // A hat from our own parts and glasses from the kit, on the head bone. The hat group is sized to the model's head.
+    if (this.head) {
+      const hat = new THREE.Group(); hat.position.set(0, 0.165, -0.005); hat.rotation.y = Math.PI; hat.scale.setScalar(0.5);
+      buildHat(hat, look, accent);
+      if (hat.children.length) { mergeColored(hat, CHAR_MAT); this.head.add(hat); this.hat = hat; }
+      if (glasses) {
+        const g = glasses.clone(true);
+        g.traverse((obj) => { if (obj.isMesh) { obj.castShadow = false; obj.frustumCulled = false; } });
+        g.position.set(0, 0.19, -0.075); g.scale.setScalar(0.6); this.head.add(g); this.glasses = g;
+      }
+    }
+    // Props, scaled back to world size and held in the right hand (the model's -z is its front).
+    const ps = 1 / scale;
+    this.paper = new THREE.Mesh(G.paper, mat('#fbf7ea')); this.paper.visible = false; this.paper.position.set(0, 0.11, -0.11); this.paper.rotation.x = -0.3; this.paper.scale.setScalar(ps);
+    if (this.torso) this.torso.add(this.paper);
+    this.mug = new THREE.Mesh(G.mug, mat(accent)); this.mug.visible = false; this.mug.position.set(0, -0.13, -0.02); this.mug.scale.setScalar(ps);
+    this.phone = new THREE.Mesh(G.phone, mat('#1b1c22')); this.phone.visible = false; this.phone.position.set(-0.01, -0.12, -0.03); this.phone.rotation.x = 0.6; this.phone.rotation.y = Math.PI; this.phone.scale.setScalar(ps);
+    if (this.armR) this.armR.add(this.mug, this.phone);
+    this.headTop = 0.672 * scale;
+    this.labelY = this.headTop + (HAT_TOP[look.hat] || 0) * 0.36 * 0.5 * scale;
+  }
+  seatedY(seatTop) { return seatTop - 0.03 * this.scale; }
+  setAnim(name) { this.anim = name; }
+  update(dt, speed = 0) {
+    this.t += dt;
+    const t = this.t, b = this.blend;
+    const want = wantFor(this.anim, speed, this.paper.visible);
+    const k = Math.min(1, dt * 9);
+    for (const n of ANIMS) b[n] += (want[n] - b[n]) * k;
+    this.mug.visible = b.sip > 0.2 || b.pour > 0.2;
+    this.phone.visible = b.phone > 0.2;
+    const A = this.actions;
+    const sit = Math.min(1, b.sit), walk = Math.min(1 - sit, b.walk);
+    A.sit?.setEffectiveWeight(sit); A.walk?.setEffectiveWeight(walk); A.idle?.setEffectiveWeight(Math.max(0, 1 - sit - walk));
+    // Back to the rest pose first: the mixer only writes the bones a playing clip has tracks for (the sit clip has no head
+    // or torso track), and our turns below are relative, so without this they would pile up frame after frame.
+    for (const [bone, r] of this.rest) { bone.quaternion.copy(r.q); bone.position.copy(r.p); }
+    this.mixer.update(dt);
+    // The kit's clips set the base pose; our poses turn the bones on top of it.
+    const p = poseFor(b, t, dt, this);
+    // The model is turned half-way round inside the group, so a turn about its local x or z runs the other way (y is unchanged).
+    const lean = b.walk * 0.05 - b.stretch * 0.1 + b.phone * 0.05;
+    if (this.root) {
+      this.root.position.y += (Math.abs(Math.sin(t * 7)) * 0.045 * b.cheer + Math.sin(t * 2) * 0.002);
+      this.root.rotateX(-lean); this.root.rotateZ(-Math.sin(t * 0.9) * 0.02 * b.listen);
+    }
+    const armX = 1 - walk;  // the walk clip swings the arms itself
+    // Our arm layers assume a hanging arm; the clips start from a slightly spread one, so the outward turn is eased back a little.
+    if (this.armL) { this.armL.rotateX(-(p.aL * armX + p.aL * walk * 0.2 * (1 - b.walk))); this.armL.rotateZ(-(p.zL * 0.9 + 0.1)); }
+    if (this.armR) { this.armR.rotateX(-(p.aR * armX + p.aR * walk * 0.2 * (1 - b.walk))); this.armR.rotateZ(-(p.zR * 0.9 - 0.1)); this.armR.rotateY(b.pour * -0.6); }
+    if (this.head) { this.head.rotateX(-p.headX); this.head.rotateY(p.headY); this.head.rotateZ(-p.headZ); }
+    if (this.torso) this.torso.rotateY(b.talk * Math.sin(t * 2.1) * 0.08);
+  }
+  dispose() {
+    for (const m of this.materials) m.dispose();
+    if (this.hat) disposeMerged(this.hat);
+    this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.model);
+    this.group.removeFromParent();
+  }
+}
+
+/**
+ * Loads the model character for a look. Resolves to a ready ModelCharacter, or rejects (the caller keeps its procedural one).
+ * Everything it needs is cached after the first call, so a floor's crew costs one fetch per distinct variant.
+ */
+export async function loadModelCharacter(look, opts = {}) {
+  const variant = variantFor(look);
+  const [asset, utils, glasses] = await Promise.all([
+    loadCharacterAsset(variant), skeletonUtils(),
+    look.glasses === 'round' ? accessory('aid-glasses') : look.glasses === 'shades' ? accessory('aid-sunglasses') : null,
+  ]);
+  return new ModelCharacter(asset, utils, look, { ...opts, variant, glasses });
+}
+
+/** A turntable preview for the character builder, with its own small renderer. The model replaces the stand-in when it lands. */
 export function createPreview(canvas, look, accent) {
   let renderer;
   try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); } catch { canvas.hidden = true; return { update() {}, dispose() {} }; }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.1;
+  renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const rect = canvas.getBoundingClientRect();
   renderer.setSize(rect.width || 200, rect.height || 240, false);
   const scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight('#d2e3f5', '#c9bba6', 1.5));
-  const sun = new THREE.DirectionalLight('#fff0d8', 2.6); sun.position.set(2.5, 4, 3); sun.castShadow = true; sun.shadow.mapSize.set(512, 512);
+  scene.add(new THREE.HemisphereLight('#cfe0f5', '#b9a88f', 1.6));
+  const sun = new THREE.DirectionalLight('#ffe4c4', 2.8); sun.position.set(2.5, 4, 3); sun.castShadow = true; sun.shadow.mapSize.set(512, 512);
   Object.assign(sun.shadow.camera, { left: -2, right: 2, top: 3, bottom: -1, near: 1, far: 12 }); sun.shadow.camera.updateProjectionMatrix(); sun.shadow.bias = -0.0005; scene.add(sun);
+  const fill = new THREE.DirectionalLight('#dbe8ff', 0.6); fill.position.set(-3, 2, -2); scene.add(fill);
   const floor = new THREE.Mesh(new THREE.CircleGeometry(1.1, 28), new THREE.ShadowMaterial({ opacity: 0.22 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
   const cam = new THREE.PerspectiveCamera(26, (rect.width || 200) / (rect.height || 240), 0.1, 30);
   cam.position.set(0, 1.5, 5.4); cam.lookAt(0, 0.95, 0);
   let ch = new Character(look, { accent }); scene.add(ch.group);
-  let raf, dead = false, last = performance.now();
+  let gen = 0, raf, dead = false, last = performance.now();
+  const swapIn = (next, acc) => {
+    const my = ++gen;
+    loadModelCharacter(next, { accent: acc, scale: 2.5 }).then((mc) => {  // the same height in the frame as the stand-in
+      if (dead || my !== gen) { mc.dispose(); return; }
+      ch.dispose(); ch = mc; scene.add(ch.group);
+    }).catch(() => { /* the stand-in stays */ });
+  };
+  swapIn(look, accent);
   const loop = (now) => {
     if (dead) return;
     raf = requestAnimationFrame(loop);
@@ -246,7 +449,7 @@ export function createPreview(canvas, look, accent) {
   };
   raf = requestAnimationFrame(loop);
   return {
-    update(next, acc = accent) { ch.dispose(); ch = new Character(next, { accent: acc }); scene.add(ch.group); },
-    dispose() { dead = true; cancelAnimationFrame(raf); floor.geometry.dispose(); renderer.dispose(); renderer.forceContextLoss?.(); },
+    update(next, acc = accent) { ch.dispose(); ch = new Character(next, { accent: acc }); scene.add(ch.group); swapIn({ ...next }, acc); },
+    dispose() { dead = true; gen++; cancelAnimationFrame(raf); floor.geometry.dispose(); renderer.dispose(); renderer.forceContextLoss?.(); },
   };
 }

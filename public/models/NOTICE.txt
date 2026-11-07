@@ -1,0 +1,39 @@
+Third-party models under public/models
+=======================================
+
+All files in this directory come from Kenney (www.kenney.nl) and are released under the
+Creative Commons Zero (CC0 1.0) public-domain dedication: http://creativecommons.org/publicdomain/zero/1.0/
+Credit is not required; we credit Kenney anyway. Nothing here was taken from any other site.
+
+Source packages, downloaded directly from kenney.nl on 7 November 2026 (the page's own "Download" link):
+
+  Furniture Kit 2.0   https://kenney.nl/assets/furniture-kit     sha256 of the zip: e67652d0932cee41683f74711c03d3e192a2af9979ef8e6b237711f5482d46b0
+  Mini Characters 2.0 https://kenney.nl/assets/mini-characters   sha256 of the zip: add348e98ab9e23d9973c4740ef2c5cceb229c742106aca2d56b30a8f1241bb7
+
+The License.txt shipped inside each zip reads, in full:
+
+  Furniture Kit (2.0)
+  Created/distributed by Kenney (www.kenney.nl)
+  License: (Creative Commons Zero, CC0) http://creativecommons.org/publicdomain/zero/1.0/
+  This content is free to use in personal, educational and commercial projects.
+  Support us by crediting Kenney or www.kenney.nl (this is not mandatory)
+
+  Mini Characters (2.0)
+  Created/distributed by Kenney (www.kenney.nl)
+  License: (Creative Commons Zero, CC0) http://creativecommons.org/publicdomain/zero/1.0/
+  You can use this content for personal, educational, and commercial purposes.
+  Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)
+
+Files kept (only the ones the app uses; the rest of each kit was not copied):
+
+  furniture/   from Furniture Kit "Models/GLTF format", unmodified .glb files:
+    bookcaseOpen, books, cardboardBoxOpen, chairDesk, chairModernCushion, coatRackStanding, computerKeyboard, computerMouse,
+    computerScreen, desk, kitchenBar, kitchenCabinet, kitchenCabinetUpper, kitchenCoffeeMachine, kitchenFridgeLarge,
+    kitchenMicrowave, kitchenSink, lampRoundFloor, laptop, loungeChair, loungeDesignSofa, loungeSofa, pillow, pillowBlue,
+    plantSmall1, plantSmall2, plantSmall3, pottedPlant, speaker, stoolBar, tableCoffee, tableCross, trashcan
+  characters/  from Mini Characters "Models/GLB format", unmodified .glb files and the shared texture:
+    character-male-a .. character-male-f, character-female-a .. character-female-f, aid-glasses, aid-sunglasses,
+    Textures/colormap.png
+
+The models are recoloured at runtime (company colours on chairs and sofas, a floor's own skin, hair and outfit colours on
+people); the files themselves are not edited.
