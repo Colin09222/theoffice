@@ -288,7 +288,11 @@ class FloorPage {
     return h(`article.project.kind-${p.kind}`, { 'data-project': p.slug },
       h('span.kind', {}, KIND[p.kind] || p.kind), h('h3', {}, p.title), h('p', {}, p.description || ''),
       p.sources?.length ? h('small', {}, `${p.sources.length} ${p.sources.length === 1 ? 'source' : 'sources'}`) : null,
-      h('div.row', {}, h('button.btn.primary', { type: 'button', onclick: open }, 'Open'), priv));
+      h('div.row', {}, h('button.btn.primary', { type: 'button', onclick: open }, 'Open'), priv,
+        this.owner && p.appUrl ? h('button.link', { type: 'button', onclick: async () => {
+          if (!window.confirm(`Delete every save, leaderboard and shared value for ${p.title}? This can't be undone.`)) return;
+          try { const r = await api(`/floors/${this.slug}/projects/${p.slug}/clear-data`, { method: 'POST', body: {} }); toast(`Cleared ${r.removed} saved ${r.removed === 1 ? 'item' : 'items'}`); } catch (e) { toast(e.message, 'bad'); }
+        } }, 'Clear saved data') : null));
   }
   previewProject(p, url) {
     modal(p.title, (body) => {

@@ -9,7 +9,7 @@ const PLAIN = 'text/plain; charset=utf-8';
 export const TEXT_EXT = { html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', json: 'application/json; charset=utf-8', map: 'application/json; charset=utf-8', webmanifest: 'application/manifest+json; charset=utf-8', txt: PLAIN, md: PLAIN, svg: 'image/svg+xml; charset=utf-8', xml: 'application/xml; charset=utf-8', csv: 'text/csv; charset=utf-8',
   ts: PLAIN, tsx: PLAIN, jsx: PLAIN, vue: PLAIN, svelte: PLAIN, scss: PLAIN, less: PLAIN, yml: PLAIN, yaml: PLAIN, toml: PLAIN, lock: PLAIN, sh: PLAIN, glsl: PLAIN, wgsl: PLAIN, vert: PLAIN, frag: PLAIN, gltf: 'model/gltf+json', obj: PLAIN };
 // Only a build from a real computer can bring these in. Agents' write_file stays text-only.
-export const BINARY_EXT = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', ico: 'image/x-icon', mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', m4a: 'audio/mp4', mp4: 'video/mp4', webm: 'video/webm', wasm: 'application/wasm', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', glb: 'model/gltf-binary', bin: 'application/octet-stream', pdf: 'application/pdf' };
+export const BINARY_EXT = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', ico: 'image/x-icon', mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', m4a: 'audio/mp4', mp4: 'video/mp4', webm: 'video/webm', wasm: 'application/wasm', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', glb: 'model/gltf-binary', bin: 'application/octet-stream', data: 'application/octet-stream', pdf: 'application/pdf' };
 export const mimeOf = (path) => { const ext = String(path).split('.').pop().toLowerCase(); return TEXT_EXT[ext] || BINARY_EXT[ext] || 'application/octet-stream'; };
 export const MAX_SYNC_FILE_BYTES = 8 * 1024 * 1024;
 
@@ -21,7 +21,8 @@ export function cleanPath(p, { binary = false } = {}) {
   if (/[\\\u0000-\u001f\u007f]/.test(p)) throw new WorkspaceError('path has illegal characters');
   if (p.startsWith('/') || p.startsWith('~')) throw new WorkspaceError('paths are relative to the workspace');
   const parts = p.split('/');
-  if (parts.length > 6) throw new WorkspaceError('path is too deep');
+  // Real builds nest deeper than anything an agent writes by hand.
+  if (parts.length > (binary ? 12 : 6)) throw new WorkspaceError('path is too deep');
   for (const seg of parts) {
     if (!seg || seg === '.' || seg === '..') throw new WorkspaceError('path may not contain empty, . or .. segments');
     if (!/^[A-Za-z0-9._ -]{1,80}$/.test(seg) || seg.startsWith('.')) throw new WorkspaceError(`bad path segment "${seg.slice(0, 40)}"`);
@@ -113,6 +114,6 @@ export function applySync(db, floorId, slug, entries, baseline, agentId, quotaBy
     }
     if (get(db, 'SELECT COUNT(*) n FROM files WHERE floor_id=?', floorId).n > MAX_FILES) throw new WorkspaceError(`that is more than ${MAX_FILES} files; leave build leftovers out`);
     if (floorBytes(db, floorId) > quotaBytes) throw new WorkspaceError(`that does not fit this floor's ${Math.round(quotaBytes / 1048576)} MB storage quota; leave out large files or leftovers`);
-    return { written, removed, skipped };
+    return { written, removed, skipped, accepted: [...incoming].map(([path, data]) => ({ path, data })) };
   });
 }

@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS app_kv (
 );
 CREATE TABLE IF NOT EXISTS app_scores (
   floor_id INTEGER NOT NULL, project TEXT NOT NULL, board TEXT NOT NULL, player TEXT NOT NULL, name TEXT NOT NULL,
-  score REAL NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project, board, player)
+  score REAL NOT NULL, lower INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project, board, player)
 );
 CREATE INDEX IF NOT EXISTS app_scores_rank ON app_scores(floor_id, project, board, score);
 `;

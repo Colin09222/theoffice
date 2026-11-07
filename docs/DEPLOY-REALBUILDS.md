@@ -9,15 +9,20 @@ Not tested anywhere yet: real DNS, real certificates, Caddy with this config, Do
 
 ## 0. Read this first: same domain or a separate one
 
-A browser treats `x.apps.iscolinfree.com` and `iscolinfree.com` as the **same site**, though not the same origin. That has three consequences for a domain shared with the private site:
+A browser treats `x.apps.iscolinfree.com` and `iscolinfree.com` as the **same site**, though not the same origin. For a domain shared with the private site, that means:
 
-1. Published code can plant a cookie for the parent domain with `document.cookie = "x=y; Domain=iscolinfree.com"`. It can't read cookies, but it can shadow one, or overflow the cookie header so every request to the private site fails until the victim clears cookies.
-2. `SameSite=Lax` doesn't stop a same-site request, so a published page can send requests to the private site with `bhq_auth` attached. It can't read the replies. The gate patch in step 4 refuses these. The Office's own API already does.
-3. The page's Content-Security-Policy blocks all of this from ordinary pages, but it is not a hard wall: a service worker can synthesise a page with no CSP. The gate patch is the real defence.
+1. **Planted cookies.** Published code can set a cookie for the parent domain with `document.cookie = "x=y; Domain=iscolinfree.com; Path=/theoffice"`. It can't read any cookie, but:
+   - It can log a logged-out visitor into the attacker's own floor, by planting a valid `office_s`. They would then be chatting on the attacker's floor.
+   - It can lock an owner out. Two `office_s` cookies are treated as logged out, and logging in again doesn't help until they clear the planted one.
+   - It can overflow the cookie header, so every request to the private site fails until the visitor clears cookies.
+2. **Same-site requests.** `SameSite=Lax` doesn't stop a same-site request, so a published page can send requests to the private site with `bhq_auth` attached. It can't read the replies. The gate patch in step 4 refuses these. The Office's own API already does.
+3. **CSP is not a hard wall.** The page's Content-Security-Policy blocks all of this from ordinary pages, but a service worker can synthesise a page with no CSP. The gate patch is the real defence for item 2. Nothing stops item 1.
 
-**Recommendation: use a separate registrable domain**, such as `iscolinfree-apps.com`. It removes all three, because the browser then treats projects as a different site. It costs one domain registration, which is the owner's decision. Everything below works the same way with either; swap the domain name.
+**Recommendation: use a separate registrable domain**, such as `iscolinfree-apps.com`. It removes all of the above for the main site and the private site, because the browser then treats projects as a different site. It costs one domain registration, which is the owner's decision. Everything below works the same way with either; swap the domain name. The server logs a warning at boot if the two share a site.
 
-If you stay on `apps.iscolinfree.com`, step 1 and step 4 are mandatory, and item 1 above remains as a nuisance risk (a friend's published page could log a visitor out of The Office or break the private site for them until they clear cookies). It cannot read anything.
+If you stay on `apps.iscolinfree.com`, step 1 and step 4 are mandatory and item 1 is an accepted risk, in a building of friends who were each given a code. It cannot read anything.
+
+**Either way,** projects can plant cookies on each other, because they share the apps domain. A hostile project can't read another's data or fake its preview pass (`__Host-` cookies can't be planted), but a very large planted cookie can make every project fail with a 431 for that visitor until they clear cookies. Listing the apps domain on the Public Suffix List would end that, and is worth doing on a separate domain once it is stable.
 
 ## 1. Check `bhq_auth` first (same-domain only)
 
@@ -26,7 +31,9 @@ ssh hz 'grep -n "bhq_auth" /opt/bhq/server.js | grep -i "cookie"'
 curl -sI https://iscolinfree.com/ | grep -i set-cookie
 ```
 
-The cookie must have **no `Domain=` attribute**. With one, the browser would send it to every project origin, and published code could use it. The Office's cookies have no `Domain` (tested). If `bhq_auth` has one, remove it or use a separate domain; do not continue.
+The cookie must have **no `Domain=` attribute**. With one, the browser would send it to every project origin, and published code could use it. The Office's cookies have no `Domain` (tested), and neither does `bhq_auth` in the local copy of the gate (`repos/bhq-gate/server.js`), but that copy may not match hz. If `bhq_auth` has one on hz, remove it or use a separate domain; do not continue.
+
+Also check the gate for a WebSocket handler: `ssh hz 'grep -n "upgrade" /opt/bhq/server.js'`. The local copy has none. The patch in step 4 only covers ordinary requests, and browsers let any page open a WebSocket, with cookies attached and the reply readable. If there is one, it needs the same `refuseAppOrigins` check on its `Origin`, or a separate domain.
 
 ## 2. DNS
 
@@ -43,7 +50,7 @@ If the zone is behind a CDN proxy, set this record to DNS-only: Caddy has to ans
 
 This site block goes straight to the app, **not through the gate**, so nothing about the private site is in its path. Use one of the two TLS options.
 
-**Option A: on-demand TLS.** No DNS API needed. The `ask` URL approves only labels of real published projects. Each project gets its own certificate. Let's Encrypt allows 50 new certificates per registered domain per week, shared with everything else on that domain. It also makes a private project's name visible in certificate logs, and its origin answers TLS where an unknown one does not.
+**Option A: on-demand TLS.** No DNS API needed. The `ask` URL approves only live published projects, and only answers direct calls: through the gate it returns 404, because the gate adds `X-Forwarded-For`. Each project gets its own certificate. Let's Encrypt allows 50 new certificates per registered domain per week, shared with everything else on that domain. It also makes a private project's name visible in certificate logs, and its origin answers TLS where an unknown one does not.
 
 ```caddyfile
 {
@@ -56,6 +63,9 @@ This site block goes straight to the app, **not through the gate**, so nothing a
 	tls {
 		on_demand
 	}
+	# Only a private project's preview pass needs a cookie. Dropping the rest also stops a planted cookie breaking public projects.
+	@nopass not header Cookie *__Host-office_preview=*
+	request_header @nopass -Cookie
 	reverse_proxy 127.0.0.1:8083 {
 		header_up -Authorization
 		header_up Cookie "(^|;\s*)(office_s|office_a|bhq_auth)=[^;]*" ""
@@ -73,6 +83,9 @@ Merge the `on_demand_tls` lines into the existing global options block if there 
 	tls {
 		dns <provider> {env.DNS_API_TOKEN}
 	}
+	# Only a private project's preview pass needs a cookie. Dropping the rest also stops a planted cookie breaking public projects.
+	@nopass not header Cookie *__Host-office_preview=*
+	request_header @nopass -Cookie
 	reverse_proxy 127.0.0.1:8083 {
 		header_up -Authorization
 		header_up Cookie "(^|;\s*)(office_s|office_a|bhq_auth)=[^;]*" ""
@@ -148,7 +161,7 @@ Publish something, or use an existing project.
 LABEL=<project>--<floor>
 curl -sI https://iscolinfree.com/theoffice/f/<floor>/<project>/ | grep -iE 'HTTP|location'      # 302 to the project origin
 curl -sI https://$LABEL.apps.iscolinfree.com/ | grep -iE 'HTTP|content-security|set-cookie'      # 200, a CSP with connect-src 'self', no set-cookie
-curl -s -o /dev/null -w '%{http_code}\n' https://$LABEL.apps.iscolinfree.com/theoffice/api/me    # 404
+curl -s https://$LABEL.apps.iscolinfree.com/theoffice/api/me | head -c 80                        # the project's own page (client-side route fallback), never JSON
 curl -s -o /dev/null -w '%{http_code}\n' https://nope--nothing.apps.iscolinfree.com/             # TLS failure on option A, 404 on option B
 curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8083/theoffice/api/apps/tls-check?domain=evil.example'  # 404, run on hz
 curl -s -H 'Sec-Fetch-Site: same-site' -o /dev/null -w '%{http_code}\n' https://iscolinfree.com/   # 403 with the gate patch
@@ -177,7 +190,7 @@ Sessions are left in place for debugging, and hold that task's project files and
 
 Each step undoes alone, and nothing needs restoring.
 
-1. **Computers off:** remove `COMPUTER_ENABLED`, then `docker compose up -d`. The Builder goes back to writing files through the old tool loop. A task that was mid-session resumes under the old loop, starting over from its brief.
+1. **Computers off:** remove `COMPUTER_ENABLED`, then `docker compose up -d`. The Builder goes back to writing files through the old tool loop. A task that was mid-session resumes under the old loop from its brief and any notes, with its safety prompt, and without files it hadn't saved. Its session is left idle; delete it in the Console if you like.
 2. **App origins off:** remove `APPS_BASE_DOMAIN`, then `docker compose up -d`. Friendly links serve from the sandbox again at once. Saved game data stays in the database but is unreachable, and sandboxed pages can't use it.
 3. **Code:** rsync `main` back and rebuild, then remove the gate line and the Caddy block, and reload both. Binary files published meanwhile stop being served by the old code; they stay in the database.
 4. **DNS:** the record can stay, or be removed.
@@ -191,4 +204,4 @@ The private site is never in the path of the app origin, and removing the gate l
 | Host routing, cookies ignored, data isolation, labels, TLS check, gate patch | Node tests with crafted `Host` headers (`test/apporigin.test.js`, `test/gate-apps.test.js`) |
 | Cookie non-delivery, CSP blocks, real localStorage, service worker, offline | Real Chrome on `*.apps.localhost` (`npm run e2e:apps`, `scripts/proof-realbuild.mjs browser`) |
 | Containers, network limits, Playwright, cost | Real Managed Agents sessions (`scripts/proof-realbuild.mjs build`) |
-| Real DNS, real TLS, Caddy config, Docker image, hz gate | **Not checked** |
+| Real DNS, real TLS, Caddy config, Docker image, the gate on hz | **Not checked**. The Caddy lines in particular are from its documentation, so run `caddy validate` |

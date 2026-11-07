@@ -9,6 +9,10 @@ const log = (level, msg, extra = {}) => { if (level === 'error' || msg !== 'api'
 const db = openDb(cfg.dataDir);
 const app = createApp({ db, cfg, models: loadModels(), log });
 if (cfg.aiMode === 'live' && !cfg.openrouterKey) log('warn', 'OPENROUTER_API_KEY is not set: floors will pause when an agent tries to think');
+if (cfg.appsBaseDomain && cfg.publicOrigin) {
+  const site = (h) => h.split(':')[0].split('.').slice(-2).join('.');
+  try { if (site(cfg.appsBaseDomain) === site(new URL(cfg.publicOrigin).hostname)) log('warn', 'APPS_BASE_DOMAIN shares a site with PUBLIC_ORIGIN: published pages can plant cookies on the main site. See docs/DEPLOY-REALBUILDS.md'); } catch { /* unset */ }
+}
 if (!cfg.adminPassword) log('warn', 'ADMIN_PASSWORD is not set: the admin view is locked');
 app.engine.start();
 app.server.listen(cfg.port, cfg.host, () => log('info', 'the office is open', { port: cfg.port, aiMode: cfg.aiMode }));

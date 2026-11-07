@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { get, run } from './db.js';
+import { get, all, run } from './db.js';
 import { ROOT } from './config.js';
 import { Limiter } from './limiter.js';
 import { ProviderError, scrub } from './llm.js';
@@ -16,6 +16,7 @@ import { computerPrompt, computerBriefing } from './prompts.js';
 
 const MIN_ROOM_USD = 0.1;
 const STALL_MS = 90_000;
+const STOP_GRACE_MS = 120_000;
 const MAX_FIX_TURNS = 2, MAX_LOST = 2, MAX_STREAM_FAILURES = 5;
 const WARN_STEPS_LEFT = 5;
 const MAX_ARCHIVE_BYTES = 40 * 1024 * 1024, MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
@@ -27,7 +28,7 @@ const SAVE_SH = `#!/bin/sh
 set -e
 mkdir -p /mnt/session/outputs
 cd /workspace/project
-tar czf /mnt/session/outputs/project.tgz --exclude=node_modules --exclude='.[!.]*' --exclude=__pycache__ --exclude=coverage --exclude=test-results --exclude=playwright-report .
+tar czf /mnt/session/outputs/project.tgz --no-wildcards-match-slash --exclude=node_modules --exclude='.[!.]*' --exclude=__pycache__ --exclude=coverage --exclude=test-results --exclude=playwright-report .
 echo "Saved $(tar tzf /mnt/session/outputs/project.tgz | grep -vc '/$') files, $(du -h /mnt/session/outputs/project.tgz | cut -f1) compressed."
 `;
 const CLIENT_JS = readFileSync(join(ROOT, 'server/app-client/office.js'));
@@ -44,8 +45,10 @@ function describeTool(ev) {
   const input = ev.input || {};
   if (ev.name === 'bash') {
     const c = String(input.command || '');
-    if (/office\/save\.sh/.test(c)) return ['typing', 'Packing up the work', 'packed up the work'];
-    if (/playwright|chromium|puppeteer|screenshot/i.test(c)) return ['browsing', 'Checking it in a real browser', 'checked it in a real browser'];
+    // Only what it actually runs counts: looking at a tool or a script is not using it.
+    if (/\b(bash|sh) +\S*save\.sh/.test(c)) return ['typing', 'Packing up the work', 'packed up the work'];
+    if (/^\s*(ls|cat|which|head|grep|echo)\b/.test(c)) return ['reading', 'Looking around the computer', null];
+    if (/playwright|chromium|puppeteer|screenshot|\.cjs\b/i.test(c)) return ['browsing', 'Checking it in a real browser', 'checked it in a real browser'];
     if (/\b(npm (run )?test|vitest|jest|node --test|pytest)\b/.test(c)) return ['typing', 'Running the tests', 'ran the tests'];
     if (/\b(vite build|npm run build|tsc\b|webpack|esbuild|rollup)/.test(c)) return ['typing', 'Running the build', 'ran the build'];
     if (/\b(npm|pnpm|yarn|bun) +(i|install|ci|add)\b|pip3? +install/.test(c)) return ['typing', 'Installing packages', 'installed packages'];
@@ -151,7 +154,8 @@ export class Computer {
       await this.finish(st, await this.drive(st));
     } catch (err) {
       const why = err?.why ?? signal.reason?.why;
-      if (st?.id && (why === 'pause' || why === 'stop')) await this.client.send(st.id, [{ type: 'user.interrupt' }]).catch(() => {});
+      // Only a shutdown leaves a session running, because the next boot picks it up. On any other way out it must not carry on spending unwatched.
+      if (st?.id && why !== 'shutdown') await this.client.send(st.id, [{ type: 'user.interrupt' }]).catch(() => {});
       // A paused session stopped mid-thought, so it needs telling to carry on. A shutdown leaves it running, and the next boot simply reattaches.
       if (st?.id && why === 'pause') this.pushMessage(taskId, 'You were paused for a while. Carry on where you left off.');
       e.handleRunError(floorId, agent, task, err, () => {
@@ -183,10 +187,36 @@ export class Computer {
     };
   }
 
+  /** A session with nobody following it: its task was stopped, or its floor is paused. Stop it, and put what it cost on the ledger. */
+  async settleOrphan(task) {
+    const e = this.engine;
+    try {
+      await this.client.send(task.session_id, [{ type: 'user.interrupt' }]).catch(() => {});
+      const s = await this.client.retrieve(task.session_id);
+      const delta = Number(s.usage?.list_cost?.amount) / 100 - task.session_charged;
+      if (delta > 0.005) {
+        e.charge(task.floor_id, { id: task.agent_id }, 'managed-session', 0, 0, delta, { taskId: task.id });
+        run(e.db, 'UPDATE tasks SET session_charged=session_charged+? WHERE id=?', delta, task.id);
+      }
+    } catch (err) { e.log('warn', 'could not settle a session', { err: scrub(err?.message, e.cfg) }); }
+  }
+  /** At boot: sessions on floors that won't reattach for now are stopped, so they don't spend off the books. */
+  recoverOrphans() {
+    const paused = this.engine.globalPaused();
+    for (const t of all(this.engine.db, "SELECT t.id,t.session_id,t.session_charged,t.agent_id,t.floor_id FROM tasks t JOIN floors f ON f.id=t.floor_id WHERE t.session_id!='' AND t.status='todo' AND (f.paused=1 OR f.status!='active' OR ?)", paused ? 1 : 0)) this.settleOrphan(t);
+  }
+
   /** Reattach to this task's session if it is still alive, otherwise box up the project and start a fresh one. */
   async attach(st, task) {
     const e = this.engine; const { floor, agent, signal } = st;
-    const room = this.room(floor.id, task);
+    let room = this.room(floor.id, task);
+    // Short of room only because other sessions hold it: they give back what they don't spend, so wait for them.
+    while (room.usd < MIN_ROOM_USD && room.daily && !e.spentOver(floor.id, MIN_ROOM_USD)) {
+      e.setAgent(agent.id, { state: 'queued', activity: 'Waiting for the budget to free up' });
+      await new Promise((res, rej) => { const t = setTimeout(res, 2000); signal.addEventListener('abort', () => { clearTimeout(t); rej(signal.reason); }, { once: true }); });
+      e.checkpoint(floor.id, signal);
+      room = this.room(floor.id, task);
+    }
     st.room = room;
     if (room.usd < MIN_ROOM_USD) {
       if (room.daily) throw new e.Halt('budget');
@@ -202,7 +232,7 @@ export class Computer {
         // The budget is fixed at creation, so a reattached session is re-capped to what may be spent from now on.
         const spent = Number(live.usage?.list_cost?.amount) || 0;
         await this.client.updateSession(st.id, { budget: { type: 'limit', max_list_cost: { amount: String(spent + Math.floor(room.usd * 100)), currency: 'USD' } } });
-        st.budgetRaised = true;
+        st.budgetRaised = true; st.resumed = true;
         e.feed(floor.id, agent, `went back to the computer for "${task.title}"`, task.project);
         return;
       }
@@ -246,6 +276,8 @@ export class Computer {
     const e = this.engine; let failures = 0;
     for (;;) {
       e.checkpoint(st.floorId, st.signal);
+      this.checkClock(st);
+      if (this.pastGrace(st)) return 'done';
       const conn = new AbortController();
       const onAbort = () => conn.abort();
       st.signal.addEventListener('abort', onAbort, { once: true });
@@ -262,9 +294,18 @@ export class Computer {
           const o = await this.onEvent(st, ev, false);
           if (o === 'running') outcome = null; else if (o) outcome = o;
         }
-        // A session that was paused at its old cap wakes by itself now the cap is raised, so that old pause is not an ending.
+        // A session paused at its old cap wakes by itself when the cap is raised, so that old pause is not an ending. (Checked against the real API.)
         if (outcome === 'budget' && st.budgetRaised) { outcome = null; st.expectRun = true; }
         st.budgetRaised = false;
+        // Pressing Resume after repeated failures is someone asking it to try again.
+        if (outcome === 'retries' && st.resumed) this.pushMessage(st.taskId, 'Something went wrong on the platform earlier. Carry on where you left off.');
+        st.resumed = false;
+        // A long silence: if the session has in fact stopped, its last status is the answer, even if that event was already seen or ignored.
+        if (st.stalled && !outcome && st.lastIdle) {
+          const live = await this.client.retrieve(st.id);
+          if (live.status === 'idle' && !st.pendingCustom.size && !st.pendingAsk.size) { outcome = st.lastIdle; st.expectRun = false; }
+        }
+        st.stalled = false;
         await this.answerPending(st);
         if (await this.sendPending(st)) { outcome = null; st.expectRun = true; }
         if (outcome && !st.expectRun) return outcome;
@@ -274,15 +315,18 @@ export class Computer {
           if (ev.id && st.seen.has(ev.id)) continue;
           if (ev.id) st.seen.add(ev.id);
           this.checkClock(st);
+          if (this.pastGrace(st)) return 'done';
           const o = await this.onEvent(st, ev, true);
           if (o && o !== 'running' && !st.expectRun) return o;
         }
       } catch (err) {
         if (st.signal.aborted) throw st.signal.reason;
+        if (conn.signal.aborted) st.stalled = true;
         if (err instanceof ProviderError && !err.retryable) throw err;
         if (!conn.signal.aborted && ++failures >= MAX_STREAM_FAILURES) throw err instanceof ProviderError ? err : new ProviderError('The computer stopped answering.', { retryable: false });
         if (!conn.signal.aborted) e.log('warn', 'session stream dropped', { err: scrub(err?.message, e.cfg) });
       } finally {
+        if (conn.signal.aborted) st.stalled = true;
         clearTimeout(stall);
         st.signal.removeEventListener('abort', onAbort);
         conn.abort();
@@ -295,11 +339,17 @@ export class Computer {
     if (!st.limit && Date.now() - st.startedAt > this.engine.cfg.sessionMaxMinutes * 60000) this.stopFor(st, 'time');
   }
   stopFor(st, why) {
-    st.limit = why;
-    if (st.interruptSent) return;
-    st.interruptSent = true;
-    this.client.send(st.id, [{ type: 'user.interrupt' }]).catch((err) => this.engine.log('warn', 'interrupt failed', { err: scrub(err?.message, this.engine.cfg) }));
+    st.limit ||= why;
+    st.limitAt ??= Date.now();
+    if (st.interruptDone || st.interruptBusy) return;
+    st.interruptBusy = true;
+    // Retried from the next event if it fails. Past the grace period the runner stops following the session regardless.
+    this.client.send(st.id, [{ type: 'user.interrupt' }])
+      .then(() => { st.interruptDone = true; })
+      .catch((err) => this.engine.log('warn', 'interrupt failed', { err: scrub(err?.message, this.engine.cfg) }))
+      .finally(() => { st.interruptBusy = false; });
   }
+  pastGrace(st) { return !!st.limitAt && Date.now() - st.limitAt > (this.stopGraceMs ?? STOP_GRACE_MS); }
 
   async onEvent(st, ev, live) {
     const e = this.engine; const { agent, floorId } = st;
@@ -355,7 +405,8 @@ export class Computer {
       case 'session.status_idle': {
         const r = ev.stop_reason?.type;
         if (r === 'requires_action') { if (live) await this.answerPending(st); return null; }
-        return { end_turn: 'done', budget_reached: 'budget', retries_exhausted: 'retries', refusal: 'refused' }[r] || 'done';
+        st.lastIdle = { end_turn: 'done', budget_reached: 'budget', retries_exhausted: 'retries', refusal: 'refused' }[r] || 'done';
+        return st.lastIdle;
       }
       case 'session.status_terminated': return 'terminated';
       default: return null;
@@ -408,11 +459,16 @@ export class Computer {
     if (outcome === 'retries') throw new ProviderError('The computer failed repeatedly.', { retryable: false });
     if (outcome === 'terminated') { await this.collect(st).catch(() => {}); return this.lost(st); }
     if (outcome === 'refused') { await this.reconcile(st); return e.finishTask(floor, agent, taskId, 'failed', 'The model declined this one.'); }
-    if (outcome === 'done' && st.ctx.suspend) {
-      await this.reconcile(st);
-      run(e.db, "UPDATE tasks SET status='blocked', updated_at=? WHERE id=?", e.now(), taskId);
-      e.emitTask(taskId);
-      return undefined;
+    while (outcome === 'done' && st.ctx.suspend) {
+      if (get(e.db, 'SELECT 1 x FROM questions WHERE task_id=? AND answer IS NULL', taskId)) {
+        await this.reconcile(st);
+        run(e.db, "UPDATE tasks SET status='blocked', updated_at=? WHERE id=?", e.now(), taskId);
+        e.emitTask(taskId);
+        return undefined;
+      }
+      // The boss already answered, while this turn was wrapping up. Carry straight on.
+      st.ctx.suspend = false;
+      outcome = await this.drive(st);
     }
     let result = { ok: false, problem: '' };
     for (let turn = 0; ; turn++) {
@@ -427,7 +483,8 @@ export class Computer {
     await this.reconcile(st);
     const links = result.published?.length ? `\n\nPublished: ${result.published.join(', ')}` : '';
     if (outcome === 'budget') {
-      if (st.room.daily) throw new e.Halt('budget');
+      // Stopped by what was left of the day. Over for today if the money is really gone; otherwise it goes back in line for what other sessions give back.
+      if (st.room.daily) throw new e.Halt(e.spentOver(floor.id, MIN_ROOM_USD) ? 'budget' : 'wait');
       return e.finishTask(floor, agent, taskId, 'failed', `Stopped: this task hit its spending limit.${links}`);
     }
     if (st.limit === 'steps') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of steps before finishing.${links}`);
@@ -470,9 +527,17 @@ export class Computer {
       if (err instanceof WorkspaceError) return { ok: false, problem: err.message };
       throw err;
     }
-    run(e.db, 'UPDATE tasks SET session_baseline=? WHERE id=?', JSON.stringify(baselineOf(keep)), taskId);
+    // Only what was accepted: a name that was refused has no business being stored at all.
+    run(e.db, 'UPDATE tasks SET session_baseline=? WHERE id=?', JSON.stringify(baselineOf(sync.accepted)), taskId);
     if (sync.written || sync.removed) e.feed(floor.id, agent, `brought ${sync.written + sync.removed} files back from the computer`, project);
     e.emitProject(floor.id, project);
+    // A file that was left out of something about to go live means a broken site, so the agent hears about it rather than the visitor.
+    const dropped = [...sync.skipped, ...unpacked.ignored];
+    const inPublished = dropped.filter((d) => st.publish.some((p) => !p.directory || d.startsWith(`${p.directory}/`)));
+    if (inPublished.length && !st.droppedTold) {
+      st.droppedTold = true;
+      return { ok: false, problem: `these files were left out, because of their path or type: ${inPublished.slice(0, 12).join(', ')}. Paths may use letters, digits and . _ - only, at most 10 folders deep, and files need a common web extension.` };
+    }
     const published = [];
     for (const p of st.publish) {
       const dir = p.directory ? `${p.directory}/` : '';

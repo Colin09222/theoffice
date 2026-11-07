@@ -518,3 +518,161 @@ describe('control and recovery', () => {
     assert.ok(!def.tools.some((x) => x.name === 'publish_project'));
   });
 });
+
+describe('found in independent review', () => {
+  test('a huge name in an archive is refused, and rejected names are never stored', async () => {
+    const seen = {};
+    const long = 'x/'.repeat(3000) + 'a.txt';
+    const h = await start({ async onTurn(api, text) {
+      await api.step();
+      if (/did not go through/.test(text)) { seen.problem = text; api.save([{ path: 'index.html', data: Buffer.from('ok') }, { path: `bad${'y'.repeat(300)}.txt`, data: Buffer.from('n') }]); await api.message('d'); return; }
+      api.save([{ path: long, data: Buffer.from('z') }]);
+      await api.message('d');
+    } });
+    const row = await h.settle((await go(h)).id);
+    assert.match(seen.problem, /name that is far too long/);
+    assert.equal(row.status, 'review');
+    assert.ok(row.session_baseline.length < 300, `baseline ${row.session_baseline.length}`);
+    assert.ok(!row.session_baseline.includes('yyy'));
+  });
+  test('a visitor view never loads transcripts', async () => {
+    const h = await start();
+    const { id } = await go(h);
+    await h.settle(id);
+    run(h.t.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: 'SECRET-TRANSCRIPT' }]), id);
+    const v = new Client(h.t);
+    assert.ok(!JSON.stringify((await v.get(`/api/floors/${h.c.slug}`)).data).includes('SECRET-TRANSCRIPT'));
+  });
+  test('a budget hold never stops a floor for the day; only spent money does', async () => {
+    const h = await start({ async onTurn(api) { await api.step(); await sleep(120); api.save([{ path: 'index.html', data: Buffer.from('x') }]); await api.message('d'); } }, { floorDailyUsd: 2, globalDailyUsd: 25, sessionMaxUsd: 5, taskMaxUsd: 3 });
+    h.t.app.engine.hireStaff(h.floor, 'tester', 'Tess');
+    const a = (await go(h, 'one', { project: 'a' })).id;
+    const b = (await go(h, 'two', { project: 'b', to: 'tester' })).id;
+    const ra = await h.settle(a); const rb = await until(() => { const r = h.taskRow(b); return r.status === 'review' ? r : null; }, { what: 'second task', timeout: 12000 });
+    assert.equal(ra.status, 'review'); assert.equal(rb.status, 'review');
+    assert.equal(get(h.t.db, 'SELECT budget_notice_day d FROM floors WHERE id=?', h.floor.id).d, '');
+    assert.ok(!all(h.t.db, "SELECT text FROM messages WHERE floor_id=? AND role='office'", h.floor.id).some((m) => /budget/i.test(m.text)));
+    assert.equal((await floorState(h.c)).floor.budgetStopped, false);
+  });
+  test('a failed interrupt is retried, and the step limit still ends the run', async () => {
+    let steps = 0;
+    const sessions = createMockSessions({}, { async onTurn(api) { for (let i = 0; i < 2000; i++) { await api.step(); steps++; await sleep(2); } } });
+    const realSend = sessions.send; let refused = 0;
+    sessions.send = async (id, events) => { if (events[0].type === 'user.interrupt' && refused < 3) { refused++; throw new Error('flaky'); } return realSend(id, events); };
+    const t = await boot({ computerEnabled: true, outputLagMs: 0, sessionMaxSteps: 10 }, { sessions });
+    open.push(t); t.app.engine.runManager = async () => {};
+    const c = await claim(t, 'Flaky Co');
+    const floor = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", floor.id);
+    const { id } = t.app.engine.assignTask(floor, mgr, { to: 'builder', title: 'x', brief: 'y', plan: '', project: 'g', private: false, dependsOn: [] });
+    t.app.engine.kick();
+    const row = await until(() => { const r = get(t.db, 'SELECT * FROM tasks WHERE id=?', id); return r.status === 'failed' ? r : null; }, { what: 'fail', timeout: 8000 });
+    assert.match(row.result, /Ran out of steps/);
+    assert.ok(steps < 40, `steps ${steps}`);
+  });
+  test('an interrupt that is never honoured still ends the run after the grace period', async () => {
+    const sessions = createMockSessions({}, { async onTurn(api) { for (let i = 0; i < 5000; i++) { api.session.interrupted = false; await api.step(); await sleep(2); } } });
+    const t = await boot({ computerEnabled: true, outputLagMs: 0, sessionMaxSteps: 6 }, { sessions });
+    open.push(t); t.app.engine.runManager = async () => {};
+    t.app.engine.computer.stopGraceMs = 100;
+    const c = await claim(t, 'Stubborn Co');
+    const floor = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", floor.id);
+    const { id } = t.app.engine.assignTask(floor, mgr, { to: 'builder', title: 'x', brief: 'y', plan: '', project: 'g', private: false, dependsOn: [] });
+    t.app.engine.kick();
+    const row = await until(() => { const r = get(t.db, 'SELECT * FROM tasks WHERE id=?', id); return r.status === 'failed' && !t.app.engine.runs.size ? r : null; }, { what: 'give up', timeout: 12000 });
+    assert.match(row.result, /Ran out of steps/);
+  });
+  test('a provider failure interrupts the session rather than leaving it spending', async () => {
+    const h = await start({ async onTurn(api) { await api.step(); api.fail(); } });
+    await go(h);
+    await until(() => get(h.t.db, 'SELECT paused FROM floors WHERE id=?', h.floor.id).paused, { what: 'pause' });
+    await until(() => h.sessions.calls.sends.some((s) => s.ev.type === 'user.interrupt'), { what: 'interrupt' });
+  });
+  test('a boot stops sessions on paused floors and bills them; stopping a queued task does too', async () => {
+    const h = await start({ stepUsd: 0.5, async onTurn(api) { await api.step(); await sleep(5000); } });
+    const { id } = await go(h);
+    await until(() => h.sessions.calls.sends.some((s) => s.ev.type === 'user.message'), { what: 'start' });
+    await sleep(30);
+    h.t.app.engine.pauseFloor(h.floor.id);
+    await until(() => h.taskRow(id).status === 'todo' && !h.t.app.engine.runs.size, { what: 'requeue' });
+    const interrupts = () => h.sessions.calls.sends.filter((s) => s.ev.type === 'user.interrupt').length;
+    const before = interrupts();
+    h.t.app.engine.computer.recoverOrphans();
+    await until(() => interrupts() > before, { what: 'orphan interrupt' });
+    h.sessions.sessions.get(h.taskRow(id).session_id).spentUsd = 1.5;
+    h.t.app.engine.stopFloor(h.floor.id);
+    await until(() => h.taskRow(id).cost_usd >= 1.49, { what: 'orphan billed' });
+    assert.equal(h.taskRow(id).status, 'cancelled');
+  });
+  test('reaching a daily cap, then the day rolling over, resumes the paused session by raising its cap', async () => {
+    let finished = false;
+    const h = await start({ stepUsd: 0.06, async onTurn(api) { for (let i = 0; i < 8; i++) await api.step(); api.save([{ path: 'index.html', data: Buffer.from('x') }]); finished = true; await api.message('done at last'); } }, { floorDailyUsd: 0.2, globalDailyUsd: 25 });
+    const { id } = await go(h);
+    await until(() => h.taskRow(id).status === 'todo' && h.taskRow(id).session_id && !h.t.app.engine.runs.size, { what: 'waiting for tomorrow' });
+    assert.equal(finished, false);
+    h.t.cfg.floorDailyUsd = 5;
+    run(h.t.db, "UPDATE floors SET budget_notice_day='' WHERE id=?", h.floor.id);
+    h.t.app.engine.kick();
+    const row = await h.settle(id);
+    assert.equal(row.status, 'review', row.result);
+    assert.ok(finished);
+    assert.equal(h.sessions.calls.sessions.length, 1);
+    assert.ok(h.sessions.calls.updates.some((u) => u.params.budget));
+  });
+  test('a boss who answers while the turn is still wrapping up is not lost', async () => {
+    const texts = []; let h;
+    h = await start({ async onTurn(api, text) {
+      texts.push(text);
+      await api.step();
+      if (texts.length === 1) {
+        await api.custom('ask_boss', { question: 'Silly or serious?' });
+        const q = get(h.t.db, 'SELECT id FROM questions WHERE floor_id=?', h.floor.id);
+        assert.equal((await h.c.post(`/api/floors/${h.c.slug}/questions/${q.id}/answer`, { text: 'Silly please' })).status, 200);
+        await api.message('waiting');
+        return;
+      }
+      api.save([{ path: 'index.html', data: Buffer.from('x') }]);
+      await api.message('finished');
+    } });
+    const row = await h.settle((await go(h)).id);
+    assert.equal(row.status, 'review', row.result);
+    assert.match(texts[1], /Silly please/);
+  });
+  test('Resume after repeated failures tries again instead of pausing forever', async () => {
+    let turns = 0;
+    const h = await start({ async onTurn(api) { turns++; await api.step(); if (turns === 1) api.fail(); api.save([{ path: 'index.html', data: Buffer.from('x') }]); await api.message('finished'); } });
+    const { id } = await go(h);
+    await until(() => get(h.t.db, 'SELECT paused FROM floors WHERE id=?', h.floor.id).paused && !h.t.app.engine.runs.size, { what: 'pause' });
+    h.t.app.engine.resumeFloor(h.floor.id);
+    const row = await h.settle(id);
+    assert.equal(row.status, 'review', row.result);
+    assert.equal(turns, 2);
+  });
+  test('a task that falls back to the old loop keeps its safety rules', async () => {
+    const h = await start();
+    const { id } = h.assign('Write', { to: 'writer', project: 'n' });
+    run(h.t.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: 'briefing' }]), id);
+    let sys = null;
+    const chat = h.t.app.engine.llm.chat;
+    h.t.app.engine.llm.chat = (a) => { sys ??= a.messages[0]; return chat(a); };
+    h.t.app.engine.kick();
+    await h.settle(id);
+    assert.equal(sys.role, 'system');
+    assert.match(sys.content, /Security rules that always apply/);
+  });
+  test('files dropped from what is going live are reported to the agent', async () => {
+    const seen = {};
+    const h = await start({ async onTurn(api, text) {
+      await api.step();
+      if (/did not go through/.test(text)) { seen.problem = text; return; }
+      await api.custom('publish_project', { title: 'x', kind: 'game', directory: 'dist' });
+      api.save([{ path: 'dist/index.html', data: Buffer.from('x') }, { path: 'dist/level.unknownext', data: Buffer.from('x') }, { path: 'dist/a/b/c/d/e/f/deep.glb', data: Buffer.from('x') }]);
+      await api.message('d');
+    } });
+    await h.settle((await go(h)).id);
+    assert.match(seen.problem, /level\.unknownext/);
+    assert.ok(!seen.problem.includes('deep.glb'), 'deep real-build paths are fine');
+    assert.ok(get(h.t.db, "SELECT 1 x FROM published_files WHERE floor_id=? AND path='a/b/c/d/e/f/deep.glb'", h.floor.id));
+  });
+});

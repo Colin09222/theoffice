@@ -27,7 +27,7 @@
     var timer = ctl && setTimeout(function () { ctl.abort(); }, 6000);
     var headers = { 'x-office-player': player() };
     if (body !== undefined) headers['content-type'] = 'application/json';
-    return fetch(base + path, { method: method, headers: headers, body: body === undefined ? undefined : JSON.stringify(body), signal: ctl && ctl.signal, credentials: 'omit' })
+    return fetch(base + path, { method: method, headers: headers, body: body === undefined ? undefined : JSON.stringify(body), signal: ctl && ctl.signal, credentials: 'same-origin' })
       .catch(function () { throw new Offline(); })
       .then(function (r) {
         var isJson = (r.headers.get('content-type') || '').indexOf('application/json') === 0;

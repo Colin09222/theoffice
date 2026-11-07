@@ -46,6 +46,7 @@ export class Engine {
     run(this.db, "UPDATE tasks SET status='todo' WHERE status='doing'");
     run(this.db, "UPDATE agents SET state='idle', activity='', project='', task_id=NULL");
     run(this.db, "UPDATE floors SET budget_notice_day=''");  // re-judged on the next tick, in case the caps changed
+    this.computer?.recoverOrphans();
     this.timer = setInterval(() => this.tick(), 1000);
     this.timer.unref?.();
     this.kick();
@@ -81,7 +82,8 @@ export class Engine {
   tickFloor(floor) {
     const day = today(this.now());
     if (floor.budget_notice_day === day) return;  // stopped for today; the date rolling over starts it again
-    if (this.overBudget(floor.id, 0)) { this.budgetNotice(floor, day); return; }
+    if (this.spentOver(floor.id, 0)) { this.budgetNotice(floor, day); return; }
+    if (this.overBudget(floor.id, 0)) return;  // only held by running sessions, so not over yet: wait and see what they really spend
     const agents = all(this.db, 'SELECT * FROM agents WHERE floor_id=?', floor.id);
     const mgr = agents.find((a) => a.role === 'manager');
     if (floor.manager_wake && !this.runs.has(mgr.id)) {
@@ -126,6 +128,8 @@ export class Engine {
     const g = this.spentGlobal() + this.reservedTotal + extra;
     return f >= this.cfg.floorDailyUsd || g >= this.cfg.globalDailyUsd;
   }
+  // Money actually gone, not merely held by a running session. Only this can stop a floor for the day.
+  spentOver(floorId, extra) { return this.spentToday(floorId) + extra >= this.cfg.floorDailyUsd || this.spentGlobal() + extra >= this.cfg.globalDailyUsd; }
   budgetNotice(floor, day) {
     const f = get(this.db, 'SELECT budget_notice_day d FROM floors WHERE id=?', floor.id);
     if (f.d === day) return;
@@ -153,7 +157,16 @@ export class Engine {
       let reservation = 0;
       try {
         const est = (JSON.stringify(messages).length / 4 * pricing.prompt + (role.maxTokens || 2000) * pricing.completion) / 1e6;
-        if (this.overBudget(floorId, est)) throw new Halt('budget');  // est assumes maxTokens, so the cap holds
+        if (this.overBudget(floorId, est)) {
+          if (this.spentOver(floorId, est)) throw new Halt('budget');  // est assumes maxTokens, so the cap holds
+          // Blocked only by a session's hold, which comes back when that session ends. Wait without keeping the slot.
+          release();
+          await new Promise((res, rej) => {
+            const t = setTimeout(res, 2000);
+            signal?.addEventListener('abort', () => { clearTimeout(t); rej(signal.reason); }, { once: true });
+          });
+          continue;
+        }
         reservation = Math.min(est, 0.25);
         this.reserve(floorId, reservation);
         this.setAgent(agent.id, { state: 'thinking' });
@@ -307,6 +320,8 @@ export class Engine {
         { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}` },
       ];
     }
+    // A task that started on a computer has no system prompt of its own here. It never runs without the safety rules.
+    if (messages[0]?.role !== 'system') messages.unshift({ role: 'system', content: staffPrompt(floor, agent, roleCfg, task, this.cfg) });
     this.setAgent(agent.id, { state: 'thinking', activity: task.title, project: task.project, task_id: task.id });
     this.feed(floorId, agent, `started "${task.title}"`, task.project);
     const call = { floorId, agent, signal, project: task.project, taskId: task.id };
@@ -463,6 +478,7 @@ export class Engine {
     run(this.db, "UPDATE tasks SET status='cancelled', updated_at=? WHERE id=?", this.now(), t.id);
     const r = this.runs.get(t.agent_id);
     if (r && t.status === 'doing') r.ctl.abort(new Halt('stop'));
+    else if (t.session_id) this.computer?.settleOrphan(t);
     this.emitTask(t.id);
     return `Cancelled #${t.id}.`;
   }
@@ -490,7 +506,12 @@ export class Engine {
     run(this.db, 'UPDATE questions SET answer=?, answered_at=? WHERE id=?', text, this.now(), id);
     if (q.task_id) {
       const t = get(this.db, 'SELECT * FROM tasks WHERE id=?', q.task_id);
-      if (t?.status === 'blocked') {
+      // A computer task may still be finishing its turn. The answer waits in line and goes in as its next message.
+      if (t?.session_id && (t.status === 'doing' || t.status === 'todo')) {
+        const msgs = t.transcript ? JSON.parse(t.transcript) : [];
+        msgs.push({ role: 'user', content: `The boss answered your question ("${q.text.slice(0, 200)}"):\n${text}` });
+        run(this.db, 'UPDATE tasks SET transcript=?, updated_at=? WHERE id=?', JSON.stringify(msgs), this.now(), t.id);
+      } else if (t?.status === 'blocked') {
         const msgs = t.transcript ? JSON.parse(t.transcript) : [];
         msgs.push({ role: 'user', content: `The boss answered your question ("${q.text.slice(0, 200)}"):\n${text}` });
         run(this.db, "UPDATE tasks SET status='todo', transcript=?, updated_at=? WHERE id=?", JSON.stringify(msgs), this.now(), t.id);
@@ -529,7 +550,9 @@ export class Engine {
     this.kick();
   }
   cancelOpen(floorId) {
-    const ids = all(this.db, "SELECT id FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked','review')", floorId).map((t) => t.id);
+    const open = all(this.db, "SELECT id,status,session_id,session_charged,agent_id,floor_id FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked','review')", floorId);
+    const ids = open.map((t) => t.id);
+    for (const t of open) if (t.session_id && t.status !== 'doing') this.computer?.settleOrphan(t);
     run(this.db, "UPDATE tasks SET status='cancelled', updated_at=? WHERE floor_id=? AND status IN ('todo','doing','blocked','review')", this.now(), floorId);
     run(this.db, 'UPDATE floors SET manager_wake=0 WHERE id=?', floorId);
     this.haltFloorRuns(floorId, 'stop');
@@ -596,7 +619,7 @@ export class Engine {
   floorState(floorId) {
     const f = get(this.db, 'SELECT paused,pause_reason,status,budget_notice_day FROM floors WHERE id=?', floorId);
     if (!f) return { status: 'gone', paused: false, pauseReason: '', globalPause: false, budgetStopped: false };
-    return { status: f.status, paused: !!f.paused, pauseReason: f.pause_reason, globalPause: this.globalPaused(), budgetStopped: f.budget_notice_day === today(this.now()) || this.overBudget(floorId, 0) };
+    return { status: f.status, paused: !!f.paused, pauseReason: f.pause_reason, globalPause: this.globalPaused(), budgetStopped: f.budget_notice_day === today(this.now()) || this.spentOver(floorId, 0) };
   }
 
   // ---- creating and destroying floors ----

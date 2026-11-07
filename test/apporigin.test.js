@@ -232,9 +232,23 @@ describe('a project on its own origin', () => {
     assert.ok(r.headers.etag);
     assert.equal((await hit(t, hostA, '/', { headers: { 'if-none-match': r.headers.etag } })).status, 304);
   });
-  test('the on-demand TLS check answers only for real project origins', async () => {
-    assert.equal((await hit(t, '127.0.0.1', `/theoffice/api/apps/tls-check?domain=${hostA}`)).status, 200);
-    for (const d of [`nope--nothing.${BASE}`, BASE, `x.y.${BASE}`, 'evil.example', 'main.test.example', '']) assert.equal((await hit(t, '127.0.0.1', `/theoffice/api/apps/tls-check?domain=${d}`)).status, 404, d);
+  test('the on-demand TLS check answers only for live project origins, and only to Caddy', async () => {
+    const q = (d, headers) => hit(t, '127.0.0.1', `/theoffice/api/apps/tls-check?domain=${d}`, { headers });
+    assert.equal((await q(hostA)).status, 200);
+    for (const d of [`nope--nothing.${BASE}`, BASE, `x.y.${BASE}`, 'evil.example', 'main.test.example', '']) assert.equal((await q(d)).status, 404, d);
+    assert.equal((await q(hostA, { 'x-forwarded-for': '203.0.113.9' })).status, 404, 'from the public internet it never answers');
+    const c = await claim(t, 'Dead Label Co');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const host = publish(t, f, 'site');
+    assert.equal((await q(host)).status, 200);
+    t.app.engine.setSuspended(f.id, true);
+    assert.equal((await q(host)).status, 404, 'a suspended floor gets no certificate');
+    t.app.engine.setSuspended(f.id, false);
+    const ad = await adminClient(t);
+    await ad.post(`/api/admin/floors/${f.id}/kill`, {});
+    assert.equal((await q(host)).status, 404, 'nor does a dead label');
+    for (let i = 0; i < 200; i++) await q(`random${i}.${BASE}`);
+    assert.equal((await q(hostA)).status, 200, 'a flood of unknown names cannot starve a real one');
   });
   test('fetch_url refuses the apps domain as well as the main one', async () => {
     const { createTools } = await import('../server/tools.js');
@@ -383,7 +397,7 @@ describe('the project data API', () => {
     assert.equal((await put(hostA, "shared/__proto__", { polluted: true })).status, 200);
     assert.equal(({}).polluted, undefined);
     assert.equal((await read(hostA, 'shared/__proto__')).json.value.polluted, true);
-    assert.equal((await put(hostA, "shared/x' OR 1=1;--", 1)).status, 400);
+    assert.equal((await put(hostA, "shared/x'%20OR%201=1;--", 1)).status, 400);
   });
   test('shared state has counters and compare-and-swap', async () => {
     const incr = (by, h = headers(hostA)) => hit(t, hostA, '/_data/v1/shared/hits/incr', { method: 'POST', body: by === undefined ? {} : { by }, headers: h });
@@ -445,6 +459,48 @@ describe('the project data API', () => {
     const high = await hit(t, host2, '/_data/v1/board/b0', { method: 'POST', body: { name: 'x', score: 1e6 }, headers: headers(host2) });
     assert.equal(high.json.improved, true);
     assert.ok(get(t.db, "SELECT COUNT(*) n FROM app_scores WHERE floor_id=? AND board='b0'", f2.id).n <= DATA_LIMITS.boardEntries + 1);
+  });
+  test('counters obey the key cap and are charged what they really take up', async () => {
+    const c = await claim(t, 'Counter Co');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const host = publish(t, f, 'q');
+    for (let i = 0; i < DATA_LIMITS.projectKeys; i++) run(t.db, 'INSERT INTO app_kv (floor_id,project,scope,key,value,size,version,updated_at) VALUES (?,?,?,?,?,?,1,0)', f.id, 'q', 'shared', `k${i}`, '1', 1);
+    assert.equal((await hit(t, host, '/_data/v1/shared/onemore/incr', { method: 'POST', body: {}, headers: headers(host) })).status, 507);
+    assert.equal((await hit(t, host, '/_data/v1/shared/k1/incr', { method: 'POST', body: {}, headers: headers(host) })).status, 200, 'an existing counter still counts');
+    assert.ok(get(t.db, "SELECT size FROM app_kv WHERE floor_id=? AND key='k1'", f.id).size >= DATA_LIMITS.rowOverhead);
+  });
+  test('a board\'s direction is fixed by its first score, so nobody can flip it to wipe the leaders', async () => {
+    const c = await claim(t, 'Direction Co');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const host = publish(t, f, 'q');
+    for (let i = 0; i < DATA_LIMITS.boardEntries; i++) run(t.db, 'INSERT INTO app_scores (floor_id,project,board,player,name,score,lower,updated_at) VALUES (?,?,?,?,?,?,0,0)', f.id, 'q', 'top', `p${i}`, 'n', 100 + i);
+    const r = await hit(t, host, '/_data/v1/board/top', { method: 'POST', body: { name: 'evil', score: 0.5, lower: true }, headers: headers(host, TOKEN_A) });
+    assert.equal(r.json.improved, false);
+    assert.equal((await read(host, 'board/top?order=asc')).json.entries[0].score, 100 + DATA_LIMITS.boardEntries - 1, 'still highest first');
+    assert.equal(get(t.db, "SELECT COUNT(*) n FROM app_scores WHERE floor_id=? AND board='top'", f.id).n, DATA_LIMITS.boardEntries);
+  });
+  test('one address can\'t write to every project at the full per-project rate', async () => {
+    const r = await boot({ appsBaseDomain: BASE, appsScheme: 'https', rateScale: 1 });
+    try {
+      const c = await claim(r, 'Spread Co');
+      const f = get(r.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+      const hosts = ['a', 'b', 'c', 'd', 'e'].map((p) => publish(r, f, p));
+      let limited = 0;
+      for (let i = 0; i < 340; i++) { const h = hosts[i % 5]; if ((await hit(r, h, '/_data/v1/shared/x', { method: 'PUT', body: { value: i }, headers: headers(h) })).status === 429) limited++; }
+      assert.ok(limited >= 30, `limited ${limited}`);
+    } finally { await r.close(); }
+  });
+  test('the owner can clear a project\'s data; nobody else can, and other projects keep theirs', async () => {
+    const c = await claim(t, 'Clear Co');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const h1 = publish(t, f, 'one'); const h2 = publish(t, f, 'two');
+    await put(h1, 'shared/x', 1); await put(h2, 'shared/x', 2);
+    assert.equal((await new Client(t).post(`/api/floors/${c.slug}/projects/one/clear-data`, {})).status, 401);
+    assert.equal((await a.post(`/api/floors/${c.slug}/projects/one/clear-data`, {})).status, 403);
+    const r = await c.post(`/api/floors/${c.slug}/projects/one/clear-data`, {});
+    assert.equal(r.data.removed, 1);
+    assert.equal((await read(h1, 'shared/x')).status, 404);
+    assert.equal((await read(h2, 'shared/x')).json.value, 2);
   });
   test('a floor-wide data cap stops many projects adding up', async () => {
     const c = await claim(t, 'Wide Co');

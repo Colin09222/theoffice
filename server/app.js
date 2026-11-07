@@ -20,7 +20,7 @@ import { createMockClient } from './mock.js';
 import { createManagedClient } from './sessions.js';
 import { createMockSessions } from './mock-sessions.js';
 import { appLabel, appOrigin, appHostLabel, lookupLabel, appHeaders, previewCookie, previewCookieName } from './apps.js';
-import { handleData, DataError, DATA_LIMITS } from './appdata.js';
+import { handleData, DataError, DATA_LIMITS, clearProjectData } from './appdata.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any iscolinfree.com cookie, page or API.
@@ -30,7 +30,7 @@ const BASE_HEADERS = {
   'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex, nofollow, noarchive',
   'referrer-policy': 'same-origin', 'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
 };
-const LIMITS = { dataRead: [600, 60000], dataWrite: [90, 60000], dataProject: [1500, 60000], tlsCheck: [120, 60000], code: [8, 60000], login: [6, 60000], admin: [5, 60000], adminAll: [60, 60000], chat: [20, 60000], mutate: [90, 60000], read: [900, 60000], publicSite: [600, 60000], sse: [40, 60000] };
+const LIMITS = { dataRead: [600, 60000], dataWrite: [90, 60000], dataIp: [300, 60000], dataProject: [1500, 60000], code: [8, 60000], login: [6, 60000], admin: [5, 60000], adminAll: [60, 60000], chat: [20, 60000], mutate: [90, 60000], read: [900, 60000], publicSite: [600, 60000], sse: [40, 60000] };
 const MAX_CHAT = 4000;
 const RESERVED = new Set(['api', 'admin', 'f', 'floor', 'js', 'css', 'vendor', 'robots', 'www', 'static', 'assets']);
 
@@ -170,7 +170,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       if (hidden.has(a.project)) { v.activity = PRIVATE_TEXT; v.taskId = null; }
       return v;
     });
-    const tasks = all(db, 'SELECT * FROM tasks WHERE floor_id=? ORDER BY id DESC LIMIT 80', f.id).reverse().map((t) => {
+    // Named columns: a view has no business loading transcripts, however large a task's have grown.
+    const tasks = all(db, 'SELECT id,plan,title,brief,agent_id,project,status,result,cost_usd,updated_at,depends_on FROM tasks WHERE floor_id=? ORDER BY id DESC LIMIT 80', f.id).reverse().map((t) => {
       const v = taskView(t);
       if (viewer.owner) return v;
       const { brief: _b, result: _r, costUsd: _c, ...pub } = v;
@@ -379,6 +380,11 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     engine.emit(f.id, 'reload', {}, { persist: false });
     json(res, 200, { ok: true, private: b.private });
   });
+  POST('/api/floors/:slug/projects/:project/clear-data', async ({ req, res, p, ip }) => {
+    const f = requireOwner(req, p.slug);
+    limit('mutate', ip);
+    json(res, 200, { ok: true, removed: clearProjectData(db, f.id, p.project) });
+  });
   GET('/api/floors/:slug/projects/:project/preview', async ({ req, res, p }) => {
     // Owner-only signed link for viewing a private project; public projects just use their normal URL.
     const f = requireOwner(req, p.slug);
@@ -422,13 +428,16 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     json(res, 200, { ok: true });
   });
 
-  // Caddy's on-demand TLS asks here before it requests a certificate, so only real project origins can ever get one.
-  GET('/api/apps/tls-check', async ({ res, url, ip }) => {
-    limit('tlsCheck', ip);
+  // Caddy's on-demand TLS asks here before it requests a certificate, so only live project origins can ever get one.
+  // Everything from the public internet arrives through a proxy that adds X-Forwarded-For. Caddy's direct call doesn't, so this can't be used to probe for private project names.
+  function tlsCheck(req, res, url) {
+    if (req.headers['x-forwarded-for'] !== undefined) return send(res, 404, 'Not found', { 'content-type': 'text/plain; charset=utf-8' });
     const label = appHostLabel(cfg, url.searchParams.get('domain'));
-    if (!label || !lookupLabel(db, label)) throw new HttpError(404, 'not_found');
-    json(res, 200, { ok: true });
-  });
+    const entry = label ? lookupLabel(db, label) : null;
+    const live = entry && get(db, "SELECT 1 x FROM projects p JOIN floors f ON f.id=p.floor_id WHERE p.floor_id=? AND p.slug=? AND p.published_at IS NOT NULL AND f.status='active'", entry.floor_id, entry.project);
+    if (!live) return send(res, 404, 'Not found', { 'content-type': 'text/plain; charset=utf-8' });
+    return json(res, 200, { ok: true });
+  }
 
   // ---- admin ----
   POST('/api/admin/login', async ({ req, res, ip }) => {
@@ -628,7 +637,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (site && site !== 'same-origin' && site !== 'none') return reply(403, { error: 'bad_origin', message: 'Only this project\'s own pages can use its data.' });
       if (!read && origin === undefined) return reply(403, { error: 'bad_origin', message: 'Only this project\'s own pages can use its data.' });
       limit(read ? 'dataRead' : 'dataWrite', `${label}:${ip}`);
-      if (!read) limit('dataProject', label);
+      // Per project, and per visitor across every project, so one address can't work through the whole building.
+      if (!read) { limit('dataProject', label); limit('dataIp', ip); }
       const url = new URL(rawUrl, 'http://x');
       const m = url.pathname.match(/^\/_data\/v1\/(.*)$/);
       if (!m) return reply(404, { error: 'not_found' });
@@ -684,6 +694,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     try { url = new URL(req.url, 'http://x'); } catch { return send(res, 400, 'Bad request'); }
     const pathname = url.pathname;
     try {
+      if (pathname === `${BASE}/api/apps/tls-check` && req.method === 'GET') return tlsCheck(req, res, url);
       if (pathname === BASE) { limit('read', ip); return serveStatic(req, res, INDEX); }
       if (!pathname.startsWith(`${BASE}/`)) return send(res, 404, 'Not found', { 'content-type': 'text/plain; charset=utf-8' });
       const rest = pathname.slice(BASE.length);

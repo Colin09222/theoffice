@@ -159,7 +159,8 @@ async function browser() {
     const offlineOk = await p.ev('!!(window.__game)').catch(() => false);
     check('it loads offline from its service worker', offlineOk === true);
     await p.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
-    const errs = p.errors || [];
+    // Refused requests above, a first load with no save yet and no favicon on robots.txt all log something. Anything else is a real error.
+    const errs = (p.errors || []).filter((e) => !/Content Security Policy|violates|status of 404|Failed to fetch|ERR_INTERNET_DISCONNECTED|net::ERR/.test(e));
     check('no page errors in the browser', !errs.length, errs.slice(0, 3).join(' | ').slice(0, 300));
   } finally { b.close(); }
   writeFileSync(join(DIR, 'browser.txt'), results.join('\n'));

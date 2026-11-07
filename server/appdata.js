@@ -5,7 +5,7 @@ import { get, all, run, tx } from './db.js';
 
 export const DATA_LIMITS = {
   valueBytes: 16 * 1024, bodyBytes: 32 * 1024, projectBytes: 5 * 1024 * 1024, floorBytes: 25 * 1024 * 1024, projectKeys: 5000,
-  playerKeys: 100, playerBytes: 256 * 1024, boards: 20, boardEntries: 1000, listMax: 100, scoreRowBytes: 120,
+  floorKeys: 50000, playerKeys: 100, playerBytes: 256 * 1024, boards: 20, boardEntries: 1000, listMax: 100, scoreRowBytes: 120, rowOverhead: 64,
 };
 const KEY = /^[A-Za-z0-9_][A-Za-z0-9_.:-]{0,63}$/;
 const PLAYER = /^[A-Za-z0-9_-]{32,64}$/;
@@ -27,6 +27,12 @@ function needPlayer(req) {
   if (!PLAYER.test(t)) throw bad('bad_player', 'Send a player token.');
   return t;
 }
+// A row costs what it really takes up, so tiny values can't pile up without limit.
+const rowSize = (key, valueBytes) => valueBytes + Buffer.byteLength(key) + DATA_LIMITS.rowOverhead;
+function checkKeyRoom(db, f, p) {
+  if (get(db, 'SELECT COUNT(*) n FROM app_kv WHERE floor_id=? AND project=?', f, p).n >= DATA_LIMITS.projectKeys
+    || get(db, 'SELECT COUNT(*) n FROM app_kv WHERE floor_id=?', f).n >= DATA_LIMITS.floorKeys) throw new DataError(507, 'quota', 'This project has too many saved items.');
+}
 const needKey = (k, what = 'key') => { if (!KEY.test(k)) throw bad(`bad_${what}`, `A ${what} is 1 to 64 letters, digits or _ . : -`); return k; };
 function encodeValue(b) {
   if (!('value' in b) || b.value === undefined) throw bad('no_value', 'Send a value.');
@@ -39,11 +45,12 @@ function encodeValue(b) {
 // Names end up on other players' screens, so markup characters go even though the client library uses textContent.
 const cleanName = (s) => String(s ?? '').replace(/[\u0000-\u001f\u007f\u2028\u2029<>&"'`]+/g, '').trim().slice(0, 24) || 'Anonymous';
 
-function putKv(db, f, p, scope, key, text, size, now, ifVersion) {
+function putKv(db, f, p, scope, key, text, valueBytes, now, ifVersion) {
+  const size = rowSize(key, valueBytes);
   return tx(db, () => {
     const prev = get(db, 'SELECT size,version FROM app_kv WHERE floor_id=? AND project=? AND scope=? AND key=?', f, p, scope, key);
     if (ifVersion !== undefined && (prev?.version ?? 0) !== ifVersion) throw new DataError(409, 'version_conflict', 'Someone else changed this first.');
-    if (!prev && get(db, 'SELECT COUNT(*) n FROM app_kv WHERE floor_id=? AND project=?', f, p).n >= DATA_LIMITS.projectKeys) throw new DataError(507, 'quota', 'This project has too many saved items.');
+    if (!prev) checkKeyRoom(db, f, p);
     if (scope !== 'shared') {
       const mine = get(db, 'SELECT COUNT(*) n, COALESCE(SUM(size),0) b FROM app_kv WHERE floor_id=? AND project=? AND scope=?', f, p, scope);
       if ((!prev && mine.n >= DATA_LIMITS.playerKeys) || mine.b - (prev?.size || 0) + size > DATA_LIMITS.playerBytes) throw new DataError(507, 'quota', 'This player has used all of their saved-data space.');
@@ -85,10 +92,13 @@ export async function handleData({ db, req, floorId: f, project: p, segments: se
         const next = cur + by;
         if (!Number.isSafeInteger(next)) throw new DataError(409, 'not_a_number', 'That number is out of range.');
         const text = JSON.stringify(next);
-        checkRoom(db, f, p, r ? 0 : text.length);
+        const size = rowSize(key, text.length);
+        if (!r) checkKeyRoom(db, f, p);
+        const had = r ? get(db, "SELECT size FROM app_kv WHERE floor_id=? AND project=? AND scope='shared' AND key=?", f, p, key).size : 0;
+        checkRoom(db, f, p, size - had);
         const version = (r?.version || 0) + 1;
         run(db, `INSERT INTO app_kv (floor_id,project,scope,key,value,size,version,updated_at) VALUES (?,?,'shared',?,?,?,?,?)
-          ON CONFLICT(floor_id,project,scope,key) DO UPDATE SET value=excluded.value,size=excluded.size,version=excluded.version,updated_at=excluded.updated_at`, f, p, key, text, text.length, version, t);
+          ON CONFLICT(floor_id,project,scope,key) DO UPDATE SET value=excluded.value,size=excluded.size,version=excluded.version,updated_at=excluded.updated_at`, f, p, key, text, size, version, t);
         return [200, { key, value: next, version }];
       });
     }
@@ -104,7 +114,9 @@ export async function handleData({ db, req, floorId: f, project: p, segments: se
   }
   if (seg[0] === 'board' && seg.length === 2) {
     const board = needKey(seg[1], 'board');
-    const lowerQ = query.get('order') === 'asc';
+    // A board's direction is settled by its first score. A later request can't flip it, or a low score could knock the leaders off a full board.
+    const stored = get(db, 'SELECT lower FROM app_scores WHERE floor_id=? AND project=? AND board=? LIMIT 1', f, p, board);
+    const lowerQ = stored ? !!stored.lower : query.get('order') === 'asc';
     if (m === 'GET') {
       const limit = Math.min(Math.max(Number(query.get('limit')) || 20, 1), DATA_LIMITS.listMax);
       const rows = all(db, `SELECT name,score,updated_at,player FROM app_scores WHERE floor_id=? AND project=? AND board=? ORDER BY score ${lowerQ ? 'ASC' : 'DESC'}, updated_at ASC LIMIT ?`, f, p, board, limit);
@@ -116,7 +128,7 @@ export async function handleData({ db, req, floorId: f, project: p, segments: se
       const player = playerScope(needPlayer(req));
       const b = await body();
       if (typeof b.score !== 'number' || !Number.isFinite(b.score) || Math.abs(b.score) > 1e15) throw bad('bad_score', 'score must be a number.');
-      const lower = b.lower === true;
+      const lower = stored ? !!stored.lower : b.lower === true;
       return tx(db, () => {
         const prev = get(db, 'SELECT score FROM app_scores WHERE floor_id=? AND project=? AND board=? AND player=?', f, p, board, player);
         if (prev && (lower ? prev.score <= b.score : prev.score >= b.score)) return [200, { board, best: prev.score, improved: false }];
@@ -129,8 +141,8 @@ export async function handleData({ db, req, floorId: f, project: p, segments: se
             run(db, 'DELETE FROM app_scores WHERE floor_id=? AND project=? AND board=? AND player=?', f, p, board, worst.player);
           } else checkRoom(db, f, p, DATA_LIMITS.scoreRowBytes);
         }
-        run(db, `INSERT INTO app_scores (floor_id,project,board,player,name,score,updated_at) VALUES (?,?,?,?,?,?,?)
-          ON CONFLICT(floor_id,project,board,player) DO UPDATE SET name=excluded.name,score=excluded.score,updated_at=excluded.updated_at`, f, p, board, player, cleanName(b.name), b.score, t);
+        run(db, `INSERT INTO app_scores (floor_id,project,board,player,name,score,lower,updated_at) VALUES (?,?,?,?,?,?,?,?)
+          ON CONFLICT(floor_id,project,board,player) DO UPDATE SET name=excluded.name,score=excluded.score,updated_at=excluded.updated_at`, f, p, board, player, cleanName(b.name), b.score, lower ? 1 : 0, t);
         return [200, { board, best: b.score, improved: true }];
       });
     }
@@ -138,6 +150,9 @@ export async function handleData({ db, req, floorId: f, project: p, segments: se
   throw new DataError(404, 'not_found');
 }
 
+export function clearProjectData(db, floorId, project) {
+  return run(db, 'DELETE FROM app_kv WHERE floor_id=? AND project=?', floorId, project).changes + run(db, 'DELETE FROM app_scores WHERE floor_id=? AND project=?', floorId, project).changes;
+}
 export function deleteFloorData(db, floorId) {
   run(db, 'DELETE FROM app_kv WHERE floor_id=?', floorId);
   run(db, 'DELETE FROM app_scores WHERE floor_id=?', floorId);

@@ -4,6 +4,7 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 
 export class TarError extends Error {}
 const BLOCK = 512;
+const MAX_NAME_RECORD = 4096;
 
 function header(name, size, type = '0', mode = 0o644) {
   const h = Buffer.alloc(BLOCK);
@@ -71,6 +72,8 @@ export function unpackTgz(gz, { maxBytes = 64 * 1024 * 1024, maxEntries = 5000 }
     const prefix = cstr(h, 345, 155);
     if (cstr(h, 257, 5) === 'ustar' && prefix && !cstr(h, 263, 2).includes(' ')) name = `${prefix}/${name}`;
     off = end + ((BLOCK - (size % BLOCK)) % BLOCK);
+    // A long name is stored, and repeated into logs and prompts, so its size can't be left to the archive.
+    if ((type === 'L' || type === 'x') && size > MAX_NAME_RECORD) throw new TarError('that archive has a name that is far too long');
     if (type === 'L') { nextName = cstr(body, 0, size); continue; }
     if (type === 'x') { const m = body.toString('utf8').match(/(?:^|\n)\d+ path=([^\n]*)\n/); if (m) nextName = m[1]; continue; }
     if (type === 'g' || type === 'K') continue;

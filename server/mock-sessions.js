@@ -45,7 +45,15 @@ export function createMockSessions(cfg, { onTurn = defaultTurn, usage = { input_
     get session() { return s; }, role: s.role, bundleFiles: s.bundle,
     async step(u = usage) {
       if (s.interrupted) throw new EndTurn('interrupted');
-      if (s.budgetCents !== null && s.spentUsd * 100 >= s.budgetCents) { emit(s, { type: 'session.usage' }); throw new EndTurn('budget'); }
+      // As the real platform does: pause at the cap, and wake by itself when the cap is raised.
+      while (s.budgetCents !== null && s.spentUsd * 100 >= s.budgetCents) {
+        emit(s, { type: 'session.usage' });
+        s.pausedAtBudget = true;
+        idle(s, 'budget_reached');
+        await new Promise((res) => { s.resumeAfterBudget = res; });
+        s.status = 'running'; emit(s, { type: 'session.status_running' });
+        if (s.interrupted) throw new EndTurn('interrupted');
+      }
       emit(s, { type: 'span.model_request_start' });
       await new Promise((r) => setImmediate(r));
       stepCost(s);
@@ -86,7 +94,6 @@ export function createMockSessions(cfg, { onTurn = defaultTurn, usage = { input_
       if (!(e instanceof EndTurn)) throw e;
       if (e.message === 'terminated') return;
       if (e.message === 'interrupted') idle(s, 'end_turn');
-      else if (e.message === 'budget') { s.pausedAtBudget = true; idle(s, 'budget_reached'); }
       else idle(s, e.message === 'retries' ? 'retries_exhausted' : e.message);
     }
     if (s.queue.length && s.status === 'idle') { const next = s.queue.shift(); runTurn(s, next); }
