@@ -363,6 +363,15 @@ describe('a public thing that names a private one', () => {
     assert.ok(!/moonbeam/i.test(JSON.stringify(live('task', { id: 1, title: 'Teaser for Project Moonbeam Acquisition', plan: 'Project Moonbeam Acquisition push', brief: 'b', result: 'r' }))));
     assert.ok(!/moonbeam/i.test(JSON.stringify(live('agent', { id: 1, state: 'typing', activity: 'On Project Moonbeam Acquisition', taskId: 1 }))));
   });
+  test('only the whole word goes, so a short private name doesn\'t mangle public text', async () => {
+    const t = await start();
+    t.app.engine.tickFloor = () => {};
+    const c = await claim(t, 'Word Co');
+    const f = floorRow(t, c.slug);
+    t.app.engine.upsertProject(f, 'art', { title: 'Art (ours)', makePrivate: true });
+    t.app.engine.assignTask(f, agentOf(t, f.id, 'manager'), { to: 'writer', title: 'Restart the art page, about Art (ours)', brief: 'x', plan: '', project: '', private: false, dependsOn: [], afterPrevious: false });
+    assert.equal((await new Client(t).get(`/api/floors/${c.slug}`)).data.tasks.at(-1).title, 'Restart the private page, about private');
+  });
   test('a public project can\'t go up on the launched wall with a title or description that names one', async () => {
     const { t, f, mgr } = await setup();
     const ctx = t.app.engine.toolCtx(f, mgr, null, ['write_file', 'publish_project']);

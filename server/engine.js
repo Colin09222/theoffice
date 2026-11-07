@@ -1042,7 +1042,8 @@ export function redactor(db, floorId) {
   if (priv.length) for (const t of all(db, 'SELECT title,project FROM tasks WHERE floor_id=? ORDER BY id DESC LIMIT 200', floorId)) if (priv.some((p) => p.slug === t.project)) terms.add(t.title);
   const list = [...terms].filter((x) => x && x.length >= 3).sort((a, b) => b.length - a.length);
   if (!list.length) return (text) => text;
-  const re = new RegExp(list.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
+  // Whole words only, or a private project called Art would turn "started" into nonsense on the lobby's ticker.
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])(?:${list.map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\p{L}\\p{N}])`, 'giu');
   return (text) => String(text).replace(re, 'private');
 }
 export { PRIVATE_TEXT };
