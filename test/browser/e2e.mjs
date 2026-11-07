@@ -65,22 +65,9 @@ async function run(label, opts, t, adminCode) {
     await p.click('.modal button[type=submit]');
     await p.until('(() => { const e = document.querySelector(".form-error"); return e && !e.hidden && /isn.t valid/.test(e.textContent); })()', 'error message');
   });
-  await step(tag('claim: code, company, boss builder, recovery code, secure cookie'), async () => {
+  await step(tag('claim: a code alone opens the office, recovery code, secure cookie'), async () => {
     const code = await adminCode(); // from the real admin CLI path
     await p.type('.code-input', code);
-    await p.click('.modal button[type=submit]');
-    await p.until('document.querySelector("input[name=company]") !== null', 'company step');
-    await p.type('input[name=company]', companyName);
-    await p.type('input[name=tagline]', phone ? 'The smallest show on earth' : 'Warm ideas, baked overnight');
-    await p.click('.modal [aria-label="Main colour #7a4bb5"]');
-    await p.click('.modal button[type=submit]');
-    await p.until('document.querySelector("input[name=boss]") !== null', 'boss step');
-    await p.type('input[name=boss]', phone ? 'Ringmaster' : 'Chef');
-    await sleep(600);
-    await p.click('.modal [aria-label="Hat"] [data-v="crown"]');
-    await p.click('.modal [aria-label="Hair"] [data-v="curly"]');
-    await sleep(500);
-    await shot('03-boss-builder');
     await p.click('.modal button[type=submit]');
     await p.until('document.querySelector("[data-recovery]") !== null', 'recovery code');
     const rec = await p.ev('document.querySelector("[data-recovery]").textContent');
@@ -93,6 +80,9 @@ async function run(label, opts, t, adminCode) {
     await sleep(2200);
     await shot('04-floor-new');
   });
+  await step(tag('a new floor starts in setup and lands in the manager chat'), async () => {
+    await p.until('window.__office.state.floor.setup === true && document.querySelector("[data-setup]") !== null && document.querySelector(".chat-input textarea") !== null', 'setup in the chat');
+  });
   const slug = await p.ev('window.__office?.slug');
   await step(tag('a new floor offers three clear ways in, on screen and big enough to tap'), async () => {
     await p.until('document.querySelectorAll(".lanes .lane").length === 3', 'the lane buttons');
@@ -103,11 +93,19 @@ async function run(label, opts, t, adminCode) {
       return { names: [...document.querySelectorAll(".lane b")].map((b) => b.textContent), boxes: [...document.querySelectorAll(".lane")].map((e) => { const r = e.getBoundingClientRect(); return { h: r.height, inPanel: r.left >= panel.left - 1 && r.right <= panel.right + 1, clearOfInput: r.bottom <= input.top + 1 || r.top >= input.bottom }; }), welcome: document.querySelector(".msg.manager").textContent, note: document.querySelector(".lanes .fineprint").textContent };
     })()`);
     if (info.names.join() !== 'Game,Website,Business') throw new Error(`names: ${info.names}`);
-    if (!/Tap one below/.test(info.welcome)) throw new Error(`welcome: ${info.welcome}`);
+    if (!/Tap one below|our first job/.test(info.welcome)) throw new Error(`welcome: ${info.welcome}`);
     if (!/Nobody here can send email, post, run ads or spend money/.test(info.note)) throw new Error(`note: ${info.note}`);
     for (const b of info.boxes) if (b.h < 44 || !b.inPanel || !b.clearOfInput) throw new Error(`a button is badly placed: ${JSON.stringify(b)}`);
     await sleep(200);
     await p.shot(join(OUT, `lanes-new-floor-${label}.jpg`));
+  });
+  await step(tag('the manager makes the company by talking, and the floor updates live'), async () => {
+    await p.type('.chat-input textarea', `A bakery that works through the night, called ${companyName}.`);
+    await p.click('.send');
+    await p.until(`window.__office.state.floor.setup === false && window.__office.state.floor.name === ${q(companyName)}`, 'company named');
+    await p.until(`document.querySelector(".floor-name")?.textContent === ${q(companyName)}`, 'name on the floor');
+    await p.until('window.__office.state.agents.every((a) => a.state === "idle")', 'manager idle');
+    await shot('03-named-by-manager');
   });
   await step(tag('customise: staff name and decor change the real floor'), async () => {
     await p.click('.controls .btn:nth-of-type(4)');
@@ -116,7 +114,7 @@ async function run(label, opts, t, adminCode) {
     await p.until('document.querySelector(".modal [aria-label=Pet]") !== null', 'decor pane');
     await p.click('.modal [aria-label=Floor] [data-v=terrazzo]');
     await p.click('.modal [aria-label=Pet] [data-v=dog]');
-    await p.ev('[...document.querySelectorAll(".toggle")].find((l) => l.textContent.includes("Arcade")).querySelector("input").click()');
+    await p.ev('{ const i = [...document.querySelectorAll(".toggle")].find((l) => l.textContent.includes("Arcade")).querySelector("input"); if (!i.checked) i.click(); } true')
     await sleep(200);
     await shot('05-customise');
     await p.click('.modal form button[type=submit]');

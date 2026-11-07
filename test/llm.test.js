@@ -2,6 +2,7 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import { createOpenRouterClient, ProviderError } from '../server/llm.js';
 import { boot, claim, floorState, until, Client } from './helpers.js';
 
@@ -127,8 +128,12 @@ describe('the real tool loop, end to end against the stub', () => {
     assert.ok(Math.abs(spent - n * 0.01) < 1e-6, `spend ${spent} over ${n} calls`);
     const rows = t.db.prepare('SELECT DISTINCT model FROM ledger').all().map((r) => r.model);
     assert.ok(rows.includes('claude-opus-5-5'));
-    assert.ok(stub.reqs.every((r) => r.body.tools.length > 0));
-    assert.ok(!stub.reqs.some((r) => r.body.tools.some((d) => d.function.name === 'web_search')), 'no web_search without a key');
+    // The room's small talk is a plain call on the cheap model; every call of the work loop carries the tools.
+    const talkModel = JSON.parse(readFileSync(new URL('../config/models.json', import.meta.url))).tools.talk.model;
+    const work = stub.reqs.filter((r) => r.body.model !== talkModel);
+    assert.ok(work.length > 0 && work.every((r) => r.body.tools?.length > 0));
+    assert.ok(stub.reqs.filter((r) => !r.body.tools).every((r) => r.body.model === talkModel), 'only small talk goes without tools');
+    assert.ok(!work.some((r) => r.body.tools.some((d) => d.function.name === 'web_search')), 'no web_search without a key');
     await t.close(); await stub.close();
   });
   test('a flaky provider recovers with backoff, without pausing', async () => {
