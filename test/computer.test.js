@@ -333,7 +333,7 @@ describe('limits and caps', () => {
     const h = await start({ stepUsd: 0.06, async onTurn(api) { for (let i = 0; i < 100; i++) await api.step(); } }, { floorDailyUsd: 0.2, sessionMaxUsd: 5, globalDailyUsd: 25 });
     const { id } = await go(h);
     await until(() => h.taskRow(id).status === 'todo' && h.taskRow(id).session_id, { what: 'requeue' });
-    assert.ok(all(h.t.db, "SELECT text FROM messages WHERE floor_id=? AND role='budget'", h.floor.id).some((m) => /budget/i.test(m.text)));
+    assert.ok(all(h.t.db, "SELECT text FROM messages WHERE floor_id=? AND role='budget'", h.floor.id).some((m) => /gone home/i.test(m.text) && !/budget/i.test(m.text)));
     assert.equal(h.sessions.calls.sessions.length, 1);
   });
   test('no session starts when nothing is left of the task cap or the day', async () => {
