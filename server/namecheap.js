@@ -6,7 +6,7 @@ import https from 'node:https';
 export class NamecheapError extends Error {
   constructor(kind, number = 0, safeText = '', opts = {}) {
     super(`Namecheap ${kind}${number ? ` ${number}` : ''}`);
-    this.name = 'NamecheapError'; this.kind = kind; this.number = number; this.safeText = safeText; this.lowFunds = !!opts.lowFunds;
+    this.name = 'NamecheapError'; this.kind = kind; this.number = number; this.safeText = safeText; this.lowFunds = !!opts.lowFunds; this.numbers = opts.numbers || (number ? [number] : []);
   }
 }
 
@@ -52,7 +52,8 @@ export function parseXml(xml) {
 const child = (n, name) => n?.children.find((c) => c.name.toLowerCase() === name.toLowerCase());
 const children = (n, name) => (n?.children || []).filter((c) => c.name.toLowerCase() === name.toLowerCase());
 const yes = (v) => String(v ?? '').toLowerCase() === 'true';
-const money = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+// An empty attribute is no answer, not zero dollars.
+const money = (v) => { if (v === undefined || v === null || String(v).trim() === '') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
 
 // Numbers Namecheap documents as refusals, where nothing can have been charged. Anything else on a create call might have gone through, so it is treated as "not sure".
 const CERTAIN_REFUSAL = new Set([1011102, 1011150, 1010101, 1010102, 1010104, 1017101, 1017410, 1017411, 2033409, 2033407, 2033270, 2015182, 2015267, 2011170, 2011280, 2015167, 2030280, 2011168, 2011322, 2010323, 3019166, 4019166, 2515610, 2515623, 2005, 500000]);
@@ -89,15 +90,17 @@ export function createNamecheapClient(cfg, { request } = {}) {
     try { doc = parseXml(xml); } catch { throw new NamecheapError('network'); }
     if (doc.name !== 'ApiResponse') throw new NamecheapError('network');
     if (String(doc.attrs.Status).toUpperCase() !== 'OK') {
-      const first = children(child(doc, 'Errors'), 'Error')[0];
-      const number = Number(first?.attrs.Number) || 0;
-      throw new NamecheapError('api', number, SAFE_TEXT[number] || '', { lowFunds: isLowFunds(first?.text || '') });
+      const errs = children(child(doc, 'Errors'), 'Error');
+      const numbers = errs.map((x) => Number(x.attrs.Number) || 0);
+      const number = numbers[0] || 0;
+      throw new NamecheapError('api', number, SAFE_TEXT[number] || '', { lowFunds: errs.some((x) => isLowFunds(x.text || '')), numbers });
     }
     return child(doc, 'CommandResponse') || { children: [], attrs: {} };
   }
 
   return {
-    isCertainRefusal: (e) => e instanceof NamecheapError && e.kind === 'api' && (CERTAIN_REFUSAL.has(e.number) || e.lowFunds),
+    // By number only, and every error in the reply must qualify. Words can't turn an unknown error into a safe one.
+    isCertainRefusal: (e) => e instanceof NamecheapError && e.kind === 'api' && e.numbers.length > 0 && e.numbers.every((n) => CERTAIN_REFUSAL.has(n)),
     async check(domains) {
       const r = await call('namecheap.domains.check', { DomainList: domains.join(',') });
       return children(r, 'DomainCheckResult').map((d) => ({ domain: String(d.attrs.Domain).toLowerCase(), available: yes(d.attrs.Available), premium: yes(d.attrs.IsPremiumName), premiumPrice: money(d.attrs.PremiumRegistrationPrice) ?? 0, icannFee: money(d.attrs.IcannFee) ?? 0, eapFee: money(d.attrs.EapFee) ?? 0 }));

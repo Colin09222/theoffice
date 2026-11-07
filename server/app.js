@@ -188,13 +188,13 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const feedRows = all(db, "SELECT * FROM events WHERE floor_id=? AND type='feed' ORDER BY id DESC LIMIT 120", f.id).reverse();
     const feed = feedRows.map((e) => {
       const d = JSON.parse(e.data);
-      return { id: e.id, ...d, text: hidden.has(e.project) && d.agent !== null ? PRIVATE_TEXT.toLowerCase() : d.text };
+      return { id: e.id, ...d, text: hidden.has(e.project) && (d.agent !== null || e.project) ? PRIVATE_TEXT.toLowerCase() : d.text };
     });
     const out = {
       viewer: { owner: viewer.owner }, floor: { number: f.number, slug: f.slug, name: f.name, tagline: f.tagline, colors: JSON.parse(f.colors), boss: JSON.parse(f.boss), decor: JSON.parse(f.decor), publicChat: !!f.public_chat, defaultPrivate: !!f.default_private, ...engine.floorState(f.id) },
       agents, tasks, projects, feed, spend: { today: engine.spentToday(f.id), cap: cfg.floorDailyUsd }, lastEventId: get(db, 'SELECT COALESCE(MAX(id),0) n FROM events WHERE floor_id=?', f.id).n,
     };
-    if (viewer.owner || viewer.publicChat) out.messages = all(db, "SELECT id,role,agent_id agentId,text,created_at createdAt FROM messages WHERE floor_id=? AND role!='note' ORDER BY id DESC LIMIT 120", f.id).reverse().map((m) => (viewer.owner ? m : { ...m, text: redactChat(db, f.id, m.text) }));
+    if (viewer.owner || viewer.publicChat) out.messages = all(db, "SELECT id,role,agent_id agentId,text,created_at createdAt FROM messages WHERE floor_id=? AND role!='note' ORDER BY id DESC LIMIT 120", f.id).reverse().map((m) => (viewer.owner ? m : { ...m, text: redactChat(db, f.id, m.text) })).filter((m) => viewer.owner || m.role !== 'report');
     if (viewer.owner) {
       out.questions = all(db, 'SELECT q.id,q.text,a.name agentName FROM questions q LEFT JOIN agents a ON a.id=q.agent_id WHERE q.floor_id=? AND q.answer IS NULL ORDER BY q.id', f.id);
       out.purchases = all(db, 'SELECT p.id,p.item,p.price,p.why,p.link,p.status,p.admin_note adminNote,p.created_at createdAt,a.name agentName FROM purchases p LEFT JOIN agents a ON a.id=p.agent_id WHERE p.floor_id=? ORDER BY p.id DESC LIMIT 50', f.id);
@@ -574,6 +574,12 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     engine.kick();
     json(res, 200, { ok: true });
   });
+  POST('/api/admin/domains/:id/resolve', async ({ req, res, p, ip }) => {
+    requireAdmin(req); limit('mutate', ip);
+    const b = await readJson(req, 512);
+    let o; try { o = engine.domains.resolve(Number(p.id), b.outcome, b.chargedUsd); } catch (e) { domainError(e); }
+    json(res, 200, { ok: true, domain: engine.domains.view(o) });
+  });
   GET('/api/admin/domains', async ({ req, res }) => {
     requireAdmin(req);
     const orders = engine.domains.adminList();
@@ -777,7 +783,6 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (site && site !== 'same-origin' && site !== 'none') return reply(403, { error: 'bad_origin', message: 'Only this project\'s own pages can use its data.' });
       if (!read && origin === undefined) return reply(403, { error: 'bad_origin', message: 'Only this project\'s own pages can use its data.' });
       limit(read ? 'dataRead' : 'dataWrite', `${label}:${ip}`);
-      if (rawUrl.startsWith('/_data/v1/form/')) limit('form', `${label}:${ip}`);
       // Per project, and per visitor across every project, so one address can't work through the whole building.
       if (!read) { limit('dataProject', label); limit('dataIp', ip); }
       const url = new URL(rawUrl, 'http://x');
@@ -786,6 +791,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       // Decoded one segment at a time, so %2f can never add a level.
       let segments;
       try { segments = m[1].split('/').filter(Boolean).map((s) => decodeURIComponent(s)); } catch { return reply(400, { error: 'bad_path' }); }
+      // Counted once the path is really parsed, so no spelling of it slips past.
+      if (segments[0] === 'form') limit('form', `${label}:${ip}`);
       const [status, out] = await handleData({ db, req, floorId: f.id, project: pr.slug, segments, query: url.searchParams, body: () => readJson(req, DATA_LIMITS.bodyBytes), now });
       reply(status, out);
     } catch (e) {

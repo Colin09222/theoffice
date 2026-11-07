@@ -157,13 +157,13 @@ async function run(label, opts, t, adminCode) {
     const cap = t.cfg.floorDailyUsd.toFixed(2);
     if (!new RegExp(`\\$0\\.\\d+ of \\$${cap.replace('.', '\\.')} today`).test(await p.ev('document.querySelector(".spend").textContent'))) throw new Error('spend label');
   });
-  await step(tag('purchase requests show as pending, with no way to pay'), async () => {
+  await step(tag('purchase requests go to the building manager, with no way to pay from here'), async () => {
     await p.click('[data-tab=requests]');
     await p.until('document.querySelector(".request") !== null', 'request card');
     await sleep(300);
     await shot('11-requests');
     const text = await p.ev('document.querySelector(".requests").textContent');
-    if (!/Pending/.test(text) || !/can pay for anything/.test(text)) throw new Error('wording');
+    if (!/With the building manager/.test(text) || !/can't spend money/.test(text)) throw new Error('wording');
     await p.click('.request .btn:last-child');
     await p.until('/Declined/.test(document.querySelector(".request").textContent)', 'declined');
   });

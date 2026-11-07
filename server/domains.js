@@ -1,7 +1,8 @@
 // The domain broker: the one place in the building that can spend money, and it only does so after a click from that floor's boss.
 // Bots can ask. They hold no tool that approves, and nothing they write can reach the approve route. The registrant's details stay inside a single call.
 //
-// Status: awaiting_boss -> buying (click taken, nothing sent yet) -> sent (create may have gone out) -> bought -> live. Also declined and failed.
+// Status: awaiting_boss -> buying (click taken, nothing sent yet) -> sent (create may have gone out) -> bought -> live. Also declined, failed, and uncertain:
+// "sent" that the registrar's list never settled. Uncertain keeps the name blocked until the building manager has looked, so a second create can't follow it.
 // "sent" is written BEFORE the create call, so a crash or a timeout can never lead to a second create: only the registrar's own list can settle it.
 import { get, all, run, tx } from './db.js';
 import { createNamecheapClient, NamecheapError } from './namecheap.js';
@@ -28,7 +29,9 @@ export function cleanDomain(cfg, raw) {
   return d;
 }
 
-export const domainsConfigured = (cfg) => !!(cfg.namecheapKey && cfg.namecheapUser && cfg.namecheapClientIp && cfg.domainContactSource && cfg.serverIp && cfg.appsBaseDomain);
+// A mock building must never reach the real registrar with real settings: there, only a stub on this machine counts.
+const localStub = (cfg) => { try { return ['127.0.0.1', 'localhost'].includes(new URL(cfg.namecheapBase).hostname); } catch { return false; } };
+export const domainsConfigured = (cfg) => !!(cfg.namecheapKey && cfg.namecheapUser && cfg.namecheapClientIp && cfg.domainContactSource && cfg.serverIp && cfg.appsBaseDomain && (cfg.aiMode !== 'mock' || localStub(cfg)));
 
 export function createDomainBroker({ db, cfg, engine, client }) {
   const enabled = domainsConfigured(cfg);
@@ -47,22 +50,22 @@ export function createDomainBroker({ db, cfg, engine, client }) {
     engine.kick();
   };
 
-  async function priceOf(tld) {
+  async function priceOf(tld, fresh) {
     const hit = prices.get(tld);
-    if (hit && now() - hit.at < PRICE_TTL_MS) return hit.usd;
+    if (!fresh && hit && now() - hit.at < PRICE_TTL_MS) return hit.usd;
     const usd = await nc.price(tld);
     prices.set(tld, { usd, at: now() });
     return usd;
   }
   /** Everything known about one name right now. Never trusts a cached answer on availability. */
-  async function quote(domains) {
+  async function quote(domains, fresh = false) {
     const seen = await nc.check(domains);
     const out = [];
     for (const d of domains) {
       const r = seen.find((x) => x.domain === d);
       const tld = d.split('.')[1];
       let usd = null;
-      try { usd = await priceOf(tld); } catch { usd = null; }
+      try { usd = await priceOf(tld, fresh); } catch { usd = null; }
       const total = usd === null ? null : Math.round((usd + (r?.icannFee || 0)) * 100) / 100;
       let why = '';
       if (!r) why = 'no answer from the registrar';
@@ -80,7 +83,16 @@ export function createDomainBroker({ db, cfg, engine, client }) {
     return 'the registrar did not answer properly';
   };
 
-  const liveToday = (where, ...a) => get(db, `SELECT COUNT(*) n FROM domain_orders WHERE ${where} AND approved_at>=? AND status IN ('buying','sent','bought','live')`, ...a, Date.parse(`${DAY(now())}T00:00:00Z`)).n;
+  const liveToday = (where, ...a) => get(db, `SELECT COUNT(*) n FROM domain_orders WHERE ${where} AND approved_at>=? AND status IN ('buying','sent','uncertain','bought','live')`, ...a, Date.parse(`${DAY(now())}T00:00:00Z`)).n;
+
+  // The registrar's allowance is shared by the whole account, so every call a bot can cause counts here.
+  function spendCalls(floorId, n) {
+    const c = checks.get(floorId);
+    const hour = Math.floor(now() / 3600000);
+    const used = c?.hour === hour ? c.n : 0;
+    if (used + n > CHECKS_PER_HOUR) throw new DomainRefused('this floor has checked a lot of names this hour; try again later');
+    checks.set(floorId, { hour, n: used + n });
+  }
 
   // ---- what bots can do: look, and ask ----
   async function check(floor, names) {
@@ -88,11 +100,7 @@ export function createDomainBroker({ db, cfg, engine, client }) {
     const list = [...new Set((Array.isArray(names) ? names : [names]).slice(0, 10))];
     const good = []; const results = [];
     for (const n of list) { try { good.push(cleanDomain(cfg, n)); } catch (e) { if (e instanceof DomainRefused) results.push({ domain: String(n).slice(0, 80), available: false, buyable: false, why: e.message }); else throw e; } }
-    const c = checks.get(floor.id);
-    const hour = Math.floor(now() / 3600000);
-    const used = c?.hour === hour ? c.n : 0;
-    if (used + good.length > CHECKS_PER_HOUR) throw new DomainRefused('this floor has checked a lot of names this hour; try again later');
-    checks.set(floor.id, { hour, n: used + good.length });
+    spendCalls(floor.id, good.length);
     if (good.length) { try { results.push(...await quote(good)); } catch (e) { throw new DomainRefused(`could not check: ${sayNc(e)}`); } }
     return results;
   }
@@ -101,9 +109,10 @@ export function createDomainBroker({ db, cfg, engine, client }) {
     if (!enabled) throw new DomainRefused('domain buying is not set up in this building');
     const domain = cleanDomain(cfg, raw);
     if (!get(db, 'SELECT 1 x FROM projects WHERE floor_id=? AND slug=?', floor.id, project)) throw new DomainRefused(`there is no project "${String(project).slice(0, 40)}" on this floor`);
-    const mine = get(db, "SELECT id,status FROM domain_orders WHERE floor_id=? AND domain=? AND status IN ('awaiting_boss','buying','sent','bought','live') ORDER BY id DESC LIMIT 1", floor.id, domain);
+    const mine = get(db, "SELECT id,status FROM domain_orders WHERE floor_id=? AND domain=? AND status IN ('awaiting_boss','buying','sent','uncertain','bought','live') ORDER BY id DESC LIMIT 1", floor.id, domain);
     // Asking twice changes nothing. There is one request, and one click.
     if (mine) return { id: mine.id, status: mine.status, already: true };
+    spendCalls(floor.id, 1);
     if (get(db, "SELECT COUNT(*) n FROM domain_orders WHERE floor_id=? AND status='awaiting_boss'", floor.id).n >= OPEN_REQUESTS) throw new DomainRefused('the boss already has several domain requests waiting');
     let q;
     try { [q] = await quote([domain]); } catch (e) { throw new DomainRefused(`could not check: ${sayNc(e)}`); }
@@ -129,7 +138,8 @@ export function createDomainBroker({ db, cfg, engine, client }) {
       if (seen > cfg.domainMaxUsd) throw new DomainRefused(`that is over the $${cfg.domainMaxUsd} limit`);
       if (liveToday('floor_id=?', floor.id) >= cfg.domainsPerFloorDay) throw new DomainRefused(`this floor has bought its ${cfg.domainsPerFloorDay} domains for today`);
       if (liveToday('1=1') >= cfg.domainsGlobalDay) throw new DomainRefused('the building has bought its domains for today');
-      if (get(db, "SELECT 1 x FROM domain_orders WHERE domain=? AND status IN ('buying','sent','bought','live')", o.domain)) throw new DomainRefused('someone in this building is already buying that name');
+      if (!get(db, 'SELECT 1 x FROM projects WHERE floor_id=? AND slug=?', floor.id, o.project)) throw new DomainRefused('the project it was for is gone');
+      if (get(db, "SELECT 1 x FROM domain_orders WHERE domain=? AND status IN ('buying','sent','uncertain','bought','live')", o.domain)) throw new DomainRefused('someone in this building is already buying that name');
       run(db, "UPDATE domain_orders SET status='buying', approved_usd=?, approved_at=?, note='', updated_at=? WHERE id=? AND status='awaiting_boss'", seen, now(), now(), id);
       return true;
     });
@@ -164,7 +174,8 @@ export function createDomainBroker({ db, cfg, engine, client }) {
       // Everything up to here is free and safe to repeat.
       let q, balance;
       try {
-        [q] = await quote([o.domain]);
+        // The moment of paying: no cached price.
+        [q] = await quote([o.domain], true);
         balance = await nc.balance();
         contacts = await nc.contacts(cfg.domainContactSource);
       } catch (e) {
@@ -187,33 +198,34 @@ export function createDomainBroker({ db, cfg, engine, client }) {
       // Written first. From this line on, nothing may ever send another create for this order.
       const claimed = run(db, "UPDATE domain_orders SET status='sent', sent_at=?, updated_at=? WHERE id=? AND status='buying'", now(), now(), id);
       if (!claimed.changes) return;
+      // On disk before the money moves, even through a power cut: SQLite in this mode would otherwise be free to lose the last write.
+      db.exec('PRAGMA wal_checkpoint(FULL)');
       let made;
       try { made = await nc.create(o.domain, contacts); } catch (e) {
         if (nc.isCertainRefusal(e)) {
-          const low = e.lowFunds;
           engine.log('warn', 'domain refused', { order: id, number: e.number });
-          if (low) {
-            backToBoss(o, 'Nothing was charged. The building\'s Namecheap balance is too low. Press the button again once it has been topped up.');
-            engine.officeNotice(o.floor_id, `Boss, **${o.domain}** was not bought and nothing was charged: the building's Namecheap balance is too low. Ask the building manager to top it up, then press Buy again under Requests.`);
-          } else {
-            set(id, { status: 'failed', note: `Not bought: ${e.safeText || `the registrar refused it (error ${e.number})`}. Nothing was charged.` });
-            engine.officeNotice(o.floor_id, `I couldn't buy **${o.domain}**, boss: ${e.safeText || 'the registrar refused it'}. Nothing was charged.`);
-            tell(o.floor_id);
-          }
+          set(id, { status: 'failed', note: `Not bought: ${e.safeText || `the registrar refused it (error ${e.number})`}. Nothing was charged.` });
+          engine.officeNotice(o.floor_id, `I couldn't buy **${o.domain}**, boss: ${e.safeText || 'the registrar refused it'}. Nothing was charged.`);
+          tell(o.floor_id);
           return;
         }
         // Timed out, or an answer that could mean anything. It may have gone through, so it stays "sent" until the registrar's own list says which.
         engine.log('warn', 'domain outcome unclear', { order: id, kind: e?.kind, number: e?.number });
+        // Words saying the balance was short are worth passing on, but they aren't proof nothing moved. The account's own list still decides.
+        const low = !!e?.lowFunds;
+        set(id, { reply: low ? 'low_funds' : '', note: low ? 'The registrar says the balance is too low. Confirming nothing was charged before you can try again.' : 'The registrar did not give a clear answer. Checking whether it went through; it will not be bought twice.', next_try_at: now() + (cfg.domainRetryMs ?? 30000) });
+        if (low) engine.officeNotice(o.floor_id, `Boss, the registrar says the building's Namecheap balance is too low for **${o.domain}**. I'm confirming nothing was charged. Ask the building manager to top it up; the Buy button comes back once that's confirmed.`);
+        tell(o.floor_id);
+        return;
+      }
+      // Only a plain yes, for this exact name, counts. Anything else goes to the registrar's list, like any other unclear answer.
+      if (!made.registered || made.domain !== o.domain) {
+        engine.log('warn', 'domain reply unclear', { order: id });
         set(id, { note: 'The registrar did not give a clear answer. Checking whether it went through; it will not be bought twice.', next_try_at: now() + (cfg.domainRetryMs ?? 30000) });
         tell(o.floor_id);
         return;
       }
-      if (!made.registered) {
-        set(id, { status: 'failed', note: 'The registrar did not register it. Nothing was charged.' });
-        engine.officeNotice(o.floor_id, `I couldn't buy **${o.domain}**, boss: the registrar didn't register it. Nothing was charged.`);
-        tell(o.floor_id);
-        return;
-      }
+      if (made.charged !== null && made.charged > cfg.domainMaxUsd) engine.log('error', 'domain charged over the limit', { order: id, charged: made.charged });
       bought(row(id), made.charged ?? q.priceUsd, made.charged === null, made);
       await pointDns(id);
     } finally { contacts = null; working.delete(id); }
@@ -277,19 +289,49 @@ export function createDomainBroker({ db, cfg, engine, client }) {
           bought(o, o.approved_usd ?? o.quoted_usd, true);
           working.delete(o.id);
           await pointDns(o.id);
-        } else if (now() - (o.sent_at || o.updated_at) > UNCERTAIN_GRACE_MS) {
-          set(o.id, { status: 'failed', note: 'It never appeared in the account, so it was not bought. Nothing shows as charged.' });
-          engine.officeNotice(o.floor_id, `**${o.domain}** didn't go through in the end, boss. It never appeared in the account. Ask the manager if you still want it.`);
-          tell(o.floor_id);
+        } else if (now() - (o.sent_at || o.updated_at) > (cfg.domainGraceMs ?? UNCERTAIN_GRACE_MS)) {
+          if (o.reply === 'low_funds') {
+            // The registrar said the balance was short and the name never appeared. Both agree, so it can safely wait for another click.
+            backToBoss(o, 'Nothing was charged. The building\'s Namecheap balance was too low. Press the button again once it has been topped up.');
+            engine.officeNotice(o.floor_id, `**${o.domain}** was not bought, boss, and nothing was charged. Once the building manager has topped up the balance, press Buy again under Requests.`);
+          } else {
+            // No proof either way, so it can't be called "nothing charged", and the name stays blocked. Only a person with the registrar's records can settle this.
+            set(o.id, { status: 'uncertain', note: 'The registrar never gave a clear answer. The building manager is checking the account. It will not be bought again until they do.' });
+            engine.log('error', 'domain order needs a person', { order: o.id });
+            engine.officeNotice(o.floor_id, `I can't confirm whether **${o.domain}** went through, boss. The registrar never gave a clear answer. The building manager will check the account, and nothing more will happen with it until they have.`);
+            tell(o.floor_id);
+          }
         } else set(o.id, { next_try_at: now() + (cfg.domainRetryMs ?? 60000) });
       } finally { working.delete(o.id); }
     }
   }
 
+  /** The building manager, having looked at the registrar's own records, settles an order nobody else could. */
+  function resolve(id, outcome, chargedUsd) {
+    const o = row(id);
+    if (!o || o.status !== 'uncertain') throw new DomainRefused('only an order marked uncertain can be settled by hand');
+    if (outcome === 'not_bought') {
+      set(id, { status: 'failed', note: 'The building manager checked: it was not bought and nothing was charged.' });
+      engine.officeNotice(o.floor_id, `The building manager checked **${o.domain}**: it wasn't bought and nothing was charged. Ask the manager if you still want it.`);
+    } else if (outcome === 'bought') {
+      const usd = Number(chargedUsd);
+      if (!Number.isFinite(usd) || usd < 0 || usd > 100000) throw new DomainRefused('say what was charged');
+      run(db, "UPDATE domain_orders SET status='sent' WHERE id=? AND status='uncertain'", id);
+      bought(row(id), usd, false);
+      pointDns(id).catch((e) => engine.fail('domain', e));
+    } else throw new DomainRefused('outcome is bought or not_bought');
+    tell(o.floor_id);
+    return row(id);
+  }
+  /** A reset or closed floor can't leave a live Buy button behind. */
+  function dropRequests(floorId) {
+    run(db, "UPDATE domain_orders SET status='declined', note='The floor was reset.', updated_at=? WHERE floor_id=? AND status='awaiting_boss'", now(), floorId);
+  }
+
   // ---- views: never the registrant, never a credential ----
   const view = (o) => ({ id: o.id, domain: o.domain, project: o.project, why: o.why, status: o.status, priceUsd: o.quoted_usd, chargedUsd: o.charged_usd, note: o.note, createdAt: o.created_at, boughtAt: o.bought_at });
   return {
-    enabled, check, request, approve, decline, attach, recover, reconcile, view,
+    enabled, check, request, approve, decline, attach, recover, reconcile, view, resolve, dropRequests,
     forFloor: (floorId) => all(db, 'SELECT * FROM domain_orders WHERE floor_id=? ORDER BY id DESC LIMIT 30', floorId).map(view),
     adminList: () => all(db, 'SELECT o.*, f.name floor FROM domain_orders o LEFT JOIN floors f ON f.id=o.floor_id ORDER BY o.id DESC LIMIT 200').map((o) => ({ ...view(o), floor: o.floor || '(closed)', orderId: o.order_id, transactionId: o.txn_id, privacy: !!o.privacy, estimated: !!o.charged_estimated })),
     /** The live domain for a Host header, apex or www. */

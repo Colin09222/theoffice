@@ -588,7 +588,7 @@ export class Computer {
       const has = (n) => get(e.db, 'SELECT 1 x FROM files WHERE floor_id=? AND path=?', floor.id, prefix + n);
       const isDoc = p.kind === 'doc' || p.kind === 'research';
       if (!has('index.html') && !(isDoc && has('index.md'))) return { ok: false, problem: `${prefix}${isDoc ? 'index.md' : 'index.html'} is missing from what you saved.` };
-      const check = runCheck(e.db, floor, p.project, p.directory, p.kind);
+      const check = await runCheck(e.db, floor, p.project, p.directory, p.kind);
       const refused = gateProblem(check, p.reason);
       saveCheck(e.db, floor.id, p.project, check, p.reason, e.now());
       if (refused) return { ok: false, problem: refused };

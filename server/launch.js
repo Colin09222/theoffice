@@ -1,8 +1,8 @@
 // What makes a product more than a page: first-party visitor counts, the waitlist the boss reads, the checklist and the launch report.
 // Nothing here reaches a third party. Visitor counts use no cookie and keep no address: a hash salted per day, and those hashes are gone after a day.
 import { createHash } from 'node:crypto';
+import { Worker } from 'node:worker_threads';
 import { get, all, run } from './db.js';
-import { checkSite } from './launch-check.js';
 import { publicUrl } from './tools.js';
 
 const BOT = /bot|crawl|spider|slurp|preview|facebookexternalhit|embedly|headless|lighthouse|curl|wget|python-requests|node-fetch|axios|go-http/i;
@@ -37,7 +37,7 @@ export function projectStats(db, floorId, project, now, days = 30) {
 }
 
 export const formCount = (db, floorId, project) => get(db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=? AND project=?', floorId, project).n;
-export const formEntries = (db, floorId, project, limit = 500) => all(db, 'SELECT id,form,data,created_at FROM app_forms WHERE floor_id=? AND project=? ORDER BY id DESC LIMIT ?', floorId, project, limit).map((r) => ({ id: r.id, form: r.form, fields: JSON.parse(r.data), createdAt: r.created_at }));
+export const formEntries = (db, floorId, project, limit = 5000) => all(db, 'SELECT id,form,data,created_at FROM app_forms WHERE floor_id=? AND project=? ORDER BY id DESC LIMIT ?', floorId, project, limit).map((r) => ({ id: r.id, form: r.form, fields: JSON.parse(r.data), createdAt: r.created_at }));
 // A spreadsheet runs a cell starting with these as a formula, and visitors write these cells.
 const csvCell = (v) => { let s = String(v ?? ''); if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; return `"${s.replace(/"/g, '""')}"`; };
 export function formsCsv(entries) {
@@ -55,9 +55,28 @@ export function filesToPublish(db, floorId, slug, directory = '') {
   const prefix = `projects/${slug}/${directory ? `${directory}/` : ''}`;
   return all(db, 'SELECT path,content FROM files WHERE floor_id=? ORDER BY path', floorId).filter((f) => f.path.startsWith(prefix)).map((f) => ({ path: f.path.slice(prefix.length), data: f.content }));
 }
+const CHECK_MS = 8000;
+const TEXTY = /\.(html?|js|mjs|css|json|webmanifest|svg|txt|md)$/i;
+let line = Promise.resolve();
+// One at a time, each on a clock. If it can't finish, it fails closed: nothing publishes on an unfinished check.
+function inWorker(input) {
+  const job = line.then(() => new Promise((resolve) => {
+    const refuse = (why) => resolve({ errors: [why], claims: [], warnings: [], passed: [] });
+    const w = new Worker(new URL('./launch-worker.js', import.meta.url), { workerData: input, resourceLimits: { maxOldGenerationSizeMb: 200 } });
+    w.unref();
+    const timer = setTimeout(() => { w.terminate(); refuse('This took too long to check, so it can\'t go live as it is. Make the pages simpler or smaller.'); }, CHECK_MS);
+    timer.unref?.();
+    w.once('message', (r) => { clearTimeout(timer); w.terminate(); resolve(r); });
+    w.once('error', () => { clearTimeout(timer); refuse('The check could not finish on this project, so it can\'t go live as it is.'); });
+  }));
+  line = job;
+  return job;
+}
 export function runCheck(db, floor, slug, directory = '', kind = 'site') {
   const pr = get(db, 'SELECT payment_link FROM projects WHERE floor_id=? AND slug=?', floor.id, slug);
-  return checkSite({ files: filesToPublish(db, floor.id, slug, directory), bossText: bossText(db, floor.id), paymentLink: !!pr?.payment_link, kind });
+  // Only the names of binary files matter here, so their bytes stay behind.
+  const files = filesToPublish(db, floor.id, slug, directory).map((f) => (TEXTY.test(f.path) ? f : { path: f.path, data: '' }));
+  return inWorker({ files, bossText: bossText(db, floor.id), paymentLink: !!pr?.payment_link, kind });
 }
 export function saveCheck(db, floorId, slug, r, reason, now) {
   run(db, 'UPDATE projects SET launch_check=? WHERE floor_id=? AND slug=?', JSON.stringify({ at: now, errors: r.errors, claims: r.claims, warnings: r.warnings, passed: r.passed, reason: reason || '' }), floorId, slug);

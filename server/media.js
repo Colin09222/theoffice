@@ -25,7 +25,8 @@ export function createMedia({ cfg, tools, httpFetch = fetch }) {
     try {
       res = await httpFetch(`${cfg.openrouterBase}/chat/completions`, { method: 'POST', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000), headers: { authorization: `Bearer ${cfg.openrouterKey}`, 'content-type': 'application/json', 'x-title': 'The Office' }, body: JSON.stringify({ ...body, usage: { include: true } }) });
     } catch (e) { if (signal?.aborted) throw e; throw new ProviderError('Could not reach the model provider.', { retryable: true }); }
-    const raw = await res.text();
+    let raw;
+    try { raw = await res.text(); } catch (e) { if (signal?.aborted) throw e; throw new ProviderError('The model stopped answering part way.', { retryable: true }); }
     if (raw.length > MAX_RESPONSE) throw new ProviderError('The model sent back too much.');
     let j = null; try { j = JSON.parse(raw); } catch { /* handled below */ }
     if (!res.ok || !j || j.error) throw new ProviderError(`Model provider said ${res.status}${j?.error?.message ? `: ${scrub(j.error.message, cfg)}` : ''}`, { status: res.status, retryable: res.status === 429 || res.status >= 500 });

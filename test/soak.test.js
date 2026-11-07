@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { boot, Client, claim, floorState, until, sse, sleep, allDone } from './helpers.js';
 
 test('50 floors through repeated rounds with no errors or leaks', { timeout: 300000 }, async () => {
-  const t = await boot({ mockDelayMs: 1 });
+  // The mock prices its long prompts as real tokens, so 50 floors would hit the real building cap; that isn't what this measures.
+  const t = await boot({ mockDelayMs: 1, globalDailyUsd: 1000 });
   t.cfg.mockDelayMs = 1;
   const floors = [];
   for (let i = 0; i < 40; i++) floors.push(await claim(t, `Soak ${i}`));

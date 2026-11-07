@@ -39,8 +39,10 @@ export class Engine {
     this.domains = createDomainBroker({ db, cfg, engine: this, client: namecheap });
     this.ios = createIos({ db, cfg, engine: this });
     const brokers = models.tools || {};
-    this.media = media || (cfg.mediaMock ? createMockMedia(brokers) : cfg.openrouterKey && brokers.image ? createMedia({ cfg, tools: brokers, httpFetch: httpFetch || fetch }) : null);
-    this.search = search || (cfg.searchMock ? createMockSearch() : cfg.anthropicKey && brokers.search ? createSearch({ cfg, tool: brokers.search }) : null);
+    // A mock building never reaches a paid broker, whatever keys happen to be set.
+    const real = cfg.aiMode !== 'mock';
+    this.media = media || (cfg.mediaMock ? createMockMedia(brokers) : real && cfg.openrouterKey && brokers.image ? createMedia({ cfg, tools: brokers, httpFetch: httpFetch || fetch }) : null);
+    this.search = search || (cfg.searchMock ? createMockSearch() : real && cfg.anthropicKey && brokers.search ? createSearch({ cfg, tool: brokers.search }) : null);
     this.runs = new Map();      // agentId -> { ctl, floorId, promise }
     this.reserved = new Map();  // floorId -> dollars reserved by in-flight calls
     this.reservedTotal = 0;
@@ -252,7 +254,8 @@ export class Engine {
       `Domains: ${domainLines.length ? domainLines.join(' | ') : 'none'}. Limit: $${this.cfg.domainMaxUsd} a name, ${this.cfg.domainsPerFloorDay} a day, and only the boss's click buys one.`,
     ].join('\n');
     // 'office' notices (budget, outage, stop) are for the boss only. If they reached the model it would lose the thread.
-    const msgs = all(this.db, "SELECT id,role,text FROM messages WHERE floor_id=? AND role!='office' ORDER BY id DESC LIMIT 30", floor.id).reverse();
+    // Reports stay out too: they quote what was found on pages, and the manager has the facts in the state message.
+    const msgs = all(this.db, "SELECT id,role,text FROM messages WHERE floor_id=? AND role NOT IN ('office','report') ORDER BY id DESC LIMIT 30", floor.id).reverse();
     const roster = { manager: mgr.name };
     const out = [{ role: 'system', content: managerPrompt(floor, boss, roster, this.cfg) }];
     for (const m of msgs) {
@@ -492,7 +495,8 @@ export class Engine {
     if (!t) throw new ToolError('no such task on this floor');
     if (t.status !== 'review') throw new ToolError(`task #${taskId} is ${t.status}, not waiting for review`);
     const staff = get(this.db, 'SELECT * FROM agents WHERE id=?', t.agent_id);
-    if (verdict === 'revise' && t.revisions < 2) {
+    // A task holding the Expo vault ran on the boss's click. Going round again would take another click.
+    if (verdict === 'revise' && t.revisions < 2 && !t.vault) {
       const msgs = t.transcript ? JSON.parse(t.transcript) : null;
       if (msgs) msgs.push({ role: 'user', content: `The Office Manager sent this back with notes:\n${notes || 'Please improve it.'}` });
       run(this.db, "UPDATE tasks SET status='todo', revisions=revisions+1, transcript=?, updated_at=? WHERE id=?", msgs ? JSON.stringify(msgs) : '', this.now(), t.id);
@@ -522,7 +526,12 @@ export class Engine {
     if (get(this.db, 'SELECT 1 x FROM agents WHERE floor_id=? AND role=?', floor.id, role)) return `You already have a ${cfg.title}.`;
     const n = get(this.db, "SELECT COUNT(*) n FROM agents WHERE floor_id=? AND role!='manager'", floor.id).n;
     if (n >= this.cfg.maxStaff) throw new ToolError(`this floor is at its staff limit of ${this.cfg.maxStaff}`);
-    const nm = cleanName(name) || STAFF_NAMES[(floor.id * 3 + n) % STAFF_NAMES.length];
+    // Nobody shares a name with someone already on the floor, the manager included.
+    const taken = new Set(all(this.db, 'SELECT name FROM agents WHERE floor_id=?', floor.id).map((a) => a.name.toLowerCase()));
+    const start = (floor.id * 3 + n) % STAFF_NAMES.length;
+    const free = STAFF_NAMES.map((_, i) => STAFF_NAMES[(start + i) % STAFF_NAMES.length]).find((x) => !taken.has(x.toLowerCase()));
+    const wanted = cleanName(name);
+    const nm = wanted && !taken.has(wanted.toLowerCase()) ? wanted : free || wanted || STAFF_NAMES[start];
     const r = run(this.db, 'INSERT INTO agents (floor_id,role,title,name,look,hired,created_at) VALUES (?,?,?,?,?,1,?)', floor.id, role, cfg.title, nm, JSON.stringify(seededLook(floor.id * 17 + n * 5 + 3)), this.now());
     const a = get(this.db, 'SELECT * FROM agents WHERE id=?', Number(r.lastInsertRowid));
     this.emit(floor.id, 'hired', { agent: agentView(a) });
@@ -617,6 +626,12 @@ export class Engine {
     const mgr = get(this.db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", floorId);
     this.addMessage(floorId, 'manager', mgr?.id ?? null, text);
   }
+  /** The launch report: for the boss alone. It holds sign-up counts and checklist findings, so even a public-chat floor doesn't show it. */
+  reportToBoss(floorId, text) {
+    const mgr = get(this.db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", floorId);
+    const r = run(this.db, 'INSERT INTO messages (floor_id,role,agent_id,text,created_at) VALUES (?,?,?,?,?)', floorId, 'report', mgr?.id ?? null, text, this.now());
+    this.emit(floorId, 'message', { id: Number(r.lastInsertRowid), role: 'report', agentId: mgr?.id ?? null, text, createdAt: this.now() }, { chat: true, ownerOnly: true });
+  }
   officeNotice(floorId, text) {
     const mgr = get(this.db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", floorId);
     this.addMessage(floorId, 'office', mgr?.id ?? null, text);
@@ -665,9 +680,10 @@ export class Engine {
   }
   resetFloor(floorId) {
     this.cancelOpen(floorId);
+    this.domains.dropRequests(floorId);
     deleteFloorData(this.db, floorId);
     tx(this.db, () => {
-      for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
+      for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions', 'ios_requests']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
       run(this.db, "DELETE FROM agents WHERE floor_id=? AND hired=1", floorId);
       run(this.db, "UPDATE floors SET manager_wake=0, paused=0, pause_reason='', budget_notice_day='' WHERE id=?", floorId);
     });
@@ -675,10 +691,11 @@ export class Engine {
   }
   killFloor(floorId) {
     this.cancelOpen(floorId);
+    this.domains.dropRequests(floorId);
     this.emit(floorId, 'reload', {}, { persist: false });
     deleteFloorData(this.db, floorId);
     tx(this.db, () => {
-      for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions', 'agents', 'sessions']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
+      for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions', 'agents', 'sessions', 'ios_requests']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
       run(this.db, 'DELETE FROM floors WHERE id=?', floorId);
     });
     this.bus.closeFloor(floorId);

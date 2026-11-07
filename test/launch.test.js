@@ -59,7 +59,21 @@ describe('the pre-publish checklist', () => {
     const r = checkSite({ files: [{ path: 'index.html', data: '<a href="_office/pay">Buy</a>' }] });
     assert.ok(r.warnings.length >= 5); assert.match(r.warnings.join(), /Payment Link/); assert.match(formatReport(r), /SHOULD FIX/);
   });
-  test('docs and research can quote people', () => { assert.deepEqual(checkSite({ files: [{ path: 'index.html', data: '<h1>What our customers say</h1>' }], kind: 'research' }).claims, []); });
+  test('research notes in markdown can quote people, but a page is a page whatever it calls itself', () => {
+    assert.deepEqual(checkSite({ files: [{ path: 'index.md', data: '# What our customers say' }], kind: 'research' }).claims, []);
+    const r = checkSite({ files: [{ path: 'index.html', data: '<h1>Trusted by 10,000 teams</h1><img alt="" src="https://evil.example/x.png">' }], kind: 'doc' });
+    assert.ok(r.claims.length && r.errors.length);
+  });
+  test('a bad port in a payment link does not crash the check', () => {
+    assert.match(checkSite({ files: [{ path: 'index.html', data: '<a href="https://paypal.com:${port}/x">x</a>' }] }).errors.join(), /paypal\.com/);
+  });
+  test('stripping is linear on pages built to be slow', () => {
+    for (const unit of ['<', '<script ', '<!-- ', '<style ', '<img ', '<a href="', '"x']) {
+      const t0 = performance.now();
+      checkSite({ files: [{ path: 'index.html', data: `<html>${unit.repeat(Math.floor(900000 / unit.length))}` }] });
+      assert.ok(performance.now() - t0 < 3000, `${unit} took ${Math.round(performance.now() - t0)}ms`);
+    }
+  });
 });
 
 describe('publishing goes through the gate', () => {
@@ -74,6 +88,24 @@ describe('publishing goes through the gate', () => {
     assert.equal(p.launchCheck.reason, 'the boss supplied these'); assert.ok(p.launchCheck.claims.length);
     const lines = (await floorState(h.c)).feed.map((f) => f.text).join(' ');
     assert.match(lines, /possible invented claims/);
+  });
+  test('a page written to stall the checklist can\'t stop the building: it fails closed on its own thread', async () => {
+    const h = await start();
+    const evil = `<html>${'<img '.repeat(200000)}`;
+    const ticks = []; const timer = setInterval(() => ticks.push(Date.now()), 20);
+    const t0 = Date.now();
+    const out = await h.publish(evil.slice(0, 390000));
+    clearInterval(timer);
+    assert.match(out, /Published|Error:/);
+    const gaps = ticks.slice(1).map((x, i) => x - ticks[i]);
+    assert.ok(Math.max(0, ...gaps) < 3000, `main thread stalled ${Math.max(...gaps)}ms over ${Date.now() - t0}ms`);
+  });
+  test('launch_check can\'t wipe what publishing recorded', async () => {
+    const h = await start();
+    await h.publish(GOOD.replace('</body>', '<p>Trusted by 10,000 teams</p></body>'), 'teacups', { claims_ok_because: 'the boss said so' });
+    await h.tool('tester', 'launch_check', { project: 'teacups', kind: 'doc', directory: 'nothing' });
+    const p = (await floorState(h.c)).projects[0];
+    assert.ok(p.launchCheck.claims.length); assert.equal(p.launchCheck.reason, 'the boss said so');
   });
   test('errors can\'t be talked past', async () => {
     const h = await start();
@@ -134,6 +166,10 @@ describe('waitlists', () => {
     const codes = [];
     for (let i = 0; i < 12; i++) codes.push((await form(h, { fields: { email: `u${i}@b.co` } })).status);
     assert.ok(codes.includes(429), codes.join());
+    // However the path is spelled.
+    const more = [];
+    for (const path of ['/_data/v1//form/waitlist', '/_data/v1/%66orm/waitlist', '/_data/v1/./form/waitlist']) more.push((await h.app('teacups', path, { method: 'POST', headers: { 'content-type': 'application/json', origin: `http://${h.host}` }, body: JSON.stringify({ fields: { email: `z${path.length}@b.co` } }) })).status);
+    assert.ok(more.every((s) => s === 429 || s === 404), more.join());
   });
   test('what visitors typed never reaches a model: the manager sees a count', async () => {
     const h = await started();
@@ -143,6 +179,12 @@ describe('waitlists', () => {
     assert.match(text, /sign-ups: 1/); assert.doesNotMatch(text, /IGNORE PREVIOUS|x@b\.co/);
     assert.match(await h.tool('builder', 'read_file', { path: 'projects/teacups/index.html' }), /untrusted_data/);
     assert.doesNotMatch(await h.tool('builder', 'list_files', {}), /waitlist/);
+  });
+  test('the spreadsheet has everyone, past the 500 shown on screen', async () => {
+    const h = await started();
+    for (let i = 0; i < 520; i++) run(h.t.db, 'INSERT INTO app_forms (floor_id,project,form,data,size,hash,created_at) VALUES (?,?,?,?,?,?,?)', h.floor.id, 'teacups', 'w', JSON.stringify({ email: `u${i}@b.co` }), 10, String(i), i);
+    const csv = await h.c.get(`/api/floors/${h.c.slug}/projects/teacups/forms?format=csv`);
+    assert.equal(csv.data.split('\r\n').length, 521);
   });
   test('a spreadsheet can\'t be made to run a formula', () => {
     const csv = formsCsv([{ form: 'w', createdAt: 0, fields: { name: '=HYPERLINK("http://evil")', note: '+1', ok: 'fine "quoted"' } }]);
@@ -231,10 +273,17 @@ describe('the launch report', () => {
     assert.match(await h.tool('manager', 'launch_report', { project: 'teacups', headline: 'Live!' }), /Error:.*not been published/);
     await h.publish();
     assert.match(await h.tool('manager', 'launch_report', { project: 'teacups', headline: 'Tiny Teacups is live.', next_steps: 'Share it.' }), /Sent to the boss/);
-    const msg = get(h.t.db, "SELECT text FROM messages WHERE role='manager' ORDER BY id DESC LIMIT 1").text;
+    const msg = get(h.t.db, "SELECT text FROM messages WHERE role='report' ORDER BY id DESC LIMIT 1").text;
     assert.match(msg, /Launch report/); assert.match(msg, /Live at:.*teacups--/); assert.match(msg, /Design review:\*\* not done/); assert.match(msg, /Sign-ups so far:\*\* 0/);
     assert.match(msg, /Taking money:\*\* no/);
     assert.ok(get(h.t.db, "SELECT launch_report r FROM projects WHERE slug='teacups'").r);
+    // For the boss alone, even on a floor with public chat.
+    await h.c.post(`/api/floors/${h.c.slug}/settings`, { publicChat: true });
+    const seen = await new Client(h.t).get(`/api/floors/${h.c.slug}`);
+    assert.ok(Array.isArray(seen.data.messages)); assert.ok(!JSON.stringify(seen.data).includes('Launch report'));
+    assert.ok((await floorState(h.c)).messages.some((m) => /Launch report/.test(m.text)));
+    const { messages } = h.t.app.engine.managerContext(get(h.t.db, 'SELECT * FROM floors WHERE id=?', h.floor.id), h.agent('manager'));
+    assert.doesNotMatch(JSON.stringify(messages), /Launch report: /);
   });
 });
 
@@ -295,6 +344,14 @@ describe('generate_image', () => {
     const out = await okay.tool('designer', 'generate_image', { prompt: 'x', name: '../../../etc/passwd', project: 'teacups' });
     assert.ok(!all(okay.t.db, 'SELECT path FROM files').some((r) => r.path.includes('..')), out);
     assert.match(await okay.tool('designer', 'generate_image', { prompt: 'x', name: 'a', project: 'teacups', directory: '../../x' }), /simple relative/);
+  });
+  test('a private task can\'t paint a public project', async () => {
+    const f = fetcher(png()); const h = await withMedia(f);
+    h.t.app.engine.upsertProject(h.floor, 'secret-plan', { title: 'Operation Bluebird', makePrivate: true });
+    h.t.app.engine.upsertProject(h.floor, 'shop', { title: 'Shop' });
+    assert.match(await h.tool('designer', 'generate_image', { prompt: 'x', name: 'menu', project: 'shop' }, 'secret-plan'), /private/);
+    assert.equal(f.calls.length, 0);
+    assert.match(await h.tool('designer', 'generate_image', { prompt: 'bluebird poster', name: 'menu', project: 'secret-plan' }, 'secret-plan'), /Saved/);
   });
   test('a public task can\'t paint a private project, or describe one to the provider', async () => {
     const f = fetcher(png()); const h = await withMedia(f);
@@ -437,7 +494,10 @@ describe('web search', () => {
       assert.match(await h.tool('manager', 'web_search', { query: q }), /private/, q);
     }
     assert.equal(asked.length, 2, 'none of those were sent');
-    assert.match(await h.tool('researcher', 'fetch_url', { url: 'https://example.com/?q=operation%20bluebird' }), /private/);
+    for (const url of ['https://example.com/?q=operation%20bluebird', 'https://example.com/?x=%ff&q=%6f%70%65%72%61%74%69%6f%6e%2d%62%6c%75%65%62%69%72%64', 'https://example.com/?q=operation%252Dbluebird', 'https://example.com/operationbluebird']) assert.match(await h.tool('researcher', 'fetch_url', { url }), /private/, url);
+    assert.match(await h.tool('researcher', 'web_search', { query: 'operationbluebird competitors' }), /private/);
+    await h.tool('researcher', 'web_search', { query: 'ceramic glaze suppliers near harbour' });
+    assert.ok(!all(h.t.db, "SELECT data FROM events WHERE type='feed'").some((e) => /glaze/.test(e.data)), 'what was searched for stays off the public feed');
     assert.ok(!all(h.t.db, "SELECT data FROM events WHERE type='feed'").some((e) => /bluebird/i.test(e.data)));
   });
   test('a private task may search for its own work, but not another private project', async () => {
@@ -494,6 +554,13 @@ describe('purchase requests for the owner\'s assistant', () => {
     const [row] = (await a.get('/api/admin/purchases')).data.purchases;
     assert.equal(row.link, '');
     assert.equal((await a.post(`/api/admin/purchases/${row.id}`, { status: 'bought' }, { headers: { 'x-office-csrf': 'no' } })).status, 403);
+  });
+});
+
+describe('a mock building', () => {
+  test('never reaches a paid broker, whatever keys are set', async () => {
+    const t = await boot({ openrouterKey: 'REALKEY', anthropicKey: 'REALKEY' }); open.push(t);
+    assert.equal(t.app.engine.media, null); assert.equal(t.app.engine.search, null);
   });
 });
 
@@ -566,6 +633,10 @@ describe('iOS foundation', () => {
     await until(() => sessions.calls.sessions.length === 3);
     const st = get(h.t.db, 'SELECT brief FROM tasks WHERE id=?', get(h.t.db, "SELECT task_id t FROM ios_requests WHERE kind='submit'").t);
     assert.match(st.brief, /eas-cli submit --platform ios --id abcd-1234-efgh/);
+    // Sending a vault task back would run it again without a click.
+    const fresh = await until(() => { const r = get(h.t.db, 'SELECT id,status FROM tasks WHERE vault=1 AND status=? ORDER BY id LIMIT 1', 'review'); return r || null; });
+    h.t.app.engine.reviewTask(h.floor, h.agent('manager'), fresh.id, 'revise', 'go again');
+    assert.equal(get(h.t.db, 'SELECT status FROM tasks WHERE id=?', fresh.id).status, 'done');
   });
   test('a hostile build id can\'t reach a brief, and it stays off without a vault', async () => {
     const h = await start(on, { sessions: createMockSessions() });

@@ -107,7 +107,10 @@ export function publicUrl(floorSlug, project) { return `/theoffice/f/${floorSlug
 /** Is this text about private work that the task sending it has no business mentioning? Used on everything that leaves the building. */
 export function mentionsPrivate(db, floorId, exceptProject, text) {
   const norm = (s) => ` ${String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+  const squash = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '');
   const hay = norm(text);
+  // A name run together is the same name: "Moon Cafe" is what mooncafe.com says.
+  const packed = squash(text);
   const priv = all(db, 'SELECT slug,title FROM projects WHERE floor_id=? AND private=1', floorId).filter((p) => p.slug !== exceptProject);
   if (!priv.length) return false;
   const slugs = priv.map((p) => p.slug);
@@ -116,6 +119,8 @@ export function mentionsPrivate(db, floorId, exceptProject, text) {
   for (const term of [...priv.flatMap((p) => [p.slug, p.title]), ...tasks.map((t) => t.title)]) {
     const n = norm(term);
     if (n.trim().length >= 3 && hay.includes(n)) return true;
+    const s = squash(term);
+    if (s.length >= 6 && packed.includes(s)) return true;
   }
   // A run of words lifted from a private brief says as much as the name does.
   for (const t of tasks) {
@@ -131,6 +136,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     const d = [...cfg.fetchDenyHosts];
     if (cfg.publicOrigin) { try { d.push(new URL(cfg.publicOrigin).hostname.toLowerCase()); } catch { /* ignored */ } }
     if (cfg.appsBaseDomain) d.push(cfg.appsBaseDomain.split(':')[0]);
+    // A bought domain is a project origin too, and gets the same distance.
+    for (const r of all(db, "SELECT domain FROM domain_orders WHERE status='live'")) d.push(r.domain);
     return d;
   };
 
@@ -151,7 +158,10 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
   const projectFor = (c, a) => {
     const slug = typeof a.project === 'string' && a.project ? a.project : c.project;
     if (!slug || !slugPattern.test(slug)) throw new WorkspaceError('say which project: lowercase letters, digits and hyphens');
+    // The manager runs the whole floor and already knows its private work. Only staff on a task are fenced in, and in both directions.
+    if (c.agent.role === 'manager' && !c.task) return slug;
     if (isPrivate(c, slug) && !isPrivate(c, c.project)) throw new WorkspaceError('that project is private, and this task can\'t touch it');
+    if (isPrivate(c, c.project) && slug !== c.project && !isPrivate(c, slug)) throw new WorkspaceError('this task is private, so it can\'t put anything in a public project');
     return slug;
   };
   const roomFor = (c, usd) => {
@@ -181,7 +191,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       c.say('reading', 'Checking the shared drive', 'looked through the shared drive');
       return files.length ? files.map((f) => `${f.path} (${f.size} bytes)`).join('\n') : 'The workspace is empty.';
     },
-    publish_project(c, a) {
+    async publish_project(c, a) {
       const slug = str(a, 'project', 60);
       if (!slugPattern.test(slug)) throw new WorkspaceError('project must be lowercase letters, digits and hyphens');
       if (isPrivate(c, slug) && !isPrivate(c, c.project)) throw new WorkspaceError('that project is private, and this task can\'t change it');
@@ -197,7 +207,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
         .map((s) => ({ title: String(s?.title ?? '').slice(0, 200), url: String(s?.url ?? '').slice(0, 1000) }))
         .filter((s) => /^https?:\/\//i.test(s.url));
       const reason = str(a, 'claims_ok_because', 300, false);
-      const check = runCheck(db, c.floor, slug, directory, kind);
+      const check = await runCheck(db, c.floor, slug, directory, kind);
       const problem = gateProblem(check, reason);
       if (problem) { saveCheck(db, c.floor.id, slug, check, reason, engine.now()); throw new WorkspaceError(problem); }
       const n = publishSnapshot(db, c.floor.id, slug, cfg.quotaBytes, directory);
@@ -212,7 +222,9 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     },
     async fetch_url(c, a) {
       const url = str(a, 'url', 2000);
-      outbound(c, decodeURIComponent(url.replace(/%(?![0-9a-f]{2})/gi, '')), 'address');
+      // Each escape on its own, twice over, so one bad escape or a double encoding can't hide the rest.
+      const unescape1 = (s) => s.replace(/%([0-9a-f]{2})/gi, (_, x) => String.fromCharCode(parseInt(x, 16)));
+      outbound(c, unescape1(unescape1(url)), 'address');
       let shown = url; try { shown = new URL(url).hostname; } catch { /* keep raw */ }
       c.say('browsing', `Reading ${shown}`, `opened ${shown}`);
       try {
@@ -230,7 +242,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (serverSearch(cfg) && SEARCH_ROLES.has(c.agent.role) && engine.search) {
         if (todayCount(c, 'search') >= cfg.searchesPerFloorDay) throw new WorkspaceError('this floor has done all its searching for today');
         roomFor(c, 0.2);
-        c.say('browsing', `Searching: ${q.slice(0, 50)}`, `searched for "${q.slice(0, 80)}"`);
+        // What was searched for isn't shown on the floor: visitors can read the feed.
+        c.say('browsing', 'Searching the web', 'searched the web');
         let r;
         try { r = await engine.search.search(q, c.signal); } catch (e) { if (e instanceof ProviderError) { engine.log('warn', 'search failed', { status: e.status }); return 'Search is unavailable right now.'; } throw e; }
         engine.charge(c.floor.id, c.agent, engine.search.model, r.usage.prompt, r.usage.completion, r.usage.cost, { taskId: c.task?.id, kind: 'search' });
@@ -238,7 +251,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
         return wrapUntrusted('web_search', `${r.failed && !r.text ? `The search failed (${r.failed}).` : r.text || 'No results.'}${list ? `\n\nSources:\n${list}` : ''}`);
       }
       if (!cfg.webSearchKey) throw new WorkspaceError('web search is not available');
-      c.say('browsing', `Searching: ${q.slice(0, 50)}`, `searched for "${q.slice(0, 80)}"`);
+      c.say('browsing', 'Searching the web', 'searched the web');
       let res;
       try {
         res = await httpFetch(`https://api.search.brave.com/res/v1/web/search?count=8&q=${encodeURIComponent(q)}`, { headers: { accept: 'application/json', 'x-subscription-token': cfg.webSearchKey }, signal: AbortSignal.timeout(10000) });
@@ -278,7 +291,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     },
     async request_domain(c, a) {
       const domain = str(a, 'domain', 80); const project = projectFor(c, a);
-      outbound(c, domain, 'name');
+      // Naming a private project's own domain after it is the point of asking. Anyone else's still can't be said aloud.
+      if (mentionsPrivate(db, c.floor.id, isPrivate(c, project) ? project : ownPrivate(c), domain)) throw new WorkspaceError('that name would mention private work, so it was not sent. Leave the private details out.');
       try {
         const r = await engine.domains.request(c.floor, c.agent, c.task, { domain, project, why: str(a, 'why', 400, false) });
         if (r.already) return `${domain} has already been asked for (${r.status}). Asking again changes nothing.`;
@@ -340,12 +354,12 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       run(db, 'UPDATE projects SET design_review=? WHERE floor_id=? AND slug=?', JSON.stringify({ at: engine.now(), model: engine.media.review.model, verdict, text: r.text.slice(0, 2000) }), c.floor.id, project);
       return wrapUntrusted('design review from another lab', `${r.text}\n\n(cost $${r.usage.cost.toFixed(3)})`);
     },
-    launch_check(c, a) {
+    async launch_check(c, a) {
       const slug = projectFor(c, a);
       const directory = a.directory === undefined || a.directory === null || a.directory === '' ? '' : String(a.directory);
       if (directory && !/^[A-Za-z0-9_-][A-Za-z0-9._-]*(\/[A-Za-z0-9_-][A-Za-z0-9._-]*){0,2}$/.test(directory)) throw new WorkspaceError('directory must be a simple relative folder such as dist');
-      const r = runCheck(db, c.floor, slug, directory, ['site', 'app', 'game', 'simulation', 'doc', 'research'].includes(a.kind) ? a.kind : 'site');
-      saveCheck(db, c.floor.id, slug, r, '', engine.now());
+      // A look only. The record the boss relies on is written at publish time, so this can't be used to wipe what was flagged.
+      const r = await runCheck(db, c.floor, slug, directory, ['site', 'app', 'game', 'simulation', 'doc', 'research'].includes(a.kind) ? a.kind : 'site');
       c.say('reading', 'Going through the launch checklist', `ran the launch checklist on ${slug}`, { project: slug });
       return formatReport(r);
     },
@@ -356,7 +370,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const facts = launchFacts(db, cfg, c.floor, slug, engine.domains, engine.liveUrl(c.floor, slug));
       const text = composeReport(facts, str(a, 'headline', 600), str(a, 'next_steps', 800, false));
       run(db, 'UPDATE projects SET launch_report=? WHERE floor_id=? AND slug=?', text, c.floor.id, slug);
-      engine.managerSays(c.floor.id, text);
+      engine.reportToBoss(c.floor.id, text);
       engine.emitProject(c.floor.id, slug);
       return 'Sent to the boss. Do not repeat it; a line of your own is plenty.';
     },

@@ -292,7 +292,7 @@ class FloorPage {
       this.owner ? this.launchBits(p) : null,
       h('div.row', {}, h('button.btn.primary', { type: 'button', onclick: open }, 'Open'), priv,
         this.owner && p.appUrl ? h('button.link', { type: 'button', onclick: async () => {
-          if (!window.confirm(`Delete every save, leaderboard and shared value for ${p.title}? This can't be undone.`)) return;
+          if (!window.confirm(`Delete every save, leaderboard, shared value and sign-up for ${p.title}? This can't be undone. Download your sign-ups first if you want them.`)) return;
           try { const r = await api(`/floors/${this.slug}/projects/${p.slug}/clear-data`, { method: 'POST', body: {} }); toast(`Cleared ${r.removed} saved ${r.removed === 1 ? 'item' : 'items'}`); } catch (e) { toast(e.message, 'bad'); }
         } }, 'Clear saved data') : null));
   }
@@ -334,7 +334,8 @@ class FloorPage {
         const keys = [...new Set(entries.flatMap((e) => Object.keys(e.fields)))];
         body.append(h('div.stack', {},
           entries.length ? h('a.btn.ghost', { href: `${BASE}/api/floors/${this.slug}/projects/${p.slug}/forms?format=csv`, download: `${p.slug}-signups.csv` }, 'Download a spreadsheet') : h('p.empty', {}, 'Nobody yet. When someone fills in a form on the site, it lands here.'),
-          entries.length ? h('div.table-wrap', {}, h('table.admin-table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Form'), ...keys.map((k) => h('th', {}, k)), h('th', {}, 'When'))), h('tbody', {}, entries.map((e) => h('tr', {}, h('td', {}, e.form), ...keys.map((k) => h('td', {}, String(e.fields[k] ?? ''))), h('td', {}, timeAgo(e.createdAt))))))) : null));
+          entries.length > 500 ? h('p', {}, `Showing the newest 500 of ${entries.length}. The spreadsheet has them all.`) : null,
+          entries.length ? h('div.table-wrap', {}, h('table.admin-table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Form'), ...keys.map((k) => h('th', {}, k)), h('th', {}, 'When'))), h('tbody', {}, entries.slice(0, 500).map((e) => h('tr', {}, h('td', {}, e.form), ...keys.map((k) => h('td', {}, String(e.fields[k] ?? ''))), h('td', {}, timeAgo(e.createdAt))))))) : null));
       }, { wide: true });
     } catch (e) { toast(e.message, 'bad'); }
   }
@@ -378,7 +379,7 @@ class FloorPage {
 
   // ---- requests ----
   renderDomains(list) {
-    const DOMAIN_STATUS = { awaiting_boss: 'Waiting for you', buying: 'Buying now', sent: 'Confirming with the registrar', bought: 'Bought, setting its address', live: 'Live', declined: 'You said no', failed: 'Not bought' };
+    const DOMAIN_STATUS = { awaiting_boss: 'Waiting for you', buying: 'Buying now', sent: 'Confirming with the registrar', uncertain: 'The building manager is checking', bought: 'Bought, setting its address', live: 'Live', declined: 'You said no', failed: 'Not bought' };
     for (const d of this.state.domains || []) {
       const waiting = d.status === 'awaiting_boss';
       const buy = async () => {

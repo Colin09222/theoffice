@@ -91,12 +91,12 @@ CREATE TABLE IF NOT EXISTS domain_orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, agent_id INTEGER, task_id INTEGER, domain TEXT NOT NULL, project TEXT NOT NULL DEFAULT '',
   why TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, quoted_usd REAL NOT NULL, approved_usd REAL, charged_usd REAL, charged_estimated INTEGER NOT NULL DEFAULT 0,
   order_id TEXT NOT NULL DEFAULT '', txn_id TEXT NOT NULL DEFAULT '', registrar_id TEXT NOT NULL DEFAULT '', privacy INTEGER NOT NULL DEFAULT 0, dns_ok INTEGER NOT NULL DEFAULT 0,
-  dns_tries INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, approved_at INTEGER, sent_at INTEGER, bought_at INTEGER, next_try_at INTEGER NOT NULL DEFAULT 0
+  dns_tries INTEGER NOT NULL DEFAULT 0, reply TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, approved_at INTEGER, sent_at INTEGER, bought_at INTEGER, next_try_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS domain_orders_floor ON domain_orders(floor_id, id);
 CREATE INDEX IF NOT EXISTS domain_orders_domain ON domain_orders(domain, status);
 -- The database itself refuses a second live order for one name, whatever the code above it does.
-CREATE UNIQUE INDEX IF NOT EXISTS domain_orders_one_live ON domain_orders(domain) WHERE status IN ('buying','sent','bought','live');
+CREATE UNIQUE INDEX IF NOT EXISTS domain_orders_one_active ON domain_orders(domain) WHERE status IN ('buying','sent','uncertain','bought','live');
 CREATE TABLE IF NOT EXISTS app_forms (
   id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, form TEXT NOT NULL, data TEXT NOT NULL, size INTEGER NOT NULL, hash TEXT NOT NULL, created_at INTEGER NOT NULL
 );
@@ -117,6 +117,7 @@ CREATE INDEX IF NOT EXISTS ios_requests_floor ON ios_requests(floor_id, id);
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS.
 const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: 'INTEGER NOT NULL DEFAULT 0', session_charged: 'REAL NOT NULL DEFAULT 0', session_baseline: "TEXT NOT NULL DEFAULT ''", session_publish: "TEXT NOT NULL DEFAULT '[]'", session_tries: 'INTEGER NOT NULL DEFAULT 0' }, app_scores: { lower: 'INTEGER NOT NULL DEFAULT 0' },
   ledger: { kind: "TEXT NOT NULL DEFAULT 'model'" },
+  domain_orders: { reply: "TEXT NOT NULL DEFAULT ''" },
   purchases: { admin_note: "TEXT NOT NULL DEFAULT ''", decided_at: 'INTEGER' },
   projects: { payment_link: "TEXT NOT NULL DEFAULT ''", launch_check: "TEXT NOT NULL DEFAULT ''", launch_report: "TEXT NOT NULL DEFAULT ''", design_review: "TEXT NOT NULL DEFAULT ''", indexable: 'INTEGER NOT NULL DEFAULT 0' },
 };

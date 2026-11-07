@@ -13,4 +13,13 @@ for (const [role, c] of Object.entries(all)) {
   if (!(m.supported_parameters || []).includes('tools')) { console.log(`FAIL ${role}: ${c.model} has no tool support`); bad++; continue; }
   console.log(`ok   ${role.padEnd(12)} ${c.model.padEnd(32)} ${money(m.pricing.prompt)} in, ${money(m.pricing.completion)} out per Mtok`);
 }
+// The brokers: a picture model that really outputs images, and a reviewer from another lab that really reads them.
+const { tools } = loadModels();
+const brokers = [['image', tools.image, (m) => (m.architecture?.output_modalities || []).includes('image')], ['review', tools.review, (m) => (m.architecture?.input_modalities || []).includes('image') && !/^anthropic\//.test(m.id)]];
+for (const [name, t, fits] of brokers) {
+  const m = t && live.get(t.model);
+  if (!m) { console.log(`FAIL ${name}: ${t?.model} not on OpenRouter`); bad++; continue; }
+  if (!fits(m)) { console.log(`FAIL ${name}: ${t.model} can't do this job`); bad++; continue; }
+  console.log(`ok   ${name.padEnd(12)} ${t.model.padEnd(32)} ${money(m.pricing.prompt)} in, ${money(m.pricing.completion)} out per Mtok`);
+}
 process.exit(bad ? 1 : 0);

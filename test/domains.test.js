@@ -6,7 +6,7 @@ import { get, all, run, openDb } from '../server/db.js';
 import { loadConfig, loadModels } from '../server/config.js';
 import { createApp } from '../server/app.js';
 import { parseXml, createNamecheapClient, NamecheapError } from '../server/namecheap.js';
-import { cleanDomain, DomainRefused } from '../server/domains.js';
+import { cleanDomain, DomainRefused, domainsConfigured } from '../server/domains.js';
 import { toolsForRole, toolDefs } from '../server/tools.js';
 import { startNamecheapStub, CONTACT_SECRETS } from './stubs/namecheap.mjs';
 import { boot, claim, until, Client, adminClient, floorState, sse, hostFetch } from './helpers.js';
@@ -197,13 +197,71 @@ describe('a retry can never buy twice', () => {
     assert.equal(h.statusOf(row.id).status, 'awaiting_boss');
     assert.equal(h.stub.state.creates.length, 0);
   });
-  test('"sent" that never appears on the account ends as failed after the grace period, with no ledger entry and no second create', async () => {
+  test('"sent" that never appears on the account stays blocked as uncertain, and only a person can settle it', async () => {
     const h = await start({ domainReconcileMs: 100000 });
     const { row } = await h.ask();
     run(h.t.db, "UPDATE domain_orders SET status='sent', sent_at=?, approved_usd=11.46 WHERE id=?", Date.now() - 16 * 60000, row.id);
     await h.t.app.engine.domains.reconcile();
-    assert.equal(h.statusOf(row.id).status, 'failed');
+    assert.equal(h.statusOf(row.id).status, 'uncertain');
     assert.equal(h.stub.state.creates.length, 0); assert.equal(ledgerFor(h.t, 'tinyteacups.com').length, 0);
+    assert.doesNotMatch(h.statusOf(row.id).note, /Nothing was charged/, 'we do not know that');
+    // Asking again, from this floor or any other, can't start a second purchase.
+    assert.match((await h.ask()).out, /already been asked/);
+    const c2 = await claim(h.t, 'Rival Co');
+    const f2 = get(h.t.db, 'SELECT * FROM floors WHERE slug=?', c2.slug);
+    h.t.app.engine.upsertProject(f2, 'launch', { title: 'L' });
+    const b = await h.t.app.engine.domains.request(f2, get(h.t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", f2.id), null, { domain: 'tinyteacups.com', project: 'launch', why: '' });
+    assert.equal((await c2.post(`/api/floors/${c2.slug}/domains/${b.id}/buy`, { priceUsd: 11.46 })).status, 409);
+    assert.equal(h.stub.state.creates.length, 0);
+    // Admin only, and it settles once.
+    const adm = await adminClient(h.t);
+    assert.equal((await new Client(h.t).post(`/api/admin/domains/${row.id}/resolve`, { outcome: 'bought', chargedUsd: 11.46 })).status, 401);
+    assert.equal((await h.c.post(`/api/admin/domains/${row.id}/resolve`, { outcome: 'bought', chargedUsd: 11.46 })).status, 401);
+    assert.equal((await adm.post(`/api/admin/domains/${row.id}/resolve`, { outcome: 'maybe' })).status, 409);
+    assert.equal((await adm.post(`/api/admin/domains/${row.id}/resolve`, { outcome: 'bought', chargedUsd: 11.46 })).status, 200);
+    await h.settled(row.id, ['live']);
+    assert.equal(ledgerFor(h.t, 'tinyteacups.com').length, 1);
+    assert.equal(ledgerFor(h.t, 'tinyteacups.com')[0].cost_usd, 11.46);
+    assert.equal((await adm.post(`/api/admin/domains/${row.id}/resolve`, { outcome: 'not_bought' })).status, 409);
+    assert.equal(h.stub.state.creates.length, 0);
+  });
+  test('settled by hand as not bought, the name is free again', async () => {
+    const h = await start({ domainReconcileMs: 100000 });
+    const { row } = await h.ask();
+    run(h.t.db, "UPDATE domain_orders SET status='uncertain' WHERE id=?", row.id);
+    const adm = await adminClient(h.t);
+    assert.equal((await adm.post(`/api/admin/domains/${row.id}/resolve`, { outcome: 'not_bought' })).status, 200);
+    assert.equal(h.statusOf(row.id).status, 'failed');
+    const again = await h.ask();
+    assert.notEqual(again.row.id, row.id);
+  });
+  test('a yes without Registered=true, or naming another domain, or with an empty amount, is not taken at its word', async () => {
+    for (const reply of ['<DomainCreateResult Domain="tinyteacups.com" Registered="false" ChargedAmount="10.50"/>', '<DomainCreateResult Domain="tinyteacups.com" ChargedAmount="10.50"/>', '<DomainCreateResult Domain="other.com" Registered="true" ChargedAmount="10.50"/>']) {
+      const client = { price: async () => 11.28, check: async (d) => d.map((x) => ({ domain: x, available: true, premium: false, premiumPrice: 0, icannFee: 0.18, eapFee: 0 })), balance: async () => 100, contacts: async () => ({}), owned: async () => false, setHosts: async () => true, isCertainRefusal: () => false };
+      const { createNamecheapClient: real } = await import('../server/namecheap.js');
+      const parsed = await real({ namecheapBase: 'http://localhost:1/x', namecheapKey: 'k', namecheapUser: 'u', namecheapClientIp: '1.1.1.1' }, { request: async () => `<ApiResponse Status="OK"><CommandResponse>${reply}</CommandResponse></ApiResponse>` }).create('tinyteacups.com', {});
+      let creates = 0;
+      client.create = async () => { creates++; return parsed; };
+      const h = await start({ domainReconcileMs: 100000 });
+      h.t.app.engine.domains = (await import('../server/domains.js')).createDomainBroker({ db: h.t.db, cfg: h.t.cfg, engine: h.t.app.engine, client });
+      const { row } = await h.ask();
+      await h.buy(row.id);
+      await until(() => /clear answer/.test(h.statusOf(row.id).note), { what: reply });
+      assert.equal(h.statusOf(row.id).status, 'sent', reply);
+      assert.equal(ledgerFor(h.t, 'tinyteacups.com').length, 0);
+      await h.buy(row.id);
+      assert.equal(creates, 1);
+    }
+    const { parseXml: px } = await import('../server/namecheap.js');
+    assert.ok(px('<a/>'));
+  });
+  test('words can\'t make an unknown error safe, and every error in the reply has to qualify', async () => {
+    const { createNamecheapClient: real, NamecheapError: E } = await import('../server/namecheap.js');
+    const nc = real({ namecheapBase: 'http://localhost:1/x' }, { request: async () => '' });
+    assert.equal(nc.isCertainRefusal(new E('api', 9999, '', { lowFunds: true, numbers: [9999] })), false);
+    assert.equal(nc.isCertainRefusal(new E('api', 2011170, '', { numbers: [2011170, 5050900] })), false);
+    assert.equal(nc.isCertainRefusal(new E('api', 2011170, '', { numbers: [2011170] })), true);
+    assert.equal(nc.isCertainRefusal(new E('network')), false);
   });
   test('the database refuses a second live order for a name, across floors', async () => {
     const h = await start();
@@ -275,12 +333,16 @@ describe('the rules', () => {
     await h.settled(row.id, ['live']);
     assert.equal(h.stub.state.creates.length, 1);
   });
-  test('a low balance only found out at the create call reads the same way', async () => {
-    const h = await start();
+  test('a low balance only found out at the create call tells the boss, and the button returns only once the account confirms nothing moved', async () => {
+    const h = await start({ domainReconcileMs: 100000 });
     const { row } = await h.ask();
     h.stub.state.failNext['namecheap.domains.create'] = { number: 2528166, text: 'Insufficient funds in your account' };
     await h.buy(row.id);
     await until(() => /balance/.test(h.statusOf(row.id).note));
+    assert.equal(h.statusOf(row.id).status, 'sent', 'not yet');
+    assert.match(all(h.t.db, "SELECT text FROM messages WHERE role='office'").map((m) => m.text).join(' '), /balance is too low/);
+    run(h.t.db, 'UPDATE domain_orders SET sent_at=?, next_try_at=0 WHERE id=?', Date.now() - 16 * 60000, row.id);
+    await h.t.app.engine.domains.reconcile();
     assert.equal(h.statusOf(row.id).status, 'awaiting_boss');
     assert.equal(ledgerFor(h.t, 'tinyteacups.com').length, 0);
   });
@@ -310,6 +372,37 @@ describe('the rules', () => {
     await h.settled(row.id, ['live']);
     assert.equal(h.stub.count('namecheap.domains.dns.setDefault'), 1);
     assert.equal(h.stub.state.creates.length, 1);
+  });
+  test('a floor reset takes its Buy buttons with it', async () => {
+    const h = await start();
+    const { row } = await h.ask();
+    const adm = await adminClient(h.t);
+    assert.equal((await adm.post(`/api/admin/floors/${h.floor.id}/reset`)).status, 200);
+    assert.equal(h.statusOf(row.id).status, 'declined');
+    const again = await h.c.post(`/api/floors/${h.c.slug}/domains/${row.id}/buy`, { priceUsd: 11.46 });
+    assert.equal(again.status, 202);
+    assert.equal(h.stub.state.creates.length, 0);
+  });
+  test('a project that vanished can\'t be bought for', async () => {
+    const h = await start();
+    const { row } = await h.ask();
+    run(h.t.db, "DELETE FROM projects WHERE slug='launch'");
+    assert.equal((await h.buy(row.id)).status, 409);
+    assert.equal(h.stub.state.creates.length, 0);
+  });
+  test('the registrar is called a limited number of times by requests too', async () => {
+    const h = await start();
+    h.stub.state.taken.add('taken-name.com');
+    let last = '';
+    for (let i = 0; i < 70; i++) last = await h.tool('request_domain', { domain: 'taken-name.com', project: 'launch', why: '' });
+    assert.match(last, /a lot of names/);
+    assert.ok(h.stub.count('namecheap.domains.check') <= 61);
+  });
+  test('a mock building can\'t reach the real registrar', () => {
+    const on = (over) => domainsConfigured({ namecheapKey: 'k', namecheapUser: 'u', namecheapClientIp: '1.1.1.1', domainContactSource: 'a.com', serverIp: '1.1.1.1', appsBaseDomain: 'b.com', ...over });
+    assert.equal(on({ aiMode: 'mock', namecheapBase: 'https://api.namecheap.com/xml.response' }), false);
+    assert.equal(on({ aiMode: 'mock', namecheapBase: 'http://localhost:9/x' }), true);
+    assert.equal(on({ aiMode: 'live', namecheapBase: 'https://api.namecheap.com/xml.response' }), true);
   });
   test('switched off entirely when any setting is missing', async () => {
     const t = await boot({ namecheapKey: '' }); open.push(t);
@@ -389,12 +482,30 @@ describe('prompt injection and other people', () => {
     const own = await hostFetch(h.t.port, '/theoffice/api/me', { headers: { host: 'tinyteacups.com', cookie: h.c.cookieHeader() } });
     assert.doesNotMatch(await own.text(), /csrf/);
   });
-  test('a public task can\'t aim a domain at a private project, or spell one out to the registrar', async () => {
+  test('private names can\'t be spelled out to the registrar for anything else', async () => {
     const h = await start();
     h.t.app.engine.upsertProject(h.floor, 'secret-plan', { title: 'Secret Plan', makePrivate: true });
-    assert.match(await h.tool('request_domain', { domain: 'somename.com', project: 'secret-plan', why: '' }), /private/);
     assert.match(await h.tool('check_domain', { names: ['secret-plan.com'] }), /private/);
+    assert.match(await h.tool('check_domain', { names: ['secretplan.com'] }), /private/, 'run together, it is still the name');
+    assert.match(await h.tool('request_domain', { domain: 'secretplan.com', project: 'launch', why: '' }), /private/);
     assert.equal(h.stub.count('namecheap.domains.check'), 0);
+  });
+  test('visitors don\'t see a private project\'s domain in the feed, live or in a fresh load', async () => {
+    const h = await start();
+    const { row } = await h.ask();
+    await h.buy(row.id);
+    await h.settled(row.id, ['live']);
+    run(h.t.db, "UPDATE projects SET private=1 WHERE slug='launch'");
+    const seen = await new Client(h.t).get(`/api/floors/${h.c.slug}`);
+    assert.ok(!JSON.stringify(seen.data).includes('tinyteacups'), JSON.stringify(seen.data.feed).slice(0, 300));
+    assert.equal(seen.data.domains, undefined);
+  });
+  test('the manager can ask for a domain for a private project, and a domain named after it', async () => {
+    const h = await start();
+    h.t.app.engine.upsertProject(h.floor, 'secret-plan', { title: 'Secret Plan', makePrivate: true });
+    h.t.app.engine.upsertProject(h.floor, 'other-plan', { title: 'Other Hidden Thing', makePrivate: true });
+    assert.match(await h.tool('request_domain', { domain: 'secretplan.com', project: 'secret-plan', why: '' }), /Buy button/);
+    assert.match(await h.tool('request_domain', { domain: 'otherhiddenthing.com', project: 'secret-plan', why: '' }), /private/);
   });
   test('a suspended floor can\'t buy, and its domain stops being served', async () => {
     const h = await start();
