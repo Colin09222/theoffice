@@ -12,7 +12,7 @@ const t = await boot({ mockDelayMs: 900, rateScale: 50 });  // slow enough for t
 const c = await claim(t, 'Night Bakery', { body: { colors: { primary: '#7a4bb5', accent: '#f4c95d' } } });
 const base = `http://localhost:${t.port}/theoffice`;
 
-for (const [label, opts, q, budget] of ONLY === 'living' ? [] : [['desktop', { width: 1440, height: 900 }, 'high', 350], ['phone', { mobile: true }, 'low', 200]]) {
+for (const [label, opts, q, budget] of ONLY === 'living' || ONLY === 'landscape' ? [] : [['desktop', { width: 1440, height: 900 }, 'high', 350], ['phone', { mobile: true }, 'low', 200]]) {
   const b = await launch(); const p = await b.newPage(opts);
   const tag = (s) => `${label}: ${s}`;
   await p.goto(base);
@@ -92,10 +92,6 @@ for (const [label, opts, q, budget] of ONLY === 'living' ? [] : [['desktop', { w
 }
 
 // ---- the living floor: rooms, walking, words you can read, and the page around them ----
-if (ONLY !== 'basic') {
-const owner = await claim(t, 'Living Floor', { body: { colors: { primary: '#2f6f62', accent: '#f4c95d' } } });
-const neighbour = await claim(t, 'Next Door', { body: { colors: { primary: '#aa5522', accent: '#ffe08a' } } });
-const hush = await claim(t, 'Hush Floor', { body: { colors: { primary: '#334466', accent: '#ffcc66' } } });
 const asOwner = async (p, c2, q = 'low') => {
   await p.goto(base);
   await p.send('Network.setCookie', { name: 'office_s', value: c2.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
@@ -103,6 +99,12 @@ const asOwner = async (p, c2, q = 'low') => {
   await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
   await p.until('window.__office.view.modelsOn === true', 'furniture', 45000);
 };
+const rects = (p, list) => p.ev(`(() => { const out = {}; for (const s of ${JSON.stringify(list)}) { const e = document.querySelector(s); const r = e && !e.hidden && getComputedStyle(e).display !== 'none' ? e.getBoundingClientRect() : null; out[s] = r ? { l: r.left, t: r.top, r: r.right, b: r.bottom } : null; } return out; })()`);
+const hits = (a, b) => a && b && !(a.r <= b.l || a.l >= b.r || a.b <= b.t || a.t >= b.b);
+if (ONLY !== 'basic' && ONLY !== 'landscape') {
+const owner = await claim(t, 'Living Floor', { body: { colors: { primary: '#2f6f62', accent: '#f4c95d' } } });
+const neighbour = await claim(t, 'Next Door', { body: { colors: { primary: '#aa5522', accent: '#ffe08a' } } });
+const hush = await claim(t, 'Hush Floor', { body: { colors: { primary: '#334466', accent: '#ffcc66' } } });
 // Runs the room's clock by hand, far faster than a software renderer would, so this tests the people and not the machine's patience. Records each
 // step: the rooms each person passes through, the biggest single jump anyone makes, any step inside furniture, and what was said out loud.
 const RECORD = `(() => { const last = new Map(); const r = window.__rec = { rooms: {}, jump: 0, jumper: '', cut: 0, steps: 0, said: new Set(), pills: new Set(), bubblesOverHeads: 0 };
@@ -119,8 +121,6 @@ const RECORD = `(() => { const last = new Map(); const r = window.__rec = { room
   window.__ff = setInterval(() => { const v = window.__office?.view; if (!v) return; for (let i = 0; i < 10; i++) { v.update(0.05); note(v); } }, 50);
   return true; })()`;
 const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); const r = window.__rec; return { rooms: r.rooms, jump: r.jump, jumper: r.jumper, cut: r.cut, steps: r.steps, said: [...r.said], pills: [...r.pills], bubblesOverHeads: r.bubblesOverHeads }; })()');
-const rects = (p, list) => p.ev(`(() => { const out = {}; for (const s of ${JSON.stringify(list)}) { const e = document.querySelector(s); const r = e && !e.hidden && getComputedStyle(e).display !== 'none' ? e.getBoundingClientRect() : null; out[s] = r ? { l: r.left, t: r.top, r: r.right, b: r.bottom } : null; } return out; })()`);
-const hits = (a, b) => a && b && !(a.r <= b.l || a.l >= b.r || a.b <= b.t || a.t >= b.b);
 
 { // desktop
   const b = await launch(); const p = await b.newPage({ width: 1440, height: 900 });
@@ -135,6 +135,7 @@ const hits = (a, b) => a && b && !(a.r <= b.l || a.l >= b.r || a.b <= b.t || a.t
     const card = await p.ev('document.querySelector(".floor-top").textContent');
     if (!/Floor \d+/.test(card) || !/Living Floor/.test(card) || !/Run by/.test(card) || !/\d+ people/.test(card)) throw new Error(card.slice(0, 200));
     if (!(await p.ev('!!document.querySelector("[data-share]")'))) throw new Error('no Share button');
+    if (/null|undefined|NaN/.test(card)) throw new Error(`a blank field on the card: ${card.slice(0, 200)}`);
   });
   await step(tag('the room sits in the space between the card and the panel'), async () => {
     await sleep(1200);
@@ -359,6 +360,24 @@ const hits = (a, b) => a && b && !(a.r <= b.l || a.l >= b.r || a.b <= b.t || a.t
   });
   p.close(); b.close();
 }
+}
+if (ONLY !== 'basic') { // a phone on its side
+  const land = await claim(t, 'Sideways Floor');
+  const b = await launch(); const p = await b.newPage({ width: 844, height: 390 });
+  await step('landscape: the card, panel, scrubber and buttons all fit, with no overlaps, and the room has space', async () => {
+    await asOwner(p, land);
+    await sleep(1200);
+    const box = await rects(p, ['.floor-top', '.floor-panel', '.floor-scrubber', '.controls']);
+    for (const [k, r] of Object.entries(box)) if (!r || r.l < -1 || r.t < -1 || r.r > 845 || r.b > 391) throw new Error(`${k} ${JSON.stringify(r)}`);
+    for (const [x, y] of [['.floor-top', '.floor-panel'], ['.floor-top', '.controls'], ['.floor-panel', '.floor-scrubber'], ['.floor-panel', '.controls']]) if (hits(box[x], box[y])) throw new Error(`${x} over ${y}`);
+    await p.click('.panel-close');
+    await p.until('document.querySelector(".floor-panel").classList.contains("closed") && !document.querySelector(".talk-pill").hidden', 'closed', 4000);
+    const pill = await rects(p, ['.talk-pill', '.controls', '.floor-scrubber']);
+    if (hits(pill['.talk-pill'], pill['.controls']) || hits(pill['.talk-pill'], pill['.floor-scrubber'])) throw new Error(JSON.stringify(pill));
+    await p.click('.talk-pill');
+    await p.until('window.__office.tab === "chat" && !document.querySelector(".floor-panel").classList.contains("closed")', 'chat', 4000);
+  });
+  p.close(); b.close();
 }
 console.log(`\n${results.filter((r) => r.startsWith('PASS')).length} passed, ${failures} failed`);
 await t.close();

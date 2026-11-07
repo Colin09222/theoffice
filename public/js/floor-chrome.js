@@ -1,6 +1,6 @@
 // The furniture of the floor page around the room: the company card on the left, the floor scrubber on the right, and the round pins over
 // the rooms. All of it reads the same state as the panels, and everything a visitor sees here is already filtered by the server.
-import { h, api, clear, toast, BASE } from './dom.js';
+import { h, api, clear, put, toast, BASE } from './dom.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const ICONS = {
@@ -32,7 +32,7 @@ export function renderCard(page) {
   const made = s.projects.filter((p) => !p.private).slice(0, 3);
   const site = s.projects.find((p) => !p.private && ['site', 'app', 'game', 'simulation'].includes(p.kind));
   clear(el);
-  el.append(
+  put(el,
     h('p.card-boss', {}, 'Run by ', h('b', {}, s.floor.boss.name)),
     h('p.card-crew', {}, h('i.card-dot', { class: busy.length ? 'on' : '' }), `${crew} people · ${line}`),
     latest ? h('p.card-activity', {}, h('b', {}, latest.name), ` ${latest.text}`) : null,

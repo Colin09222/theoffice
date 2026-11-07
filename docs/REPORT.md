@@ -408,7 +408,41 @@ Owner's request: staff should walk between offices and talk so you can read the 
 
 **The page.** Desktop: a glass company card on the left (floor, logo or monogram, name, tagline, boss, head count, live activity line, what they've made, Visit website, Share), a vertical floor scrubber on the right, round pins over the rooms that open the manager chat (manager's office), Requests (boss's office), Tasks (meeting room), Talk (kitchen), Projects (lounge) and Orders (printer), and a pill over each working person with their task and a count such as `2/4`. That count is finished tasks in the run of tasks on the same plan, and a task with no plan or alone on one shows no number. The bar on their monitor used to fill on a timer and now shows the same count. A boss arrives with the chat open. A visitor arrives with the room filling the screen and a pill to open the panel. Closing the panel gives the room the space, and a pill says "Talk to Tess": one tap. Phone: the same as a bottom sheet. It folds to its tabs with a tap or a drag, the room moves into the space, the card lives under an About tab, pins and scrubber have 44-point hit areas, and pills and speech sit above the sheet. Our layout, wording and code; nothing was taken from the reference site.
 
-@@RESULTS@@
+**Performance** (headless Chrome on a software renderer, so frame rates mean nothing and aren't reported; `node test/browser/floors.mjs` and `CUSTOM_ONLY=budgets node test/browser/custom.mjs`). Pins, pills and bubbles are page elements, not draw calls. Pins only move when the camera does.
+
+| Scene | Before (`ultra-custom`) | After |
+|---|---|---|
+| An ordinary floor, busy, low (390x844) | 83 calls, 66k tris | 75 to 79 calls, 68k tris |
+| An ordinary floor, busy, high (1440x900) | 154 calls, 167k tris | 136 calls, 169k tris (174 calls, 296k tris on a frame that also redraws the shadow map) |
+| Each plan, ordinary crew, low | not measured | 75 to 78 calls, 70k tris |
+| Each plan, worst case (full crew, hats, eight plants, arcade, pet), low | 120 to 133 calls, 77k tris | 127 to 130 calls, 80k tris; budget 200 |
+| The same, high | 187 to 282 calls, 180k to 317k tris | 190 to 264 calls, 182k to 320k tris; budget 350 |
+
+The figures in the After column are from the runs on this branch. New script: `node scripts/shots-floors2.mjs [outdir] [q] [desktop|phone]` retakes the `media/floors2-*` pictures. `node scripts/plan-map.mjs [plan]` draws a plan's walking grid as text and lists anything unreachable.
+
+**Tests** (Node 22, mock mode, on the final commit, with the load average around 10 to 25 from other builds):
+- `npm test`: @@NPM@@. New here: `test/rooms.test.js` (35: every plan has every kind of room, everyone sits in one, spots are inside their rooms, doors are wide enough, walls miss the desks, every seat reaches every room in every combination of decor, and a walked route never crosses a wall) and `test/talk.test.js` (21: real words from and to the right people, compared with the real brief, result and note; handover between colleagues once only; a tester's findings; a question and answer hidden from visitors; a private project hidden in the snapshot, live and on replay; a project made private later; a default-private floor; private names redacted; no dollar figure in any spelling; a link's secret part removed; hostile text stays text; no ledger row; filler lines through the same event; small talk claims no work; progress counts real tasks; and the scene rules in plain Node).
+- `npm run e2e`: @@E2E@@.
+- `node test/browser/floors.mjs`: 34 of 34, including the new steps: card, scrubber, panel and buttons with no overlaps; the room between the card and the panel; all six pins open the right tab; closing the panel gives the room space and leaves one tap to the manager; the scrubber goes to the next floor and back; a real run where the whole team goes from their own rooms to the meeting room and back with no step over 0.5 units in one frame (biggest seen 0.43, walking is 0.13), and every line said out loud is also in the Talk tab, sits above a head, and the pills only show real counts; every layout walked for a meeting, a handoff, a review, a question and a break; a new hire leaves the room as it is; a visitor sees people walk but reads no private words in the bubbles, the Talk tab or the page state; and on a phone: the sheet, nobody covered, folding to the tabs, tap targets, the card under About, bubbles that fit and stay above the sheet, and landscape.
+- `node test/browser/custom.mjs` 41 of 41, `npm run e2e:apps` 26 of 26, `npm run e2e:launch` 18 of 18, each from a run after the merge and before the last two small client fixes (the Talk tab's scroll and unread count, and a blank field on the card).
+
+Walking tests step the room's clock by hand. In this environment the software renderer managed about two frames a second under load, and the room's clock is capped per frame, so left alone a scene takes minutes. That's the machine: the same cap on a real device only matters below ten frames a second.
+
+**Merge.** `origin/office-next` was merged twice (it moved on while this was being tested). Conflicts were in `floor-ui.js`, `office-scene.js`, `server/app.js` and `server/engine.js`, and each kept both sides: no spend on the floor page or in the snapshot, plus the card and the talk list. The look pass's label solver stays and now knows about speech: somebody's words are top priority, are never set aside, stay on screen, and keep clear of the card and a phone's title. Talk adds no figure anywhere.
+
+**Still weak.**
+- Only the mock has run. How a real model's briefs and reports read when cut to 170 characters is unproven, and a dull first sentence will make a dull bubble.
+- Nothing has run on a real phone or a real GPU, so the pace of a scene at a normal frame rate has never been seen. Walking speed and reading time may want tuning by eye.
+- Saved floors change: the plans keep their ids, but all five are redrawn, so an existing floor gets the new rooms and desks move.
+- People pass through each other in corridors and doorways, though they don't stop in the same spot. Nobody sits on the sofas; they stand in the lounge.
+- With two people speaking at once in one small room on a phone, the bubbles can still crowd. It's rare in a real run, but it was seen when lines were held on screen for pictures.
+- Changing the layout in Customise rebuilds the room, and that one case does put everyone back in their chairs. A new hire simply appears at a new desk.
+- The count on a pill is tasks done in the plan, not how far along this one task is, because nothing real measures that. A task on its own shows no number.
+- The card has no "what it does" or "who it's for", because those settings were promised to stay private to the boss. Showing them would need an opt-in. The neighbouring floor visible through the glass isn't built.
+- Small talk happens in each browser separately, so two viewers see different chit-chat.
+
+**Screenshots.** `media/floors2-handoff-desktop.jpg`, `floors2-visitor-desktop.jpg` and `floors2-talk-tab-desktop.jpg` at the high tier; `floors2-talking-phone.jpg`, `floors2-talk-tab-phone.jpg` and `floors2-visitor-phone.jpg` at the phone tier; `floors2-layout-{open,studio,garage,lounge,pods}.jpg` for each plan with the panel shut. Text on these comes from the mock. The bubbles in them were held on screen a little longer so they could be caught, which is why two can overlap in the handoff picture.
+
 ## Known limits
 - An interrupted task resumes from its last completed step, and the aborted call is charged as an estimate.
 - Spend caps reset at midnight UTC.
