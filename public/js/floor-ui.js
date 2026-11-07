@@ -12,7 +12,7 @@ import { muteButton, sfx } from './sfx.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 const isPhone = () => window.innerWidth <= 760;
-const TALK_KIND = { assign: 'Assignment', plan: 'The plan', handoff: 'Handoff', findings: 'Findings', review: 'Review', question: 'Question', answer: 'Answer', ask: 'Asking', meeting: 'Meeting' };
+const TALK_KIND = { assign: 'Assignment', plan: 'The plan', handoff: 'Handoff', findings: 'Findings', review: 'Review', question: 'Question', answer: 'Answer', ask: 'Asking', meeting: 'Meeting', banter: 'Small talk' };
 const NAME_INK = ['#b3261e', '#0b6e69', '#1d5fb8', '#8a5200', '#8a2f6b', '#2c7a31', '#a33f00', '#22577a'];
 const COLUMNS = [['todo', 'To do'], ['doing', 'Doing'], ['review', 'With manager'], ['done', 'Done']];
 const STATE_LABEL = { idle: 'At desk', thinking: 'Thinking', typing: 'Writing', browsing: 'On the web', reading: 'Reading', talking: 'Talking', queued: 'Waiting for a line' };
@@ -781,7 +781,7 @@ class FloorPage {
       this.state.talk.push(line);
       if (this.state.talk.length > 200) this.state.talk.shift();
       this.addTalkLine(line);
-      if (fresh(d)) this.view?.life?.line({ ...line, kind: d.beat || (d.kind === 'banter' ? 'small' : d.kind) });
+      if (fresh(d)) this.view?.life?.line(line);  // the room reads the beat and the kind apart: a meeting walks over, banter is small talk
     });
     on('task', (d) => {
       const i = this.state.tasks.findIndex((t) => t.id === d.id);

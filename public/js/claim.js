@@ -39,11 +39,11 @@ export function openClaim({ code = '' } = {}) {
       input.focus();
     };
     const stepCompany = () => {
-      const name = h('input', { name: 'company', value: state.name, placeholder: 'Tiny Empire Ltd', maxlength: 60, required: true, autofocus: true });
+      const name = h('input', { name: 'company', value: state.name, placeholder: 'Tiny Empire Ltd, or leave it blank', maxlength: 60, minlength: 2, autofocus: true });
       const tag = h('input', { name: 'tagline', value: state.tagline, placeholder: 'What this floor is for', maxlength: 120 });
-      const form = h('form.stack', { onsubmit: (ev) => { ev.preventDefault(); state.name = name.value.trim(); state.tagline = tag.value.trim(); if (state.name.length >= 2) stepBoss(); } },
+      const form = h('form.stack', { onsubmit: (ev) => { ev.preventDefault(); state.name = name.value.trim(); state.tagline = tag.value.trim(); if (state.name.length !== 1) stepBoss(); } },
         h('p.step-kicker', {}, `Floor ${state.floor ?? ''} is yours. Step 1 of 2`),
-        h('label.field', {}, h('span', {}, 'Company name'), name),
+        h('label.field', {}, h('span', {}, 'Company name'), name, h('small.fineprint', {}, 'No idea yet? Leave it blank and work it out with your office manager.')),
         h('label.field', {}, h('span', {}, 'Tagline'), tag),
         h('div.field', {}, h('span', {}, 'Main colour'), swatches(BRAND, state.colors.primary, (c) => { state.colors.primary = c; }, 'Main colour')),
         h('div.field', {}, h('span', {}, 'Accent colour'), swatches(ACCENT, state.colors.accent, (c) => { state.colors.accent = c; }, 'Accent colour')),
