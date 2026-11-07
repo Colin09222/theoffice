@@ -162,6 +162,24 @@ Bytes on the wire for a cold load (gzip, no cache): lobby 493 KB on a desktop (a
 
 **Still short of the reference.** The far shore and sky are still paler than theirs; our buildings are boxes with shader windows, not modelled facades, so close up they are simpler; the water is a flat plane with a shader; the people are the kit's chibi proportions, bigger-headed than their furniture suggests; FXAA is no substitute for MSAA at a pixel ratio of 1; and the whole look was tuned on screenshots from a software renderer, never on a real phone or a real GPU's frame times.
 
+## Customising a floor (branch `ultra-custom`, not merged, not deployed)
+Owner's request: each boss's floor and team should feel like theirs, and the settings should really change things. No deploy steps beyond a normal deploy: the new columns (`floors.identity`, `floors.crew`, `agents.persona`) are added on boot, and a floor saved before them looks and behaves as it did.
+
+**A bug this found.** The kit's people natively face +z, but the code turned them half way round and mirrored every pose to match. So the character builder showed the back of the boss's head, people walked backwards, and they sat with their backs to their desks. They now face the way they go, and the browser test checks that each seated person's legs point at their own desk.
+
+**What a boss can change**, all from one Customise panel with one Save. The office changes live behind the panel as you tap, and Cancel puts it back. On a phone the panel is a sheet that stops short so the room stays in view; on a desktop it docks to the side.
+- **Pick a vibe:** six presets that set the plan, floor, walls, art, pet, colours and tone in one tap.
+- **The company:** what it does (300 characters), tone of voice (friendly, serious, silly, punk, corporate, dreamy, with a sample line), house rules (600), things to always avoid (300), who gets words, facts and looks when there's a choice.
+- **Staff:** name, job title, personality (nine labels plus free text), focus, look, hire and let go within the cap. The manager always stays, and nobody leaves with a task open.
+- **People:** the kit's twelve people as a direct pick, eight new hats, two new eyewear options, nine new things to wear, more colours, ten quick looks and Surprise me.
+- **The office:** five floor plans (open plan, studio, garage, lounge, pods) drawn from the kit, eight floors, five wall finishes, four art styles including the company's own logo if a public project has a picture with "logo" in its file name (a drawn monogram until then), six pets.
+
+**How it reaches the bots.** `server/brief.js` builds one `<boss_settings>` block. It goes before the security rules in the manager's and staff prompts, and into the first message on a computer. Text is cut to length and stripped of markup and invisible characters when saved and again when read, so it can't close the block or pose as something else, and the block says plainly that it can't change rules, budgets, tools or purchases. Those are enforced in code anyway, and nothing here touches them. In mock mode `server/mock-voice.js` reads that block from the system prompt and writes to suit, so `test/customise.test.js` can prove the wiring from the output: from the same request a silly floor says "Honk honk" and publishes "one suspicious duck", and a serious one says "Understood" and publishes "Prepared with care". A floor with nothing set sends exactly the prompt it always did.
+
+**What visitors get.** The room, names, job titles, looks and the fixed personality label. Never the identity, the personality notes or the focus. A real model is told not to quote the settings in published work, but that is an instruction, not a guarantee, so don't put secrets in house rules.
+
+**Still weak.** Only the mock has been run, so how well a real model holds a tone is unproven. Personalities and tones are short instructions, and tests prove delivery, not quality. Hats and extras are simple shapes on the kit's heads, and some hair pokes through a cap. A floor reset doesn't bring back founding staff the boss let go, though the boss or the manager can hire them again. Nothing has run on a real phone: the phone numbers are emulation on a software renderer.
+
 ## Known limits
 - An interrupted task resumes from its last completed step, and the aborted call is charged as an estimate.
 - Spend caps reset at midnight UTC.
