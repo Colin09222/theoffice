@@ -158,7 +158,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); const r = wind
     await p.until('document.querySelector(".floor-panel").classList.contains("closed")', 'closed', 3000);
     await sleep(1500);
     const after = await p.ev('({ w: window.__office.view.visW, pill: document.querySelector(".talk-pill").textContent, hidden: document.querySelector(".talk-pill").hidden })');
-    if (after.hidden || !/^Talk to /.test(after.pill)) throw new Error(JSON.stringify(after));
+    if (after.hidden || !/^(Talk to|Call) /.test(after.pill)) throw new Error(JSON.stringify(after));
     if (after.w <= wide + 100) throw new Error(`the room got no more space: ${wide} then ${after.w}`);
     await p.click('.talk-pill');
     await p.until('window.__office.tab === "chat" && !!document.querySelector(".chat-input textarea") && !document.querySelector(".floor-panel").classList.contains("closed")', 'chat open', 3000);
@@ -201,7 +201,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); const r = wind
   await step(tag('the Talk tab lists the same lines, as plain text'), async () => {
     await p.click('[data-tab=talk]');
     await p.until('document.querySelectorAll(".talk-line").length >= 8', 'talk lines', 5000);
-    const st = await p.ev(`({ shown: [...document.querySelectorAll('.talk-line p')].map((e) => e.textContent), real: window.__office.state.talk.map((l) => l.text), kinds: [...new Set([...document.querySelectorAll('.talk-line')].map((e) => e.dataset.kind))] })`);
+    const st = await p.ev(`({ shown: [...document.querySelectorAll('.talk-line p')].map((e) => e.textContent), real: window.__office.state.talk.map((l) => l.text), kinds: [...new Set([...document.querySelectorAll('.talk-line')].map((e) => e.dataset.beat || e.dataset.kind))] })`);
     for (const s of st.real) if (!st.shown.includes(s)) throw new Error(`not listed: ${s}`);
     for (const k of ['assign', 'handoff', 'review']) if (!st.kinds.includes(k)) throw new Error(`no ${k} line: ${st.kinds}`);
   });

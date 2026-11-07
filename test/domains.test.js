@@ -92,7 +92,9 @@ describe('the whole purchase', () => {
 
     const led = ledgerFor(h.t, 'tinyteacups.com');
     assert.equal(led.length, 1); assert.equal(led[0].cost_usd, 11.46); assert.equal(led[0].kind, 'domain');
-    assert.equal(h.t.app.engine.spentToday(h.floor.id), 0, 'a domain does not use up the staff\'s daily budget');
+    // The people chatting in the room are paid for on the same day; the domain itself must not be.
+    const talk = all(h.t.db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND kind LIKE 'talk-%'", h.floor.id)[0].n;
+    assert.equal(h.t.app.engine.spentToday(h.floor.id), talk, 'a domain does not use up the staff\'s daily budget');
 
     // Served, with the isolation of an app origin.
     const page = await hostFetch(h.t.port, '/', { headers: { host: 'tinyteacups.com' } });

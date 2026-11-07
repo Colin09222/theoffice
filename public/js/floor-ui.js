@@ -435,7 +435,7 @@ class FloorPage {
     const who = this.person(l.from, l.fromName);
     const name = l.fromName || who?.name || 'Someone';
     const cont = prev && (prev.from || prev.fromName) === (l.from || l.fromName) && prev.toName === l.toName && (l.ts || 0) - (prev.ts || 0) < 180000 && !kind;
-    return h(`li.talk-line.${l.kind || 'line'}${l.beat ? `.${l.beat}` : ''}${who?.boss ? '.boss' : ''}${cont ? '.cont' : ''}`, { 'data-kind': l.kind || '', 'data-talk': l.id || '' },
+    return h(`li.talk-line.${l.kind || 'line'}${l.beat ? `.${l.beat}` : ''}${who?.boss ? '.boss' : ''}${cont ? '.cont' : ''}`, { 'data-kind': l.kind || '', 'data-beat': l.beat || '', 'data-talk': l.id || '' },
       this.face(who),
       h('div.talk-bubble', {},
         h('div.talk-who', { css: { '--who': this.nameInk(name) } }, h('b', {}, name), l.toName ? h('span.talk-to', {}, `to ${l.toName}`) : null, kind ? h('span.talk-kind', {}, kind) : null),
