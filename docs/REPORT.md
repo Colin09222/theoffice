@@ -539,7 +539,9 @@ Also proven and fixed in parallel by office-next's cap work, so its version stan
 
 `office-review` is `floors2` at 84a6319 with `office-next` at d9ea3fe merged, so the caps are off in everything above. Node 22, mock mode.
 
-TEST_RESULTS
+On commit 7e63c39, one suite at a time: `npm test` 790 of 790, of which 25 are the new ones in `test/review.test.js`. `npm run e2e` 66 of 66, `floors.mjs` 34 of 34, `custom.mjs` 41 of 41, `e2e:apps` 26 of 26, `e2e:resilience` 16 of 16.
+
+`e2e:launch` was 18 of 18 on three runs, one of them straight after `e2e:apps`. A first run, also straight after `e2e:apps`, passed its 8 desktop checks and then failed on the phone pass, timing out after 60 seconds waiting for the work to settle. It did not happen again, and I don't know why it happened, so treat it as an unexplained intermittent rather than as cleared.
 
 Nothing here has met a real model, the real registrar or the real session platform. The domain flow ran against the Namecheap stub, and sessions against the mock.
 
