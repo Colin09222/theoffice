@@ -25,7 +25,8 @@ describe('1. agents have no shell, no code execution, no real filesystem', () =>
     }
   });
   test('the tool list is exactly the permitted set', () => {
-    assert.deepEqual([...STAFF_TOOLS].sort(), ['ask_boss', 'fetch_url', 'file_purchase_request', 'list_files', 'publish_project', 'read_file', 'web_search', 'write_file'].sort());
+    // ask_colleague reaches only a colleague on the same floor, through the cheap model, and its answer comes back fenced as data.
+    assert.deepEqual([...STAFF_TOOLS].sort(), ['ask_boss', 'ask_colleague', 'fetch_url', 'file_purchase_request', 'list_files', 'publish_project', 'read_file', 'web_search', 'write_file'].sort());
     // Manager extras only touch this floor's own rows.
     assert.deepEqual(MANAGER_TOOLS.filter((x) => !STAFF_TOOLS.includes(x)).sort(), ['assign_task', 'cancel_task', 'hire_staff', 'review_task']);
   });
@@ -718,7 +719,8 @@ describe('independent review: regressions', () => {
     await t.close();
   });
   test('a call aborted before its first token is still charged', async () => {
-    const t = await boot({}, { llm: { chat: ({ signal }) => new Promise((_, rej) => { signal.addEventListener('abort', () => rej(signal.reason)); }) } });
+    // One call in flight, so the people's own chatter (people.test.js) stays out.
+    const t = await boot({ peopleTalk: false }, { llm: { chat: ({ signal }) => new Promise((_, rej) => { signal.addEventListener('abort', () => rej(signal.reason)); }) } });
     const a = await claim(t, 'Dodger');
     await a.post(`/api/floors/${a.slug}/chat`, { text: 'hello' });
     await until(() => t.app.engine.runs.size === 1 && t.app.engine.limiter.active === 1, { what: 'call in flight' });
