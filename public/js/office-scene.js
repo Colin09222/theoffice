@@ -1124,12 +1124,12 @@ export class OfficeView {
         if (r.kind === 'kitchen') { x.strokeStyle = 'rgba(60,70,80,.1)'; x.lineWidth = 1; x.beginPath(); for (let cx = Math.ceil(x0); cx < x1; cx++) { x.moveTo(px(cx), pz(z0)); x.lineTo(px(cx), pz(z1)); } for (let cz = Math.ceil(z0); cz < z1; cz++) { x.moveTo(px(x0), pz(cz)); x.lineTo(px(x1), pz(cz)); } x.stroke(); }
       }
       // Each room's name, painted small on its floor by the way in, like the lettering in an old office block.
-      x.save(); x.font = '600 15px ui-sans-serif, system-ui, sans-serif'; x.textBaseline = 'bottom';
+      x.save(); x.font = '700 19px ui-sans-serif, system-ui, sans-serif'; x.textBaseline = 'bottom';
       for (const r of this.plan.rooms || []) {
         if (r.kind === 'pod') continue;
         const [x0, , , z1] = r.rect;
-        x.fillStyle = 'rgba(255,255,255,.34)'; x.fillText(r.label.toUpperCase(), px(x0) + 12, pz(z1) - 7);
-        x.fillStyle = 'rgba(20,16,12,.42)'; x.fillText(r.label.toUpperCase(), px(x0) + 11, pz(z1) - 8);
+        x.fillStyle = 'rgba(255,255,255,.42)'; x.fillText(r.label.toUpperCase(), px(x0) + 13, pz(z1) - 7);
+        x.fillStyle = 'rgba(20,16,12,.55)'; x.fillText(r.label.toUpperCase(), px(x0) + 12, pz(z1) - 8);
       }
       x.restore();
       // A soft dark line under every wall, so the rooms read from above even with no glass glint.

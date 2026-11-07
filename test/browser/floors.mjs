@@ -60,7 +60,9 @@ for (const [label, opts, q, budget] of ONLY === 'living' ? [] : [['desktop', { w
       const busy = [...v.actors.values()].find((a) => a.state !== 'idle');
       if (busy && busy.seat.screenMat && busy.seat.screenMat.map !== v.idleTex) window.__samples.screen++;
       if (busy && !busy.bubble.hidden && busy.bubble.querySelector('.dots')) window.__samples.dots++; }, 100); true`);
-    await c.post(`/api/floors/${c.slug}/chat`, { text: `go build ${label === 'desktop' ? 'midnight rolls' : 'morning buns'}` });
+    // A software renderer can spend many seconds compiling shaders at the high tier, long enough for a whole mock run to come and go unseen.
+    await p.until('__stage.frame > 12', 'the room drawing frames', 60000);
+    await c.post(`/api/floors/${c.slug}/chat`, { text: `go build ${label === 'desktop' ? 'midnight rolls' : 'morning buns'} [slow]` });
     await p.until('window.__office.state.tasks.length >= 1', 'tasks', 20000);
     await p.until('[...window.__office.view.actors.values()].some((a) => a.state !== "idle")', 'someone working', 20000);
     await sleep(1500);

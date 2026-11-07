@@ -68,12 +68,12 @@ export class FloorLife {
       this.playLine(a, q.shift(), q.length);
     }
   }
-  /** One line: over to the listener and said to their face, or said from here when they are close or there is a backlog to get through. */
+  /** One line: over to the listener and said to their face, or said from here when there is a real backlog to get through. */
   playLine(a, ev, backlog) {
     const to = ev.to ? this.people.get(ev.to) : null;
     const steps = [];
     const hold = readingTime(ev.text);
-    if (to && to !== a && !backlog && !ev.inPlace) {
+    if (to && to !== a && backlog < 2) {
       const near = to.seated ? to.seat : { at: [to.group.position.x, to.group.position.z] };
       const spot = this.view.visitSpot(near, a);
       this.view.claims.set(a, spot.at);

@@ -239,7 +239,7 @@ describe('what people do with the words', () => {
     v.time = 2; v.life.update();
     assert.ok(v.actors.get('m').performed[0].some((s) => s.walk), 'should walk over');
     v.actors.get('m').scene = false;
-    for (const text of ['Two', 'Three']) v.life.line({ from: 'm', to: 'b', text, kind: 'review' });
+    for (const text of ['Two', 'Three', 'Four']) v.life.line({ from: 'm', to: 'b', text, kind: 'review' });
     v.life.update();
     assert.ok(!v.actors.get('m').performed[1].some((s) => s.walk), 'a backlog is said on the spot');
     assert.equal(v.actors.get('m').performed[1].find((s) => s.say).say, 'Two');

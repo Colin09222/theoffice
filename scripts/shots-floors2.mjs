@@ -18,10 +18,23 @@ for (const [label, opts] of [['desktop', { width: 1440, height: 900 }], ['phone'
   await sleep(1500);
   for (const a of (await p.ev('[...window.__office.view.actors.keys()]'))) await p.ev(`window.__office.view.actors.get(${JSON.stringify(a)}).idleTimer = 1e9; true`);
   await p.shot(join(OUT, `floors2-quiet-${label}.jpg`));
-  await c.post(`/api/floors/${c.slug}/chat`, { text: `go build ${label === 'desktop' ? 'midnight rolls' : 'morning buns'}` });
-  await p.until('!!document.querySelector("#labels .char-bubble.speech:not([hidden])")', 'a speech bubble', 60000);
-  await sleep(600);
+  await c.post(`/api/floors/${c.slug}/chat`, { text: `go build ${label === 'desktop' ? 'midnight rolls' : 'morning buns'} [slow]` });
+  // The renderer here is software, and slow. Run the room's clock by hand up to the moment worth seeing, then let it be drawn.
+  const forward = (until) => p.ev(`new Promise((done) => { const t = setInterval(() => { const v = window.__office.view; for (let i = 0; i < 6; i++) { v.update(0.05); if (${until}) { clearInterval(t); done(true); return; } } }, 40); setTimeout(() => { clearInterval(t); done(false); }, 90000); })`);
+  const hold = 'for (const a of window.__office.view.actors.values()) if (a.speech) { a.holdUntil += 60; } true';
+  await forward('!!document.querySelector("#labels .char-bubble.speech:not([hidden])")');
+  await p.ev(hold);
+  await sleep(4000);
   await p.shot(join(OUT, `floors2-talking-${label}.jpg`));
+  await p.ev('for (const a of window.__office.view.actors.values()) if (a.speech) a.holdUntil = 0; true');
+  await forward('[...window.__office.view.actors.values()].some((a) => a.speech && a.info.id !== window.__office.view.manager.info.id)');
+  await p.ev(hold);
+  await sleep(4000);
+  await p.shot(join(OUT, `floors2-handoff-${label}.jpg`));
+  await p.ev('for (const a of window.__office.view.actors.values()) if (a.speech) a.holdUntil = 0; true');
+  await p.click('[data-tab=talk]');
+  await sleep(1500);
+  await p.shot(join(OUT, `floors2-talk-tab-${label}.jpg`));
   const info = await p.ev(`(() => { const v = window.__office.view; return { rooms: [...v.actors.values()].map((a) => a.info.name + ':' + v.life.roomOf(a)).join(' '), calls: __stage.renderer.info.render.calls, tris: __stage.renderer.info.render.triangles, talk: window.__office.state.talk.length, errors: 0 }; })()`);
   console.log(label, JSON.stringify(info).slice(0, 400));
   if (p.errors.length) console.log('errors', p.errors.slice(0, 4).join(' | ').slice(0, 500));
