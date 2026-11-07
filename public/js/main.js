@@ -45,7 +45,7 @@ function trackKeyboard() {
   const vv = window.visualViewport;
   if (vv) {
     const fit = () => {
-      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      const kb = Math.max(0, Math.round(Math.max(window.innerHeight, document.documentElement.clientHeight) - vv.height - vv.offsetTop));
       document.documentElement.style.setProperty('--kb', `${kb}px`);
       document.body.classList.toggle('kb-open', kb > 80);
     };
