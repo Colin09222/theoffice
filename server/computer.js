@@ -195,7 +195,8 @@ export class Computer {
     const comp = computerRole(e.models.all[agent.role]);
     return {
       id: task.session_id || '', floorId: floor.id, floor, agent, taskId: task.id, project: task.project, signal, room: null,
-      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, warned: false, limit: '', lastText: '', lastFeed: '',
+      // History counts towards the steps, so a restart can't reset them. A round of fixes the manager asked for gets its own, or the fix never fits; the dollar caps still hold.
+      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Set(), steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), warned: false, limit: '', lastText: '', lastFeed: '',
       pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
       publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
       ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design')]), signal },
@@ -381,7 +382,7 @@ export class Computer {
         st.steps++;
         if (live) {
           e.setAgent(agent.id, { state: 'thinking', activity: 'Thinking it through', project: st.project, task_id: st.taskId });
-          const left = e.cfg.sessionMaxSteps - st.steps;
+          const left = st.maxSteps - st.steps;
           if (left === WARN_STEPS_LEFT && !st.warned) {
             st.warned = true;
             this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: `You have ${WARN_STEPS_LEFT} steps left on this computer. Finish up now: save your work with .office/save.sh, publish if you are going to, and reply with your summary.` }] }]).catch(() => {});

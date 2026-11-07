@@ -220,7 +220,7 @@ class FloorPage {
     this.scrollChat();
   }
   // ---- the three ways in ----
-  isNewFloor() { return this.owner && !(this.state.messages || []).some((m) => m.role === 'boss') && !this.state.tasks.length; }
+  isNewFloor() { return this.owner && this.state.floor.status === 'active' && !(this.state.messages || []).some((m) => m.role === 'boss') && !this.state.tasks.length; }
   lanePicker() {
     const buttons = LANES.map(([id, title, what, text]) => h('button.lane', { type: 'button', 'data-lane': id, onclick: async () => {
       for (const b of buttons) b.disabled = true;

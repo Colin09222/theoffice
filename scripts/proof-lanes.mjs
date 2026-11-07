@@ -1,6 +1,6 @@
 // The lanes and the help line for real: real Claude manager and staff, real computers, real OpenRouter pictures and reviews, real web search.
 // Spends real money. Keys come from the environment and go nowhere else. A watcher pauses the building at PROOF_ANTHROPIC_MAX or PROOF_OPENROUTER_MAX, counted across every run in PROOF_DIR.
-// Usage: node scripts/proof-lanes.mjs game | website | business | help | spend | look
+// Usage: node scripts/proof-lanes.mjs game | website | business | help | spend | look, or `resume <lane>` to pick a job up again after a stop.
 // `look` needs no key and no model: it opens what was made in real Chrome, plays it, and takes screenshots. Domain buying stays off throughout.
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb, get, all } from '../server/db.js';
 import { loadConfig, loadModels } from '../server/config.js';
 import { createApp } from '../server/app.js';
-import { issueCode } from '../server/auth.js';
+import { issueCode, createSession, COOKIE, OWNER_MAX_AGE } from '../server/auth.js';
 import { appLabel } from '../server/apps.js';
 import { launch, sleep } from '../test/browser/cdp.mjs';
 
@@ -62,7 +62,7 @@ const spent = (db) => ({
 const quiet = (s) => s.agents.every((a) => a.state === 'idle') && !s.tasks.some((t) => ['todo', 'doing'].includes(t.status));
 
 // One floor's whole job, as a person would drive it: tap, reply, say go, wait.
-async function job(lane, { company, boss: bossName, tap, reply, go, minutes = 25 }) {
+async function job(lane, { company, boss: bossName, tap, reply, go, minutes = 45 }, resuming) {
   if (!process.env.ANTHROPIC_API_KEY || !process.env.OPENROUTER_API_KEY) throw new Error('keys are not set');
   const { db, app } = await makeApp(true);
   const engine = app.engine;
@@ -70,10 +70,12 @@ async function job(lane, { company, boss: bossName, tap, reply, go, minutes = 25
     const s = spent(db);
     if ((s.anthropic >= ANTHROPIC_MAX || s.openrouter >= OPENROUTER_MAX) && !engine.globalPaused()) { log('PROOF LIMIT REACHED, pausing the building', JSON.stringify(s)); engine.setGlobalPause(true); }
   }, 2000);
-  const started = spent(db);
-  log('spent before this job', JSON.stringify(started));
-  const boss = new Boss(); const made = await boss.claim(db, company, bossName);
-  const floor = get(db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+  log('spent before this', JSON.stringify(spent(db)));
+  const boss = new Boss();
+  const was = resuming ? report()[lane] : null;
+  const made = was ? { slug: was.floor, number: was.number } : await boss.claim(db, company, bossName);
+  const floor = get(db, 'SELECT * FROM floors WHERE slug=?', made.slug);
+  if (was) { const own = createSession(db, 'owner', floor.id, OWNER_MAX_AGE, Date.now()); boss.cookies[COOKIE] = own.token; boss.csrf = own.csrf; boss.slug = floor.slug; }
   app.bus.subscribe(floor.id, { ip: 'proof', send: (ev) => {
     if (ev.type === 'feed') log(ev.data.name, ev.data.text);
     if (ev.type === 'message' && ev.data.role !== 'boss') log('SAYS', `[${ev.data.role}]`, String(ev.data.text).slice(0, 1500));
@@ -88,7 +90,7 @@ async function job(lane, { company, boss: bossName, tap, reply, go, minutes = 25
       if (Date.now() > end) { log(what, 'TIMED OUT'); return s; }
     }
   };
-  const out = { lane, floor: made.slug, number: made.number, company, turns: [] };
+  const out = was || { lane, floor: made.slug, number: made.number, company, turns: [] };
   const say = async (text, what, ms) => {
     log('BOSS', text);
     await boss.say(text);
@@ -96,12 +98,16 @@ async function job(lane, { company, boss: bossName, tap, reply, go, minutes = 25
     out.turns.push({ what, tasks: s.tasks.length, costSoFar: floorCost(db, floor.id) });
     return s;
   };
-  // The first reply has to be a conversation, not work.
-  let s = await say(tap, 'tap', 180000);
-  out.tapStartedWork = s.tasks.length > 0;
-  out.firstReply = s.messages.filter((m) => m.role === 'manager').at(-1)?.text;
-  if (reply) s = await say(reply, 'reply', 180000);
-  s = await say(go, 'go', minutes * 60000);
+  let s;
+  if (was) s = await waitQuiet('resume', minutes * 60000);
+  else {
+    // The first reply has to be a conversation, not work.
+    s = await say(tap, 'tap', 180000);
+    out.tapStartedWork = s.tasks.length > 0;
+    out.firstReply = s.messages.filter((m) => m.role === 'manager').at(-1)?.text;
+    if (reply) s = await say(reply, 'reply', 180000);
+    s = await say(go, 'go', minutes * 60000);
+  }
   out.projects = s.projects.map((p) => ({ slug: p.slug, title: p.title, kind: p.kind, private: p.private, url: `http://${appLabel(db, floor, p.slug)}.apps.localhost:${PORT}/`, sources: p.sources?.length, check: p.launchCheck ? { errors: p.launchCheck.errors, claims: p.launchCheck.claims, warnings: p.launchCheck.warnings, reason: p.launchCheck.reason } : null, review: p.designReview?.verdict || null, reported: !!p.launchReport }));
   out.tasks = all(db, 'SELECT t.id, t.title, t.status, t.lane, t.project, t.revisions, ROUND(t.cost_usd,3) usd, a.role, substr(t.result,1,1200) result FROM tasks t LEFT JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? ORDER BY t.id', floor.id);
   out.messages = s.messages.map((m) => ({ role: m.role, text: m.text }));
@@ -152,9 +158,9 @@ async function helpTrip() {
 }
 
 const JOBS = {
-  game: { company: process.env.PROOF_COMPANY || 'Pocket Arcade', boss: 'Sam', tap: 'Let\'s do a game. What could we build?', go: 'Go with your favourite of those. Keep it small and cheap.', minutes: 25 },
-  website: { company: process.env.PROOF_COMPANY || 'Corner Spokes', boss: 'Maya', tap: 'Let\'s do a website. What do you need from me?', reply: 'It is for my Saturday bike repair stand, Corner Spokes, in my neighbourhood. People should find out what I fix and join a list so I can tell them when I am next out. I have not settled a location or prices yet, so do not make any up.', go: 'Go, keep it small and cheap.', minutes: 25 },
-  business: { company: process.env.PROOF_COMPANY || 'Second Shelf', boss: 'Priya', tap: 'Let\'s do a small business. Help me work it out.', reply: 'I want to start a monthly subscription box of second-hand paperback novels picked by theme, for people in the US who read a lot on a budget. Nothing exists yet. I have no customers and no supplier.', go: 'Go. Use the Analyst for the numbers, and keep it cheap.', minutes: 30 },
+  game: { company: process.env.PROOF_COMPANY || 'Pocket Arcade', boss: 'Sam', tap: 'Let\'s do a game. What could we build?', go: 'Go with your favourite of those. Keep it small and cheap.' },
+  website: { company: process.env.PROOF_COMPANY || 'Corner Spokes', boss: 'Maya', tap: 'Let\'s do a website. What do you need from me?', reply: 'It is for my Saturday bike repair stand, Corner Spokes, in my neighbourhood. People should find out what I fix and join a list so I can tell them when I am next out. I have not settled a location or prices yet, so do not make any up.', go: 'Go, keep it small and cheap.' },
+  business: { company: process.env.PROOF_COMPANY || 'Second Shelf', boss: 'Priya', tap: 'Let\'s do a small business. Help me work it out.', reply: 'I want to start a monthly subscription box of second-hand paperback novels picked by theme, for people in the US who read a lot on a budget. Nothing exists yet. I have no customers and no supplier.', go: 'Go. Use the Analyst for the numbers, and keep it cheap.' },
 };
 
 async function look() {
@@ -264,6 +270,7 @@ function spend() {
 
 const what = process.argv[2];
 if (JOBS[what]) await job(what, JOBS[what]);
+else if (what === 'resume' && JOBS[process.argv[3]]) await job(process.argv[3], JOBS[process.argv[3]], true);
 else if (what === 'help') await helpTrip();
 else if (what === 'look') await look();
 else if (what === 'spend') spend();

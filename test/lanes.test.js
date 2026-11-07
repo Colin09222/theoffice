@@ -25,7 +25,7 @@ describe('the manager\'s playbooks', () => {
     const game = full.slice(full.indexOf('GAME\n'), full.indexOf('WEBSITE\n'));
     assert.match(game, /three small original ideas/); assert.match(game, /Never a copy of a named game/);
     assert.match(game, /playable version/); assert.match(game, /Say in the brief not to publish yet/); assert.match(game, /saved high score/);
-    assert.match(game, /Hire a Tester/); assert.match(game, /play it in a real browser/);
+    assert.match(game, /Hire a Tester/); assert.match(game, /play it in a real browser/); assert.match(game, /fix small clear bugs themselves and retest/); assert.match(game, /what nobody has replayed/);
     assert.match(game, /send the Builder's task back with review_task/); assert.match(game, /call publish_project yourself/);
   });
   test('the website lane goes brief, copy, named design, build, review_design, publish', () => {

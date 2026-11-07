@@ -435,6 +435,17 @@ describe('control and recovery', () => {
     assert.match(texts[1], /ball bigger/);
     assert.equal(h.sessions.calls.sessions.length, 1);
   });
+  test('a round of fixes gets its own steps, so a first round that used most of them can still fix what the Tester found', async () => {
+    let turns = 0;
+    const h = await start({ async onTurn(api) { turns++; for (let i = 0; i < 7; i++) { await api.step(); api.tool('bash', { command: 'npm run build' }); } api.save([{ path: 'index.html', data: Buffer.from(`round ${turns}`) }]); await api.message('finished'); } }, { sessionMaxSteps: 8 });
+    const { id } = await go(h);
+    assert.equal((await h.settle(id)).status, 'review');
+    h.t.app.engine.reviewTask(h.floor, h.mgr, id, 'revise', 'Fix the bugs');
+    await until(() => turns === 2 && h.taskRow(id).status === 'review' && !h.t.app.engine.runs.size, { what: 'the fix round' });
+    assert.equal(h.taskRow(id).revisions, 1);
+    assert.doesNotMatch(h.taskRow(id).result, /Ran out of steps/);
+    assert.equal(h.sessions.calls.sessions.length, 1, 'the same computer');
+  });
   test('a dropped stream reconnects with no lost or repeated events, and never double-charges', async () => {
     let dropped = false;
     const h = await start({ async onTurn(api) {
