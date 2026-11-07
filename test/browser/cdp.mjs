@@ -3,13 +3,16 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:net';
 
 const MAC = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Asked of the system, not guessed: with several browsers up at once, a guessed port can land on a running one, and a "new" browser then quietly shares its cookies.
+const freePort = () => new Promise((resolve, reject) => { const s = createServer(); s.on('error', reject); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
 
 export async function launch({ args = [], noAngle = false } = {}) {
   const exe = process.env.CHROME || (existsSync(MAC) ? MAC : '/opt/pw-browsers/chromium');
-  const port = 9300 + Math.floor(Math.random() * 400);
+  const port = await freePort();
   const dir = mkdtempSync(join(tmpdir(), 'officecdp-'));
   const gfx = noAngle ? [] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
   const proc = spawn(exe, ['--headless=new', '--no-sandbox', ...gfx, ...args, '--mute-audio', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore' });
