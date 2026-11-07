@@ -78,8 +78,8 @@ class FloorPage {
     this.pillEl = h('button.talk-pill.glass', { type: 'button', 'data-talk-pill': '', onclick: () => this.setTab(this.canSeeChat ? 'chat' : 'talk') });
     this.pinsEl = buildPins(this);
     this.scrubberEl = buildScrubber(this);
+    document.body.append(this.pinsEl);  // under the people's labels, so a pin never hides what someone is saying
     this.root.append(
-      this.pinsEl,
       h('header.floor-top.glass', {},
         h('button.btn.chrome.back', { type: 'button', 'aria-label': 'Back to the lobby', onclick: () => window.officeGo('/') }, '←', h('span', {}, 'Lobby')),
         h('div.floor-title', {}, h('span.floor-num', {}, `Floor ${s.floor.number}`), this.logoEl, this.titleEl, this.tagEl),
@@ -812,6 +812,7 @@ class FloorPage {
     clearTimeout(this.cardTimer);
     if (this.onResize) window.removeEventListener('resize', this.onResize);
     delete document.body.dataset.sheet;
+    this.pinsEl?.remove();
     this.markSeen?.();
     this.es?.close();
     this.view?.destroy();

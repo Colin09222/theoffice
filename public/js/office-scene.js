@@ -870,7 +870,7 @@ export class OfficeView {
    */
   buildWalls(room, env) {
     const { primary, accent } = this.colors; const L = this.plan;
-    const GH = 3.1, frame = L.frame || '#2b2d35';
+    const GH = 3.1, frame = L.frame || '#454852';
     const pos = [], idx = [];
     const pane = (x0, z0, x1, z1, y0, y1) => { const b = pos.length / 3; pos.push(x0, y0, z0, x1, y0, z1, x1, y1, z1, x0, y1, z0); idx.push(b, b + 1, b + 2, b, b + 2, b + 3); };
     const bar = (x0, z0, x1, z1, y, h, t = 0.08, color = frame) => { const along = x0 !== x1; piece(room, color, along ? x1 - x0 : t, h, along ? t : z1 - z0, (x0 + x1) / 2, y, (z0 + z1) / 2, { cast: false }); };
@@ -900,7 +900,7 @@ export class OfficeView {
   }
   /** The meeting table, or some crates. The glass round it is one of the plan's walls, see buildWalls. */
   buildMeeting(room, detail, legacy) {
-    const { accent } = this.colors; const m = this.plan.meet;
+    const { primary, accent } = this.colors; const m = this.plan.meet;
     const [tx, tz] = m.table;
     if (m.kind === 'crates') {
       // A door on two crates: the table of every company that started in a garage.

@@ -13,7 +13,7 @@
 #labels .char-tag:has(.speech) { z-index: 9000 !important; }
 
 /* pins */
-.floor-pins { position: absolute; inset: 0; pointer-events: none !important; overflow: hidden; }
+.floor-pins { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 2; }
 .pin { position: absolute; left: 0; top: 0; pointer-events: auto; display: flex; align-items: center; gap: 0; height: 36px; min-width: 36px; padding: 0 9px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .5); background: rgba(24, 26, 38, .72); color: #fff; box-shadow: 0 6px 18px rgba(8, 10, 24, .35); will-change: transform; cursor: pointer; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .pin:hover, .pin:focus-visible { background: var(--brand); gap: 6px; }
 .pin-label { max-width: 0; overflow: hidden; white-space: nowrap; font: 600 12.5px var(--sans); transition: max-width .16s ease; }
@@ -41,7 +41,7 @@
 .floor-scrubber { display: none; }
 
 @media (min-width: 761px) {
-  .floor-top { top: 14px; left: 14px; right: auto; width: 292px; max-height: calc(100% - 92px); padding: 12px 14px 14px; flex-direction: column; gap: 7px; align-items: stretch; overflow-y: auto; border-radius: 20px; }
+  .floor-top { top: 14px; left: 14px; right: auto; width: 268px; max-height: calc(100% - 92px); padding: 12px 14px 14px; flex-direction: column; gap: 7px; align-items: stretch; overflow-y: auto; border-radius: 20px; }
   .floor-top .back { align-self: flex-start; min-height: 30px; padding: 3px 11px; font-size: 12.5px; }
   .floor-title { text-shadow: none; display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: center; pointer-events: auto; }
   .floor-num { grid-column: 1 / -1; margin-bottom: 4px; }
@@ -66,13 +66,13 @@
   .card-project small { color: var(--ink-3); flex: none; }
   .card-actions { display: flex; gap: 7px; margin-top: 4px; }
   .card-actions .btn { min-height: 34px; padding: 5px 13px; font-size: 13px; }
-  .controls { left: 14px; bottom: 16px; max-width: 292px; }
+  .controls { left: 14px; bottom: 16px; max-width: 360px; flex-wrap: nowrap; }
   .controls .btn { padding: 6px 12px; font-size: 13px; min-height: 32px; }
-  .floor-panel { right: 70px; top: 14px; bottom: 16px; width: min(384px, 34vw); }
+  .floor-panel { right: 68px; top: 14px; bottom: 16px; width: clamp(300px, 26vw, 372px); }
   .floor-panel.closed { display: none; }
   .panel-close { display: grid; place-items: center; position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; z-index: 2; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .1); color: var(--ink); font-size: 17px; line-height: 1; cursor: pointer; }
   .panel-close:hover { background: rgba(255, 255, 255, .2); }
-  .staff-strip { padding-right: 42px; }
+  .floor-panel .staff-strip { margin-right: 34px; }
   .talk-pill { display: block; position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 11px 22px; border-radius: 999px; color: var(--ink); font: 600 14.5px var(--sans); cursor: pointer; white-space: nowrap; }
   .talk-pill[hidden] { display: none; }
   .talk-pill:hover { background: var(--brand); }
@@ -108,8 +108,8 @@
   .scrub-btn { width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .1); color: #fff; }
   .scrub-btn:disabled { opacity: .3; }
   .scrub-track, .scrub-name { display: none; }
-  .pin { height: 30px; min-width: 30px; padding: 0 5px; justify-content: center; }
-  .pin::before { content: ''; position: absolute; inset: -7px; }
+  .pin { height: 28px; min-width: 28px; padding: 0 5px; justify-content: center; }
+  .pin::before { content: ''; position: absolute; inset: -8px; }
   .pin-label { display: none; }
   .pin .ico { width: 16px; height: 16px; }
   #labels .char-bubble.speech { max-width: 168px; font-size: 11.5px; padding: 5px 8px; }

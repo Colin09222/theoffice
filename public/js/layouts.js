@@ -114,7 +114,7 @@ export const PLANS = {
       { id: 'kitchen', kind: 'kitchen', label: 'Kitchen', rect: [8.2, -4.6, 11, 4.4], spots: [[9.0, -1.0, Q], [9.0, 0.4, Q], [9.0, -2.4, Q], [9.1, -3.6, Q]] },
       { id: 'lounge', kind: 'lounge', label: 'Lounge', rect: [-5.8, -2.95, 7.2, 2.9], spots: [[-4.4, 0.4, 1.4], [5.8, 0.4, -1.4], [-3.4, -2.3, 0.6], [4.3, -2.3, -0.6], [5.8, 1.9, -1.0]] },
       { id: 'pod-a', kind: 'pod', label: 'Window desks', rect: [-11, -6.8, -2.9, -2.95] },
-      { id: 'pod-b', kind: 'pod', label: 'Window desks', rect: [2.2, -6.8, 11, -4.6] },
+      { id: 'pod-b', kind: 'pod', label: 'Window desks', rect: [2.2, -6.8, 11, -2.95] },
       { id: 'pod-c', kind: 'pod', label: 'Wall desks', rect: [-11, -2.95, -5.8, 6.8] },
       { id: 'pod-d', kind: 'pod', label: 'Front desks', rect: [-3.7, 2.9, 3.7, 6.8] },
     ],
