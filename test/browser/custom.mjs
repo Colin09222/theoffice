@@ -235,25 +235,29 @@ if (!ONLY || ONLY === 'plans') {
         return bad;
       })()`);
       if (seated.length) throw new Error(seated.join('; '));
-      // The meeting: everyone heads for their spot, none of them through furniture, and they get there. Listeners go back to their
-      // desks when they've heard enough, so what counts is how close each of them got, and that all of them sat down again after.
-      const moved = await p.ev(`(() => { const v = window.__office.view; const st = window.__office.state; const mgr = st.agents.find((a) => a.role === 'manager').id; const staff = st.agents.filter((a) => a.role !== 'manager').map((a) => a.id);
-        const spots = v.plan.meet.spots; const near = Object.fromEntries(staff.map((id) => [id, 99]));
-        window.__track = { cut: 0, seen: 0, near, shot: false };
-        window.__trackT = setInterval(() => { staff.forEach((id, i) => { const a = v.actors.get(id); near[id] = Math.min(near[id], Math.hypot(a.group.position.x - spots[i % spots.length][0], a.group.position.z - spots[i % spots.length][1])); });
-          for (const a of v.actors.values()) if (a.path.length) { window.__track.seen++; if (v.nav.isBlocked(a.group.position.x, a.group.position.z) && Math.hypot(a.group.position.x - a.seat.at[0], a.group.position.z - a.seat.at[1]) > 1.3) window.__track.cut++; } }, 50);
-        v.meeting(mgr, staff); return staff.length; })()`);
-      if (moved !== 8) throw new Error(`${moved} staff`);
-      await p.until(`(() => { const t = window.__track; return Object.values(t.near).filter((d) => d < 0.5).length >= 4; })()`, 'people reaching the meeting', 40000);
-      if (OUT) await p.shot(join(OUT, `custom-meeting-${layout}-phone.jpg`));
-      await p.until(`Object.values(window.__track.near).every((d) => d < 0.5) && [...window.__office.view.actors.values()].every((a) => a.seated)`, 'everyone at the meeting and back in their chair', 70000);
-      const track = await p.ev('(clearInterval(window.__trackT), window.__track)');
-      if (!track.seen) throw new Error('nobody was seen walking');
+      // The meeting: everyone heads for their spot, none of them through furniture, and they get there. The room's clock is stepped by
+      // hand here, not left to the renderer, so a slow machine can't make this a test of patience. Listeners go back to their desks when
+      // they've heard enough, so what counts is how close each of them got, and that all of them sat down again after.
+      const sim = (body) => p.ev(`(() => { const v = window.__office.view; const st = window.__office.state; const staff = st.agents.filter((a) => a.role !== 'manager').map((a) => a.id); const spots = v.plan.meet.spots; const T = window.__sim;
+        const seated = () => [...v.actors.values()].every((a) => a.seated && !a.action);
+        const run = (done, most = 240) => { let t = 0; for (; t < most && !done(); t += 0.05) { v.update(0.05); staff.forEach((id, i) => { const a = v.actors.get(id); T.near[id] = Math.min(T.near[id], Math.hypot(a.group.position.x - spots[i % spots.length][0], a.group.position.z - spots[i % spots.length][1])); });
+          for (const a of v.actors.values()) if (a.path.length) { T.seen++; if (v.nav.isBlocked(a.group.position.x, a.group.position.z) && Math.hypot(a.group.position.x - a.seat.at[0], a.group.position.z - a.seat.at[1]) > 1.3) T.cut++; } } return t; };
+        ${body} })()`);
+      await p.ev('window.__sim = { near: Object.fromEntries(window.__office.state.agents.filter((a) => a.role !== "manager").map((a) => [a.id, 99])), cut: 0, seen: 0 }; true');
+      await sim(`v.meeting(st.agents.find((a) => a.role === 'manager').id, staff); run(() => staff.filter((id) => { const a = v.actors.get(id); return !a.path.length && !a.seated; }).length === staff.length || Object.values(T.near).filter((d) => d < 0.5).length >= 7); return true;`);
+      if (OUT) { await sleep(400); await p.shot(join(OUT, `custom-meeting-${layout}-phone.jpg`)); }
+      const after = await sim(`const took = run(() => Object.values(T.near).every((d) => d < 0.5) && seated()); return { took, seated: seated(), near: T.near, cut: T.cut, seen: T.seen, stuck: [...v.actors.values()].filter((a) => !a.seated).map((a) => a.info.name + ' ' + a.char.anim + ' path=' + a.path.length) };`);
+      if (Object.values(after.near).some((d) => d >= 0.5)) throw new Error(`someone never reached their spot: ${JSON.stringify(after.near)}`);
+      if (!after.seated) throw new Error(`still up after ${after.took}s: ${after.stuck.join('; ')}`);
+      if (!after.seen) throw new Error('nobody was seen walking');
       // The grid blocks any cell furniture touches, so brushing a corner on the way past can land in one for a sample or two.
-      if (track.cut > track.seen * 0.02) throw new Error(`people walked through furniture: ${JSON.stringify(track)}`);
+      if (after.cut > after.seen * 0.02) throw new Error(`people walked through furniture: ${after.cut} of ${after.seen} samples`);
       // Every kind of errand, the boss's visit and a handoff, on one person each.
-      await p.ev(`(() => { const v = window.__office.view; const list = [...v.actors.values()].filter((a) => !a.isBoss && !a.isManager); list.slice(0, 5).forEach((a, i) => { const realRandom = Math.random; Math.random = () => (i + 0.5) / 5; a.idleErrand(); Math.random = realRandom; }); v.bossTalks(); v.handoff(list[6].id, v.manager.id); v.cheer(); return true; })()`);
-      await p.until(`[...window.__office.view.actors.values()].every((a) => a.seated)`, 'back after errands', 45000);
+      const back = await sim(`const list = [...v.actors.values()].filter((a) => !a.isBoss && !a.isManager);
+        list.slice(0, 5).forEach((a, i) => { const realRandom = Math.random; Math.random = () => (i + 0.5) / 5; a.idleErrand(); Math.random = realRandom; });
+        v.bossTalks(); v.handoff(list[6].id, v.manager.id); v.cheer();
+        const took = run(() => seated()); return { took, seated: seated(), stuck: [...v.actors.values()].filter((a) => !a.seated || a.action).map((a) => a.info.name + ' ' + a.char.anim + ' path=' + a.path.length) };`);
+      if (!back.seated) throw new Error(`still up after errands: ${back.stuck.join('; ')}`);
     });
   }
   await step(tag('switching the room again and again leaks nothing and loses nobody'), async () => {
