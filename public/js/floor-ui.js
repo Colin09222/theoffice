@@ -99,7 +99,7 @@ class FloorPage {
         h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, 'Customise'));
     } else {
       put(this.controlsEl,
-        h('span.visitor-note', {}, f.filler ? 'A demo company: scripted, fictional, nobody\'s. Watch all you like.' : 'You\'re visiting. Watch all you like.'),
+        h('span.visitor-note', {}, f.filler ? 'A demo company: scripted and fictional. Watch all you like.' : 'You\'re visiting. Watch all you like.'),
         session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'));
     }
   }
