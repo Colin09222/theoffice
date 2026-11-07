@@ -173,8 +173,8 @@ async function run(label, opts, t, adminCode) {
     const spend = await p.ev('window.__office.state.spend.today');
     if (!(spend > 0)) throw new Error('no spend recorded');
     // The boss sees a share of the allowance, never a dollar figure.
-    const label = await p.ev('document.querySelector(".spend").textContent');
-    if (!/^\d+% of today's allowance$/.test(label)) throw new Error(`spend label: ${label}`);
+    const allowance = await p.ev('document.querySelector(".spend").textContent');
+    if (!/^\d+% of today's allowance$/.test(allowance)) throw new Error(`spend label: ${allowance}`);
   });
   await step(tag('purchase requests go to the building manager, with no way to pay from here'), async () => {
     await p.click('[data-tab=requests]');
