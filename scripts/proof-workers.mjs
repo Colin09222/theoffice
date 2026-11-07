@@ -147,6 +147,7 @@ const SCENARIOS = {
   'plan-tap-biz': { plan: true, company: 'Tap Biz', boss: 'Sam', steps: ['Let\'s do a small business. Help me work it out.', 'idk u pick'] },
   // ---- whole jobs ----
   'game-vague': { company: 'Snack Attack', boss: 'Dee', steps: ['make me a game. idk something fun, not too hard', 'u pick'] },
+  'game-dog': { company: 'Doggo Inc', boss: 'Kel', steps: ['i want a game like flappy bird but w my dog lol'] },
   'web-vague': { company: 'Rosa Sweets', boss: 'Tony', steps: ['need a website for my moms bakery', 'its called rosas. in queens. she does cakes mostly, birthday and quinceañera stuff. no prices yet, ppl should just call or ask. i dont have her number on me so leave it out for now'] },
   'biz-vague': { company: 'Good Boy', boss: 'Ana', steps: ['dog walking biz in austin, can u figure it out', 'sure go'] },
 };
