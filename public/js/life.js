@@ -8,6 +8,8 @@ const QUEUE_MAX = 3;    // lines someone can have waiting to act out; beyond tha
 const HOLD_ASSIGN = 0.9;  // a batch of assignments waits this long, in room time, for the meeting that usually follows it
 const CARRIES = new Set(['assign', 'handoff', 'findings', 'review']);
 
+/** The server's talk events carry what's happening in `kind` and the old, finer detail in `beat`. Older events only have `kind`. */
+const beatOf = (ev) => ev.beat || ev.kind;
 export const readingTime = (text) => Math.max(READ_MIN, Math.min(READ_MAX, String(text).length / CHARS_PER_SEC));
 
 /**
@@ -47,7 +49,8 @@ export class FloorLife {
     const speaker = this.people.get(ev.from);
     if (!speaker) return;
     this.seen.add(`${ev.from}>${ev.to}`);
-    if (ev.kind === 'assign' || ev.kind === 'plan') { this.held.push(ev); this.holdUntil = this.view.time + HOLD_ASSIGN; return; }
+    const beat = beatOf(ev);
+    if (beat === 'assign' || beat === 'plan') { this.held.push(ev); this.holdUntil = this.view.time + HOLD_ASSIGN; return; }
     this.enqueue(ev);
   }
   enqueue(ev) {
@@ -56,13 +59,13 @@ export class FloorLife {
     while (q.length > QUEUE_MAX) q.shift();
     this.queues.set(ev.from, q);
     // Whatever they are doing now, they have the paper in their hand until they get to hand it over.
-    const paper = CARRIES.has(ev.kind) && this.people.get(ev.from)?.char?.paper;
+    const paper = CARRIES.has(beatOf(ev)) && this.people.get(ev.from)?.char?.paper;
     if (paper) paper.visible = true;
   }
   /** Someone finished a scene or a step list and is free for the next line. */
   release(actor) { this.view.claims.delete(actor); }
   update() {
-    if (this.held.length && this.view.time >= this.holdUntil) { for (const ev of this.held) if (ev.to || ev.kind === 'plan') this.enqueue(ev); this.held = []; }
+    if (this.held.length && this.view.time >= this.holdUntil) { for (const ev of this.held) if (ev.to || beatOf(ev) === 'plan') this.enqueue(ev); this.held = []; }
     for (const [id, q] of this.queues) {
       if (!q.length) { this.queues.delete(id); continue; }
       const a = this.people.get(id);
@@ -76,18 +79,40 @@ export class FloorLife {
     const to = ev.to ? this.people.get(ev.to) : null;
     const steps = [];
     const hold = readingTime(ev.text);
-    if (to && to !== a && backlog < 2) {
+    const small = ev.kind === 'small' || ev.kind === 'banter';
+    // Already standing close by (an answer to someone who came over to ask): said where they are, no walk.
+    const beside = to && !to.seated && Math.hypot(to.group.position.x - a.group.position.x, to.group.position.z - a.group.position.z) < 3.2;
+    // A meeting line is said in the meeting room, and banter often over the kettle. Whoever it's for comes too, if they're free.
+    if (to && to !== a && backlog < 2 && !beside && (ev.kind === 'meeting' || (ev.kind === 'banter' && Math.random() < 0.5)) && this.together(a, to, ev, hold, small)) return;
+    if (to && to !== a && backlog < 2 && !beside) {
       const near = to.seated ? to.seat : { at: [to.group.position.x, to.group.position.z] };
       const spot = this.view.visitSpot(near, a);
       this.view.claims.set(a, spot.at);
-      if (CARRIES.has(ev.kind)) steps.push({ anim: 'stand', hold: 0.15, paper: true });
+      if (CARRIES.has(beatOf(ev))) steps.push({ anim: 'stand', hold: 0.15, paper: true });
       steps.push({ walk: spot.at });
-      steps.push({ anim: 'talk', say: ev.text, to: ev.to, hold, paper: false, small: ev.kind === 'small' });
-      steps.push({ anim: 'stand', hold: 0.5 });
+      steps.push({ anim: 'talk', say: ev.text, to: ev.to, hold, paper: false, small });
+      // Someone who asked a question waits a moment for the answer before heading back.
+      steps.push({ anim: ev.kind === 'ask' ? 'listen' : 'stand', hold: ev.kind === 'ask' ? 3.5 : 0.5 });
     } else {
-      steps.push({ say: ev.text, to: ev.to, hold, paper: false, small: ev.kind === 'small' });
+      steps.push({ say: ev.text, to: ev.to, hold, paper: false, small });
     }
     a.perform(steps, { scene: true });
+  }
+  /** Two people walk to a shared room and the line is said there. False when there's nowhere free, or the listener is in the middle of something. */
+  together(a, to, ev, hold, small) {
+    if (to.action || to.scene || to.state !== 'idle') return false;
+    const room = ev.kind === 'meeting' ? null : (this.view.decor.coffee ? 'kitchen' : 'lounge');
+    const taken = [...this.view.claims.entries()].filter(([who]) => who !== a && who !== to).map(([, c]) => c);
+    const open = (list) => list.filter((p) => taken.every((c) => Math.hypot(c[0] - p[0], c[1] - p[1]) > 0.8));
+    const spots = room ? open(roomOfKind(this.view.plan, room)?.spots || []) : open(this.view.plan.meet.spots);
+    if (spots.length < 2) return false;
+    const [sa, sb] = spots;
+    this.view.claims.set(a, [sa[0], sa[1]]); this.view.claims.set(to, [sb[0], sb[1]]);
+    const face = (p, q) => Math.atan2(q[0] - p[0], q[1] - p[1]);
+    const there = () => !to.path.length && Math.hypot(to.group.position.x - sb[0], to.group.position.z - sb[1]) < 1.2;
+    a.perform([{ walk: sa }, { anim: 'stand', hold: 26, until: there, face: face(sa, sb) }, { anim: 'talk', say: ev.text, to: ev.to, hold, small, face: face(sa, sb) }, { anim: 'stand', hold: 0.5 }], { scene: true });
+    to.perform([{ walk: sb }, { anim: 'listen', hold: 26 + hold, until: () => !a.scene, face: face(sb, sa) }], { scene: true });
+    return true;
   }
   /** A paper handed over with no words attached: filler floors and old events. Skipped when the words already covered it. */
   handoff(fromId, toId) {
@@ -111,7 +136,7 @@ export class FloorLife {
     const crew = staffIds.map((id) => this.people.get(id)).filter(Boolean);
     const cx = spots.reduce((n, p) => n + p[0], 0) / spots.length, cz = spots.reduce((n, p) => n + p[1], 0) / spots.length;
     const toTeam = Math.atan2(cx - stand[0], cz - stand[1]);
-    const toBoard = Math.atan2(this.view.plan.board - stand[0], -6.8 - stand[1]);
+    const toBoard = Math.atan2(this.view.plan.board - stand[0], this.view.plan.boardZ - stand[1]);
     let over = false;
     const here = (a, at) => a.dead || (!a.path.length && Math.hypot(a.group.position.x - at[0], a.group.position.z - at[1]) < 1.2);
     const places = crew.map((a, i) => [a, spots[i % spots.length]]);
@@ -119,7 +144,7 @@ export class FloorLife {
     const talkTime = lines.reduce((n, e) => n + readingTime(e.text), 0) || 6;
     const finish = { run: () => { over = true; } };
     if (m) {
-      const steps = [{ walk: stand }, { anim: 'stand', hold: 14, until: gathered, face: toTeam }];
+      const steps = [{ walk: stand }, { anim: 'stand', hold: 26, until: gathered, face: toTeam }];
       if (lines.length) for (const e of lines) steps.push({ anim: 'talk', say: e.text, to: e.to, hold: readingTime(e.text), face: toTeam });
       else steps.push({ anim: 'talk', hold: 2.4, face: toTeam }, { anim: 'talk', hold: 1.6, face: toBoard }, { anim: 'talk', hold: 2.0, face: toTeam });
       steps.push(finish);
@@ -127,7 +152,7 @@ export class FloorLife {
     } else over = true;
     for (const [a, sp] of places) {
       const face = Math.atan2(stand[0] - sp[0], stand[1] - sp[1]);
-      a.perform([{ walk: sp }, { anim: 'listen', hold: 16 + talkTime, until: () => over, face }], { scene: true });
+      a.perform([{ walk: sp }, { anim: 'listen', hold: 30 + talkTime, until: () => over, face }], { scene: true });
     }
   }
 
@@ -154,6 +179,7 @@ export class FloorLife {
     if (plant) options.push(() => a.perform([{ walk: [plant[0] + plant[2], plant[1] + plant[3]] }, { anim: 'pour', hold: 3, face: Math.atan2(-plant[2], -plant[3]) }], { offDuty: true }));
     options.push(() => a.perform([{ walk: [L.shelf[0] + 1.0, L.shelf[1] + (Math.random() - 0.5) * 1.5] }, { anim: 'listen', hold: 2.5, face: -Math.PI / 2 }], { offDuty: true }));
     options.push(() => this.chat(a) || this.go(a, kitchen || lounge, kitchen ? 'sip' : 'phone', 6));
+    for (let i = 0; i < 2; i++) options.push(() => this.visit(a) || this.chat(a) || this.go(a, kitchen || lounge, kitchen ? 'sip' : 'phone', 6));
     options.push(() => a.perform([{ anim: 'stretch', hold: 2.4 }]));
     const pick = options[Math.floor(Math.random() * options.length)];
     pick();
@@ -162,6 +188,20 @@ export class FloorLife {
     if (!spot) { a.perform([{ anim: 'stretch', hold: 2.4 }]); return; }
     this.view.claims.set(a, [spot[0], spot[1]]);
     a.perform([{ walk: [spot[0], spot[1]] }, { anim, hold, face: spot[2] ?? 0 }], { offDuty: true });
+  }
+  /** Dropping in on a colleague: over to their office for a word, and they answer from their desk. Returns false when nobody is in. */
+  visit(a) {
+    if (a.isBoss) return false;
+    const free = [...this.people.values()].filter((o) => o !== a && !o.isBoss && o.seated && o.state === 'idle' && !o.action && !o.scene);
+    const b = free[Math.floor(Math.random() * free.length)];
+    if (!b) return false;
+    const spot = this.view.visitSpot(b.seat, a);
+    this.view.claims.set(a, spot.at);
+    const [one, two] = SMALL_TALK[Math.floor(Math.random() * SMALL_TALK.length)];
+    const log = (who, to, text) => this.onSmallTalk?.({ from: who.id, to: to.id, fromName: who.info.name, toName: to.info.name, text, kind: 'small', ts: Date.now() });
+    const reply = () => { if (!b.dead && !b.action && !b.scene && b.state === 'idle') { log(b, a, two); b.perform([{ say: two, to: a.id, small: true, hold: readingTime(two) }], { offDuty: true }); } };
+    a.perform([{ walk: spot.at }, { run: () => log(a, b, one) }, { anim: 'talk', say: one, to: b.id, small: true, hold: readingTime(one), face: spot.face }, { run: reply }, { anim: 'listen', hold: readingTime(two) + 0.6, face: spot.face }], { offDuty: true });
+    return true;
   }
   /** Two free people meet in the kitchen or the lounge for a word. Returns false when nobody is free to talk to. */
   chat(a) {
@@ -183,7 +223,7 @@ export class FloorLife {
     const alone = () => !together;  // called back to work before they met: nobody is left talking to thin air
     const facing = (p, q) => Math.atan2(q[0] - p[0], q[1] - p[1]);
     const log = (who, to, text) => ({ unless: alone, run: () => this.onSmallTalk?.({ from: who.id, to: to.id, fromName: who.info.name, toName: to.info.name, text, kind: 'small', ts: Date.now() }) });
-    const wait = 14;
+    const wait = 26;
     a.perform([{ walk: [sa[0], sa[1]] }, { anim: 'stand', hold: wait, until: met, face: facing(sa, sb) }, log(a, b, one), { unless: alone, anim: 'talk', say: one, to: b.id, small: true, hold: readingTime(one), face: facing(sa, sb) }, { unless: alone, anim: 'sip', hold: readingTime(two) + 1.5, face: facing(sa, sb) }], { offDuty: true });
     b.perform([{ walk: [sb[0], sb[1]] }, { anim: 'stand', hold: wait, until: met, face: facing(sb, sa) }, { unless: alone, anim: 'sip', hold: readingTime(one), face: facing(sb, sa) }, log(b, a, two), { unless: alone, anim: 'talk', say: two, to: a.id, small: true, hold: readingTime(two), face: facing(sb, sa) }, { unless: alone, anim: 'stand', hold: 1.2, face: facing(sb, sa) }], { offDuty: true });
     return true;

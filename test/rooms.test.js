@@ -96,8 +96,10 @@ for (const [id, plan] of Object.entries(PLANS)) {
       for (const to of [plan.meet.stand, ...plan.meet.spots]) assert.ok(nav.reachable(from[0], from[1], to[0], to[1]), `the meeting at ${to}`);
       // Hiring past the number of rooms: each extra person gets a second desk in an office, and nobody gets shut in.
       const full = navFor(plan, f);
-      for (let i = 12; i < 24; i++) full.block(...deskRect(seatSpot(plan, i)));
-      for (let i = 0; i < 24; i++) { const a = seatOf(seatSpot(plan, i)).at; assert.ok(full.reachable(from[0], from[1], a[0], a[1]), `seat ${i} at ${a}`); }
+      const seats = 12 + plan.shared.length;
+      assert.ok(plan.shared.length >= 4, 'room for more hires than offices');
+      for (let i = 12; i < seats; i++) full.block(...deskRect(seatSpot(plan, i)));
+      for (let i = 0; i < seats; i++) { const a = seatOf(seatSpot(plan, i)).at; assert.ok(full.reachable(from[0], from[1], a[0], a[1]), `seat ${i} at ${a}`); }
     });
     test('each pair of rooms is joined: people can walk between them, door by door', () => {
       const nav = navFor(plan, { coffee: true, arcade: true, plants: 8, staffCount: 12 });

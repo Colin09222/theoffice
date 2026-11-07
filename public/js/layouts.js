@@ -76,7 +76,7 @@ function make(def) {
       room.wall = spec.wall || OPPOSITE[spec.door];
       const d = deskIn(rect, room.wall, kind === 'office');
       room.desk = d;
-      if (kind === 'staff') { plan.desks.push(d); plan.shared ||= []; plan.shared.push(sharedDesk(room)); } else plan[id] = d;
+      if (kind === 'staff') { plan.desks.push(d); plan.shared ||= []; const half = (SIDES[room.wall].n[0] ? z1 - z0 : x1 - x0) / 2; if (half >= 2) plan.shared.push(sharedDesk(room)); } else plan[id] = d;
     }
     if (kind === 'meeting') { plan.meet = meetingFor(rect, spec); plan.board = plan.meet.table[0]; plan.boardZ = z0 + 0.12; }
     if (kind === 'kitchen') {
@@ -102,7 +102,7 @@ function make(def) {
     }
   }
   plan.console = null;
-  plan.rugs ||= []; plan.art ||= [[-3, 3.4, 1.5, 1.15], [3, 3.4, 1.4, 1.1]];
+  plan.rugs ||= []; plan.art ||= [[-7.5, 3.4, 1.5, 1.15], [7, 3.4, 1.4, 1.1]];
   delete plan.names;
   return plan;
 }
