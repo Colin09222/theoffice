@@ -114,7 +114,7 @@ describe('when a provider reaches its total', () => {
     assert.equal(get(t.db, 'SELECT manager_wake w FROM floors WHERE id=?', floor.id).w, 1, 'the manager is still owed a turn');
     t.cfg.budgetAnthropicUsd = 60;
     await until(async () => { const x = await floorState(c); return !x.floor.outOfBudget && seen.length > 0; }, { what: 'the work to resume' });
-    assert.match(notices(t, floor).at(-1), /budget again/); assert.doesNotMatch(notices(t, floor).at(-1), /\d/);
+    assert.match(notices(t, floor).at(-1), /back at work/); assert.doesNotMatch(notices(t, floor).at(-1), /\d/);
     await waitDone(c);
   });
   test('a role on the other provider keeps working while the Anthropic roles wait', async () => {
@@ -281,7 +281,7 @@ describe('across a restart', () => {
 
       t = await up({ budgetAnthropicUsd: 30, ...NO_DAILY }, { llm: recording(seen) });
       await until(() => seen.length > 0, { what: 'work to resume on the new limit' });
-      await until(() => /budget again/.test(notices(t, floor).at(-1)), { what: 'the boss to hear' });
+      await until(() => /back at work/.test(notices(t, floor).at(-1)), { what: 'the boss to hear' });
       await t.close();
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
