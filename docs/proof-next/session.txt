@@ -1,0 +1,20 @@
+PASS the session was capped to what is left of the limit (20 cents on a limit of 20)
+PASS it stopped at the limit, and the task waits rather than fails (todo)
+PASS the boss hears once, with no figures (Boss, the building is out of budget, so work has stopped and everything is saved. Please ask the owner about it. We'll carry on by ourselves as soon as that is sorted.)
+PASS the overrun is small (0.2025 on a limit of 0.2)
+PASS nothing is left held
+PASS no figure in what the boss gets ({"figures":[],"fields":[]})
+PASS the admin sees it stopped ({"spentUsd":0.2025,"heldUsd":0,"limitUsd":0.2,"remainingUsd":0,"percent":101.2,"flag":"100%","stopped":true})
+PASS raising the limit carried on in the same session (review)
+PASS it finished (I've built the Biscuit site and published it. It goes live when this turn ends, at http://biscuit--small-computer.apps.localhost:18098/
+
+**What's on it:**
+- **P)
+PASS the boss is told it is back
+PASS the work was saved and published
+
+spent {"anthropic":0.2915,"openrouter":0.0072}
+
+boss's notices:
+Boss, the building is out of budget, so work has stopped and everything is saved. Please ask the owner about it. We'll carry on by ourselves as soon as that is sorted.
+Good news, boss: the building has budget again, so we're back at work.

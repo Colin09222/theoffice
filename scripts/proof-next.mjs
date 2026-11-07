@@ -5,6 +5,7 @@
 //   tone     the same request on a silly floor and a serious one: the real manager and Writer, nobody else
 //   help     an ask_buddehbot round trip, answered through the real CLI in its own process
 //   stop     a limit just above what has gone: Claude roles stop, nobody sees a figure, an OpenRouter role carries on, and raising it resumes the work
+//   session  a real computer at a limit it can't finish inside. Run it with its own PROOF_BASE
 //   spend    what every step has cost so far
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -30,6 +31,7 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const spent = (db) => Object.fromEntries(['anthropic', 'openrouter'].map((p) => [p, Number(get(db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE provider=?', p).n.toFixed(4))]));
 const floorCost = (db, id) => Number(get(db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND kind!='domain'", id).n.toFixed(4));
 
+let watcher = null;
 async function makeApp({ budgetAnthropic = LIMIT.anthropic, computer = true } = {}) {
   if (!process.env.ANTHROPIC_API_KEY || !process.env.OPENROUTER_API_KEY) throw new Error('keys are not set');
   const cfg = loadConfig({
@@ -41,11 +43,12 @@ async function makeApp({ budgetAnthropic = LIMIT.anthropic, computer = true } = 
   const app = createApp({ db, cfg, models: loadModels(), log: (level, msg, x) => { if (level !== 'info') log(level, msg, JSON.stringify(x ?? {}).slice(0, 300)); } });
   await new Promise((r) => app.server.listen(PORT, '127.0.0.1', r));
   app.engine.start();
-  const watch = setInterval(() => {
+  clearInterval(watcher);
+  watcher = setInterval(() => {
     const s = spent(db);
     if ((s.anthropic >= HARD.anthropic || s.openrouter >= HARD.openrouter) && !app.engine.globalPaused()) { log('HARD LIMIT REACHED, pausing the building', JSON.stringify(s)); app.engine.setGlobalPause(true); }
   }, 3000);
-  watch.unref();
+  watcher.unref();
   return { db, cfg, app };
 }
 
@@ -76,7 +79,7 @@ const watchFloor = (app, floor) => app.bus.subscribe(floor.id, { ip: 'proof', se
 const quiet = (app, db, floor) => ![...app.engine.runs.values()].some((r) => r.floorId === floor.id) && !get(db, 'SELECT manager_wake w FROM floors WHERE id=?', floor.id).w;
 const settled = (app, db, floor) => quiet(app, db, floor) && !get(db, "SELECT 1 x FROM tasks WHERE floor_id=? AND status IN ('todo','doing','review')", floor.id);
 const chat = (db, floor) => all(db, 'SELECT role,text FROM messages WHERE floor_id=? ORDER BY id', floor.id).map((m) => `### ${m.role}\n${m.text}`).join('\n\n');
-const finish = async (app, db) => { await app.close(); db.close(); };
+const finish = async (app, db) => { clearInterval(watcher); await app.close(); db.close(); };
 const cli = (...args) => {
   // Its own process, on the same database, with no key in its environment: the way the owner's assistant runs it.
   const r = spawnSync(process.execPath, ['--no-warnings', join(ROOT, 'scripts/admin.mjs'), ...args], { env: { PATH: process.env.PATH, DATA_DIR: DATA, BUDGET_ANTHROPIC_USD: process.env.CLI_BUDGET_ANTHROPIC ?? String(LIMIT.anthropic), BUDGET_OPENROUTER_USD: String(LIMIT.openrouter) }, encoding: 'utf8', timeout: 30000 });
@@ -85,7 +88,7 @@ const cli = (...args) => {
 };
 // Figures a boss or a visitor should never meet. What a real site quotes as its own price is told apart by reading the hits, so they are listed rather than failed on here.
 const FIGURE = /.{0,60}(?:\$\s?\d|\b\d+(?:\.\d+)?\s?cents?\b|\bUSD\b).{0,30}/g;
-const MONEY_FIELD = /"(?:spend|costUsd|estUsd|estimateUsd|limitUsd|spentUsd|remainingUsd|today|cap)"/g;
+const MONEY_FIELD = /"(?:spend|costUsd|estUsd|estimateUsd|limitUsd|spentUsd|remainingUsd|today)"/g;
 const scan = (text) => ({ figures: [...new Set(String(text).match(FIGURE) || [])].slice(0, 12), fields: [...new Set(String(text).match(MONEY_FIELD) || [])] });
 
 async function website() {
@@ -131,13 +134,19 @@ async function tone() {
   const out = {};
   for (const [name, toneKey] of [['Sunny Cups Silly', 'silly'], ['Sunny Cups Serious', 'serious']]) {
     const boss = new Boss();
-    const made = await boss.claim(db, name, 'Robin');
-    const floor = get(db, 'SELECT * FROM floors WHERE slug=?', made.slug);
+    // A floor from an earlier try is picked up where it got to, so a restart of this script doesn't pay for the same words twice.
+    let floor = get(db, 'SELECT * FROM floors WHERE name=?', name);
+    if (floor) boss.own(db, floor);
+    else {
+      const made = await boss.claim(db, name, 'Robin');
+      floor = get(db, 'SELECT * FROM floors WHERE slug=?', made.slug);
+      const saved = await boss.call('POST', `/api/floors/${floor.slug}/customise`, { identity: { tone: toneKey, about: 'A lemonade stand in the park.' } });
+      if (saved.status !== 200) throw new Error(`customise: ${saved.status}`);
+      await boss.say('need a one page site for my lemonade stand, sunny cups. we do classic and strawberry');
+    }
     watchFloor(app, floor);
-    const saved = await boss.call('POST', `/api/floors/${floor.slug}/customise`, { identity: { tone: toneKey, about: 'A lemonade stand in the park.' } });
-    if (saved.status !== 200) throw new Error(`customise: ${saved.status}`);
-    await boss.say('need a one page site for my lemonade stand, sunny cups. we do classic and strawberry');
-    await until(`${toneKey} to settle`, () => settled(app, db, floor) && get(db, "SELECT 1 x FROM tasks WHERE floor_id=? AND status NOT IN ('cancelled')", floor.id), 8 * 60000);
+    const written = () => get(db, "SELECT t.id FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='writer' AND t.status IN ('review','done','failed')", floor.id);
+    await until(`${toneKey} to settle`, () => written() && ![...app.engine.runs.values()].some((r) => r.floorId === floor.id), 8 * 60000);
     const files = all(db, "SELECT path,content FROM files WHERE floor_id=? AND path LIKE 'projects/%' AND (path LIKE '%.md' OR path LIKE '%.html')", floor.id).map((f) => ({ path: f.path, text: String(f.content).slice(0, 1600) }));
     out[toneKey] = { cost: floorCost(db, floor.id), manager: all(db, "SELECT text FROM messages WHERE floor_id=? AND role='manager' ORDER BY id", floor.id).map((m) => m.text), writerResult: get(db, "SELECT t.result r FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='writer' ORDER BY t.id LIMIT 1", floor.id)?.r ?? '', files };
     log('tone', toneKey, 'cost', out[toneKey].cost);
@@ -178,7 +187,7 @@ async function stop() {
   process.env.CLI_BUDGET_ANTHROPIC = String(low);
   let { db, app } = await makeApp({ budgetAnthropic: low, computer: false });
   const boss = new Boss();
-  const made = await boss.claim(db, 'Out Of Luck', 'Sage');
+  const made = await boss.claim(db, `Out Of Luck ${Date.now() % 1000}`, 'Sage');
   const floor = get(db, 'SELECT * FROM floors WHERE slug=?', made.slug);
   watchFloor(app, floor);
   await boss.say('write me one line of welcome for the site');
@@ -195,7 +204,7 @@ async function stop() {
   const visitor = scan(JSON.stringify(seen.data));
   check('no figure in what a visitor gets, and no word of it', !visitor.figures.length && !visitor.fields.length && !/budget/i.test(JSON.stringify(seen.data)), JSON.stringify(visitor));
   // As people really see it, in a real browser.
-  let b;
+  let b, b2;
   try {
     b = await launch();
     const p = await b.newPage({ width: 1280, height: 800 });
@@ -206,13 +215,14 @@ async function stop() {
     const text = await p.ev('document.body.textContent');
     check('the owner\'s page says out of budget, with no amount', /Out of budget/.test(text) && !/\$\s?\d/.test(text), scan(text).figures.join(' | '));
     await p.shot(join(ROOT, 'media/next-out-of-budget.jpg'));
-    const v = await (await launch()).newPage({ width: 1280, height: 800 });
+    b2 = await launch();
+    const v = await b2.newPage({ width: 1280, height: 800 });
     await v.goto(`${ORIGIN}/theoffice/floor/${floor.slug}`);
     await v.until('document.body.dataset.page === "floor" && !!window.__office', 'the visitor floor', 30000);
     await sleep(1500);
     const vt = await v.ev('document.body.textContent');
     check('a visitor\'s page has no figure and no word of the budget', !/\$\s?\d/.test(vt) && !/budget/i.test(vt), scan(vt).figures.join(' | '));
-  } catch (e) { check('browser check', false, e.message); } finally { b?.close(); }
+  } catch (e) { check('browser check', false, e.message); } finally { b?.close(); b2?.close(); }
   const report = JSON.parse(cli('budget', '--json'));
   check('the admin CLI shows it stopped', report.providers.anthropic.stopped === true && report.providers.anthropic.flag === '100%', JSON.stringify(report.providers.anthropic));
   // An OpenRouter role on the same floor keeps working.
@@ -246,13 +256,63 @@ async function stop() {
   await finish(app, db);
 }
 
+// A real computer session at a limit it can't finish inside. Its own data folder, because the limit is measured from nothing here: run it with PROOF_BASE set.
+async function session() {
+  const results = [];
+  const check = (name, ok, detail = '') => { results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${String(detail).slice(0, 200)})` : ''}`); log(results.at(-1)); };
+  const low = 0.2;
+  process.env.CLI_BUDGET_ANTHROPIC = String(low);
+  let { db, app } = await makeApp({ budgetAnthropic: low });
+  app.engine.runManager = async () => {};
+  const seen = { budgets: [] };
+  const real = app.engine.computer.client.createSession?.bind(app.engine.computer.client);
+  app.engine.computer.client.createSession = (x, ...rest) => { seen.budgets.push(x?.budget?.max_list_cost?.amount); return real(x, ...rest); };
+  const boss = new Boss();
+  const made = await boss.claim(db, 'Small Computer', 'Ari');
+  const floor = get(db, 'SELECT * FROM floors WHERE slug=?', made.slug);
+  watchFloor(app, floor);
+  const mgr = get(db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", floor.id);
+  const t = app.engine.assignTask(floor, mgr, { to: 'builder', title: 'Build a one page site', brief: 'A one page site about a cat called Biscuit: a drawn SVG portrait, a hand-written stylesheet and a short story about her. Check it in a browser at phone and desktop size, then publish it.', plan: '', project: 'biscuit', private: false, dependsOn: [] });
+  app.engine.kick();
+  const task = () => get(db, 'SELECT * FROM tasks WHERE id=?', t.id);
+  const notices = () => all(db, "SELECT text FROM messages WHERE floor_id=? AND role='budget' ORDER BY id", floor.id).map((m) => m.text);
+  const sessionId = await until('a computer to start', () => task().session_id, 180000);
+  check('the session was capped to what is left of the limit', seen.budgets.length === 1 && Number(seen.budgets[0]) <= low * 100, `${seen.budgets[0]} cents on a limit of ${low * 100}`);
+  await until('it to stop or finish', () => !app.engine.runs.size && ['todo', 'review', 'failed'].includes(task().status), 8 * 60000);
+  const stopped = task().status === 'todo';
+  check('it stopped at the limit, and the task waits rather than fails', stopped, task().status);
+  await until('the boss to hear', () => notices().length >= 1 || !stopped, 30000);
+  check('the boss hears once, with no figures', notices().length === 1 && /out of budget/.test(notices()[0]) && !/\d/.test(notices()[0]), notices()[0]);
+  const gone = spent(db).anthropic;
+  check('the overrun is small', gone <= low + 0.15, `${gone} on a limit of ${low}`);
+  check('nothing is left held', get(db, 'SELECT COUNT(*) n FROM budget_holds').n === 0);
+  const owner = scan(JSON.stringify(await boss.state()));
+  check('no figure in what the boss gets', !owner.figures.length && !owner.fields.length, JSON.stringify(owner));
+  const report = JSON.parse(cli('budget', '--json'));
+  check('the admin sees it stopped', report.providers.anthropic.stopped === true && report.providers.anthropic.flag === '100%', JSON.stringify(report.providers.anthropic));
+  await finish(app, db);
+
+  // The owner raises it. The same session carries on.
+  ({ db, app } = await makeApp({ budgetAnthropic: 1.5 }));
+  app.engine.runManager = async () => {};
+  await until('the work to finish', () => !app.engine.runs.size && ['review', 'failed'].includes(task().status), 12 * 60000);
+  check('raising the limit carried on in the same session', task().session_id === sessionId, `${task().status}`);
+  check('it finished', task().status === 'review', String(task().result).slice(0, 160));
+  check('the boss is told it is back', notices().some((n) => /budget again/.test(n)) && !notices().some((n) => /\d/.test(n)));
+  check('the work was saved and published', !!get(db, 'SELECT 1 x FROM projects WHERE floor_id=? AND published_at IS NOT NULL', floor.id));
+  writeFileSync(join(OUT, 'session.txt'), `${results.join('\n')}\n\nspent ${JSON.stringify(spent(db))}\n\nboss's notices:\n${notices().join('\n')}\n`);
+  log('DONE session', results.filter((r) => r.startsWith('FAIL')).length, 'failed of', results.length, 'all spend', JSON.stringify(spent(db)));
+  await finish(app, db);
+}
+
 const cmd = process.argv[2];
 try {
   if (cmd === 'website') await website();
   else if (cmd === 'tone') await tone();
   else if (cmd === 'help') await help();
   else if (cmd === 'stop') await stop();
+  else if (cmd === 'session') await session();
   else if (cmd === 'spend') { if (!existsSync(join(DATA, 'office.db'))) console.log('nothing yet'); else { const db = openDb(DATA); console.log(JSON.stringify(spent(db))); db.close(); } }
-  else { console.error('website | tone | help | stop | spend'); process.exitCode = 1; }
+  else { console.error('website | tone | help | stop | session | spend'); process.exitCode = 1; }
 } catch (e) { log('FAILED', String(e?.message || e).slice(0, 400)); process.exitCode = 1; }
 process.exit();

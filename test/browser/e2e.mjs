@@ -487,6 +487,7 @@ async function runAdmin(t) {
     await step(tag('login refuses a wrong password, then accepts the right one'), async () => {
       await p.goto(`${base}/admin`);
       await p.until('document.querySelector(".admin-login input") !== null', 'admin login');
+      await p.until('document.documentElement.classList.contains("ready")', 'the curtain to lift', 2000);
       await p.type('.admin-login input', 'wrong password');
       await p.click('.admin-login button');
       await p.until('(() => { const e = document.querySelector(".form-error"); return e && !e.hidden; })()', 'error');
@@ -521,10 +522,10 @@ async function runAdmin(t) {
       await p.type('.modal textarea', 'Use the second checker.');
       await p.click('.modal button[type=submit]');
       await p.until(`document.querySelector('.help-line [data-help="${row}"]') === null`, 'it leaves the list');
-      await until(async () => { const r = await new Client(t).get(`/api/floors/${slug}`); return r.data.helpWaiting === 0; });
+      await until(async () => { const r = await new Client(t).get(`/api/floors/${slug}`); return r.data.helpWaiting === 0; }, { what: 'nothing left waiting' });
       const { get } = await import('../../server/db.js');
       const floor = get(t.db, 'SELECT id FROM floors WHERE slug=?', slug);
-      await until(() => get(t.db, "SELECT 1 x FROM messages WHERE floor_id=? AND role='help' AND text LIKE '%Use the second checker%'", floor.id) && get(t.db, "SELECT 1 x FROM messages WHERE floor_id=? AND role='manager' AND text LIKE '%Thanks to buddehbot%'", floor.id));
+      await until(() => get(t.db, "SELECT 1 x FROM messages WHERE floor_id=? AND role='help' AND text LIKE '%Use the second checker%'", floor.id) && get(t.db, "SELECT 1 x FROM messages WHERE floor_id=? AND role='manager' AND text LIKE '%Thanks to buddehbot%'", floor.id), { what: 'the guidance and the manager\'s thanks' });
     });
     await step(tag('issues a code that really opens a floor'), async () => {
       await p.click('.admin-actions .btn.primary');

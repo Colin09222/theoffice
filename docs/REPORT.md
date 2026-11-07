@@ -356,6 +356,41 @@ Two test changes follow from the no-dollars rule: the spend label is gone, and a
 - **Brotli depends on the proxy in front** passing `content-encoding` through. Check it after deploying (see `docs/DEPLOY-LOOK.md`).
 - **Not measured:** real network timings (all of this ran on localhost) and memory on a phone.
 
+## office-next: everything merged (not deployed)
+`lanes`, then `ultra-workers`, then `ultra-custom`, then `ultra-look`, each section above still describing its own part. `docs/WORKERS.md` has the staff-quality work. `floors2` was started later and isn't in here. How to ship it: `docs/DEPLOY-NEXT.md`.
+
+**What the merge had to decide or fix.**
+- **The go-ahead.** `lanes` said no work starts until the boss says go. `ultra-workers` made the request itself the go-ahead. They can't both hold, so the merge keeps `ultra-workers`: it is the later decision, made after real runs. The lanes playbooks' own "answering is not a go" wording went with it.
+- **Money in new UI and new prompts.** `ultra-look` showed bosses "12% of today's allowance", which is a spend figure, so it came out. `ultra-workers` told computers they were "nearly out of budget", which now reads "your time on this computer is nearly up". `ultra-custom`'s settings block mentioned budgets, and no longer does. The leak test now scans prompts on a customised floor too.
+- **Old figures said in words.** The first-boot cleanup only looked for a dollar sign, so the very sentence that started this ("we have spent about 5 cents") would have survived and replayed to the model. It now catches amounts in words, removes cost fields from stored events, and covers questions and help requests. The lanes worker who wrote the first version flagged this in its handoff.
+- **A blocked admin page.** `ultra-look`'s loading curtain waited for a 3D scene to paint, and the admin page has none, so it covered the login form for about three seconds. It now lifts at once there.
+- **A hanging test browser.** A headless Chrome that dies mid-run used to hang the whole suite forever. It now fails the step. This came up because something outside this work killed the browser during a run, most likely another worker's cleanup between its own runs.
+
+**A slip worth knowing about.** The lanes worker was reported as crashed, but its process was still alive and editing `test/budget.test.js` in the main checkout while this work began there, and its line collided with one of mine. It stopped and handed over once it noticed, and this work moved to its own worktree, `../theoffice-next`. Nothing was lost. Its last edit that matters, the "a hold exists" test, is kept.
+
+### Real check on the merged code
+`scripts/proof-next.mjs`, on real Claude, real Managed Agents computers and real OpenRouter. Outputs are in `docs/proof-next/`. Spend: **Anthropic $1.77 of the $4 allowed, OpenRouter $0.10 of the $0.50 allowed**, from the building's own ledgers.
+
+| Check | Result | Cost |
+|---|---|---|
+| Website job, typed the way people type, one line | Writer, Designer and Builder on a real computer, published, 5.6 minutes. No figure reached the boss or a visitor | $1.04 |
+| Silly tone against serious tone, same request | Clearly different. Silly: "Not a submarine, not a spaceship, not a very small bank." Serious: "The menu is short by intention." | $0.34 |
+| `ask_buddehbot` round trip through the real CLI in its own process | Asked, fenced in the listing, answered, the manager told the boss. The answer text was made up for the check and isn't a fact about the building | $0.09 |
+| A low `BUDGET_ANTHROPIC_USD` | 13 of 13: no Claude call, the boss told once with no digits, no figure in the owner's or a visitor's page in real Chrome, the admin CLI shows 100%, an OpenRouter role carried on, a restart stayed stopped, raising it resumed by itself | $0.10 |
+| A real computer session at a 20-cent limit | 11 of 11: capped to 20 cents, stopped at 20.25, the task waited, raising the limit carried on in the same session and published | $0.30 |
+
+The `$0.10` line includes the first try of that check, where my script crashed after its Claude-free part, and the manager replying once the limit went up.
+
+### Tests on the merged code
+TESTS_PLACEHOLDER
+
+### Not proven
+- Nothing here has been deployed, or run on hz, in Docker, on a real phone, or in Safari or Firefox.
+- The scrub has only run on test data. It matches a spend word and an amount in the same sentence, so an unusual phrasing could survive it, and an old sentence about a real price with "spent" in it could lose its number. Read a few old floors after deploying.
+- Bots aren't told any figure, but nothing stops a real model inventing one. There is no filter on what it says.
+- `ultra-custom`'s personalities and house rules have only been checked by tests and one real tone comparison. Whether a model holds a tone over a long job is unproven.
+- The real Website job asked no follow-up question and got no go-ahead step, so the merged behaviour costs money from the first message. Whether the owner wants that is theirs to say.
+
 ## Known limits
 - An interrupted task resumes from its last completed step, and the aborted call is charged as an estimate.
 - Spend caps reset at midnight UTC.

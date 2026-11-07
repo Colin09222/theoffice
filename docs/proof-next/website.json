@@ -1,0 +1,48 @@
+{
+ "minutes": 5.6,
+ "cost": 1.0371,
+ "spent": {
+  "anthropic": 0.9581,
+  "openrouter": 0.079
+ },
+ "tasks": [
+  {
+   "id": 1,
+   "title": "Write the Corner Spokes site words",
+   "status": "done",
+   "role": "writer",
+   "usd": 0.077
+  },
+  {
+   "id": 2,
+   "title": "Design notes for Corner Spokes",
+   "status": "done",
+   "role": "designer",
+   "usd": 0.314
+  },
+  {
+   "id": 3,
+   "title": "Build and publish Corner Spokes site",
+   "status": "done",
+   "role": "builder",
+   "usd": 0.488
+  }
+ ],
+ "projects": [
+  {
+   "slug": "corner-spokes",
+   "kind": "site",
+   "url": "/theoffice/f/corner-spokes/corner-spokes/"
+  }
+ ],
+ "owner": {
+  "figures": [],
+  "fields": [
+   "\"cap\""
+  ]
+ },
+ "visitor": {
+  "figures": [],
+  "fields": []
+ }
+}

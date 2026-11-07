@@ -72,7 +72,8 @@ async function boot() {
   window.addEventListener('popstate', route);
   try { await route(); } catch (e) { console.error(e); toast('Something broke on the way in. Try reloading.'); }
   // One clean reveal: the curtain lifts on the finished picture, not on a half-built one that then changes.
-  await Promise.race([Promise.all([window.__office?.ready, stage.ok ? stage.whenPainted(2600) : null]), new Promise((r) => setTimeout(r, 3400))]);
+  // The admin page has no scene to wait for, so its curtain has nothing to hold out for.
+  await Promise.race([Promise.all([window.__office?.ready, stage.ok && document.body.dataset.page !== 'admin' ? stage.whenPainted(2600) : null]), new Promise((r) => setTimeout(r, 3400))]);
   lift();
   // Once things are quiet, fetch the floor's code in the background, so the first walk in is instant. Not on a data-saving connection.
   if (document.body.dataset.page === 'lobby' && !navigator.connection?.saveData) {
