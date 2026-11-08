@@ -21,8 +21,8 @@ export const FH = 10.5;
 // The camera looks well down, as a floor page does, so people show over their desks and screens; the floors above the one in the
 // middle rise out of its way (GAP), and the stack closes up again away from it.
 const PITCH = 0.55, GAP = 9;
-// Zoom: 1 is a floor across the free area; up to ZMAX is a close look at desk height; down to the whole building (worked out per screen).
-const ZMAX = 3.4;
+// Zoom: 1 is a floor across the free area; in to a close look at desk height, out to the whole building (both worked out per screen).
+const CLOSE = 23;  // the closest the camera comes to the floor in the middle
 const TAU = Math.PI * 2;
 const smooth01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const PLATE = TOWER_W * WS + 1.2;       // a floor's slab, as the floor page draws it
@@ -147,7 +147,7 @@ export class TowerView {
     this.slots = []; this.byNumber = new Map(); this.staff = {}; this.rooms = {};
     this.full = new Map(); this.fade = new Float32Array(FADE_N * 4).fill(1);
     this.ride = 0; this.target = 0; this.yaw = 0.35; this.targetYaw = 0.35; this.time = 0;
-    this.zoom = 1; this.targetZoom = 1; this.zMin = 0.2; this.out = 0; this.pts = new Map(); this.lastInput = 0;
+    this.zoom = 1; this.targetZoom = 1; this.zMin = 0.2; this.zMax = 3.4; this.out = 0; this.pts = new Map(); this.lastInput = 0;
     this.radius = 1; this.w = window.innerWidth; this.h = window.innerHeight; this.turns = []; this.stillFor = 0; this.edge = [0, 1];
     this.plaques = new Map(); this.plaqueRoot = document.createElement('div'); this.plaqueRoot.className = 'tower-plaques';
     this.ray = new THREE.Raycaster(); this.box3 = new THREE.Box3(); this.v = new THREE.Vector3();
@@ -415,11 +415,11 @@ export class TowerView {
   }
   placeCamera() {
     const fr = this.framing = this.frame();
-    const all = this.overview(fr); this.zMin = Math.min(0.85, fr.dist / all.dist);
+    const all = this.overview(fr); this.zMin = Math.min(0.85, fr.dist / all.dist); this.zMax = Math.max(2.4, fr.dist / CLOSE);
     const z = this.zoom;
     // Out from 1: the camera backs off and drifts to the building's middle, the gap over the floor in view closing a little. In from 1: closer
     // and lower, down to desk height.
-    const out = this.out = z < 1 ? smooth01((1 - z) / Math.max(1e-3, 1 - this.zMin)) : 0, inn = z > 1 ? (z - 1) / (ZMAX - 1) : 0;
+    const out = this.out = z < 1 ? smooth01((1 - z) / Math.max(1e-3, 1 - this.zMin)) : 0, inn = z > 1 ? Math.min(1, (z - 1) / (this.zMax - 1)) : 0;
     this.U.uGap.value = GAP * (1 - 0.55 * out);
     const pitch = PITCH + (0.42 - PITCH) * out - (PITCH - 0.2) * Math.sqrt(inn);
     const dist = out > 0 ? fr.dist + (all.dist - fr.dist) * out : fr.dist / z;
@@ -440,7 +440,7 @@ export class TowerView {
     const top = [...this.slots].reverse().find((x) => x.kind === 'company');
     this.rideTo((s || top || this.slots[0] || { k: 0 }).k, { instant: true });
     if (spot?.yaw !== undefined) this.yaw = this.targetYaw = spot.yaw;
-    if (spot?.zoom) this.zoom = this.targetZoom = Math.min(ZMAX, spot.zoom);
+    if (spot?.zoom) this.zoom = this.targetZoom = Math.min(this.zMax, spot.zoom);
   }
   rideTo(k, { instant = false } = {}) { this.target = this.clampTarget(k); if (instant) this.ride = this.target; }
   /** Rides to a floor by its number. */
@@ -451,7 +451,7 @@ export class TowerView {
   /** Up or down a floor, round by an angle, in or out by a factor: the buttons and keys. */
   step(n) { this.target = this.clampTarget(Math.round(this.target) + n); this.glide = true; this.flyTicket = (this.flyTicket || 0) + 1; this.poke(); }
   turnBy(a) { this.targetYaw = Math.round((this.targetYaw + a) / (Math.PI / 4)) * (Math.PI / 4); this.poke(); }
-  zoomBy(f) { this.targetZoom = Math.max(this.zMin, Math.min(ZMAX, this.targetZoom * f)); this.poke(); }
+  zoomBy(f) { this.targetZoom = Math.max(this.zMin, Math.min(this.zMax, this.targetZoom * f)); this.poke(); }
   /** The whole building in view, or back to the floor in the middle when it already is. */
   wholeBuilding() { this.targetZoom = this.targetZoom < 0.95 ? 1 : this.zMin; this.poke(); }
   poke() { this.lastInput = performance.now(); stage.wake?.(); }
@@ -464,14 +464,14 @@ export class TowerView {
       e.preventDefault(); this.poke();
       const unit = e.deltaMode === 1 ? 40 : 1, dy = e.deltaY * unit, dx = e.deltaX * unit;
       // A pinch on a trackpad arrives as ctrl+wheel: zoom. A sideways two-finger swipe turns. The wheel itself rides the floors.
-      if (e.ctrlKey || e.metaKey) { this.targetZoom = Math.max(this.zMin, Math.min(ZMAX, this.targetZoom * Math.exp(-Math.max(-60, Math.min(60, dy)) * 0.012))); return; }
+      if (e.ctrlKey || e.metaKey) { this.targetZoom = Math.max(this.zMin, Math.min(this.zMax, this.targetZoom * Math.exp(-Math.max(-60, Math.min(60, dy)) * 0.012))); return; }
       if (Math.abs(dx) > Math.abs(dy) * 1.5) { this.targetYaw -= dx * 0.004; return; }
       this.target = this.clampTarget(this.target - dy / 150);
       wheelAt = performance.now(); this.wheeling = true; this.flyTicket = (this.flyTicket || 0) + 1;
     };
     this.snapWheel = () => { if (this.wheeling && performance.now() - wheelAt > 160) { this.wheeling = false; this.target = this.clampTarget(Math.round(this.target)); } };
     // Safari's own trackpad pinch.
-    this.onGesture = (e) => { if (!this.active || this.flight) return; e.preventDefault(); this.poke(); if (e.type === 'gesturestart') this.gesture = this.targetZoom; else if (this.gesture) this.targetZoom = Math.max(this.zMin, Math.min(ZMAX, this.gesture * e.scale)); };
+    this.onGesture = (e) => { if (!this.active || this.flight) return; e.preventDefault(); this.poke(); if (e.type === 'gesturestart') this.gesture = this.targetZoom; else if (this.gesture) this.targetZoom = Math.max(this.zMin, Math.min(this.zMax, this.gesture * e.scale)); };
     this.onDown = (e) => {
       if (!this.active || e.target !== el || this.flight) return;
       this.poke();
@@ -493,7 +493,7 @@ export class TowerView {
       this.pts.set(e.pointerId, [e.clientX, e.clientY]);
       if (this.pinch && this.pts.size >= 2) {
         const [a, b] = [...this.pts.values()];
-        this.targetZoom = Math.max(this.zMin, Math.min(ZMAX, this.pinch.zoom * (Math.hypot(a[0] - b[0], a[1] - b[1]) / this.pinch.d)));
+        this.targetZoom = Math.max(this.zMin, Math.min(this.zMax, this.pinch.zoom * (Math.hypot(a[0] - b[0], a[1] - b[1]) / this.pinch.d)));
         this.poke(); return;
       }
       const d = this.drag;
@@ -691,7 +691,7 @@ export class TowerView {
     // Out to the same spot the camera flew in from, when it came from here.
     let spot = null; try { spot = JSON.parse(sessionStorage.getItem(SPOT_KEY) || 'null'); } catch { /* private mode */ }
     this.ride = this.target = s.k; this.targetYaw = this.yaw = spot?.n === h.number && spot.yaw !== undefined ? spot.yaw : this.yaw;
-    if (spot?.n === h.number && spot.zoom) this.zoom = this.targetZoom = Math.min(ZMAX, spot.zoom);
+    if (spot?.n === h.number && spot.zoom) this.zoom = this.targetZoom = Math.min(this.zMax, spot.zoom);
     const from = { pos: h.camera.position.clone().add(new THREE.Vector3(0, slotY(s.k), 0)), quat: h.camera.quaternion.clone(), view: { ...h.camera.view } };
     this.placeCamera();
     this.flight = { kind: 'out', f, ground: slotY(s.k) + pageGround(s.n), t: 0, dur: reduced() ? 0.35 : 1.3, from, to: null };

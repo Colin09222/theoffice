@@ -211,10 +211,12 @@ async function profile(kind) {
     await sleep(phone ? 3500 : 2000);  // the neighbours are fetched while the floor is looked at
     const times = [];
     for (const [dir, n] of [['up', 14], ['down', 12], ['up', 14], ['down', 12]]) {
-      await p.ev('window.__t0 = performance.now(); window.__doors = 0; window.__dw = setInterval(() => { if (document.querySelector("#fade")?.classList.contains("in")) window.__doors++; }, 10)');
+      // Timed in the page, frame by frame: from the press to the first frame on which the new floor is there in full detail.
+      await p.ev(`(() => { window.__t0 = performance.now(); window.__t1 = 0; window.__doors = 0; const w = () => { if (document.querySelector("#fade")?.classList.contains("in") || document.querySelector("#boot:not(.gone)")) window.__doors++;
+        if (window.__office?.state?.floor?.number === ${n} && (${fullDetail})) { window.__t1 = performance.now(); return; } requestAnimationFrame(w); }; requestAnimationFrame(w); })()`);
       await click(p, `[data-scrub=${dir}]`);
-      await p.until(`window.__office?.state?.floor?.number === ${n} && (${fullDetail})`, `floor ${n}`, 20000);
-      times.push(await p.ev(`new Promise((res) => requestAnimationFrame(() => { clearInterval(window.__dw); res({ ms: Math.round(performance.now() - window.__t0), doors: window.__doors }); }))`));
+      await p.until('window.__t1 > 0', `floor ${n}`, 20000);
+      times.push(await p.ev('({ ms: Math.round(window.__t1 - window.__t0), doors: window.__doors })'));
       await sleep(phone ? 2500 : 1500);
     }
     r.lift = times;

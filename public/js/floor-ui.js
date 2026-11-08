@@ -13,7 +13,7 @@ import { lobbyMode } from './stack.js';
 import { muteButton, sfx } from './sfx.js';
 import { confetti, fanfare, mayParty } from './party.js';
 import { handOver, takeHandoff } from './handoff.js';
-import { aheadState, park, unpark } from './floorcache.js';
+import { aheadState, isParked, lift, park, peekAhead, unpark } from './floorcache.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -156,6 +156,24 @@ class FloorPage {
     );
   }
 
+  /**
+   * The floors either side, their rooms built ahead while this one is left alone and kept for the lift (see floorcache.js): a desktop
+   * builds both, a phone the one the lift was last going towards. A room takes a moment to put together, so it waits for a quiet spell.
+   */
+  async buildAhead(above, below) {
+    const list = (isPhone() ? [lift.dir > 0 ? above || below : below || above] : [above, below]).filter(Boolean);
+    for (const f of list) {
+      for (let i = 0; i < 40 && !this.dead; i++) {
+        await new Promise((r) => setTimeout(r, 400));
+        if (stage.view === this.view && performance.now() - (stage.lastInput || 0) > 2500 && this.view?.loading?.settled) break;
+      }
+      if (this.dead || !stage.ok || isParked(f.slug)) continue;
+      const state = await peekAhead(f.slug);
+      if (!state || this.dead) continue;
+      const v = new OfficeView({ state, labels: document.createElement('div') });
+      park(f.slug, v, isPhone() ? 2 : 3);
+    }
+  }
   makeView() { return new OfficeView({ state: this.viewState(), labels: this.labels, onSmallTalk: (line) => this.addLocalTalk(line) }); }
   /**
    * Flown in from the 3D building: the very room the camera landed in, people mid-stride and all, brought up to date with what this
@@ -1040,7 +1058,7 @@ class FloorPage {
     this.markSeen?.();
     this.es?.close();
     // Off to the next floor by the lift: this room is kept a minute, so the way back is instant.
-    if (this.parkView && this.view && stage.ok && !this.preview) park(this.slug, this.view, isPhone() ? 1 : 2); else this.view?.destroy();
+    if (this.parkView && this.view && stage.ok && !this.preview) park(this.slug, this.view, isPhone() ? 2 : 3); else this.view?.destroy();
     if (this.labels) clear(this.labels);
     document.documentElement.style.removeProperty('--brand');
     document.documentElement.style.removeProperty('--brand-2');
@@ -1059,13 +1077,16 @@ const safeHref = (u) => (/^https?:\/\//i.test(u) ? u : '#');
 
 export async function showFloor(root, slug) {
   const page = new FloorPage(root, slug);
+  performance.mark('office:floor-load');
   try { await page.load(); } catch (e) {
     root.append(h('div.notfound', {}, h('h1', {}, 'No such floor.'), h('p', {}, e.status === 404 ? 'That office isn\'t in the directory. It may never have opened, or it has closed.' : e.message), h('button.btn.primary', { type: 'button', onclick: () => window.officeGo('/') }, 'Back to the lobby')));
     return;
   }
   // No doors and no curtain: the room's shell is on screen at once, and its furniture and people come in as they load.
   F = page;
+  performance.mark('office:floor-loaded');
   page.mount();
+  performance.mark('office:floor-mounted');
   page.ready = new Promise((done) => {
     const from = performance.now();
     const check = () => {

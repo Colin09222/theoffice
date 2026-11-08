@@ -14,6 +14,11 @@ export function prefetchFloor(slug) {
   ahead.set(slug, { at: performance.now(), state: api(`/floors/${slug}`).catch(() => null) });
   if (ahead.size > 6) ahead.delete(ahead.keys().next().value);
 }
+/** A floor's data fetched ahead, without taking it: for building its room ahead. */
+export function peekAhead(slug) { const a = ahead.get(slug); return a && performance.now() - a.at < FRESH ? a.state : Promise.resolve(null); }
+export const isParked = (slug) => parked.has(slug);
+/** Which way the lift went last: the floor that way is the one a phone builds ahead. */
+export const lift = { dir: 1 };
 /** A floor's data fetched ahead and still fresh, or null. Taken once. */
 export async function aheadState(slug) {
   const a = ahead.get(slug); ahead.delete(slug);
