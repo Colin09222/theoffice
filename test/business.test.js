@@ -136,6 +136,7 @@ describe('the journey in mock mode', () => {
       assert.ok(budget.tracks.every((x) => x.lamp === 'done' && x.done === x.total), JSON.stringify(budget.tracks));
       assert.equal(budget.step, 'customers');
       assert.equal(budget.ads.pictures.length, 2);
+      assert.match(budget.ads.pictures[0].src, /^\/theoffice\/api\/floors\/[a-z0-9-]+\/business\/file\/ad-1\.png$/, 'a path the floor page can load');
       assert.equal(budget.ads.videos.length, 2);
       assert.ok(budget.ads.videos.every((v) => v.captions), 'every video has its captions');
       assert.equal(budget.ads.plan.where[0], 'Facebook');

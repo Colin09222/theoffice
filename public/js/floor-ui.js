@@ -11,7 +11,7 @@ import { attachTray, attachmentEl, ACCEPT } from './attach.js';
 import { portrait } from './portrait.js';
 import { muteButton, sfx } from './sfx.js';
 import { confetti, fanfare, mayParty } from './party.js';
-import { journeyBar, chipsRow, startButton, renderBusiness, businessActive } from './business-ui.js';
+import { journeyBar, chipsRow, startButton, renderBusiness, businessActive, businessUnchanged } from './business-ui.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -343,6 +343,7 @@ class FloorPage {
   }
   renderBody() {
     this.renderBanner();
+    if (this.tab === 'business' && businessUnchanged(this)) return;
     clear(this.bodyEl);
     this.bodyEl.ondragover = this.bodyEl.ondragleave = this.bodyEl.ondrop = null;
     this.bodyEl.dataset.surface = this.tab;

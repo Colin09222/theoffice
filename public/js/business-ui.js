@@ -9,6 +9,14 @@ const PREVIEW_MS = 50 * 60 * 1000;
 const dollars = (n) => `$${Number(n) || 0}`;  // only ever the boss's own choice of ad money, or a sourced estimate on a card
 
 export const businessActive = (page) => !!page.state.business?.active;
+/** The server answers every click with the journey as it now stands. It shows at once; the rest of the floor catches up on its own reload. */
+function apply(page, r, tab) {
+  if (r?.business) page.state.business = r.business;
+  page.renderJourney(); page.renderControls();
+  if (tab) page.tab = tab;
+  page.renderTabs(); page.renderBody();
+  page.reload();
+}
 
 /** The four steps, lit like a lift's floor indicator. Tapping it opens the Business tab. */
 export function journeyBar(page) {
@@ -48,8 +56,8 @@ function openStart(page) {
     const go = h('button.btn.primary', { type: 'button', 'data-business-go': '', onclick: async () => {
       go.disabled = true;
       try {
-        await api(`/floors/${page.slug}/business/start`, { method: 'POST', body: { wish: wish.value.trim() } });
-        close(); await page.reload(); page.setTab('business');
+        const r = await api(`/floors/${page.slug}/business/start`, { method: 'POST', body: { wish: wish.value.trim() } });
+        close(); if (!page.panelOpen) page.setPanel(true); apply(page, r, 'business');
       } catch (e) { toast(e.message, 'bad'); go.disabled = false; }
     } }, icon('rocket-launch'), 'Find me an idea');
     body.append(
@@ -61,10 +69,16 @@ function openStart(page) {
 }
 
 // ---- the Business tab ----
+/** True when the tab already shows exactly this journey. The floor reloads on every bit of news, and rebuilding the tab each time would reload the
+ * preview and could swallow a click on its way down. */
+export function businessUnchanged(page) {
+  return !!page.bizEl && page.bodyEl.firstChild === page.bizEl && page.bizSig === JSON.stringify(page.state.business);
+}
 export function renderBusiness(page) {
   const b = page.state.business;
   const owner = page.owner;
   const box = h('div.biz', { 'data-biz': b?.step || 'off' });
+  page.bizEl = box; page.bizSig = JSON.stringify(b);
   if (!b?.active) {
     box.append(h('p.biz-quiet', {}, owner ? 'Business mode is off. Tap Start a business, or tell your manager "find me a business idea and build it".' : 'Nothing here yet.'));
     page.bodyEl.append(box);
@@ -101,7 +115,7 @@ function ideaStep(page, b) {
 function ideaCard(page, x, i) {
   const pickIt = async (e) => {
     const btn = e.currentTarget; btn.disabled = true;
-    try { await api(`/floors/${page.slug}/business/pick`, { method: 'POST', body: { idea: i } }); toast(`Building ${x.name}`); await page.reload(); } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
+    try { const r = await api(`/floors/${page.slug}/business/pick`, { method: 'POST', body: { idea: i } }); toast(`Building ${x.name}`); apply(page, r); } catch (err) { toast(err.message, 'bad'); btn.disabled = false; }
   };
   const row = (label, text) => h('div.card-row', {}, h('span', {}, label), h('p', {}, text));
   return h('article.idea-card', { role: 'listitem', 'data-idea': String(i) },
@@ -173,7 +187,7 @@ function moneyEl(page, b) {
   } }, n ? dollars(n) : h('span', {}, '$0', h('small', {}, 'just for fun'))));
   const go = h('button.btn.primary', { type: 'button', 'data-launch': '', disabled: !b.adMoney.ready, onclick: async () => {
     go.disabled = true;
-    try { await api(`/floors/${page.slug}/business/launch`, { method: 'POST', body: { amount: chosen } }); page.bizMoney = undefined; await page.reload(); } catch (e) { toast(e.message, 'bad'); go.disabled = false; }
+    try { const r = await api(`/floors/${page.slug}/business/launch`, { method: 'POST', body: { amount: chosen } }); page.bizMoney = undefined; apply(page, r); } catch (e) { toast(e.message, 'bad'); go.disabled = false; }
   } }, icon('rocket-launch'), h('span', {}, chosen ? `Launch with ${dollars(chosen)} of ads` : 'Launch for free'));
   return h('section.ad-money', { 'data-money-box': '' },
     h('div.wo-head', {}, h('b', {}, 'Ad money'), h('small', {}, b.adMoney.ready ? 'Your choice' : 'Once the ads are ready')),
@@ -190,7 +204,7 @@ function spendEl(page, b) {
   if (!s) return null;
   const decide = (answer) => async (e) => {
     for (const x of e.currentTarget.parentNode.querySelectorAll('button')) x.disabled = true;
-    try { await api(`/floors/${page.slug}/business/ad-spend/${s.id}`, { method: 'POST', body: { answer } }); await page.reload(); } catch (err) { toast(err.message, 'bad'); for (const x of e.currentTarget.parentNode.querySelectorAll('button')) x.disabled = false; }
+    try { const r = await api(`/floors/${page.slug}/business/ad-spend/${s.id}`, { method: 'POST', body: { answer } }); apply(page, r); } catch (err) { toast(err.message, 'bad'); for (const x of e.currentTarget.parentNode.querySelectorAll('button')) x.disabled = false; }
   };
   return h(`section.requisition.${s.status}`, { 'data-ad-spend': s.status },
     h('div.wo-head', {}, h('b', {}, 'AD SPEND request'), h('small', {}, `No. ${s.id}`)),

@@ -106,7 +106,7 @@ const stepIndex = (id) => CONFIG.steps.findIndex((s) => s.id === id);
 const TASK_ITEMS = CONFIG.tracks.flatMap((t) => t.items.filter((i) => i.task));
 
 export function installBusiness(ext) {
-  const { db, cfg, engine, log, now, hooks, GET, POST, json, send, readJson, limit, requireOwner, floorBySlug, viewerFor, HttpError } = ext;
+  const { db, cfg, engine, log, now, hooks, GET, POST, json, send, readJson, limit, requireOwner, floorBySlug, viewerFor, HttpError, BASE } = ext;
   db.exec(SCHEMA);
   const on = cfg.businessMode !== false;
   let timer = null, stopped = false;
@@ -524,7 +524,7 @@ export function installBusiness(ext) {
     const live = !!pr?.published_at;
     const ideas = parse(row.ideas, []);
     const files = adFiles(f.id, row.project);
-    const fileUrl = (name) => `/api/floors/${f.slug}/business/file/${encodeURIComponent(name)}`;
+    const fileUrl = (name) => `${BASE}/api/floors/${f.slug}/business/file/${encodeURIComponent(name)}`;
     const showAds = row.step === 'launch' && !row.ads_skipped;
     const ads = { pictures: files.pictures.map((x) => ({ name: x.name, src: fileUrl(x.name) })), videos: files.videos.map((x) => ({ name: x.name, src: fileUrl(x.name), captions: x.captions ? fileUrl(x.captions) : '' })), plan: adsOf(row).plan || null, videoFailed: adsOf(row).videoFailed || '', skipped: !!row.ads_skipped };
     const base = {
