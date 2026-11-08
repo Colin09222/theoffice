@@ -21,7 +21,7 @@ export function createAppAi({ db, models, engine, llm, log, powers, gate }) {
 
   /** What the page sent, checked: one prompt or a conversation that ends with the person speaking. */
   function clean(body) {
-    const tier = body.model ?? 'fast';
+    const tier = body.model === undefined ? 'fast' : body.model;
     if (tier !== 'fast' && tier !== 'smart') throw new CloudError(400, 'bad_model', 'The model is \'fast\' or \'smart\'.');
     if (body.prompt !== undefined && body.messages !== undefined) throw BAD('Give a prompt or messages, not both.');
     let turns;

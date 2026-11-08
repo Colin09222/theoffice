@@ -691,16 +691,30 @@ class FloorPage {
       if (!u) throw new Error('This project is not published yet.');
       const s = u.usage; const size = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
       const row = (label, value) => h('p.kv', {}, h('span', {}, label), h('b', {}, String(value)));
+      const count = (n) => Number(n).toLocaleString();
       const meter = (label, used, cap) => h('div', {}, row(label, `${size(used)} of ${size(cap)}`), h('div.meter', { role: 'img', 'aria-label': `${label}: ${Math.round((used / cap) * 100)}% used` }, h('i', { css: { width: `${Math.min(100, Math.max(1, (used / cap) * 100))}%` } })));
       modal(`Backend: ${p.title}`, (body) => {
         body.append(h('div.stack', {},
-          h('p.lede', {}, 'Saves, accounts, leaderboards, multiplayer rooms and uploads, built in. These are counts only: nobody here can see what people saved or their passwords. Ask your manager to use it in a game or site.'),
+          h('p.lede', {}, 'Saves, accounts, leaderboards, multiplayer rooms, uploads, AI and reading web pages, built in. These are counts only: nobody here can see what people saved or their passwords. Ask your manager to use it in a game or site.'),
           row('Accounts', s.users), row('Documents', `${s.docs} in ${s.collections} ${s.collections === 1 ? 'collection' : 'collections'}`), row('Saves', s.saves),
           row('Leaderboard scores', `${s.scores} on ${s.boards} ${s.boards === 1 ? 'board' : 'boards'}`), row('Uploads', s.files),
           row('Playing right now', `${u.live.players} in ${u.live.rooms} ${u.live.rooms === 1 ? 'room' : 'rooms'}`), row('Requests today', s.requestsToday),
-          meter('Data', s.bytes, s.limits.bytes), meter('Uploads', s.fileBytes, s.limits.fileBytes)));
+          meter('Data', s.bytes, s.limits.bytes), meter('Uploads', s.fileBytes, s.limits.fileBytes),
+          this.powerSwitch(p, 'ai', 'AI features', u.powers.ai, [row('AI requests today', u.powers.ai.callsToday), row('Quick AI left today', `${count(u.powers.ai.fastLeft)} of ${count(u.powers.ai.fastPerDay)} tokens`), row('Smart AI left today', `${count(u.powers.ai.smartLeft)} of ${count(u.powers.ai.smartPerDay)} tokens`)]),
+          this.powerSwitch(p, 'fetch', 'Reading web pages', u.powers.fetch, [row('Pages read today', u.powers.fetch.fetchedToday), row('Pages left today', `${count(u.powers.fetch.left)} of ${count(u.powers.fetch.perDay)}`)])));
       });
     } catch (e) { toast(e.message, 'bad'); }
+  }
+  // On by default: a boss only comes here to turn one off. Counts and what's left, nothing about what it costs.
+  powerSwitch(p, kind, label, state, rows) {
+    return h('div', {},
+      h('h3', {}, label),
+      h('label.toggle', {}, h('input', { type: 'checkbox', checked: state.on, 'data-power': kind, onchange: async (e) => {
+        const on = e.target.checked;
+        try { await api(`/floors/${this.slug}/cloud/${p.slug}/powers`, { method: 'POST', body: { [kind]: on } }); toast(on ? `${label}: on` : `${label}: off`); } catch (err) { e.target.checked = !on; toast(err.message, 'bad'); }
+      } }), h('span', {}, 'Let this site use it')),
+      state.paused ? h('p', {}, 'Paused for now by the building.') : null,
+      ...rows);
   }
   async openSignups(p) {
     try {
