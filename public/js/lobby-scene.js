@@ -847,7 +847,7 @@ export function getWorld() {
   const shore = makeFarShore();
   group.add(sky, water, shore, land, city.group, traffic, boats.group);
   worldCache = {
-    group, sky, water, land, city: city.city, detail: city.detail, stats: city.stats, boats: boats.boats, env: null,
+    group, sky, water, land, city: city.city, blocks: city.blocks, detail: city.detail, stats: city.stats, boats: boats.boats, env: null,
     update(dt, time) {
       sky.material.uniforms.uTime.value = time;
       water.material.uniforms.uTime.value = time;
@@ -894,7 +894,7 @@ export class LobbyView {
     Object.assign(this, { floorCount, onHover, onPick });
     if (bakeFloors !== floorCount) {  // the shadows on the ground are the height of this building, whoever baked them first
       bakeFloors = floorCount;
-      const baked = worldCache?.land.userData.baked; if (baked?.uBaked.value) { baked.uBaked.value.dispose(); baked.uBaked.value = null; if (baked.uBakedOn.value) baked.uBaked.value = bakeGroundShadows(worldCache.city.blocks); }
+      const baked = worldCache?.land.userData.baked; if (baked?.uBaked.value) { baked.uBaked.value.dispose(); baked.uBaked.value = null; if (baked.uBakedOn.value) baked.uBaked.value = bakeGroundShadows(worldCache.blocks); }
     }
     this.scene = new THREE.Scene();
     // Fog with a long start, so the near city keeps its full colour and everything far melts into the warm haze (see the fog chunks above).
