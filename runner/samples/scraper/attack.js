@@ -110,7 +110,7 @@ const tests = {
     const t0 = Date.now();
     let bytes = 0;
     await new Promise((resolve) => {
-      const r = https.get(url, (res) => {
+      const r = https.get(url, { headers: { 'user-agent': 'office-runner-attack/1' } }, (res) => {
         res.on('data', (c) => {
           bytes += c.length;
           if (Date.now() - t0 > 10000) r.destroy();

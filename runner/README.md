@@ -90,7 +90,7 @@ secret whose SHA-256 is listed in `/opt/office-runner/etc/forbidden-secret-sha25
 | User | uid/gid 10001, never root |
 | Capabilities | `--cap-drop ALL`, `--security-opt no-new-privileges` |
 | Filesystem | `--read-only` root; `/tmp` tmpfs `noexec,nosuid,nodev`, 64 MB (256 MB browser) |
-| Persistent data | only its own `/data`: a 256 MB loop-mounted ext4 image (`nosuid,nodev,noexec`), a hard quota |
+| Persistent data | only its own `/data`: a 256 MB loop-mounted ext4 image, a hard quota. The host mount is `nosuid,nodev,noexec`, but gVisor does not honour `noexec` inside the sandbox, so an app can run its own files from `/data` (the `/tmp` `noexec` is honoured) |
 | Mounts | nothing else from the host: no Docker socket, no host paths |
 | Processes | `--pids-limit 128` |
 | Memory / CPU | standard 512 MB / 1 CPU, browser 1 GB / 1 CPU; swap = memory (no swap) |
@@ -177,10 +177,9 @@ Operator shortcuts on hz: `runnerctl GET /v1/apps`, `deploy-dir.mjs <label> <fol
 
 ## Install / restore
 
-**Status 2026-11-08 00:15 ET: not installed.** The go (Colon's Hetzner snapshot) did not arrive
-within the 90-minute window, so nothing on hz was changed. The source is staged at
-`/root/office-runner-src` and the browser base image is already built. When the go comes, as root
-on hz from that folder:
+**Status 2026-11-08: installed on hz and proven on the real box (see RUNNER.md in the workspace's
+cloudtasks folder for every result).** To reinstall from a copy of this folder, as root on hz from
+`/root/office-runner-src`:
 
 1. `B=$(bash deploy/backup.sh)`: saves the Caddyfile, daemon.json (absent today), iptables, ip6tables
    and nft rules, UFW status, networks and container StartedAt, with a RESTORE.md.
@@ -189,12 +188,13 @@ on hz from that folder:
    merges `deploy/daemon.json` (runtimes `runsc` and `runsc-build`), `systemctl reload docker`.
    Check that every container's StartedAt is unchanged, and that
    `docker run --rm --runtime=runsc --network none node:22-slim@sha256:5ec23b7c… node -p "require('os').release()"`
-   prints gVisor's `4.4.0`.
+   prints gVisor's `4.19.0-gvisor`.
 3. `bash deploy/install.sh --with-browser-base`; check the sites.
 4. DNS under gVisor: `docker run --rm --runtime=runsc --network office-apps --ip 172.30.0.200 node:22-slim@sha256:5ec23b7c… node -e "require('dns').promises.lookup('example.com').then(console.log)"`.
-   If Docker's embedded DNS (127.0.0.11) isn't reachable from gVisor's network stack, write
-   `/opt/office-runner/etc/resolv.conf` (`nameserver 185.12.64.1`, `nameserver 185.12.64.2`), set
-   `"APP_RESOLV_CONF": "/opt/office-runner/etc/resolv.conf"` in runner.json, restart office-runner.
+   Docker's embedded DNS (127.0.0.11) is not reachable from gVisor's network stack, so `install.sh` writes
+   `/opt/office-runner/etc/resolv.conf` (`nameserver 185.12.64.1`, `nameserver 185.12.64.2`) and a new
+   runner.json sets `"APP_RESOLV_CONF"` to it (an existing runner.json is left alone). To check, add
+   `-v /opt/office-runner/etc/resolv.conf:/etc/resolv.conf:ro` to the command above.
 5. Caddy: if `md5sum /opt/edge/Caddyfile` is still `e3d0255e2ae008473b451e84c20b3b63`, write the
    validated staged file in place (`cat /root/runner-survey/Caddyfile.new > /opt/edge/Caddyfile`),
    otherwise apply `deploy/Caddyfile.runner` by hand; then `docker exec edge-caddy-1 caddy validate
@@ -207,13 +207,9 @@ on hz from that folder:
    on the scraper, two more apps then a 5th deploy (409), `IDLE_MINUTES` set low to watch sleep and
    wake, `/v1/apps/<label>/logs`, `kill-all` and `--release`, the sites after every step.
 
-Check these first after the go, they can only be settled on the real box: Chromium under gVisor
-with `--pids-limit 128` (gVisor's own threads count against the cgroup, so Chromium may need fewer
-processes or the browser tier a higher limit); Docker's embedded DNS under runsc (fallback above);
-whether gVisor honours `noexec` on `/tmp` and `/data`; that an over-limit app is OOM-killed as a
-whole sandbox.
+Settled on the real box 2026-11-08: Chromium runs under gVisor within `--pids-limit 128` (real pages peaked at 52 pids and 199 MB, no limit hit), so the browser tier keeps 128; Docker's embedded DNS is not reachable from runsc (the fallback above is now the installed default); gVisor honours `noexec` on `/tmp` but not on `/data`; an over-limit app is OOM-killed as a whole sandbox (`OOMKilled=true`, exit 137); a fork bomb fills the pids cgroup in under a second and kills only that app's sandbox (exit 2), which comes back on its next request.
 
-Restore, once installed (backups and a RESTORE.md will be in `/root/office-runner-backup-*` on hz):
+Restore (backups and a RESTORE.md are in `/root/office-runner-backup-*` on hz):
 
 1. Apps off: `/opt/office-runner/kill-all`.
 2. Caddy: `cat /root/office-runner-backup-*/Caddyfile > /opt/edge/Caddyfile` (in place, same inode),
