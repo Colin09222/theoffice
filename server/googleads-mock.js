@@ -1,6 +1,7 @@
 // A stand-in for the Google Ads API (v26 over REST) and Google's token endpoint, for tests and mock mode. Nothing here reaches Google. It keeps
-// campaigns in memory and refuses what the real API refused in the live test on 2026-11-07: startDate/endDate (v26 wants startDateTime and
-// endDateTime), an end time that isn't the end of a day, a total budget on a two-day run, and over-long ad text. Spend is whatever a test
+// campaigns in memory and refuses what the real API refused on 2026-11-07 (a live test and validate-only checks): startDate/endDate (v26 wants
+// startDateTime and endDateTime), a start that isn't 00:00:00 or an end that isn't 23:59:59, a total budget over fewer than 4 days, and
+// over-long ad text. Spend is whatever a test
 // says it is (spend()), and campaigns made outside the Office can be added (foreign()) to see the watchdog pause them.
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -65,12 +66,13 @@ export function createMockGoogleAds({ now = Date.now, timeZone = 'America/New_Yo
         else if (usedBudgets.has(c.campaignBudget)) errors.push(err({ campaignBudgetError: 'CAMPAIGN_BUDGET_IN_USE' }, 'This budget is already used by another campaign.', at(['campaign_budget'])));
         const fmt = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
         if (c.endDateTime !== undefined && (!fmt.test(c.endDateTime) || !c.endDateTime.endsWith('23:59:59'))) errors.push(err({ dateError: 'DATE_RANGE_ERROR_END_TIME_MUST_BE_THE_END_OF_A_DAY' }, 'The end time must be the end of a day.', at(['end_date_time'])));
-        if (c.startDateTime !== undefined && (!fmt.test(c.startDateTime) || zonedMs(...c.startDateTime.split(' '), timeZone) < now() - 60000)) errors.push(err({ dateError: 'START_DATE_TIME_IN_THE_PAST' }, 'The start time is in the past.', at(['start_date_time'])));
+        if (c.startDateTime !== undefined && (!fmt.test(c.startDateTime) || !c.startDateTime.endsWith('00:00:00'))) errors.push(err({ dateError: 'DATE_RANGE_ERROR_START_TIME_MUST_BE_THE_START_OF_A_DAY' }, 'The date time string must end with 00:00:00 to indicate the start of the day.', at(['start_date_time'])));
+        else if (c.startDateTime !== undefined && c.startDateTime.slice(0, 10) < new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date(now()))) errors.push(err({ dateError: 'START_DATE_IN_THE_PAST' }, 'The start date is in the past.', at(['start_date_time'])));
         if (b?.period === 'CUSTOM_PERIOD') {
           if (!c.startDateTime || !c.endDateTime) errors.push(err({ campaignError: 'MISSING_DATES_FOR_TOTAL_BUDGET' }, 'A total budget needs a start and an end.', at(['end_date_time'])));
           else {
-            const days = (zonedMs(...c.endDateTime.split(' '), timeZone) - zonedMs(...c.startDateTime.split(' '), timeZone)) / 86400000;
-            if (days < 2 || days > 90) errors.push(err({ requestError: 'UNKNOWN' }, 'The error code is not in this version.', at(['end_date_time'])));
+            const days = Math.round((Date.parse(`${c.endDateTime.slice(0, 10)}T12:00:00Z`) - Date.parse(`${c.startDateTime.slice(0, 10)}T12:00:00Z`)) / 86400000) + 1;
+            if (days < 4 || days > 90) errors.push(err({ requestError: 'UNKNOWN' }, 'The error code is not in this version.', at(['end_date_time'])));
           }
         }
         temp.set(c.resourceName, { kind: 'campaign', body: c });

@@ -29,9 +29,10 @@ describe('the campaign an approved request becomes', () => {
     const now = Date.now();
     const p = plan({ now });
     assert.equal(p.totalMicros, 10e6);
-    assert.ok(p.endsAt - now <= MAX_DAYS * DAY && p.endsAt > now + 2 * DAY, `${p.startText} to ${p.endText}`);
+    assert.ok(p.endsAt - now <= MAX_DAYS * DAY && p.endsAt > now + 3 * DAY, `${p.startText} to ${p.endText}`);
     assert.match(p.endText, / 23:59:59$/);
-    assert.ok(p.startsAt >= now, 'starts now or later, never in the past');
+    assert.match(p.startText, / 00:00:00$/, 'whole days, as v26 wants');
+    assert.ok(p.startsAt <= now && now - p.startsAt < DAY, 'today\'s date: it runs from now');
     assert.ok(p.cpcCeilingMicros > 0 && p.cpcCeilingMicros <= 2e6);
     const ops = campaignOperations({ rn: (k, id) => `customers/1/${k}/${id}` }, p);
     const budget = createOp(ops, 'campaignBudgetOperation'), c = createOp(ops, 'campaignOperation');
@@ -59,7 +60,7 @@ describe('the campaign an approved request becomes', () => {
       const now = zonedMs(...at.split(' '), TZ);
       const p = plan({ now, days: 30 });
       assert.ok(p.endsAt - now <= MAX_DAYS * DAY, `${at}: ends ${p.endText}`);
-      assert.ok(p.endsAt - p.startsAt >= 2 * DAY, `${at}: long enough for a total budget (${p.startText} to ${p.endText})`);
+      assert.ok(p.days >= 4 && p.endsAt - p.startsAt >= 4 * DAY - 1000, `${at}: long enough for a total budget (${p.startText} to ${p.endText})`);
     }
   });
   test('the search ad\'s words are checked the way Google checks them', () => {
@@ -96,15 +97,18 @@ describe('the Google Ads client and the mocked API', () => {
     assert.match(e.message, /sign-in failed \(400 invalid_grant\)/);
     assert.doesNotMatch(e.message, /revoked|mock-client-secret|ya29/);
   });
-  test('the mock refuses what Google refused in the live test: startDate, an end that isn\'t the end of a day, a two-day total budget, long text', async () => {
+  test('the mock refuses what Google refused: startDate, a start or end off the day\'s edge, a total budget over 3 days, long text', async () => {
     const mock = createMockGoogleAds();
     const api = apiFor(mock);
     const ops = campaignOperations(api, plan());
     const swap = (fn) => ops.map((o) => (o.campaignOperation ? { campaignOperation: { create: fn({ ...o.campaignOperation.create }) } } : o));
     await assert.rejects(api.mutate(swap((c) => { delete c.startDateTime; delete c.endDateTime; return { ...c, startDate: '2026-11-08', endDate: '2026-11-14' }; })), /Unknown name|400/);
     await assert.rejects(api.mutate(swap((c) => ({ ...c, endDateTime: c.endDateTime.replace('23:59:59', '00:00:00') }))), /END_TIME_MUST_BE_THE_END_OF_A_DAY/);
-    const two = plan(); const start = two.startText.split(' ')[0];
-    await assert.rejects(api.mutate(swap((c) => ({ ...c, endDateTime: `${start} 23:59:59` }))), /UNKNOWN/);
+    await assert.rejects(api.mutate(swap((c) => ({ ...c, startDateTime: c.startDateTime.replace('00:00:00', '21:50:00') }))), /START_TIME_MUST_BE_THE_START_OF_A_DAY/);
+    const start = plan().startText.split(' ')[0];
+    const plus = (n) => { const d = new Date(`${start}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+    await assert.rejects(api.mutate(swap((c) => ({ ...c, endDateTime: `${plus(2)} 23:59:59` }))), /UNKNOWN/, 'three days is too short for a total budget');
+    await api.mutate(swap((c) => ({ ...c, endDateTime: `${plus(3)} 23:59:59` })), { validateOnly: true });
     await assert.rejects(api.mutate(ops.map((o) => (o.adGroupAdOperation ? { adGroupAdOperation: { create: { ...o.adGroupAdOperation.create, ad: { ...o.adGroupAdOperation.create.ad, responsiveSearchAd: { ...o.adGroupAdOperation.create.ad.responsiveSearchAd, descriptions: [{ text: 'x'.repeat(92) }, { text: 'ok' }] } } } } } : o))), /TOO_LONG/);
     assert.equal(mock.campaigns.size, 0, 'a refused request makes nothing at all');
     await api.mutate(ops, { validateOnly: true });

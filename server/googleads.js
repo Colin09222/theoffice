@@ -7,7 +7,7 @@
 export const API_VERSION = 'v26';
 export const HARD_MAX_USD = 25;
 export const MAX_DAYS = 7;
-const MIN_DAYS = 3;          // Google refused a 2-day run with a total budget and took a 7-day one (live test, 2026-11-07)
+const MIN_DAYS = 4;          // the real API refuses a total budget over 2 or 3 days and takes 4 to 7 (live and validate-only tests, 2026-11-07)
 const DAY = 86400000;
 export const LIMITS = { headline: 30, description: 90, path: 15, keyword: 80, keywordWords: 10, headlines: [3, 15], descriptions: [2, 4], keywords: [3, 10] };
 
@@ -132,8 +132,10 @@ export function planCampaign({ requestId, tag, label = '', amountUsd, days = MAX
   if (url.protocol !== 'https:' || /^(localhost|127\.|10\.|192\.168\.)/.test(url.hostname)) throw new AdsError('plan', 'the ad has to point at the live site on the public web (https)');
   const words = checkSearchAd({ headlines, descriptions, keywords, path1, path2 });
   if (!words.ok) throw new AdsError('plan', words.problems.join('; '));
-  // Starts in a few minutes and ends at the end of a day, within 7 days of now whatever the clock says.
-  const start = localParts(Math.ceil((now + 10 * 60000) / 60000) * 60000, timeZone);
+  // v26 wants whole days: a start at 00:00:00 and an end at 23:59:59. It takes today's date as the start (it runs from now), or tomorrow's in
+  // the last minutes of a day, and the end is the last day that keeps the whole run within 7 days of now.
+  const here = localParts(now, timeZone);
+  const start = { date: here.time >= '23:45:00' ? addDays(here.date, 1) : here.date, time: '00:00:00' };
   const startText = `${start.date} ${start.time}`;
   let n = Math.min(MAX_DAYS, Math.max(MIN_DAYS, Math.round(Number(days) || MAX_DAYS)));
   const endFor = (k) => `${addDays(start.date, k - 1)} 23:59:59`;
