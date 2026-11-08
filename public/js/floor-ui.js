@@ -584,7 +584,7 @@ class FloorPage {
       this.owner ? this.launchBits(p) : null,
       h('div.row', {}, h('button.btn.primary', { type: 'button', onclick: open }, icon('folder-open'), 'Open'), priv,
         this.owner && p.appUrl ? h('button.link', { type: 'button', onclick: async () => {
-          if (!window.confirm(`Delete every save, leaderboard, shared value and sign-up for ${p.title}? This can't be undone. Download your sign-ups first if you want them.`)) return;
+          if (!window.confirm(`Delete every save, account, leaderboard, document, upload, shared value and sign-up for ${p.title}? This can't be undone. Download your sign-ups first if you want them.`)) return;
           try { const r = await api(`/floors/${this.slug}/projects/${p.slug}/clear-data`, { method: 'POST', body: {} }); toast(`Cleared ${r.removed} saved ${r.removed === 1 ? 'item' : 'items'}`); } catch (e) { toast(e.message, 'bad'); }
         } }, 'Clear saved data') : null));
   }
@@ -604,6 +604,7 @@ class FloorPage {
     if (p.designReview) box.append(h('small', {}, `Design review: ${p.designReview.verdict}`));
     box.append(h('div.row', {},
       h('button.link', { type: 'button', 'data-stats': p.slug, onclick: () => this.openStats(p) }, 'Visitors'),
+      p.appUrl ? h('button.link', { type: 'button', 'data-cloud': p.slug, onclick: () => this.openCloud(p) }, 'Backend') : null,
       // Forms need the project's own web address, and a document has nowhere to put a Buy button. Neither gets a button that goes nowhere.
       p.appUrl || p.signups ? h('button.link', { type: 'button', 'data-signups': p.slug, onclick: () => this.openSignups(p) }, `Sign-ups${p.signups ? ` (${p.signups})` : ''}`) : null,
       p.kind !== 'doc' && p.kind !== 'research' ? h('button.link', { type: 'button', 'data-pay': p.slug, onclick: () => this.openPayment(p) }, p.hasPayment ? 'Payment link: on' : 'Add payment link') : null,
@@ -621,6 +622,25 @@ class FloorPage {
           s.pages.length ? h('div', {}, h('h3', {}, 'Pages'), ...s.pages.map((x) => h('p.kv', {}, h('span', {}, x.path), h('b', {}, String(x.views))))) : null,
           s.refs.length ? h('div', {}, h('h3', {}, 'Came from'), ...s.refs.map((x) => h('p.kv', {}, h('span', {}, x.ref), h('b', {}, String(x.n))))) : null,
           p.appUrl ? h('label.toggle', {}, h('input', { type: 'checkbox', checked: p.indexable || !!p.domain, disabled: !!p.domain, onchange: async (e) => { try { await api(`/floors/${this.slug}/projects/${p.slug}/indexable`, { method: 'POST', body: { on: e.target.checked } }); p.indexable = e.target.checked; } catch (x) { e.target.checked = !e.target.checked; toast(x.message, 'bad'); } } }), h('span', {}, p.domain ? 'Search engines can find it, because it has its own domain' : 'Let search engines find it')) : null));
+      });
+    } catch (e) { toast(e.message, 'bad'); }
+  }
+  // Office Cloud, the backend the project's pages use. Counts only: the boss sees how much, never anyone's data or password.
+  async openCloud(p) {
+    try {
+      const { projects } = await api(`/floors/${this.slug}/cloud`);
+      const u = projects.find((x) => x.slug === p.slug);
+      if (!u) throw new Error('This project is not published yet.');
+      const s = u.usage; const size = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
+      const row = (label, value) => h('p.kv', {}, h('span', {}, label), h('b', {}, String(value)));
+      const meter = (label, used, cap) => h('div', {}, row(label, `${size(used)} of ${size(cap)}`), h('div.meter', { role: 'img', 'aria-label': `${label}: ${Math.round((used / cap) * 100)}% used` }, h('i', { css: { width: `${Math.min(100, Math.max(1, (used / cap) * 100))}%` } })));
+      modal(`Backend: ${p.title}`, (body) => {
+        body.append(h('div.stack', {},
+          h('p.lede', {}, 'Saves, accounts, leaderboards, multiplayer rooms and uploads, built in. These are counts only: nobody here can see what people saved or their passwords. Ask your manager to use it in a game or site.'),
+          row('Accounts', s.users), row('Documents', `${s.docs} in ${s.collections} ${s.collections === 1 ? 'collection' : 'collections'}`), row('Saves', s.saves),
+          row('Leaderboard scores', `${s.scores} on ${s.boards} ${s.boards === 1 ? 'board' : 'boards'}`), row('Uploads', s.files),
+          row('Playing right now', `${u.live.players} in ${u.live.rooms} ${u.live.rooms === 1 ? 'room' : 'rooms'}`), row('Requests today', s.requestsToday),
+          meter('Data', s.bytes, s.limits.bytes), meter('Uploads', s.fileBytes, s.limits.fileBytes)));
       });
     } catch (e) { toast(e.message, 'bad'); }
   }

@@ -793,6 +793,9 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   function serveApp(req, res, label, rawUrl) {
     const HEAD = { ...appHeaders(cfg), 'cache-control': 'no-cache' };
     const ownHost = String(req.headers.host || '').toLowerCase().split(':')[0];
+    // Office Cloud rooms connect back to this same host. 'self' covers that in current browsers; older Safari needs it spelled out.
+    const hostHeader = String(req.headers.host || '').toLowerCase();
+    if (/^[a-z0-9.-]{1,253}(:\d{1,5})?$/.test(hostHeader)) HEAD['content-security-policy'] = HEAD['content-security-policy'].replace("connect-src 'self'", `connect-src 'self' ${cfg.appsScheme === 'https' ? 'wss' : 'ws'}://${hostHeader}`);
     const miss = () => { res.writeHead(404, { ...HEAD, 'content-type': 'text/plain; charset=utf-8' }); res.end('Not found'); };
     delete req.headers.authorization;
     const pass = A.parseCookies(req.headers.cookie)[previewCookieName(cfg)];
