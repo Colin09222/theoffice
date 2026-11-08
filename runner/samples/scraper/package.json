@@ -1,0 +1,6 @@
+{
+  "name": "scraper",
+  "private": true,
+  "description": "office-runner sample: fetches a public page with headless Chromium (browser tier)",
+  "dependencies": { "playwright-core": "1.65.0" }
+}

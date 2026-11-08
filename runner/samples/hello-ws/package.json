@@ -1,0 +1,7 @@
+{
+  "name": "hello-ws",
+  "private": true,
+  "description": "office-runner sample: HTTP + WebSocket echo, /data persistence",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "ws": "8.22.1" }
+}

@@ -1,0 +1,23 @@
+#!/bin/bash
+# office-runner kill switch: stops every app container (and any build) at once, with SIGKILL.
+# Works even when the runner daemons are down. Apps then stay down until released.
+#   /opt/office-runner/kill-all             stop everything now
+#   /opt/office-runner/kill-all --status    show the switch and the app containers
+#   /opt/office-runner/kill-all --release   let apps wake again on their next request
+set -u
+FLAG=/opt/office-runner/state/KILLED
+case "${1:-}" in
+  --release) rm -f "$FLAG"; echo "released: apps wake again on their next request"; exit 0 ;;
+  --status)
+    if [ -f "$FLAG" ]; then echo "KILLED since $(cat "$FLAG")"; else echo "switch off (apps run normally)"; fi
+    docker ps -a --filter label=office.runner --format '{{.Names}}  {{.Status}}'
+    exit 0 ;;
+  "") ;;
+  *) echo "usage: $0 [--status|--release]" >&2; exit 2 ;;
+esac
+[ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
+mkdir -p /opt/office-runner/state
+date -u +%FT%TZ > "$FLAG"
+ids=$(docker ps -q --filter label=office.runner)
+[ -n "$ids" ] && docker kill $ids > /dev/null
+echo "kill-all: stopped $(echo $ids | wc -w) container(s). Apps stay down until: $0 --release"

@@ -1,0 +1,11 @@
+{
+  "runtimes": {
+    "runsc": {
+      "path": "/usr/bin/runsc"
+    },
+    "runsc-build": {
+      "path": "/usr/bin/runsc",
+      "runtimeArgs": ["--overlay2=none"]
+    }
+  }
+}

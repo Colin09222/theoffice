@@ -1,0 +1,142 @@
+#!/usr/sbin/nft -f
+# office-runner firewall (Phase 1), loaded at boot by office-apps-firewall.service.
+#
+# It only creates or replaces its own two tables and never runs `flush ruleset`, so Docker's and
+# UFW's rules are never touched. The base chains run at priority -10, before Docker's and UFW's
+# filter chains: a drop here is final, an accept here still has to pass theirs too.
+#
+# office-apps  172.30.0.0/24, bridge br-office-apps: running apps.
+#   may: TCP 80/443 to public addresses, rate limited per app (each app has its own fixed address):
+#          new connections 10/s (burst 40), at most 64 open at once,
+#          upload 1 MB/s (burst 4 MB), download 4 MB/s (burst 16 MB)
+#        DNS to Hetzner's resolvers only (20 queries/s)
+#        this host only at its public address on 80/443, i.e. Caddy (iscolinfree.com, the Office)
+#   not: private ranges, loopback, 169.254.0.0/16 (metadata), multicast, other containers,
+#        SMTP 25/465/587, any other port or protocol, IPv6, host services (sshd, 127.0.0.1:*)
+# office-build 172.30.1.0/24, bridge br-office-build: build containers. Nothing is forwarded; the
+#   only reachable thing is the runner's egress proxy at 172.30.1.1:3128, which allows CONNECT to
+#   the npm registry and the Playwright CDN on 443 only.
+#
+# Check: nft -c -f /opt/office-runner/firewall/office-apps.nft
+# Counters: nft list table inet office_apps
+
+define APPS_IF = "br-office-apps"
+define BUILD_IF = "br-office-build"
+define APPS_NET = 172.30.0.0/24
+define BUILD_GW = 172.30.1.1
+define PUBLIC_IP = 2.29.59.122
+define RESOLVERS = { 185.12.64.1, 185.12.64.2 }
+
+table inet office_apps
+delete table inet office_apps
+table inet office_apps {
+	set blocked {
+		type ipv4_addr
+		flags interval
+		elements = { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16,
+			     172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.88.99.0/24, 192.168.0.0/16,
+			     198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/3 }
+	}
+	set newconn {
+		type ipv4_addr
+		size 1024
+		flags dynamic,timeout
+		timeout 1m
+	}
+	set openconn {
+		type ipv4_addr
+		size 1024
+		flags dynamic
+	}
+	set dnsrate {
+		type ipv4_addr
+		size 1024
+		flags dynamic,timeout
+		timeout 1m
+	}
+	set upbw {
+		type ipv4_addr
+		size 1024
+		flags dynamic,timeout
+		timeout 1m
+	}
+	set downbw {
+		type ipv4_addr
+		size 1024
+		flags dynamic,timeout
+		timeout 1m
+	}
+
+	chain forward {
+		type filter hook forward priority filter - 10; policy accept;
+		iifname $APPS_IF jump from_apps
+		oifname $APPS_IF jump to_apps
+		iifname $BUILD_IF counter drop comment "builds: no direct egress"
+		oifname $BUILD_IF counter drop comment "builds: nothing in"
+	}
+
+	chain from_apps {
+		meta nfproto ipv6 counter drop
+		ip saddr != $APPS_NET counter drop comment "spoofed source"
+		oifname $APPS_IF counter drop comment "app to app"
+		ip daddr @blocked counter drop comment "private, loopback, link-local and metadata, multicast"
+		ct state established,related goto up_limit
+		ip daddr $RESOLVERS meta l4proto { tcp, udp } th dport 53 jump dns
+		meta l4proto != tcp counter drop comment "TCP only (DNS above)"
+		tcp dport { 25, 465, 587 } counter drop comment "no mail"
+		tcp dport != { 80, 443 } counter drop comment "HTTP and HTTPS only"
+		ct state new add @openconn { ip saddr ct count over 64 } counter reject with tcp reset comment "64 open connections per app"
+		ct state new update @newconn { ip saddr limit rate over 10/second burst 40 packets } counter drop comment "10 new connections/s per app"
+		goto up_limit
+	}
+
+	chain dns {
+		update @dnsrate { ip saddr limit rate over 20/second burst 50 packets } counter drop
+		goto up_limit
+	}
+
+	chain up_limit {
+		update @upbw { ip saddr limit rate over 1 mbytes/second burst 4 mbytes } counter drop comment "upload 1 MB/s per app"
+		accept
+	}
+
+	chain to_apps {
+		meta nfproto ipv6 counter drop
+		ct state established,related update @downbw { ip daddr limit rate over 4 mbytes/second burst 16 mbytes } counter drop comment "download 4 MB/s per app"
+		ct state established,related accept
+		counter drop comment "nothing opens a connection into an app except the runner on this host"
+	}
+
+	chain input {
+		type filter hook input priority filter - 10; policy accept;
+		iifname $APPS_IF jump apps_to_host
+		iifname $BUILD_IF jump build_to_host
+	}
+
+	chain apps_to_host {
+		ct state established,related accept comment "replies to the runner's proxy and to allowed connections"
+		meta nfproto ipv6 counter drop
+		ip saddr != $APPS_NET counter drop
+		ip daddr $PUBLIC_IP tcp dport { 80, 443 } ct state new update @newconn { ip saddr limit rate over 10/second burst 40 packets } counter drop
+		ip daddr $PUBLIC_IP tcp dport { 80, 443 } counter accept comment "public sites through Caddy, incl. the Office"
+		counter drop comment "no host services"
+	}
+
+	chain build_to_host {
+		ct state established,related accept
+		ip daddr $BUILD_GW tcp dport 3128 counter accept comment "the runner's egress proxy"
+		counter drop
+	}
+}
+
+# Frames between two containers on the same bridge never reach the inet tables unless br_netfilter
+# is loaded, so container-to-container traffic (ARP included) is also dropped at layer 2.
+table bridge office_apps_l2
+delete table bridge office_apps_l2
+table bridge office_apps_l2 {
+	chain forward {
+		type filter hook forward priority -10; policy accept;
+		meta ibrname $APPS_IF counter drop comment "no frames between app containers"
+		meta ibrname $BUILD_IF counter drop comment "no frames between build containers"
+	}
+}

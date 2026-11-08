@@ -1,0 +1,7 @@
+{
+  "tier": "browser",
+  "start": "node server.js",
+  "cron": [
+    { "name": "scrape", "schedule": "*/30 * * * *", "run": "node scrape.js https://example.com", "timeoutMinutes": 5 }
+  ]
+}
