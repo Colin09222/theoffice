@@ -967,8 +967,25 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   // Path segments from the raw URL. Decoded by serveSite itself, one segment at a time, so %2f can never add a level.
   const rawSegments = (u) => u.split('?')[0].slice(`${BASE}/f/`.length).split('/');
 
-  const server = http.createServer((req, res) => { handle(req, res).catch(() => { try { res.destroy(); } catch { /* gone */ } }); });
-  server.requestTimeout = 30000; server.headersTimeout = 15000; server.keepAliveTimeout = 5000; server.maxConnections = 1200;
+  // Node's requestTimeout is one number for the whole server, so it is set to the upload's and every other request is
+  // held to the shorter limit here, the way Node does it: a 408 if nothing has been written yet, then the line is cut.
+  const UPLOAD_URL = new RegExp(`^${BASE}/api/floors/[^/]+/attachments$`);
+  const isUpload = (req) => req.method === 'POST' && UPLOAD_URL.test(req.url.split('?')[0]);
+  const holdTo = (req, ms) => {
+    const timer = setTimeout(() => {
+      if (req.complete) return;
+      const s = req.socket;
+      if (s.writable && s.bytesWritten === 0) s.write('HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n');
+      s.destroy();
+    }, ms);
+    timer.unref();
+    req.once('end', () => clearTimeout(timer));
+  };
+  const server = http.createServer((req, res) => {
+    if (!isUpload(req)) holdTo(req, cfg.requestTimeoutMs);
+    handle(req, res).catch(() => { try { res.destroy(); } catch { /* gone */ } });
+  });
+  server.requestTimeout = Math.max(cfg.requestTimeoutMs, cfg.uploadTimeoutMs); server.headersTimeout = 15000; server.keepAliveTimeout = 5000; server.maxConnections = 1200;
   return {
     server, engine, bus, rates,
     /** Brotli every asset ahead of the first visitor. Called by the real entry point only, so tests don't pay for it. */

@@ -140,24 +140,57 @@ const ANIMS = ['walk', 'sit', 'type', 'talk', 'carry', 'cheer', 'think', 'listen
 /** Unscaled height of the top of the head: where the name label hangs from. */
 export const HEAD_TOP = 1.7;
 
-/** The blend state every character keeps: which named poses are active, eased so nothing ever snaps. */
-function wantFor(anim, speed, carrying) {
+/**
+ * The blend state every character keeps: which named poses are active, eased so nothing ever snaps. `inChair` is set by
+ * whoever seats the person: someone who talks, cheers or takes a call from their chair keeps sitting while they do it.
+ */
+function wantFor(anim, speed, carrying, inChair) {
   const a = anim;
-  const seated = a === 'sit' || a === 'type' || a === 'think' || a === 'stretch';
+  const seated = speed <= 0.01 && (inChair || a === 'sit' || a === 'type' || a === 'think' || a === 'stretch');
   return {
     walk: speed > 0.01 ? 1 : 0, sit: seated ? 1 : 0, type: a === 'type' ? 1 : 0, talk: a === 'talk' ? 1 : 0,
     carry: carrying ? 1 : 0, cheer: a === 'cheer' ? 1 : 0, think: a === 'think' ? 1 : 0, listen: a === 'listen' ? 1 : 0,
     stretch: a === 'stretch' ? 1 : 0, sip: a === 'sip' ? 1 : 0, phone: a === 'phone' ? 1 : 0, pour: a === 'pour' ? 1 : 0,
   };
 }
+/**
+ * Typing the way people do it: bursts of quick taps with the hands taking turns, then a pause to read the screen. Each
+ * person keeps their own pace and phase, so a row of desks never moves in step. `l` and `r` are how far each hand is
+ * lifted (0 resting on the keys, 1 at the top of a tap), `on` how much typing is going on right now (0 in a pause).
+ */
+function typing(self, dt, w) {
+  let s = self.typist;
+  if (!s) s = self.typist = { rate: 2.2 + Math.random() * 0.7, ph: Math.random() * 6.3, burst: 1 + Math.random() * 4, gap: 0, on: 0, glance: 0 };
+  if (w < 0.01) { s.on = 0; return { l: 0, r: 0, on: 0, look: 0, glance: 0, nod: 0 }; }
+  if (s.gap > 0) { s.gap -= dt; if (s.gap <= 0) s.burst = 2.5 + Math.random() * 5; }
+  else if ((s.burst -= dt) <= 0) { s.gap = 0.7 + Math.random() * 1.8; s.glance = (Math.random() - 0.5) * 0.5; }
+  s.on += ((s.gap > 0 ? 0 : 1) - s.on) * Math.min(1, dt * 7);  // hands settle and pick up again over about 0.2s
+  // About 2-3 taps a second per hand; the pace drifts a little so it never reads as a loop.
+  s.ph += dt * s.rate * Math.PI * 2 * (0.85 + 0.3 * Math.sin(s.ph * 0.13));
+  const lift = (x) => { const c = Math.sin(x); return c > 0 ? c * c : 0; };
+  return { l: lift(s.ph) * s.on, r: lift(s.ph + Math.PI) * s.on, on: s.on, look: 1 - s.on, glance: s.glance * (1 - s.on), nod: Math.sin(s.ph) * s.on };
+}
+/**
+ * Moves every pose weight toward what is wanted on a critically damped spring: it sets off from standstill, never
+ * overshoots and is most of the way there in 0.2s, so a change of pose never jumps on its first frame.
+ */
+function ease(self, want, dt) {
+  const b = self.blend, v = (self.blendV ||= Object.fromEntries(ANIMS.map((n) => [n, 0])));
+  const w = 14, h = Math.min(dt, 0.1), e = Math.exp(-w * h);
+  for (const n of ANIMS) {
+    const x0 = b[n] - want[n], c = v[n] + w * x0;
+    b[n] = want[n] + (x0 + c * h) * e; v[n] = (v[n] - w * c * h) * e;
+    if (b[n] < 0 || b[n] > 1) { b[n] = Math.min(1, Math.max(0, b[n])); v[n] = 0; }
+  }
+}
 /** Arm angles (x: forward swing, z: outward) and head turns for the current blend. Shared by both kinds of character. */
 function poseFor(b, t, dt, self) {
   const swing = Math.sin(t * 9.5);
-  const typeL = Math.sin(t * 19) * 0.08, typeR = Math.sin(t * 17 + 1.3) * 0.08;
+  const ty = typing(self, dt, b.type); self.ty = ty;
   let aL = -swing * 0.58 * b.walk, aR = swing * 0.58 * b.walk;
   let zL = -0.08, zR = 0.08;
-  aL += b.sit * (-0.35) + b.type * (-0.55 + typeL);
-  aR += b.sit * (-0.35) + b.type * (-0.55 + typeR);
+  aL += b.sit * (-0.35) + b.type * (-0.55 - ty.l * 0.07);
+  aR += b.sit * (-0.35) + b.type * (-0.55 - ty.r * 0.07);
   zL += b.type * 0.22; zR -= b.type * 0.22;
   aR += b.talk * (-1.25 + Math.sin(t * 5) * 0.32); zR += b.talk * 0.35; aL += b.talk * (-0.45 + Math.sin(t * 3.3) * 0.12);
   aL += b.carry * (-1.15 - aL); aR += b.carry * (-1.15 - aR); zL += b.carry * 0.3; zR -= b.carry * 0.3;
@@ -172,9 +205,10 @@ function poseFor(b, t, dt, self) {
   aR += b.phone * (-1.55 - aR); zR += b.phone * 0.3; aL += b.phone * (-0.3 - aL);
   aR += b.pour * (-1.0 - aR); zR -= b.pour * 0.35; aL += b.pour * (-0.25 - aL);
   const nodWave = Math.sin(t * 1.7); const nod = nodWave > 0.75 ? (nodWave - 0.75) * 4 * Math.sin(t * 14) : 0;
-  const headX = b.type * (0.14 + Math.sin(t * 6) * 0.02) + Math.sin(t * 0.7) * 0.03 - b.think * 0.1 + b.talk * Math.sin(t * 3) * 0.08
+  // A typist looks down at the keys with a small nod in time, and up at the screen when they stop to read.
+  const headX = b.type * (0.12 + ty.nod * 0.02 - ty.look * 0.12) + Math.sin(t * 0.7) * 0.03 - b.think * 0.1 + b.talk * Math.sin(t * 3) * 0.08
     + b.listen * nod * 0.12 - b.stretch * 0.3 + b.phone * 0.38 + b.pour * 0.22 - b.sip * self.sipK * 0.18;
-  const headY = Math.sin(t * 0.43) * 0.22 * (1 - b.type - b.listen * 0.8) + b.talk * Math.sin(t * 2.1) * 0.15;
+  const headY = Math.sin(t * 0.43) * 0.22 * Math.max(0, 1 - b.type - b.listen * 0.8) + b.type * ty.glance + b.talk * Math.sin(t * 2.1) * 0.15;
   const headZ = b.think * 0.18 + Math.sin(t * 0.31) * 0.025 + b.listen * Math.sin(t * 0.5) * 0.04;
   return { aL, aR, zL, zR, headX, headY, headZ, swing };
 }
@@ -253,9 +287,8 @@ export class Character {
   update(dt, speed = 0) {
     this.t += dt;
     const t = this.t, b = this.blend;
-    const want = wantFor(this.anim, speed, this.paper.visible);
-    const k = Math.min(1, dt * 9);
-    for (const n of ANIMS) b[n] += (want[n] - b[n]) * k;
+    const want = wantFor(this.anim, speed, this.paper.visible, this.inChair);
+    ease(this, want, dt);
     this.mug.visible = b.sip > 0.2 || b.pour > 0.2;
     this.phone.visible = b.phone > 0.2;
     const p = poseFor(b, t, dt, this);
@@ -318,6 +351,50 @@ export function variantFor(look) {
 const MODEL_HEAD = 0.53;  // our head parts are sized for a head of radius 0.36; this fits them to the kit's
 export const MODEL_SCALE = 2.45;  // model units are about 0.67 per person; the room's people stand about 1.65 tall, 1.7 desks
 
+// The kit's arms are modelled straight out to the sides, and its clips turn them 45° down, clear of the wide body. So an
+// arm is posed here by two turns at the shoulder, made in the body's own frame on top of the clip: `s` how far the arm is
+// out from the side (MODEL_OUT is the clip's own), then `a` the swing forward and up (negative is forward, -PI overhead).
+// Turning the bone about its own x instead, as the stand-in's hanging arms allow, only rolls the kit's arm along its length.
+const MODEL_OUT = Math.PI / 4;
+// Seated, the desk top is a little above the shoulder: the arms go up over its edge (about 42° up at a staff desk, 55° at
+// the taller manager's and boss's) and the hands come down on the keys, a little in from the shoulders.
+const TYPE_A = -2.3, TYPE_A_BIG = -2.53, TYPE_S = -0.1, TAP = 0.055;
+const smooth01 = (x) => { const c = Math.min(1, Math.max(0, x)); return c * c * (3 - 2 * c); };
+const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1);
+const _q = new THREE.Quaternion(), PHONE_TILT = new THREE.Quaternion().setFromAxisAngle(AX, -0.6);
+/** Shoulder angles for the kit's people in every state: the same states as poseFor, measured on this rig. */
+function modelArms(b, t, dt, self, still, m) {
+  const O = MODEL_OUT, ty = self.ty;
+  let aL = 0, sL = O, aR = 0, sR = O;
+  const to = (w, al, sl, ar, sr) => { if (w < 0.001) return; aL += w * (al - aL); sL += w * (sl - sL); aR += w * (ar - aR); sR += w * (sr - sR); };
+  // Standing about: everyone has their own thing to do with their arms.
+  if (m && still > 0.001) {
+    if (m.stance === 1) to(still, 0, O, -0.3, O + 0.25);
+    if (m.stance === 2) to(still, -0.85, 0.12, -0.85, 0.12);
+    if (m.stance === 3) to(still, 0.45, 0.5, 0.45, 0.5);
+  }
+  to(b.sit, -0.3, O, -0.3, O);
+  to(b.talk, -0.45 + Math.sin(t * 3.3) * 0.12, 0.62, -1.3 + Math.sin(t * 5) * 0.3, 0.45 + Math.sin(t * 2.3) * 0.08);
+  to(b.listen, -0.45, 0.32, -0.45, 0.32);
+  to(b.carry, -1.35, 0.06, -1.35, 0.06);
+  to(b.cheer, -2.85 + Math.sin(t * 11) * 0.18, 0.8, -2.85 - Math.sin(t * 11) * 0.18, 0.8);
+  to(b.think, -0.7, 0.3, -2.25, 0.62);
+  const st = Math.min(1, Math.max(0, Math.sin(t * 1.1) * 0.5 + 0.5));
+  to(b.stretch, -2.7 - 0.3 * st, 0.8, -2.7 - 0.3 * st, 0.8);
+  to(b.sip, -0.2, O, -1.5 - 0.75 * (self.sipK ?? 0), 0.22);
+  to(b.phone, -0.3, O, -1.55, 0.1);
+  to(b.pour, -0.25, O, -1.0, 0.45);
+  // Typing: up over the desk's edge first, then in over the keys, so a hand never passes through the desk. Standing up runs
+  // it backwards. It is the longest reach any pose makes, so it gets its own steady 0.4s, eased at both ends.
+  const k = (self.typeK = Math.min(1, Math.max(0, (self.typeK ?? 0) + Math.sign((self.anim === 'type' ? 1 : 0) - (self.typeK ?? 0)) * dt * 2.5)));
+  const up = smooth01(k / 0.7), inw = smooth01((k - 0.3) / 0.7);
+  const lean = 0.05 * up;  // the body leans in a touch; the arms make up for it so the hands stay on the keys
+  const A = (self.bigDesk ? TYPE_A_BIG : TYPE_A) - lean;
+  aL += up * (A - ty.l * TAP - aL); aR += up * (A - ty.r * TAP - aR);
+  sL += inw * (TYPE_S + ty.l * 0.03 - sL); sR += inw * (TYPE_S + ty.r * 0.03 - sR);
+  return { aL, sL, aR, sR, lean };
+}
+
 /** Replaces the colours of chosen atlas cells, keeping each cell's light-to-dark shading. Uniforms live on the material so a clone keeps its look. */
 function tintMaterial(src, slots, means) {
   const m = src.clone();
@@ -363,6 +440,9 @@ export class ModelCharacter {
     this.armL = swap ? armB : armA; this.armR = swap ? armA : armB; this.legL = swap ? legB : legA; this.legR = swap ? legA : legB;
     this.rest = new Map();
     for (const b of [this.root, this.torso, this.head, this.armL, this.armR, this.legL, this.legR]) if (b) this.rest.set(b, { q: b.quaternion.clone(), p: b.position.clone() });
+    this.clip = new Map([...this.rest].map(([b, r]) => [b, { q: r.q.clone(), p: r.p.clone() }]));  // what the clips last set
+    // Each arm at the clips' own 45°, still: what a walker's arms go back to while their hands are full.
+    this.armOut = new Map([[this.armL, -1], [this.armR, 1]].filter(([b]) => b).map(([b, side]) => [b, b.quaternion.clone().premultiply(new THREE.Quaternion().setFromAxisAngle(AZ, -side * MODEL_OUT))]));
     // Recolour: skin and hair on the head, skin, top and trousers on the body.
     const v = VARIANTS[variant] || VARIANTS['character-male-a'];
     const o = look.outfit;
@@ -407,8 +487,10 @@ export class ModelCharacter {
     const ps = 1 / scale;
     this.paper = new THREE.Mesh(G.paper, mat('#fbf7ea')); this.paper.visible = false; this.paper.position.set(0, 0.11, 0.11); this.paper.rotation.x = 0.3; this.paper.scale.setScalar(ps);
     if (this.torso) this.torso.add(this.paper);
-    this.mug = new THREE.Mesh(G.mug, mat(accent)); this.mug.visible = false; this.mug.position.set(0, -0.13, 0.02); this.mug.scale.setScalar(ps);
-    this.phone = new THREE.Mesh(G.phone, mat('#1b1c22')); this.phone.visible = false; this.phone.position.set(0.01, -0.12, 0.03); this.phone.rotation.x = -0.6; this.phone.scale.setScalar(ps);
+    // The arm runs along the bone's x, so the hand is out along x; the props are turned upright every frame (holdProps).
+    const hx = Math.sign(this.armR?.position.x || 1);
+    this.mug = new THREE.Mesh(G.mug, mat(accent)); this.mug.visible = false; this.mug.position.set(hx * 0.25, 0, 0.055); this.mug.scale.setScalar(ps);
+    this.phone = new THREE.Mesh(G.phone, mat('#1b1c22')); this.phone.visible = false; this.phone.position.set(hx * 0.25, 0, 0.05); this.phone.scale.setScalar(ps);
     if (this.armR) this.armR.add(this.mug, this.phone);
     this.headTop = 0.672 * scale;
     this.labelY = this.headTop + (HAT_CLEAR[look.hat] || 0) * MODEL_HEAD * scale;
@@ -420,42 +502,62 @@ export class ModelCharacter {
   update(dt, speed = 0) {
     this.t += dt;
     const t = this.t, b = this.blend;
-    const want = wantFor(this.anim, speed, this.paper.visible);
-    const k = Math.min(1, dt * 9);
-    for (const n of ANIMS) b[n] += (want[n] - b[n]) * k;
+    const want = wantFor(this.anim, speed, this.paper.visible, this.inChair);
+    ease(this, want, dt);
     this.mug.visible = b.sip > 0.2 || b.pour > 0.2;
     this.phone.visible = b.phone > 0.2;
     const A = this.actions;
     const sit = Math.min(1, b.sit), walk = Math.min(1 - sit, b.walk);
     A.sit?.setEffectiveWeight(sit); A.walk?.setEffectiveWeight(walk); A.idle?.setEffectiveWeight(Math.max(0, 1 - sit - walk));
-    // Back to the rest pose first: the mixer only writes the bones a playing clip has tracks for (the sit clip has no head
-    // or torso track), and our turns below are relative, so without this they would pile up frame after frame.
-    for (const [bone, r] of this.rest) { bone.quaternion.copy(r.q); bone.position.copy(r.p); }
+    // Back to the clips' own pose first, as they left it last frame, because our turns below are relative and would
+    // otherwise pile up. Not the rest pose: the mixer only writes a bone when its value changes, so under a still clip
+    // (sit) the bone would be left at rest, which on this rig is arms straight out, and flick back whenever a weight moved.
+    for (const [bone, r] of this.clip) { bone.quaternion.copy(r.q); bone.position.copy(r.p); }
     this.mixer.update(dt);
+    for (const [bone, r] of this.clip) { r.q.copy(bone.quaternion); r.p.copy(bone.position); }
     // The kit's clips set the base pose; our poses turn the bones on top of it.
     const p = poseFor(b, t, dt, this);
+    const m = this.manner;
+    // Standing about, everyone has their own way of doing it: a lean, a slow shift of weight, and something to do with their arms.
+    const still = m ? Math.max(0, 1 - sit - walk - b.talk - b.sip - b.phone - b.cheer - b.pour - b.stretch - b.type - b.think - b.carry) : 0;
     const lean = b.walk * 0.05 - b.stretch * 0.1 + b.phone * 0.05;
     if (this.root) {
       this.root.position.y += (Math.abs(Math.sin(t * 7)) * 0.045 * b.cheer + Math.sin(t * 2) * 0.002);
       this.root.rotateX(lean); this.root.rotateZ(Math.sin(t * 0.9) * 0.02 * b.listen);
     }
-    const armX = 1 - walk;  // the walk clip swings the arms itself
-    // Our arm layers assume a hanging arm; the clips start from a slightly spread one, so the outward turn is eased back a little.
-    if (this.armL) { this.armL.rotateX(p.aL * armX + p.aL * walk * 0.2 * (1 - b.walk)); this.armL.rotateZ(p.zL * 0.9 + 0.1); }
-    if (this.armR) { this.armR.rotateX(p.aR * armX + p.aR * walk * 0.2 * (1 - b.walk)); this.armR.rotateZ(p.zR * 0.9 - 0.1); this.armR.rotateY(b.pour * -0.6); }
+    const arms = modelArms(b, t, dt, this, still, m);
+    // Walking, the clip swings the arms, unless the hands are full: then they stay out in front, holding it.
+    const hold = Math.min(1, b.carry + b.sip + b.phone + b.pour) * walk;
+    const own = 1 - walk + hold;
+    this.poseArm(this.armL, -1, arms.aL * own, (arms.sL - MODEL_OUT) * own, 0, hold);
+    this.poseArm(this.armR, 1, arms.aR * own, (arms.sR - MODEL_OUT) * own, b.pour * -0.6 * own, hold);
     if (this.head) { this.head.rotateX(p.headX); this.head.rotateY(p.headY); this.head.rotateZ(p.headZ); }
-    if (this.torso) this.torso.rotateY(b.talk * Math.sin(t * 2.1) * 0.08);
-    const m = this.manner;
+    if (this.torso) { this.torso.rotateX(arms.lean + this.ty.nod * 0.008 * b.type); this.torso.rotateY(b.talk * Math.sin(t * 2.1) * 0.08); }
     if (m) {
-      // Standing about, everyone has their own way of doing it: a lean, a slow shift of weight, and something to do with their arms.
-      const still = Math.max(0, 1 - sit - walk - b.talk - b.sip - b.phone - b.cheer - b.pour - b.stretch - b.type - b.think - b.carry);
       if (this.root) { this.root.rotateZ((m.lean + Math.sin(t * m.shift) * 0.012) * (1 - sit)); this.root.position.x += Math.sin(t * m.shift) * 0.006 * still; }
-      if (m.stance === 1 && this.armR) { this.armR.rotateZ(0.5 * still); this.armR.rotateX(-0.35 * still); }
-      if (m.stance === 2) { if (this.armL) this.armL.rotateX(-0.9 * still); if (this.armR) this.armR.rotateX(-0.9 * still); }
-      if (m.stance === 3) { if (this.armL) this.armL.rotateX(0.45 * still); if (this.armR) this.armR.rotateX(0.45 * still); }
       if (this.head) this.head.rotateY(Math.sin(t * 0.37 + m.shift * 9) * 0.22 * still);
       if (m.sway && this.torso) this.torso.rotateY(Math.sin(t * 7.6) * 0.05 * m.sway * walk);
     }
+    if (this.mug.visible || this.phone.visible) this.holdProps();
+  }
+  /**
+   * One arm, turned at the shoulder in the body's frame on top of what the clips left it at: out from the side by `ds`,
+   * round by `ry`, then forward and up by `a`. Every frame starts again from the clip, so nothing builds up.
+   */
+  poseArm(bone, side, a, ds, ry, hold) {
+    if (!bone) return;
+    if (hold > 0.001) bone.quaternion.slerp(this.armOut.get(bone), hold);
+    bone.quaternion.premultiply(_q.setFromAxisAngle(AZ, side * ds));
+    if (ry) bone.quaternion.premultiply(_q.setFromAxisAngle(AY, ry));
+    bone.quaternion.premultiply(_q.setFromAxisAngle(AX, a));
+  }
+  /** A mug or phone stays upright in the hand whichever way the arm is turned. */
+  holdProps() {
+    _q.identity();
+    for (const b of [this.root, this.torso, this.armR]) if (b) _q.multiply(b.quaternion);
+    _q.invert();
+    this.mug.quaternion.copy(_q);
+    this.phone.quaternion.copy(_q).multiply(PHONE_TILT);
   }
   dispose() {
     for (const m of this.materials) m.dispose();

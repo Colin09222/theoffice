@@ -411,6 +411,7 @@ export class Actor {
     view.scene.add(this.shadow);
     view.scene.add(this.group);
     this.sitDown();
+    this.group.position.y = this.seatY; this.char.blend.sit = 1;  // already sitting when the floor opens
     this.tag = document.createElement('div'); this.tag.className = 'char-tag';
     this.tag.dataset.side = view.actors.size % 2 ? 'left' : 'right';  // bubbles alternate sides, so a huddle stays readable
     this.nameEl = document.createElement('span'); this.nameEl.className = 'char-name'; this.nameEl.textContent = info.name;
@@ -426,16 +427,20 @@ export class Actor {
     const old = this.char;
     next.group.position.copy(old.group.position); next.group.rotation.copy(old.group.rotation);
     next.setAnim(old.anim); next.paper.visible = old.paper.visible; next.setManner(this.manner);
+    // Mid-pose stays mid-pose: no standing up and sitting down again, or arms rising afresh, when the model takes over.
+    next.inChair = old.inChair; Object.assign(next.blend, old.blend); next.typeK = old.typeK ?? old.blend.type;
     this.view.scene.remove(old.group); old.dispose();
     this.char = next; this.group = next.group; this.view.scene.add(next.group);
     if (this.seated) this.sitDown();
   }
   destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); }
   sitDown() {
-    this.seated = true;
-    // Hips land on the seat cushion; the legs hang in front of the chair, toward the desk.
+    this.seated = true; this.char.inChair = true; this.char.bigDesk = !!this.seat.big;
+    // Hips land on the seat cushion; the legs hang in front of the chair, toward the desk. The height eases in with the
+    // sitting pose (see update), so nobody hops up onto the seat.
     const f = this.seatFace();
-    this.group.position.set(this.seat.at[0] + Math.sin(f) * 0.06, this.char.seatedY(this.view.modelsOn ? SEAT_MODEL : SEAT_LEGACY), this.seat.at[1] + Math.cos(f) * 0.06);
+    this.seatY = this.char.seatedY(this.view.modelsOn ? SEAT_MODEL : SEAT_LEGACY);
+    this.group.position.set(this.seat.at[0] + Math.sin(f) * 0.06, this.group.position.y, this.seat.at[1] + Math.cos(f) * 0.06);
     this.heading = f; this.group.rotation.y = f;
     this.applyStatePose();
   }
@@ -444,12 +449,11 @@ export class Actor {
   standUp() {
     if (!this.seated) return;
     const f = this.seatFace();
-    this.seated = false; this.group.position.y = 0;
+    this.seated = false; this.char.inChair = false;
     this.group.position.x -= Math.sin(f) * 0.36; this.group.position.z -= Math.cos(f) * 0.36;
   }
   goTo(x, z, then) {
-    this.seated = false;
-    this.group.position.y = 0;
+    this.seated = false; this.char.inChair = false;
     this.path = this.view.nav.path(this.group.position.x, this.group.position.z, x, z);
     this.afterWalk = then;
     this.char.setAnim('walk');
@@ -624,6 +628,8 @@ export class Actor {
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       g.rotation.y += diff * Math.min(1, dt * 10);
     }
+    // Onto the seat and off it at the pace the sitting pose blends, so the hips glide instead of jumping.
+    g.position.y += ((this.seated ? this.seatY : 0) - g.position.y) * Math.min(1, dt * 9);
     this.shadow.position.set(g.position.x, 0.02, g.position.z);
     // Outside set hours the staff have gone home: their desks stay, they don't. Checked every frame, so a new hire or a fresh model follows too.
     const home = !!this.view.closed && !this.isBoss;
@@ -887,9 +893,9 @@ export class OfficeView {
 
     // Desks.
     const mgr = makeDesk(room, detail, legacy, L.manager[0], L.manager[1], primary, primary, accent, { big: true, seed: 2, ry: L.manager[2] });
-    this.managerSeat = { at: mgr.at, face: mgr.face, screenMat: mgr.screenMat, glow: mgr.glow, bar: mgr.bar };
+    this.managerSeat = { at: mgr.at, face: mgr.face, screenMat: mgr.screenMat, glow: mgr.glow, bar: mgr.bar, big: true };
     const bossDesk = makeDesk(room, detail, legacy, L.boss[0], L.boss[1], primary, primary, accent, { big: true, seed: 3, ry: L.boss[2] });
-    this.bossSeat = { at: bossDesk.at, face: bossDesk.face, screenMat: bossDesk.screenMat, glow: bossDesk.glow, bar: bossDesk.bar };
+    this.bossSeat = { at: bossDesk.at, face: bossDesk.face, screenMat: bossDesk.screenMat, glow: bossDesk.glow, bar: bossDesk.bar, big: true };
     piece(bossDesk.detail, '#e9b949', 0.8, 0.14, 0.2, 0.85, 1.02, 0.2);
     for (const [x, z] of L.desks) this.deskSlots.push({ x, z, desk: null });
     // The boss's and the manager's rooms are theirs too, done out like everyone else's.
@@ -1085,8 +1091,9 @@ export class OfficeView {
       const front = Math.PI;  // the kit's desk has its drawer at the back; turned, it faces the sitter
       put('desk', { z: -0.2, ry: front, scale: big ? FS * 1.25 : FS * 1.1 });
       put('computerScreen', { y: big ? 1.2 : 1.06, z: -0.58, ry: 0 });
-      put('computerKeyboard', { y: big ? 1.2 : 1.06, z: 0.16 });
-      put('computerMouse', { x: 0.56, y: big ? 1.2 : 1.06, z: 0.18 });
+      // Keys near the front edge, where a seated person's hands land (see TYPE_A in character.js).
+      put('computerKeyboard', { y: big ? 1.2 : 1.06, z: big ? 0.26 : 0.19 });
+      put('computerMouse', { x: 0.56, y: big ? 1.2 : 1.06, z: big ? 0.28 : 0.21 });
       put('chairDesk', { z: 0.84, ry: Math.PI, tint: chairTint(chairColor), scale: big ? FS * 1.15 : FS });
       if (big) put('laptop', { x: 1.05, y: big ? 1.2 : 1.06, z: -0.15, ry: 0.3 });
       target = outer;
