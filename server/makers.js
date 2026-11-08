@@ -321,10 +321,11 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     save(j, { stage: 'asking' }, { asked: why });
     say(floor, `**${j.title} is stuck, boss:** ${why}.${worst ? `\n${worst}` : ''}\nRather than go round in circles, it's your call: **Try again**, ${st.launchable ? '**Launch what works** (the last version that passed), ' : ''}or **Stop**. The buttons are on the maker card.`);
   }
-  async function ready(floor, j, why) {
+  async function ready(floor, j, why, passing = true) {
     const st = stateOf(j);
     save(j, { stage: 'ready' }, { why });
     if (j.launched_at) {
+      if (!passing) { say(floor, `The last pass on ${j.title} didn't pass the Tester, so the live version stays the one that did.`); return; }
       try { const url = await publishTested(floor, j); say(floor, `**${j.title} got better and the Tester passed it**, so the live version is updated: ${url}`); } catch (e) { say(floor, `The newest ${j.title} passed the Tester but didn't go live: ${clip(e.message, 300)}`); }
       return;
     }
@@ -353,7 +354,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
       if (d.action === 'retest') { queue(floor, j, 'test', d.pass, testBrief(j, d.pass, { computer: computerOn('tester') }, config), 'tester'); return true; }
       if (d.action === 'build') { cancelPaired(); queuePass(floor, j, d.pass, { bugs: d.bugs, regressions: d.regressions, unmet: d.unmet || [] }); return true; }
       cancelPaired();
-      if (d.action === 'ready') { ready(floor, j, d.why).catch(() => {}); return true; }
+      if (d.action === 'ready') { ready(floor, j, d.why, !!d.passing).catch(() => {}); return true; }
       if (d.action === 'ask') { ask(floor, j, d.why); return true; }
     } catch (e) {
       // The floor's own limits (open tasks, tasks a day) can refuse a pass. Then it's the boss's call, not a silent stop.
@@ -380,7 +381,9 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     if (choice === 'retry') {
       const st = stateOf(j);
       save(j, {}, { fails: 0 });
-      queuePass(floor, j, Math.min(j.pass + (st.lastPassing === j.pass ? 1 : 0), j.depth), { bugs: st.bugs || [], unmet: st.unmet || [] });
+      const docDone = get(db, "SELECT 1 x FROM maker_tasks m JOIN tasks t ON t.id=m.task_id WHERE m.job_id=? AND m.step='doc' AND t.status='done'", j.id);
+      if (!docDone) { const doc = queue(floor, j, 'doc', 0, docBrief({ ...j, ...st }), DOC_ROLE[j.type]); const b = queue(floor, j, 'build', 0, buildBrief({ ...j, ...st }, 0, {}, config), 'builder', [doc]); queue(floor, j, 'test', 0, testBrief(j, 0, { computer: computerOn('tester') }, config), 'tester', [b]); save(j, { stage: 'doc', pass: 0 }); }
+      else queuePass(floor, j, Math.min(j.pass + (st.lastPassing === j.pass ? 1 : 0), j.depth), { bugs: st.bugs || [], unmet: st.unmet || [] });
       say(floor, `Going again on ${j.title}, with the Tester's list.`);
       return view(floor);
     }
@@ -394,6 +397,8 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     const st = stateOf(j);
     const tasks = all(db, 'SELECT m.step, m.pass, t.status FROM maker_tasks m JOIN tasks t ON t.id=m.task_id WHERE m.job_id=? ORDER BY m.task_id', j.id);
     const stepState = (step, pass) => { const ts = tasks.filter((t) => t.step === step && t.pass === pass); if (!ts.length) return 'todo'; const last = ts[ts.length - 1].status; return last === 'done' || last === 'review' ? 'done' : last === 'doing' ? 'doing' : last === 'failed' ? 'failed' : last === 'cancelled' ? 'skipped' : 'todo'; };
+    // Work stopped from outside the loop (Stop all, a cancelled task) leaves nothing open: that becomes the boss's call, once.
+    if (OPEN.has(j.stage) && tasks.length && !tasks.some((t) => ['todo', 'doing', 'blocked'].includes(t.status))) { ask(floor, j, 'the work was stopped before it finished'); return view(floor); }
     const steps = [{ label: j.type === 'game' ? 'Design doc' : 'Spec', state: stepState('doc', 0) }, { label: j.type === 'game' ? 'Playable slice' : 'First version', state: stepState('build', 0) }, { label: 'Tested', state: stepState('test', 0) }];
     for (let p = 1; p <= j.depth; p++) steps.push({ label: `${j.type === 'game' ? 'Depth' : 'Polish'} pass ${p}`, state: stepState('test', p) === 'done' ? 'done' : stepState('build', p) === 'done' ? 'doing' : stepState('build', p) });
     return {

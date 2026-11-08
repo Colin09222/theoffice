@@ -179,6 +179,25 @@ describe('a floor with no company yet', () => {
   });
 });
 
+describe('work stopped from outside the loop', () => {
+  let t, c;
+  before(async () => { t = await boot(); c = await claim(t, 'Stop Start'); });
+  after(() => t.close());
+  test('"Stop all" mid-job turns into a question, and Try again starts over from the design doc', async () => {
+    const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
+    t.app.engine.setGlobalPause(true);
+    assert.equal((await c.post(`/api/floors/${c.slug}/makers/start`, { type: 'game', name: 'Halted', pitch: 'A game that gets stopped.' })).status, 200);
+    t.app.engine.cancelOpen(fid);
+    const s = await floorState(c);
+    assert.equal(s.makers.job.stage, 'asking'); assert.match(s.makers.job.asking.why, /stopped/);
+    t.app.engine.setGlobalPause(false);
+    const r = await c.post(`/api/floors/${c.slug}/makers/decide`, { choice: 'retry' });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    const done = await until(async () => { const st = await floorState(c); return st.makers?.job?.stage === 'ready' ? st : null; }, { what: 'ready after retry', timeout: 20000 });
+    assert.equal(done.makers.job.launchable, true);
+  });
+});
+
 describe('a job that keeps failing asks the boss, and the boss decides', () => {
   let t, c;
   before(async () => { t = await boot(); c = await claim(t, 'Broken Co'); });
