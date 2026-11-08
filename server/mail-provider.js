@@ -84,6 +84,7 @@ export function createResend({ apiKey, base = RESEND_API, fetchImpl = globalThis
     getDomain: (domainId) => call('GET', `/domains/${id(domainId)}`),
     updateDomain: (domainId, body) => call('PATCH', `/domains/${id(domainId)}`, body),
     verifyDomain: (domainId) => call('POST', `/domains/${id(domainId)}/verify`),
+    deleteDomain: (domainId) => call('DELETE', `/domains/${id(domainId)}`),
     listWebhooks: () => call('GET', '/webhooks'),
     createWebhook: (body) => call('POST', '/webhooks', body),
     getWebhook: (webhookId) => call('GET', `/webhooks/${id(webhookId)}`),

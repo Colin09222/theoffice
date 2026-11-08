@@ -1,4 +1,4 @@
-// Email for every company: <company-slug>@MAIL_DOMAIN, sent and received through Resend (server/mail-provider.js). See docs/MAIL.md.
+// Email for every company: <company-slug>@MAIL_DOMAIN, or its own domain once that is verified (server/mail-domains.js), sent and received through Resend (server/mail-provider.js). See docs/MAIL.md.
 // Everything that arrives is untrusted and is only ever shown to the boss, or to the staff fenced as data. Nothing goes out to a new address
 // without the boss's tap, every send is capped per floor and for the building, and a spam complaint stops the floor's sending at once.
 import { randomBytes } from 'node:crypto';
@@ -7,6 +7,7 @@ import { slugify, sniff, uploadName, floorBytes, MAX_FILES, cleanPath, Workspace
 import { createResend, verifySvix, MailProviderError } from './mail-provider.js';
 import { mailSettings } from './mail-config.js';
 export { mailSettings };
+import { createMailDomains, EmailDomainRefused } from './mail-domains.js';
 import { sanitizeHtml, htmlToText, cleanText, oneLine, parseAddress, addressList, isAddress, machineMail } from './mail-sanitize.js';
 import { wrapUntrusted, mentionsPrivate } from './tools.js';
 import { isOpen } from './modes.js';
@@ -50,12 +51,18 @@ CREATE TABLE IF NOT EXISTS mail_suppressed (address TEXT PRIMARY KEY, reason TEX
 CREATE TABLE IF NOT EXISTS mail_trusted (floor_id INTEGER NOT NULL, address TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (floor_id, address));
 CREATE TABLE IF NOT EXISTS mail_counters (day TEXT NOT NULL, key TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, key));
 CREATE TABLE IF NOT EXISTS mail_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER, kind TEXT NOT NULL, text TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS mail_domains (domain TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, held TEXT NOT NULL, status TEXT NOT NULL, local TEXT NOT NULL DEFAULT 'hello', resend_id TEXT NOT NULL DEFAULT '', records TEXT NOT NULL DEFAULT '[]', note TEXT NOT NULL DEFAULT '', tries INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0, told INTEGER NOT NULL DEFAULT 0, asked_at INTEGER NOT NULL DEFAULT 0, checked_at INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, verified_at INTEGER, updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS mail_domains_floor ON mail_domains(floor_id, status);
+CREATE INDEX IF NOT EXISTS mail_domains_next ON mail_domains(status, next_at);
+CREATE TABLE IF NOT EXISTS mail_domain_addresses (address TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, domain TEXT NOT NULL, is_primary INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS mail_domain_addresses_floor ON mail_domain_addresses(floor_id, is_primary);
 `;
 export const ensureMailSchema = (db) => db.exec(MAIL_SCHEMA);
 
 export class MailError extends Error { constructor(message, status = 400, code = 'mail_refused') { super(message); this.name = 'MailError'; this.status = status; this.code = code; } }
 export const NOT_READY = 'Email is being set up for this building, so nothing was sent. The address is saved and starts working as soon as the building manager switches email on.';
 
+const HOLDS_PLACE = ['creating', 'dns', 'records', 'verifying', 'verified'];
 const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
 const count = (db, key, d) => get(db, 'SELECT n FROM mail_counters WHERE day=? AND key=?', d, key)?.n || 0;
 const bump = (db, key, d, by = 1) => run(db, 'INSERT INTO mail_counters (day,key,n) VALUES (?,?,?) ON CONFLICT(day,key) DO UPDATE SET n=n+excluded.n', d, key, by);
@@ -82,17 +89,21 @@ export function mailStatus(db, cfg, t = Date.now()) {
   ensureMailSchema(db);
   const d = dayOf(t);
   const floors = all(db, "SELECT f.id, f.number, f.name, a.address, COALESCE(m.paused,0) paused, COALESCE(m.pause_reason,'') reason FROM floors f LEFT JOIN mail_addresses a ON a.floor_id=f.id AND a.is_primary=1 LEFT JOIN mail_floor m ON m.floor_id=f.id WHERE f.filler=0 ORDER BY f.number");
+  const domains = all(db, "SELECT d.domain, d.status, d.local, f.number FROM mail_domains d LEFT JOIN floors f ON f.id=d.floor_id WHERE d.status NOT IN ('removed','expired') ORDER BY d.created_at");
   return {
     sending: !!cfg.resendApiKey, receiving: !!cfg.resendWebhookSecret, domain: cfg.mailDomain, buildingPaused: buildingPaused(db),
     today: { sent: count(db, 'out:all', d), cap: cfg.mailBuildingDaily, received: count(db, 'in:all', d), droppedUnknown: count(db, 'drop:unknown', d), droppedCap: count(db, 'drop:cap', d), rejectedHooks: count(db, 'hook:rejected', d) },
     floors: floors.map((f) => ({ number: f.number, name: f.name, address: f.address ? `${f.address}@${cfg.mailDomain}` : '', paused: !!f.paused, reason: f.reason, sentToday: count(db, `out:${f.id}`, d), receivedToday: count(db, `in:${f.id}`, d) })),
     suppressed: get(db, 'SELECT COUNT(*) n FROM mail_suppressed').n,
+    domains: domains.map((d) => ({ domain: d.domain, status: d.status, address: `${d.local}@${d.domain}`, floor: d.number })),
+    domainPlaces: { used: 1 + domains.filter((d) => HOLDS_PLACE.includes(d.status)).length, max: cfg.mailMaxDomains ?? 3 },
     alerts: all(db, 'SELECT a.kind, a.text, a.created_at, f.number FROM mail_alerts a LEFT JOIN floors f ON f.id=a.floor_id ORDER BY a.id DESC LIMIT 10').map((a) => ({ kind: a.kind, floor: a.number, text: a.text, at: new Date(a.created_at).toISOString() })),
   };
 }
 export function mailStatusText(s) {
   const lines = [`Email: sending ${s.sending ? 'on' : 'off (no RESEND_API_KEY)'}, receiving ${s.receiving ? 'on' : 'off (no RESEND_WEBHOOK_SECRET)'}, domain ${s.domain}${s.buildingPaused ? ', PAUSED for the whole building' : ''}.`,
-    `Today: ${s.today.sent}/${s.today.cap} sent, ${s.today.received} received, ${s.today.droppedUnknown} dropped for unknown addresses, ${s.today.droppedCap} over a floor's cap, ${s.today.rejectedHooks} webhook calls refused. ${s.suppressed} suppressed addresses.`, ''];
+    `Today: ${s.today.sent}/${s.today.cap} sent, ${s.today.received} received, ${s.today.droppedUnknown} dropped for unknown addresses, ${s.today.droppedCap} over a floor's cap, ${s.today.rejectedHooks} webhook calls refused. ${s.suppressed} suppressed addresses.`,
+    `Domains: ${s.domainPlaces.used} of ${s.domainPlaces.max} places in use (${s.domain} is one).`, ...s.domains.map((d) => `  ${d.domain} (floor ${d.floor ?? '?'}): ${d.status}, ${d.address}`), ''];
   for (const f of s.floors) lines.push(`Floor ${f.number} ${f.name || '(setting up)'}: ${f.address || 'no address yet'}${f.paused ? ` PAUSED (${f.reason})` : ''}, ${f.sentToday} sent, ${f.receivedToday} received today`);
   if (s.alerts.length) { lines.push('', 'Alerts:'); for (const a of s.alerts) lines.push(`  ${a.at} floor ${a.floor ?? '?'} ${a.kind}: ${a.text}`); }
   return lines.join('\n');
@@ -114,7 +125,10 @@ export function installMail(ext) {
   const taken = (local) => RESERVED_LOCAL.has(local) || !!get(db, 'SELECT 1 x FROM mail_addresses WHERE address=?', local);
   const localOk = (local) => LOCAL_RE.test(local) && !taken(local);
   const primary = (floorId) => get(db, 'SELECT address FROM mail_addresses WHERE floor_id=? AND is_primary=1', floorId)?.address || '';
-  const addressOf = (floorId) => { const l = primary(floorId) || ensureAddress(get(db, 'SELECT * FROM floors WHERE id=?', floorId)); return l ? `${l}@${domain}` : ''; };
+  /** The company's address on MAIL_DOMAIN, which it keeps for good and which does the work until its own domain is verified. */
+  const buildingAddress = (floorId) => { const l = primary(floorId) || ensureAddress(get(db, 'SELECT * FROM floors WHERE id=?', floorId)); return l ? `${l}@${domain}` : ''; };
+  /** The address the company writes from right now. */
+  const addressOf = (floorId) => domains.ownAddress(floorId) || buildingAddress(floorId);
   const baseFor = (f) => (/^floor-\d+$/.test(f.slug) && f.name ? slugify(f.name, f.slug) : f.slug);
   function ensureAddress(f) {
     if (!f || !f.name || f.filler) return '';
@@ -170,6 +184,11 @@ export function installMail(ext) {
   }
   const notifyBoss = (floorId, data) => engine.emit(floorId, 'mail', { unread: unreadOf(floorId), ...data }, { persist: false, ownerOnly: true });
   const unreadOf = (floorId) => get(db, "SELECT COUNT(*) n FROM mail_messages WHERE floor_id=? AND direction='in' AND read_at IS NULL", floorId).n;
+
+  const addAlert = (floorId, kind, text) => { run(db, 'INSERT INTO mail_alerts (floor_id,kind,text,created_at) VALUES (?,?,?,?)', floorId, kind, oneLine(text, 400), now()); log('warn', 'mail_alert', { kind }); };
+  const hostOfUrl = (u) => { try { return new URL(u).hostname; } catch { return ''; } };
+  const buildingHosts = () => [domain, String(cfg.appsBaseDomain || '').split(':')[0], hostOfUrl(cfg.publicOrigin), cfg.domainContactSource].filter(Boolean);
+  const domains = createMailDomains({ db, set, provider, mailDomain: domain, now, log, engine, hide, addAlert, notifyBoss, buildingHosts });
 
   // ---- inbound ----
   function readRaw(req, max) {
@@ -273,9 +292,8 @@ export function installMail(ext) {
     const floorIds = [];
     for (const r of rcpts) {
       const [local, host] = r.address.split('@');
-      if (host !== domain) continue;
-      const hit = get(db, 'SELECT a.floor_id FROM mail_addresses a JOIN floors f ON f.id=a.floor_id WHERE a.address=?', local);
-      if (hit && !floorIds.includes(hit.floor_id)) floorIds.push(hit.floor_id);
+      const hit = host === domain ? get(db, 'SELECT a.floor_id FROM mail_addresses a JOIN floors f ON f.id=a.floor_id WHERE a.address=?', local)?.floor_id : domains.route(r.address);
+      if (hit != null && !floorIds.includes(hit)) floorIds.push(hit);
     }
     bump(db, 'in:all', today());
     if (!floorIds.length) { bump(db, 'drop:unknown', today()); finish(row, 'unknown_recipient'); return; }
@@ -307,7 +325,7 @@ export function installMail(ext) {
     const auth = email.authentication || {};
     const verified = auth.dmarc === 'pass' || auth.dkim === 'pass';
     const machine = machineMail({ from: from.address, headers });
-    if (from.address.endsWith(`@${domain}`)) machine.push('another-company-here');
+    if (domains.inBuilding(from.address.split('@')[1])) machine.push('another-company-here');
     const notes = [];
     let text = cleanText(email.text || '', TEXT_MAX + 1);
     if (!text && email.html) text = htmlToText(email.html, TEXT_MAX + 1);
@@ -445,7 +463,7 @@ export function installMail(ext) {
       const headersInReplyTo = replyOf?.message_id || '';
       const refs = replyOf ? oneLine(`${replyOf.refs || ''} ${replyOf.message_id || ''}`, 2000) : '';
       const r = run(db, `INSERT INTO mail_messages (floor_id,thread_id,direction,source,from_addr,from_name,to_addrs,cc_addrs,subject,text,in_reply_to,refs,status,agent_id,by_boss,reason,created_at,updated_at)
-        VALUES (?,?,'out','email',?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, f.id, threadId, `${c.from}@${domain}`, f.name, JSON.stringify(c.toList), JSON.stringify(c.ccList), c.subj, c.body, headersInReplyTo, refs, c.reason ? 'awaiting_boss' : 'queued', agentId ?? null, by === 'boss' ? 1 : 0, c.reason, t, t);
+        VALUES (?,?,'out','email',?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, f.id, threadId, addressOf(f.id), f.name, JSON.stringify(c.toList), JSON.stringify(c.ccList), c.subj, c.body, headersInReplyTo, refs, c.reason ? 'awaiting_boss' : 'queued', agentId ?? null, by === 'boss' ? 1 : 0, c.reason, t, t);
       run(db, 'UPDATE mail_threads SET last_at=? WHERE id=?', t, threadId);
       return Number(r.lastInsertRowid);
     });
@@ -467,15 +485,27 @@ export function installMail(ext) {
     if (why) { if (why !== 'gone') run(db, "UPDATE mail_messages SET status='failed', note=?, updated_at=? WHERE id=? AND status='queued'", why, now(), id); return get(db, 'SELECT * FROM mail_messages WHERE id=?', id); }
     const body = `${m.text}${signature(f)}`;
     const html = `<div style="font:15px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1f2430;white-space:pre-wrap">${esc(m.text)}</div><p style="font:12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#6b6f78;border-top:1px solid #ddd;padding-top:8px;margin-top:20px">${esc(f.name)}<br>Sent by the ${esc(f.name)} team, an AI-run company in <a href="${esc(set.mailPublicUrl)}">The Office</a>.</p>`;
-    const message = { from: `${quoteName(f.name)} <${m.from_addr}>`, to: jsonList(m.to_addrs), subject: m.subject, text: body, html, tags: [{ name: 'floor', value: String(m.floor_id) }, { name: 'mail_id', value: String(m.id) }] };
+    // Which address goes on it is decided now, not when it was written: a domain can have come good, or stopped being, while it waited for the boss.
+    const own = domains.ownAddress(m.floor_id);
+    let fromAddr = own || buildingAddress(m.floor_id) || m.from_addr;
+    const message = { from: `${quoteName(f.name)} <${fromAddr}>`, to: jsonList(m.to_addrs), subject: m.subject, text: body, html, tags: [{ name: 'floor', value: String(m.floor_id) }, { name: 'mail_id', value: String(m.id) }] };
     const cc = jsonList(m.cc_addrs); if (cc.length) message.cc = cc;
     const headers = {};
     if (m.in_reply_to) headers['In-Reply-To'] = m.in_reply_to;
     if (m.refs) headers.References = m.refs;
     if (Object.keys(headers).length) message.headers = headers;
     try {
-      const r = await provider.send(message, { idempotencyKey: `office-mail-${m.id}-${m.created_at}` });
-      run(db, "UPDATE mail_messages SET status='sent', provider_id=?, sent_at=?, note='', updated_at=? WHERE id=?", oneLine(r?.id, 80), now(), now(), id);
+      let r;
+      try { r = await provider.send(message, { idempotencyKey: `office-mail-${m.id}-${m.created_at}` }); } catch (e) {
+        // The provider won't send from the company's domain any more: this one goes from MAIL_DOMAIN, and the domain gets looked at again.
+        if (!own || !(e instanceof MailProviderError) || ![403, 422].includes(e.status) || !/verif|domain/i.test(e.message)) throw e;
+        domains.doubt(own.split('@')[1]);
+        fromAddr = buildingAddress(m.floor_id);
+        if (!fromAddr) throw e;
+        message.from = `${quoteName(f.name)} <${fromAddr}>`;
+        r = await provider.send(message, { idempotencyKey: `office-mail-${m.id}-${m.created_at}-fallback` });
+      }
+      run(db, "UPDATE mail_messages SET status='sent', from_addr=?, provider_id=?, sent_at=?, note='', updated_at=? WHERE id=?", fromAddr, oneLine(r?.id, 80), now(), now(), id);
     } catch (e) {
       // Not counted against the day if it never left. A retryable failure goes round again on the tick, a few times at most.
       tx(db, () => { bump(db, `out:${m.floor_id}`, d, -1); bump(db, 'out:all', d, -1); });
@@ -522,7 +552,8 @@ export function installMail(ext) {
     const sent = all(db, "SELECT * FROM mail_messages WHERE floor_id=? AND direction='out' ORDER BY id DESC LIMIT 60", f.id).map((m) => msgView(m, f));
     const fm = floorMail(f.id);
     const address = addressOf(f.id);
-    return { ready: ready(), receiving: !!set.resendWebhookSecret, address, setup: !address, canChange: !!address && !fm.changed, suggestions: address && !fm.changed ? suggestions(f).map((s) => `${s}@${domain}`) : [], bossEmail: fm.boss_email, paused: !!fm.paused || buildingPaused(db), unread: unreadOf(f.id), threads, sent, waiting: sent.filter((m) => m.status === 'awaiting_boss'), caps: { recipients: set.mailMaxRecipients } };
+    const onOwn = !!domains.ownAddress(f.id);
+    return { ready: ready(), receiving: !!set.resendWebhookSecret, address, buildingAddress: buildingAddress(f.id), onOwnDomain: onOwn, ownDomain: domains.view(f), setup: !address, canChange: !!address && !onOwn && !fm.changed, suggestions: address && !onOwn && !fm.changed ? suggestions(f).map((s) => `${s}@${domain}`) : [], bossEmail: fm.boss_email, paused: !!fm.paused || buildingPaused(db), unread: unreadOf(f.id), threads, sent, waiting: sent.filter((m) => m.status === 'awaiting_boss'), caps: { recipients: set.mailMaxRecipients } };
   }
   function threadView(f, id) {
     const t = get(db, 'SELECT * FROM mail_threads WHERE id=? AND floor_id=?', id, f.id);
@@ -621,6 +652,7 @@ export function installMail(ext) {
       backfill();
       nudge();
       await drain();
+      await domains.tick();
       // A send cut off by a restart goes round again; the idempotency key stops Resend sending it twice.
       run(db, "UPDATE mail_messages SET status='queued', updated_at=? WHERE direction='out' AND status='sending' AND updated_at<?", now() - 30000, now() - 600000);
       for (const m of all(db, "SELECT id FROM mail_messages WHERE direction='out' AND status='queued' AND updated_at<? LIMIT 10", now() - 20000)) await deliver(m.id);
@@ -630,7 +662,7 @@ export function installMail(ext) {
   }
 
   // ---- routes: the boss only ----
-  const wrap = async (fn) => { try { return await fn(); } catch (e) { if (e instanceof MailError) throw new HttpError(e.status, e.code, e.message); throw e; } };
+  const wrap = async (fn) => { try { return await fn(); } catch (e) { if (e instanceof MailError) throw new HttpError(e.status, e.code, e.message); if (e instanceof EmailDomainRefused) throw new HttpError(400, 'domain_refused', e.message); throw e; } };
   const idOf = (v) => { if (!/^\d{1,12}$/.test(String(v))) throw new HttpError(404, 'not_found'); return Number(v); };
   const ownerLimit = (bucket, key, n, w) => { if (!rates.allow(`${bucket}:${key}`, n, w)) throw new HttpError(429, 'rate_limited', 'Too many requests. Slow down a little.'); };
   GET('/api/floors/:slug/mail', async ({ req, res, p }) => { const f = requireOwner(req, p.slug); ensureAddress(f); json(res, 200, overview(f)); });
@@ -671,13 +703,23 @@ export function installMail(ext) {
     const b = await readJson(req, 1024);
     await wrap(() => json(res, 200, { address: changeAddress(f, b.address) }));
   });
+  // The company's own domain: a boss's click can reach the mail provider and the registrar, so these are limited harder than reading is.
+  const domainRoute = (path, fn) => POST(`/api/floors/:slug/mail/domain${path}`, async ({ req, res, p }) => {
+    const f = requireOwner(req, p.slug); ownerLimit('mailDomain', f.id, 12, 60000);
+    const b = await readJson(req, 1024);
+    await wrap(async () => json(res, 200, await fn(f, b)));
+  });
+  domainRoute('', (f, b) => domains.addByBoss(f, b.domain));
+  domainRoute('/check', (f, b) => domains.recheck(f, String(b.domain ?? '').toLowerCase()));
+  domainRoute('/local', (f, b) => domains.setLocal(f, String(b.domain ?? '').toLowerCase(), b.local));
+  domainRoute('/remove', (f, b) => domains.stopUsing(f, String(b.domain ?? '').toLowerCase()));
   POST('/api/floors/:slug/mail/settings', async ({ req, res, p }) => {
     const f = requireOwner(req, p.slug);
     const b = await readJson(req, 1024);
     const raw = String(b.bossEmail ?? '').trim();
     const a = raw ? parseAddress(raw) : { address: '' };
     if (!a) throw new HttpError(400, 'bad_email', 'That email address does not look right.');
-    if (a.address.endsWith(`@${domain}`)) throw new HttpError(400, 'bad_email', 'Use your own address, not one in the building.');
+    if (a.address && domains.inBuilding(a.address.split('@')[1])) throw new HttpError(400, 'bad_email', 'Use your own address, not one in the building.');
     touchFloor(f.id); run(db, 'UPDATE mail_floor SET boss_email=?, updated_at=? WHERE floor_id=?', a.address, now(), f.id);
     json(res, 200, { ok: true, bossEmail: a.address });
   });
@@ -689,7 +731,7 @@ export function installMail(ext) {
     out.mail = { ready: ready(), address: addressOf(f.id), unread: unreadOf(f.id), waiting: all(db, "SELECT * FROM mail_messages WHERE floor_id=? AND status='awaiting_boss' ORDER BY id DESC LIMIT 20", f.id).map((m) => msgView(m, f)) };
   });
 
-  engine.mail = { stateLine, toolInbox, toolRead, toolReply, toolSend, send: sendMail, addressOf, ensureAddress, formToInbox, webhook, ready, provider, drain, tick: () => tick(), settings: set };
+  engine.mail = { stateLine, toolInbox, toolRead, toolReply, toolSend, send: sendMail, addressOf, buildingAddress, ensureAddress, formToInbox, webhook, ready, provider, drain, tick: () => tick(), settings: set, domains };
   return {
     webhook, formToInbox,
     start() { stopped = false; backfill(); timer = setInterval(() => { tick(); }, set.mailTickMs || 4000); timer.unref?.(); },

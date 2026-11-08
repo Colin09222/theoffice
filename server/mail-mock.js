@@ -6,7 +6,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { signSvix } from './mail-provider.js';
 
 export async function startMockResend({ apiKey = 're_mock_key', webhookSecret = `whsec_${randomBytes(24).toString('base64')}` } = {}) {
-  const state = { sent: [], received: new Map(), files: new Map(), domains: [], webhooks: [], requests: [], cdnAuth: 0, failures: [], idem: new Map() };
+  const state = { sent: [], received: new Map(), files: new Map(), domains: [], webhooks: [], requests: [], cdnAuth: 0, failures: [], idem: new Map(), maxDomains: Infinity, refuseFrom: new Set() };
   let base = '';
   const reply = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   const server = http.createServer(async (req, res) => {
@@ -34,6 +34,8 @@ export async function startMockResend({ apiKey = 're_mock_key', webhookSecret = 
       const list = (v) => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
       if (!body?.from || !body?.subject || !list(body.to).length) return reply(res, 422, { statusCode: 422, name: 'validation_error', message: 'Missing `to`, `from` or `subject` field.' });
       if (list(body.to).length > 50) return reply(res, 422, { statusCode: 422, name: 'validation_error', message: 'Too many recipients.' });
+      const host = String(body.from).match(/@([^>\s]+)>?\s*$/)?.[1]?.toLowerCase();
+      if (state.refuseFrom.has(host)) return reply(res, 403, { statusCode: 403, name: 'validation_error', message: `The ${host} domain is not verified.` });
       const id = randomUUID();
       state.sent.push({ id, ...body });
       if (key) state.idem.set(key, id);
@@ -56,6 +58,7 @@ export async function startMockResend({ apiKey = 're_mock_key', webhookSecret = 
     if (path === '/domains' && req.method === 'GET') return reply(res, 200, { object: 'list', has_more: false, data: state.domains.map(({ records: _r, ...d }) => d) });
     if (path === '/domains' && req.method === 'POST') {
       if (!body?.name) return reply(res, 422, { statusCode: 422, name: 'validation_error', message: 'Missing `name` field.' });
+      if (state.domains.length >= state.maxDomains) return reply(res, 403, { statusCode: 403, name: 'validation_error', message: 'You have reached your domain limit on this plan.' });
       const caps = { sending: body.capabilities?.sending || 'enabled', receiving: body.capabilities?.receiving || 'disabled' };
       const d = { id: randomUUID(), name: body.name, status: 'not_started', created_at: new Date().toISOString(), region: body.region || 'us-east-1', open_tracking: body.open_tracking ?? true, click_tracking: body.click_tracking ?? false, capabilities: caps };
       d.records = mockRecords(d);
@@ -68,6 +71,7 @@ export async function startMockResend({ apiKey = 're_mock_key', webhookSecret = 
       if (!d) return reply(res, 404, { statusCode: 404, name: 'not_found', message: 'Domain not found' });
       if (dom[2] && req.method === 'POST') return reply(res, 200, { object: 'domain', id: d.id });
       if (req.method === 'GET') return reply(res, 200, { object: 'domain', ...d, records: mockRecords(d) });
+      if (req.method === 'DELETE') { state.domains.splice(state.domains.indexOf(d), 1); return reply(res, 200, { object: 'domain', id: d.id, deleted: true }); }
       if (req.method === 'PATCH') { if (body?.capabilities) Object.assign(d.capabilities, body.capabilities); for (const k of ['open_tracking', 'click_tracking']) if (k in (body || {})) d[k] = body[k]; return reply(res, 200, { object: 'domain', id: d.id }); }
     }
     if (path === '/webhooks' && req.method === 'GET') return reply(res, 200, { object: 'list', has_more: false, data: state.webhooks.map((w) => ({ ...w })) });
@@ -117,16 +121,23 @@ export async function startMockResend({ apiKey = 're_mock_key', webhookSecret = 
     bounced: (sent, type = 'Permanent') => outcome('email.bounced', sent, { bounce: { message: 'The recipient address does not exist.', subType: type === 'Permanent' ? 'General' : 'MailboxFull', type } }),
     complained: (sent) => outcome('email.complained', sent),
     failNext(prefix, status = 500, times = 1) { state.failures.push({ prefix, status, times }); },
+    /** A domain's DNS checks come back: whole, or (sending only) with the receiving record still waiting. */
+    verify(name, { status = 'verified', records = status === 'verified' ? { DKIM: 'verified', SPF: 'verified', Receiving: 'verified' } : { DKIM: 'verified', SPF: 'verified', Receiving: 'pending' } } = {}) {
+      const d = state.domains.find((x) => x.name === name);
+      if (!d) throw new Error(`no domain ${name} in the mock`);
+      d.status = status; d.recordStatus = records;
+    },
     close: () => new Promise((r) => server.close(r)),
   };
 }
 
 function mockRecords(d) {
-  const recs = [
+  const recs = withStatus(d, [
     { record: 'DKIM', name: 'resend._domainkey', type: 'TXT', ttl: 'Auto', status: 'not_started', value: 'p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDmock' },
     { record: 'SPF', name: 'send', type: 'MX', ttl: 'Auto', status: 'not_started', value: `feedback-smtp.${d.region}.amazonses.com`, priority: 10 },
     { record: 'SPF', name: 'send', type: 'TXT', ttl: 'Auto', status: 'not_started', value: 'v=spf1 include:amazonses.com ~all' },
-  ];
-  if (d.capabilities.receiving === 'enabled') recs.push({ record: 'Receiving', name: '@', type: 'MX', ttl: 'Auto', status: 'not_started', value: `inbound-smtp.${d.region}.amazonaws.com`, priority: 10 });
+  ]);
+  if (d.capabilities.receiving === 'enabled') recs.push(...withStatus(d, [{ record: 'Receiving', name: '@', type: 'MX', ttl: 'Auto', status: 'not_started', value: `inbound-smtp.${d.region}.amazonaws.com`, priority: 10 }]));
   return recs;
 }
+const withStatus = (d, recs) => recs.map((r) => (d.recordStatus?.[r.record] ? { ...r, status: d.recordStatus[r.record] } : r));

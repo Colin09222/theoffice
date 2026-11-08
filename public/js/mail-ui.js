@@ -57,8 +57,56 @@ function head(page, v, go) {
     !v.ready ? h('p.mail-banner', { 'data-mail-setup': '' }, SETUP) : v.paused ? h('p.mail-banner.bad', {}, 'Sending is paused for now. Mail still arrives here.') : null);
 }
 
+const DOMAIN_WORD = { creating: 'Setting up', dns: 'Setting up', verifying: 'Confirming', records: 'Needs your records', verified: 'Live', conflict: 'Left as it is', full: 'Waiting for a place', failed: 'Not finished' };
+const copyText = (text) => async () => { try { await navigator.clipboard.writeText(text); toast('Copied'); } catch { toast(text); } };
+
+/** One DNS record for the boss to add where the domain is managed: what kind, its name and its value, each ready to copy. */
+function dnsRow(r) {
+  return h('div.mail-dns', { 'data-mail-dns': r.type },
+    h('b.mail-dns-kind', {}, r.priority === null || r.priority === undefined ? r.type : `${r.type} ${r.priority}`),
+    h('span.mail-dns-name', {}, r.name),
+    r.ok ? h('small.mail-dns-ok', {}, 'Found') : h('button.btn.ghost.small', { type: 'button', onclick: copyText(r.value) }, 'Copy'),
+    h('code.mail-dns-value', {}, r.value));
+}
+
+/** The company's own domain for email, with where it has got to. Until it says Live, mail keeps going from the building's address. */
+function domainCard(page, v, go) {
+  const own = v.ownDomain;
+  if (!own || (!own.domains.length && !own.canAddDomain)) return null;
+  const say = (path, body) => async () => {
+    try { await api(`/floors/${page.slug}/mail/domain${path}`, { method: 'POST', body }); go({}); } catch (e) { toast(e.message, 'bad'); go({}); }
+  };
+  const add = () => modal('Send from your own domain', (body, close) => {
+    const input = h('input', { type: 'text', name: 'mail-domain', placeholder: 'yourcompany.com', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false' });
+    const send = async (name) => {
+      try { await api(`/floors/${page.slug}/mail/domain`, { method: 'POST', body: { domain: name } }); close(); go({}); } catch (e) { toast(e.message, 'bad'); }
+    };
+    body.append(h('p.lede', {}, 'Email can go out from a domain you own, like hello@yourcompany.com. It takes a little setting up; your email carries on as it is until it\'s ready.'));
+    if (own.domainChoices.length) body.append(h('div.mail-picks', {}, ...own.domainChoices.map((d) => h('button.mail-pick', { type: 'button', 'data-mail-domain-pick': d, onclick: () => send(d) }, d))));
+    body.append(h('form.row', { onsubmit: (e) => { e.preventDefault(); if (input.value.trim()) send(input.value); } }, input, h('button.btn.primary', { type: 'submit', 'data-mail-domain-add': '' }, 'Use it')));
+  });
+  const cards = own.domains.map((d) => h(`section.mail-domain.${d.status}`, { 'data-mail-domain': d.domain, 'data-status': d.status },
+    h('div.row.spread.mail-domain-top', {}, h('b.mail-domain-name', {}, icon('globe'), h('span', {}, d.domain)), h('span.mail-domain-pill', {}, DOMAIN_WORD[d.status] || d.status)),
+    h('p.mail-domain-line', { 'data-mail-domain-line': '' }, d.line),
+    d.ready && v.buildingAddress ? h('p.fineprint', {}, `Mail to ${v.buildingAddress} still reaches you.`) : null,
+    d.records.length ? h('div.mail-dns-list', {}, ...d.records.map(dnsRow)) : null,
+    ['creating', 'dns', 'records', 'verifying', 'verified'].includes(d.status) ? h('label.mail-domain-from', {}, h('span', {}, 'Send as'),
+      h('select', { name: 'mail-domain-local', 'data-mail-domain-local': '', onchange: (e) => say('/local', { domain: d.domain, local: e.target.value })() },
+        ...own.localChoices.map((l) => h('option', { value: l, selected: l === d.local }, `${l}@${d.domain}`)))) : null,
+    h('div.row.mail-domain-actions', {},
+      d.canCheck ? h('button.btn.ghost.small', { type: 'button', 'data-mail-domain-check': '', onclick: say('/check', { domain: d.domain }) }, 'Check again') : null,
+      h('button.btn.ghost.small', { type: 'button', 'data-mail-domain-remove': '', onclick: () => modal(`Stop using ${d.domain} for email?`, (body, close) => {
+        body.append(h('p.lede', {}, `Your email goes back to ${v.buildingAddress || 'your building address'}.`), h('div.row', {},
+          h('button.btn.primary', { type: 'button', onclick: async () => { close(); await say('/remove', { domain: d.domain })(); } }, 'Stop using it'), h('button.btn.ghost', { type: 'button', onclick: () => close() }, 'Keep it')));
+      }) }, 'Stop using it'))));
+  return h('div.mail-domains', { 'data-mail-domains': '' }, ...cards,
+    own.canAddDomain ? h('button.btn.ghost.small.mail-domain-add', { type: 'button', 'data-mail-domain-open': '', onclick: add }, icon('globe'), 'Send from your own domain') : null);
+}
+
 function listView(page, box, v, go) {
   box.append(head(page, v, go));
+  const dom = domainCard(page, v, go);
+  if (dom) box.append(dom);
   const folder = page.mailView.folder;
   const tabs = h('div.mail-folders', { role: 'tablist' });
   for (const [id, label] of [['inbox', v.unread ? `Inbox (${v.unread})` : 'Inbox'], ['sent', 'Sent by the team'], ['waiting', v.waiting.length ? `Waiting (${v.waiting.length})` : 'Waiting']]) {
