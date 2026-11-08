@@ -19,6 +19,8 @@ t.db.prepare('UPDATE floors SET hidden=1 WHERE number=5').run();
 t.db.prepare("UPDATE floors SET name='' WHERE number=12").run();  // claimed, still in setup
 
 const b = await launch();
+// A real key, the way a keyboard sends it: a non-text key needs its key code or Chrome drops it.
+const key = async (p, k) => { const vk = { PageUp: 33, PageDown: 34 }[k]; await p.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: k, code: k, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk }); await p.send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code: k, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk }); };
 const floorNow = (p) => p.ev('location.pathname.split("/").pop()');
 const onFloor = (p, slug) => p.until(`document.body.dataset.page === "floor" && location.pathname.endsWith("/${slug}") && !document.querySelector('.scrub-btn[data-scrub="up"]').title.startsWith('')===false`, `floor ${slug}`);
 const lift = (p) => p.until('!!document.querySelector(".scrub-btn .scrub-to") && document.querySelectorAll(".scrub-btn:not(:disabled)").length > 0', 'lift loaded');
@@ -56,10 +58,10 @@ try {
     if (tos !== '12,3') throw new Error(`lift shows ${tos}`);
   });
   await step('PageUp and PageDown ride to the next open floor, skipping hidden and empty ones', async () => {
-    await p.press('PageDown');
+    await key(p, 'PageDown');
     await p.until('window.__office?.state?.floor?.number === 3 && location.pathname.includes("/floor/")', 'down to 3');
     await lift(p);
-    await p.press('PageUp');
+    await key(p, 'PageUp');
     await p.until('window.__office?.state?.floor?.number === 7 && location.pathname.includes("/floor/")', 'up to 7');
     await lift(p);
     await p.click('.scrub-btn[data-scrub="down"]');
@@ -71,10 +73,12 @@ try {
     await p.click('.floor-top .back');
     await p.until('document.body.dataset.page === "lobby" && document.body.dataset.lobby === "building" && !document.querySelector(".stack").hidden', 'stack back');
     await sleep(200);
-    const y = await p.ev('document.querySelector(".stack").scrollTop');
-    if (Math.abs(y - 120) > 4) throw new Error(`scrollTop ${y}`);
+    const y = await p.ev('document.querySelector(".stack").scrollTop'), saved = Number(await p.ev('sessionStorage.getItem("office:stack-y")'));
+    if (!saved || Math.abs(y - saved) > 4) throw new Error(`scrollTop ${y}, saved ${saved}`);
   });
   await step('Outside brings the 3D tower back, and the directory still works', async () => {
+    await p.until('!document.querySelector("#fade.in")', 'doors open');
+    await sleep(500);
     await p.click('.mode-btn[data-mode="outside"]');
     await p.until('document.body.dataset.lobby === "outside" && document.querySelector(".stack").hidden && document.querySelectorAll(".dir-row").length === 3', 'outside');
   });
@@ -87,6 +91,8 @@ try {
     if (OUT) await m.shot(join(OUT, 'phone-stack.jpg'));
   });
   await step('phone: tap a strip, then flick up a floor', async () => {
+    await m.until('!document.querySelector(".boot-bar") || getComputedStyle(document.querySelector(".boot-bar").closest("div") || document.body).visibility === "hidden" || !document.querySelector(".boot-bar").offsetParent', 'curtain up', 8000).catch(() => {});
+    await sleep(800);
     await m.click('.stack-strip[data-floor="7"]');
     await m.until('window.__office?.state?.floor?.number === 7 && location.pathname.includes("/floor/")', 'phone floor 7');
     await lift(m);

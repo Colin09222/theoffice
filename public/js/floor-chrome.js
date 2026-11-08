@@ -90,12 +90,13 @@ function wireLiftKeys(page, panel) {
   let start = null;
   const onDown = (e) => {
     const t = e.target;
-    start = e.pointerType === 'touch' && e.isPrimary && (t.id === 'scene' || panel.contains(t)) ? { x: e.clientX, y: e.clientY, at: performance.now() } : null;
+    const free = t.id === 'scene' || panel.contains(t) || !t.closest('button, a, input, textarea, select, .floor-panel, .floor-top, .controls, .modal-back');
+    start = e.pointerType === 'touch' && e.isPrimary && free ? { x: e.clientX, y: e.clientY, at: performance.now() } : null;
   };
   const onUp = (e) => {
     if (!start || page.dead || !e.isPrimary) return;
     const dx = e.clientX - start.x, dy = e.clientY - start.y, ms = performance.now() - start.at; start = null;
-    if (ms < 400 && Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 2.2) page.liftGo?.(dy < 0 ? 1 : -1);
+    if (ms < 700 && Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 2.2) page.liftGo?.(dy < 0 ? 1 : -1);
   };
   window.addEventListener('keydown', onKey);
   window.addEventListener('pointerdown', onDown, true); window.addEventListener('pointerup', onUp, true);

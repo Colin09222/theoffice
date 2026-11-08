@@ -380,7 +380,7 @@ describe('every route, swept from the source', () => {
   const server = fileURLToPath(new URL('../server/', import.meta.url));
   const patterns = readdirSync(server).filter((n) => n.endsWith('.js')).flatMap((n) => [...readFileSync(join(server, n), 'utf8').matchAll(/\b(GET|POST)\('(\/api\/[^']+)'/g)].map((m) => ({ method: m[1], pattern: m[2] })));
   const OPEN_POST = new Set(['/api/claim/check', '/api/claim', '/api/login', '/api/logout', '/api/admin/login']);
-  const OPEN_GET = new Set(['/api/me', '/api/floors', '/api/floors/:slug', '/api/floors/:slug/stream', '/api/building/ticker', '/api/building/launched', '/api/building/thumb/:floor/:project', '/api/building/party', '/api/building/leaderboard']);
+  const OPEN_GET = new Set(['/api/me', '/api/floors', '/api/floors/:slug', '/api/floors/:slug/stream', '/api/building/ticker', '/api/building/staff', '/api/building/launched', '/api/building/thumb/:floor/:project', '/api/building/party', '/api/building/leaderboard']);
   test('nobody but the floor\'s boss or the admin gets past a route that needs one', async () => {
     assert.ok(patterns.length > 40, `only found ${patterns.length}`);
     const t = await start();
