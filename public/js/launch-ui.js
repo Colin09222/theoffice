@@ -6,20 +6,40 @@ import { icon } from './icons.js';
 const TYPE_ICON = { game: 'play', app: 'lightning', website: 'globe', business: 'briefcase' };
 const FALLBACK_TYPES = [['game', 'Game', 'A real game with levels, enemies and upgrades'], ['app', 'App / SaaS', 'A signed-in web app with real accounts and data'], ['website', 'Website', 'A fast, good-looking site with real words'], ['business', 'Business', 'Research, a plan and a landing page, step by step']];
 
+// Shared with the full-screen Setup (setup-ui.js): the same four choices, the same endpoints, the same landing.
+const LAUNCH_NOTE = 'Your team designs it, builds it, plays it in a real browser and fixes it. You launch it with one tap. Nobody here can post, run ads or spend money, and email to anyone new waits for your OK, so they will tell you what only you can do.';
+export const launchTypes = (page) => page.state.makers?.types?.map((t) => [t.id, t.label, t.blurb]) || FALLBACK_TYPES;
+export const typeIcon = (id) => icon(TYPE_ICON[id] || 'sparkle');
+export const ideaTag = (c) => (c.starter === 'game-3d' ? h('i.tag', {}, '3D') : c.starter === 'game-2d' ? h('i.tag', {}, '2D') : '');
+export const fetchIdeas = (page, type, seed = 0) => api(`/floors/${page.slug}/makers/ideas?type=${type}&seed=${seed}`);
+export const wordsToCard = (page, type, text) => api(`/floors/${page.slug}/makers/words`, { method: 'POST', body: { type, text } });
+/** Go. `company` names a floor that has no name yet: the server saves it through the manager's own set_company, before the work starts. */
+export function startWork(page, { type, card, name, pitch, goal, plan, company }) {
+  if (type === 'business') return api(`/floors/${page.slug}/business/start`, { method: 'POST', body: { wish: `${name}: ${pitch}`.slice(0, 300), company } });
+  return api(`/floors/${page.slug}/makers/start`, { method: 'POST', body: { type, idea: card.id, starter: card.starter, name, pitch, goal, plan, company } });
+}
+/** Straight to the chat, where the maker card shows the team's progress, even once the floor has a name. */
+export async function landInChat(page) {
+  page.view?.bossTalks?.(); toast('The team is on it');
+  page.landUntil = Date.now() + 8000;
+  page.tab = 'chat'; page.panelOpen = true;
+  await page.reload?.();
+}
+
 /** The whole flow, for a floor with nothing on it yet. */
 export function launchFlow(page, { onBack = null } = {}) {
+  // A nameless floor starts in the full-screen Setup. Whoever chose "I'd rather just tell the manager" gets the words, and the buttons stay out of their way.
+  if (page.state.floor.setup) return h('div.setup-note', { 'data-setup': '' }, h('b', {}, 'No forms, no paperwork.'), h('span', {}, `Just tell ${page.manager?.name || 'your manager'} what you want to make. They'll name the company and get everyone moving.`));
   const root = h('div.launcher', { role: 'group', 'aria-label': 'Start something', 'data-launcher': '' });
-  const types = page.state.makers?.types?.map((t) => [t.id, t.label, t.blurb]) || FALLBACK_TYPES;
+  const types = launchTypes(page);
   // Each step starts at its question, so a phone shows the choices rather than the middle of the last list.
   const step = (n, ...kids) => { root.replaceChildren(h('p.launch-step', {}, `Step ${n} of 3`), ...kids.filter(Boolean)); root.querySelector('button:not([disabled]), input, textarea')?.focus({ preventScroll: true }); if (root.isConnected) { const list = root.closest('.chat-list'); if (list) list.scrollTo({ top: list.scrollTop + root.getBoundingClientRect().top - list.getBoundingClientRect().top, behavior: 'smooth' }); else root.scrollIntoView({ block: 'start', behavior: 'smooth' }); } };
 
   function pickType() {
-    const setup = page.state.floor.setup;
-    step(1, setup ? h('div.setup-note', { 'data-setup': '' }, h('b', {}, 'No forms, no paperwork.'), h('span', {}, `Tap one below, or just tell ${page.manager?.name || 'your manager'} what you want to make. They'll name the company and get everyone moving.`)) : null,
-      h('h3.launch-q', {}, 'What are we making?'),
-      h('div.launch-types', {}, ...types.map(([id, label, blurb]) => h('button.launch-type', { type: 'button', 'data-type': id, onclick: () => pickIdea(id, label) }, icon(TYPE_ICON[id] || 'sparkle'), h('b', {}, label), h('span', {}, blurb)))),
-      h('p.fineprint', {}, 'Your team designs it, builds it, plays it in a real browser and fixes it. You launch it with one tap. Nobody here can post, run ads or spend money, and email to anyone new waits for your OK, so they will tell you what only you can do.'),
-      onBack ? h('button.link', { type: 'button', 'data-launcher-back': '', onclick: onBack }, 'Back') : setup ? null : h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => page.openCustomise?.('vibe') }, 'First, make this office yours'));
+    step(1, h('h3.launch-q', {}, 'What are we making?'),
+      h('div.launch-types', {}, ...types.map(([id, label, blurb]) => h('button.launch-type', { type: 'button', 'data-type': id, onclick: () => pickIdea(id, label) }, typeIcon(id), h('b', {}, label), h('span', {}, blurb)))),
+      h('p.fineprint', {}, LAUNCH_NOTE),
+      onBack ? h('button.link', { type: 'button', 'data-launcher-back': '', onclick: onBack }, 'Back') : h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => page.openCustomise?.('vibe') }, 'First, make this office yours'));
   }
   async function pickIdea(type, label, seed = 0) {
     const cards = h('div.launch-cards', {}, h('p.launch-loading', {}, 'Thinking of ideas...'));
@@ -27,19 +47,19 @@ export function launchFlow(page, { onBack = null } = {}) {
     const useOwn = h('button.btn.ghost', { type: 'button', 'data-own': '', onclick: async () => {
       const text = own.value.trim(); if (!text) { own.focus(); return; }
       useOwn.disabled = true;
-      try { const r = await api(`/floors/${page.slug}/makers/words`, { method: 'POST', body: { type, text } }); review(type, label, r.card); } catch (e) { toast(e.message, 'bad'); useOwn.disabled = false; }
+      try { const r = await wordsToCard(page, type, text); review(type, label, r.card); } catch (e) { toast(e.message, 'bad'); useOwn.disabled = false; }
     } }, 'Use my words');
     step(2, h('h3.launch-q', {}, `Which ${label.toLowerCase().split(' ')[0]}?`), cards,
       h('div.launch-own', {}, own, useOwn),
       h('div.launch-row', {}, h('button.link', { type: 'button', onclick: pickType }, 'Back'), h('button.link', { type: 'button', 'data-more': '', onclick: () => pickIdea(type, label, seed + 1) }, 'More ideas')));
     try {
-      const r = await api(`/floors/${page.slug}/makers/ideas?type=${type}&seed=${seed}`);
+      const r = await fetchIdeas(page, type, seed);
       cards.replaceChildren(...r.cards.map((c) => ideaButton(c, () => review(type, label, c))),
         h('button.launch-card.surprise', { type: 'button', 'data-surprise': '', onclick: () => review(type, label, r.surprise) }, icon('sparkle'), h('b', {}, 'Surprise me'), h('span', {}, 'The team picks one it believes in')));
     } catch (e) { cards.replaceChildren(h('p.bad', {}, e.message)); }
   }
   function ideaButton(c, fn) {
-    return h('button.launch-card', { type: 'button', 'data-idea': c.id, onclick: fn }, h('b', {}, c.title), h('span', {}, c.pitch), c.starter === 'game-3d' ? h('i.tag', {}, '3D') : c.starter === 'game-2d' ? h('i.tag', {}, '2D') : '');
+    return h('button.launch-card', { type: 'button', 'data-idea': c.id, onclick: fn }, h('b', {}, c.title), h('span', {}, c.pitch), ideaTag(c));
   }
   function review(type, label, card) {
     const name = h('input', { name: 'name', value: card.name, maxlength: 40, 'aria-label': 'Name', required: true });
@@ -49,13 +69,8 @@ export function launchFlow(page, { onBack = null } = {}) {
     const go = h('button.btn.primary.launch-go', { type: 'button', 'data-go': '', onclick: async () => {
       go.disabled = true; go.textContent = 'Starting...';
       try {
-        if (type === 'business') await api(`/floors/${page.slug}/business/start`, { method: 'POST', body: { wish: `${name.value.trim()}: ${pitch.value.trim()}`.slice(0, 300) } });
-        else await api(`/floors/${page.slug}/makers/start`, { method: 'POST', body: { type, idea: card.id, starter: card.starter, name: name.value.trim(), pitch: pitch.value.trim(), goal: goal.value.trim(), plan: plan.value.split('\n').map((s) => s.trim()).filter(Boolean) } });
-        page.view?.bossTalks?.(); toast('The team is on it');
-        page.landUntil = Date.now() + 8000;
-        // The maker card lives in the chat, which is where the boss just was, even once the floor has a name.
-        page.tab = 'chat'; page.panelOpen = true;
-        await page.reload?.();
+        await startWork(page, { type, card, name: name.value.trim(), pitch: pitch.value.trim(), goal: goal.value.trim(), plan: plan.value.split('\n').map((s) => s.trim()).filter(Boolean) });
+        await landInChat(page);
       } catch (e) { toast(e.message, 'bad'); go.disabled = false; go.replaceChildren(icon('rocket-launch'), 'Go'); }
     } }, icon('rocket-launch'), 'Go');
     step(3, h('h3.launch-q', {}, 'Ready?'),
@@ -104,7 +119,7 @@ export function makerCard(page) {
       anyway || (job.asking.canLaunch && !job.launched ? h('button.btn.primary', { type: 'button', onclick: () => launch?.click() }, 'Launch what works') : null),
       h('button.btn.ghost', { type: 'button', onclick: () => decide('stop') }, 'Stop')) : null;
     // Once this one is out in the world, the same three taps start the next thing. Back returns to this card.
-    const another = job.stage === 'ready' && job.launched ? h('button.link.maker-new', { type: 'button', 'data-make-new': '', onclick: () => { const flow = launchFlow(page, { onBack: () => { flow.replaceWith(box); page.lanesEl = box; } }); page.lanesEl = flow; box.replaceWith(flow); } }, 'Make something new') : null;
+    const another = job.stage === 'ready' && job.launched ? h('button.link.maker-new', { type: 'button', 'data-make-new': '', onclick: () => page.startNew?.() }, 'Make something new') : null;
     box.replaceChildren(...[
       h('div.maker-head', {}, h('b', {}, job.title), h('span', {}, building ? (job.launched ? 'Live, and getting better' : 'Team is building') : job.stage === 'ready' ? (job.launched ? 'Live' : 'Ready to launch') : job.stage === 'asking' ? 'Needs you' : '')),
       steps, job.report ? h('p.maker-report', {}, `Last test: ${job.report.verdict === 'pass' ? 'passed' : 'not yet'}${job.report.summary ? `, ${job.report.summary}` : ''}`) : null,

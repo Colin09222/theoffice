@@ -20,6 +20,7 @@ import { legalPending, renderLegalRequests } from './legal-ui.js';
 import { renderNumbers } from './numbers-ui.js';
 import { onChatEvent } from './chat-ui.js';
 import { launchFlow, makerCard } from './launch-ui.js';
+import { setupOnArrival } from './setup-ui.js';
 import { recoveryBox } from './dom.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
@@ -114,7 +115,7 @@ class FloorPage {
     this.catchUpBanner();
     this.connect();
     this.wireSceneTaps();
-    if (s.floor.setup && this.owner) setTimeout(() => { if (!this.dead && !isPhone()) this.bodyEl.querySelector('.chat-input textarea')?.focus(); }, 500);
+    if (!setupOnArrival(this) && s.floor.setup && this.owner) setTimeout(() => { if (!this.dead && !isPhone()) this.bodyEl.querySelector('.chat-input textarea')?.focus(); }, 500);
   }
   /** Tap someone in the room to open their file. A drag still spins the room: only a tap that barely moved counts, and only on a person. */
   wireSceneTaps() {
