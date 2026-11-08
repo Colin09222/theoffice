@@ -91,6 +91,29 @@ describe('each person\'s part', () => {
     assert.doesNotMatch(laneBrief('website', 'builder', BARE), /review_design/);
     assert.match(laneBrief('business', 'researcher', BARE), /search is not switched on/);
   });
+  test('every brief says what done means, and real work is checked by someone else before the boss hears it is done', () => {
+    const full = managerPrompt(floor, BOSS, ROSTER, FULL);
+    assert.match(full, /ends with a line starting "Done means:"/); assert.match(full, /Everything the boss named is in it/);
+    const site = full.split(/^WEBSITE$/m)[1].split(/^BUSINESS$/m)[0];
+    assert.match(site, /Say in the brief not to publish yet/); assert.match(site, /role tester/); assert.match(site, /phone and desktop size/);
+    assert.match(site, /really submits every form/); assert.match(site, /send the Builder's task back with review_task/); assert.match(site, /One round of fixes/);
+    assert.ok(site.indexOf('Tester') < site.indexOf('launch_report'), 'the Tester comes before the report');
+    const bareSite = managerPrompt(floor, BOSS, ROSTER, BARE).split(/^WEBSITE$/m)[1].split(/^BUSINESS$/m)[0];
+    assert.match(bareSite, /runs the checklist and publishes/); assert.doesNotMatch(bareSite, /role tester/);
+    const builder = laneBrief('website', 'builder', FULL);
+    for (const must of [/390 px wide phone/, /console is clean/, /every form really submits/, /every photo the boss sent/, /no lorem/, /og:image and a favicon/, /credited/]) assert.match(builder, must);
+    assert.match(builder, /do not publish: a Tester checks it next/); assert.match(laneBrief('website', 'builder', BARE), /then publish/);
+    const tester = laneBrief('website', 'tester', FULL);
+    for (const must of [/390x844/, /1280x800/, /console errors/, /click every link and button/, /really submit every form/, /Done means/, /PASS/, /Do not publish/]) assert.match(tester, must);
+    assert.match(laneBrief('website', 'tester', BARE), /no browser here/);
+    const game = laneBrief('game', 'builder', FULL);
+    assert.match(game, /every room, level, item, enemy, boss and screen it names goes in/); assert.match(game, /about 25 for one with rooms or levels/); assert.match(game, /a win where the game can be won/);
+    assert.match(laneBrief('game', 'tester', FULL), /win screen as well as game over/);
+    assert.match(laneBrief('business', 'builder', FULL), /390 px wide phone/); assert.match(laneBrief('business', 'builder', FULL), /submit the form once/); assert.match(laneBrief('business', 'builder', BARE), /then publish/);
+    // A long report is cut before the manager reads it, so the verdict goes first.
+    for (const role of ['game', 'website']) assert.match(laneBrief(role, 'tester', FULL), /Begin your reply with PASS/);
+    assert.match(computerPrompt(FULL, 'tester', {}), /verdict first/); assert.match(computerPrompt(FULL, 'builder', {}), /cut off before the Office Manager reads it/);
+  });
   test('on a computer it goes in the first message, because the system prompt is cached across floors', () => {
     const task = { id: 7, title: 'T', project: 'p', brief: 'Do it', lane: 'game' };
     const first = computerBriefing({ name: 'A', number: 1 }, { name: 'S', title: 'Builder', role: 'builder' }, {}, task, FULL);
