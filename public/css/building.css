@@ -237,7 +237,8 @@ section.stack[hidden] { display: none; }
   .lobby-mode { left: 12px; transform: none; top: calc(max(10px, env(safe-area-inset-top)) + 84px); }
   body[data-lobby="building"] .lobby-mode { top: max(10px, env(safe-area-inset-top)); }
   .mode-btn { min-height: 38px; padding: 0 14px; font-size: 17px; }
-  section.stack { left: 0; right: 0; top: calc(max(10px, env(safe-area-inset-top)) + 58px); bottom: 0; max-width: none; border-radius: 0; box-shadow: none; }
+  /* The strips run on under the sheet's peek, the pill and the ticker, so they are the bottom layer: the sheet's grip stays tappable over them. */
+  section.stack { left: 0; right: 0; top: calc(max(10px, env(safe-area-inset-top)) + 58px); bottom: 0; max-width: none; border-radius: 0; box-shadow: none; z-index: -1; }
   .stack-ground { margin-bottom: 190px; }
   .stack-strip { grid-template-columns: 50px 1fr 18px; min-height: 92px; }
 }

@@ -92,6 +92,15 @@ try {
     await sleep(400);
     if (OUT) await m.shot(join(OUT, 'phone-stack.jpg'));
   });
+  await step('phone: the directory sheet opens over the strips, and shuts again', async () => {
+    // The strips run on under the sheet's peek, so the sheet's grip has to stay on top of them to be tapped.
+    await m.click('.sheet-grip');
+    await m.until('document.querySelector(".directory").classList.contains("open")', 'sheet open');
+    await sleep(500);
+    await m.click('.sheet-grip');
+    await m.until('!document.querySelector(".directory").classList.contains("open")', 'sheet shut');
+    await sleep(500);
+  });
   await step('phone: tap a strip and its floor opens', async () => {
     await m.until('!document.querySelector(".boot-bar") || getComputedStyle(document.querySelector(".boot-bar").closest("div") || document.body).visibility === "hidden" || !document.querySelector("#boot")', 'curtain', 8000).catch(() => {});
     await sleep(800);
