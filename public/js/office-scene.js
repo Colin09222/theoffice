@@ -720,6 +720,14 @@ export class OfficeView {
     const pbr = this.pbr;
     // The panorama is shared (see textures.js), so it is never this view's to dispose. In the tower it lights the tower's scene instead.
     if (pbr && stage.renderer && !this.host) environmentMap(stage.renderer).then((rt) => { if (rt && !this.dead) { this.scene.environment = rt.texture; this.scene.environmentIntensity = 0.5; } });
+    // A timber deck for the terrace, just above the slab and under the room's edge, so nothing else has to change.
+    if (pbr) textureSet('wood', { pbr: false }).then((set) => {
+      if (!set?.map || this.dead || this.deck) return;
+      const plate = TOWER_W * WORLD_SCALE + 1.1;
+      const deck = new THREE.Mesh(new THREE.PlaneGeometry(plate, plate), new THREE.MeshStandardMaterial({ map: repeating(set.map, { color: true, repeat: plate / 3.4 }), color: '#ead9c0', roughness: 0.82, metalness: 0 }));
+      deck.rotation.x = -Math.PI / 2; deck.position.y = -0.055; deck.receiveShadow = true; deck.userData.keep = true;
+      this.deck = deck; this.room.add(deck);
+    });
     const style = this.decor.wallMat || 'paint';
     if (WALL_TEX[style]) textureSet(WALL_TEX[style], { pbr }).then((set) => { if (set && !this.dead) this.skinWalls(style, set); });
     this.loadFloorSets();
@@ -777,6 +785,16 @@ export class OfficeView {
     const rail = new THREE.MeshStandardMaterial({ color: '#cfe0ec', roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false, envMap: env });
     for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(room, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
     for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { piece(room, '#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); piece(room, '#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
+    // The terrace is part of the company too: planters along the rail in its colours and somewhere to sit outside. A timber deck follows in loadLooks.
+    for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
+      const x = i * 6.4 + (sz < 0 ? 1.4 : 0), z = sz * (plate / 2 - 0.85);
+      piece(room, mix(primary, '#cfc4b0', 0.62), 1.9, 0.55, 0.85, x, 0, z);
+      piece(room, i % 2 ? '#5c8650' : '#6c9452', 1.7, 0.36 + ((i * i) % 3) * 0.14, 0.66, x, 0.55, z);
+    }
+    for (const [x, z] of [[-10.5, plate / 2 - 2.9], [8.5, plate / 2 - 3.1]]) {
+      piece(room, '#a8825c', 1.25, 0.07, 1.25, x, 0.72, z, { geo: cyl }); piece(room, '#3d3b44', 0.09, 0.72, 0.09, x, 0, z, { geo: cyl });
+      for (const a of [0.4, 2.5, 4.6]) { const sx = x + Math.cos(a) * 1.3, sz = z + Math.sin(a) * 1.3; piece(room, mix(primary, '#ffffff', 0.32), 0.62, 0.1, 0.62, sx, 0.44, sz); piece(room, '#3d3b44', 0.07, 0.44, 0.07, sx, 0, sz, { cast: false }); }
+    }
     this.floorMat = new THREE.MeshStandardMaterial({ roughness: { carpet: 0.95, rubber: 0.8, tile: 0.35, checker: 0.35 }[d.floor] ?? 0.55, metalness: 0, envMapIntensity: 0.6 });
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), this.floorMat);
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.userData.keep = true; room.add(floor);
@@ -1858,6 +1876,7 @@ export class OfficeView {
     if (this.world) this.scene.remove(this.world.group);  // shared with the lobby, so never disposed here
     this.root.removeFromParent();
     for (const root of [this.room, this.detail, this.legacy, this.models, this.officeStatic, this.officeDetail, this.officeLegacy, this.officeModels, this.stub?.group, this.pet?.group].filter(Boolean)) this.disposeTree(root);
+    this.deck?.geometry.dispose(); this.deck?.material.map?.dispose(); this.deck?.material.dispose();
     this.glassGeo?.dispose(); this.glassMat?.dispose();
     this.ring?.geometry.dispose(); this.ring?.material.dispose();
     if (this.signMesh2) { this.signMesh2.geometry.dispose(); this.signMesh2.material.map.dispose(); this.signMesh2.material.dispose(); }
