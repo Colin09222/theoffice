@@ -271,11 +271,14 @@ export async function showLobby(root) {
     if (chosen) setLobbyMode(m);
     if (!stage.ok) { stage.paused = m === 'building'; if (m === 'building') stack.show(); else stack.hide(); return; }
     stack.hide(); stage.paused = false;
-    if (m === 'building') { document.body.dataset.tower = '3d'; showTower().catch((e) => { console.error(e); toast('The building could not be drawn here.'); }); }
-    else { delete document.body.dataset.tower; if (view && stage.view !== view) stage.setView(view); }
+    if (m === 'building') { document.body.dataset.tower = '3d'; return showTower().catch((e) => { console.error(e); toast('The building could not be drawn here.'); }); }
+    delete document.body.dataset.tower; if (view && stage.view !== view) stage.setView(view);
+    return null;
   };
   root.append(stack.el, modes);
-  setMode(lobbyMode(), false);
+  // The page is ready once the building is up, so the curtain lifts on it rather than on an empty sky (the router waits for this).
+  await setMode(lobbyMode(), false);
+  if (document.body.dataset.page !== 'lobby') return;  // gone already, while the building was being put up
 
   // ---- launch parties ----
   // The building picks them and keeps them rare. This tab also takes one a minute at most, and never the same one twice.

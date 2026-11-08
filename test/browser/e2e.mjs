@@ -48,6 +48,8 @@ async function run(label, opts, t, adminCode) {
     if (phone) { await shot('02-directory'); await p.click('.sheet-grip'); await sleep(450); }
   });
   await step(tag('dragging turns and scrolling rides the tower'), async () => {
+    // A phone starts in the Building (the tower cut away, see tower.mjs); this is the tower from the street, so go Outside first.
+    if (phone) { await p.click('.mode-btn[data-mode="outside"]'); await p.until('document.body.dataset.lobby === "outside" && window.__stage.view === window.__lobbyDebug', 'outside'); await sleep(600); }
     if (phone) await p.drag(70, 420, 310, 480, true);
     else {
       await p.drag(150, 700, 60, 690, false);

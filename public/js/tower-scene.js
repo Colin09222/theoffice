@@ -283,9 +283,13 @@ export class TowerView {
       const on = show || f.show > 0;
       if (v.root.visible !== on) {
         v.root.visible = on;
-        if (on) this.listen(f);
-        else { this.quiet(f); for (const a of v.actors.values()) { a.tagOff = true; a.tag.style.visibility = 'hidden'; } }
+        if (!on) for (const a of v.actors.values()) { a.tagOff = true; a.tag.style.visibility = 'hidden'; }
       }
+      // Live from the floor's own stream while it is near the middle: opened once the building stands still, closed when it is two away,
+      // so a tab holds three streams at most. Coming back, the stream replays what was missed.
+      const d = Math.abs(f.slot.k - Math.round(this.ride));
+      if (!f.es && this.active && on && d <= 1 && this.stillFor > 0.3) this.listen(f);
+      else if (f.es && (!this.active || !on || d > 2)) this.quiet(f);
       this.fade[f.slot.k] = 1 - f.show;
     }
     this.fadeAll();
@@ -417,7 +421,7 @@ export class TowerView {
       e.preventDefault();
       const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
       this.target = this.clampTarget(this.target - dy / 150);
-      wheelAt = performance.now(); this.wheeling = true;
+      wheelAt = performance.now(); this.wheeling = true; this.flyTicket = (this.flyTicket || 0) + 1;
     };
     this.snapWheel = () => { if (this.wheeling && performance.now() - wheelAt > 160) { this.wheeling = false; this.target = this.clampTarget(Math.round(this.target)); } };
     this.onDown = (e) => {
@@ -432,6 +436,7 @@ export class TowerView {
       const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
       if (Math.hypot(dx, dy) > 8) d.moved = true;
       if (!d.moved) return;
+      if (!d.called) { d.called = true; this.flyTicket = (this.flyTicket || 0) + 1; }
       const per = FH * (this.framing?.pxPerUnit || 10);
       this.ride = this.target = Math.max(-0.35, Math.min(this.slots.length - 0.65, d.ride + dy / per));
       this.targetYaw = Math.max(-0.25, Math.min(0.95, d.yaw - dx * 0.003));
@@ -540,18 +545,22 @@ export class TowerView {
     if (w <= 760) return { left: 0, right: 0, top: 58, bottom: (owner ? h * 0.54 : 104) + 44 };
     return { left: Math.min(w * 0.3, 286), right: Math.min(w * 0.42, owner ? 86 + Math.min(420, Math.max(340, w * 0.27)) + 6 : 82), top: 20, bottom: 56 };
   }
-  /** Rides to a floor, builds it if it isn't yet, and flies into it. Resolves once the floor page has the room. */
+  /**
+   * Rides to a floor, builds it if it isn't yet, and flies into it; the floor page then carries on with the room. A floor that isn't ready
+   * within a couple of seconds (a slow line, a slow device) is gone into through the lift doors instead, as from anywhere else: no waiting.
+   */
   async flyInto(n) {
     const s = this.byNumber.get(n);
     if (!s || s.kind !== 'company' || this.flight) return;
     this.rideTo(s.k);
+    const ticket = this.flyTicket = (this.flyTicket || 0) + 1;  // a swipe or the wheel meanwhile calls it off
+    const giveUp = performance.now() + 2500, wait = (ms) => new Promise((r) => setTimeout(r, ms));
     let f = this.full.get(s.k);
-    if (!f) { while (this.building != null) await new Promise((r) => setTimeout(r, 30)); if (!this.full.has(s.k)) await this.buildFloor(s.k); f = this.full.get(s.k); }
-    if (!f || this.dead) { this.onEnter?.(s.card, { seamless: false }); return; }
-    f.pinned = true;
+    if (!f) { while (this.building != null && performance.now() < giveUp) await wait(30); if (!this.full.has(s.k) && this.building == null) await this.buildFloor(s.k); f = this.full.get(s.k); }
     // A floor still being put together finishes first: a flight into stand-ins would land on a room changing under the camera.
-    for (const end = performance.now() + 8000; !f.ready && !this.dead && performance.now() < end;) await new Promise((r) => setTimeout(r, 40));
-    if (this.dead || this.flight) return;
+    if (f) { f.pinned = true; while (!f.ready && !this.dead && performance.now() < giveUp) await wait(40); }
+    if (this.dead || this.flight || ticket !== this.flyTicket) { if (f && ticket !== this.flyTicket) f.pinned = false; return; }
+    if (!f?.ready) { if (f) f.pinned = false; this.onEnter?.(s.card, { seamless: false }); return; }
     const pose = f.view.homePose(this.w, this.h, this.pageInsets(s.card.slug));
     const to = pose.position.clone().add(new THREE.Vector3(0, slotY(s.k), 0));
     this.flight = { kind: 'in', f, ground: slotY(s.k) + pageGround(n), t: 0, dur: reduced() ? 0.35 : 1.45, from: { pos: this.camera.position.clone(), quat: this.camera.quaternion.clone(), view: { ...this.camera.view } }, to: { pos: to, quat: pose.quaternion.clone(), view: pose.view }, pose };
@@ -569,7 +578,7 @@ export class TowerView {
     this.place(view, s.k, h.state);
     for (const a of view.actors.values()) this.labels.append(a.tag);
     const f = { slot: s, view, state: h.state, show: 1, ready: true, lastId: h.state?.lastEventId, pinned: true };
-    view.root.visible = true; this.fade[s.k] = 0; this.full.set(s.k, f); this.listen(f);
+    view.root.visible = true; this.fade[s.k] = 0; this.full.set(s.k, f);
     const lift = 150;
     this.U.uLiftFrom.value = s.k + 0.5; this.U.uLift.value = lift;
     this.U.uRide.value = s.k;
@@ -635,7 +644,6 @@ export class TowerView {
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
     const r = stage.renderer; r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true; r.toneMappingExposure = 0.92;
     document.body.append(this.plaqueRoot);
-    for (const f of this.full.values()) if (f.view.root.visible) this.listen(f);
   }
   /** Outside, or off to a floor page: the real floors stop listening while nobody can see them. */
   leave() {
