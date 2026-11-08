@@ -23,8 +23,9 @@ Nothing here restarts dockerd or an existing container.
      cat $B/Caddyfile > /opt/edge/Caddyfile && docker exec edge-caddy-1 caddy reload --config /etc/caddy/Caddyfile
 3. Runner: systemctl disable --now office-runner-edge office-runner
      docker rm -f \$(docker ps -aq --filter label=office.runner); umount /opt/office-runner/mnt/* ; docker network rm office-apps office-build
-4. Firewall (own tables only; UFW/Docker rules were never changed, the saved copies are for reference):
+4. Firewall (own nft tables, plus one UFW rule; Docker's rules were never changed, the saved copies are for reference):
      systemctl disable office-apps-firewall; nft delete table inet office_apps; nft delete table bridge office_apps_l2
+     ufw delete allow in on br-office-build to 172.30.1.1 port 3128 proto tcp
 5. Docker runtimes: $( [ -f /etc/docker/daemon.json ] && echo "cp $B/daemon.json /etc/docker/daemon.json" || echo "rm /etc/docker/daemon.json (it did not exist before)" ) && systemctl reload docker
 6. gVisor: apt-get remove runsc; rm /etc/apt/sources.list.d/gvisor.list /usr/share/keyrings/gvisor-archive-keyring.gpg
 Check after each step: curl -s -o /dev/null -w '%{http_code}' https://iscolinfree.com/ (and /theoffice/, https://sortmydog.com/) give 200,

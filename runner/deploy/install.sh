@@ -60,6 +60,10 @@ docker network inspect office-build > /dev/null 2>&1 || docker network create --
   --subnet 172.30.1.0/24 --gateway 172.30.1.1 -o com.docker.network.bridge.name=br-office-build \
   --label office.runner=network office-build > /dev/null
 
+# UFW drops all input except 22/80/443, so let build containers reach the egress proxy (and only that,
+# only on the build bridge). The nft tables below narrow it further.
+ufw status | grep -q '172.30.1.1 3128/tcp on br-office-build' || ufw allow in on br-office-build to 172.30.1.1 port 3128 proto tcp comment 'office-runner build egress proxy' > /dev/null
+
 # Firewall first: the runner refuses to start apps without it.
 install -m 0644 "$SRC/deploy/office-apps.nft" $R/firewall/office-apps.nft
 nft -c -f $R/firewall/office-apps.nft

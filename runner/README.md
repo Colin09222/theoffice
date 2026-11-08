@@ -117,6 +117,8 @@ and UFW's rules are untouched. Base chains at priority -10, so a drop there is f
   the other special ranges, multicast; **SMTP 25/465/587**; every other port and protocol; IPv6; any
   host service (sshd, the Office on 127.0.0.1:8083, the runner, Caddy's admin, Docker's networks);
   **app↔app** at layer 3 and layer 2 (bridge table); anything opening a connection into an app.
+* UFW (unchanged otherwise) got one rule so builds can reach the proxy:
+  `ufw allow in on br-office-build to 172.30.1.1 port 3128 proto tcp`.
 * Build containers: nothing forwarded at all; only `172.30.1.1:3128`, the edge's CONNECT proxy,
   which allows `registry.npmjs.org`, `cdn.playwright.dev`, `playwright.download.prss.microsoft.com` on
   443 and resolves them to public addresses only.
@@ -189,7 +191,8 @@ Restore (backups and a RESTORE.md are in `/root/office-runner-backup-*` on hz):
    `docker rm -f $(docker ps -aq --filter label=office.runner)`; `umount /opt/office-runner/mnt/*`;
    `docker network rm office-apps office-build`.
 4. Firewall: `systemctl disable office-apps-firewall` then
-   `nft delete table inet office_apps; nft delete table bridge office_apps_l2`.
+   `nft delete table inet office_apps; nft delete table bridge office_apps_l2`;
+   `ufw delete allow in on br-office-build to 172.30.1.1 port 3128 proto tcp`.
 5. gVisor: remove the two `runsc*` entries from `/etc/docker/daemon.json` (it did not exist before:
    delete it), `systemctl reload docker`; `apt-get remove runsc`; remove
    `/etc/apt/sources.list.d/gvisor.list` and `/usr/share/keyrings/gvisor-archive-keyring.gpg`.
