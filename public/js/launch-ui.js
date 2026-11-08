@@ -11,7 +11,7 @@ export function launchFlow(page, { onBack = null } = {}) {
   const root = h('div.launcher', { role: 'group', 'aria-label': 'Start something', 'data-launcher': '' });
   const types = page.state.makers?.types?.map((t) => [t.id, t.label, t.blurb]) || FALLBACK_TYPES;
   // Each step starts at its question, so a phone shows the choices rather than the middle of the last list.
-  const step = (n, ...kids) => { root.replaceChildren(h('p.launch-step', {}, `Step ${n} of 3`), ...kids.filter(Boolean)); root.querySelector('button:not([disabled]), input, textarea')?.focus({ preventScroll: true }); if (root.isConnected) root.scrollIntoView({ block: 'start', behavior: 'smooth' }); };
+  const step = (n, ...kids) => { root.replaceChildren(h('p.launch-step', {}, `Step ${n} of 3`), ...kids.filter(Boolean)); root.querySelector('button:not([disabled]), input, textarea')?.focus({ preventScroll: true }); if (root.isConnected) { const list = root.closest('.chat-list'); if (list) list.scrollTo({ top: list.scrollTop + root.getBoundingClientRect().top - list.getBoundingClientRect().top, behavior: 'smooth' }); else root.scrollIntoView({ block: 'start', behavior: 'smooth' }); } };
 
   function pickType() {
     const setup = page.state.floor.setup;

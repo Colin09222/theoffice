@@ -51,6 +51,7 @@ function trackKeyboard() {
     const fit = () => {
       const kb = Math.max(0, Math.round(Math.max(window.innerHeight, document.documentElement.clientHeight) - vv.height - vv.offsetTop));
       document.documentElement.style.setProperty('--kb', `${kb}px`);
+      document.documentElement.style.setProperty('--vvt', `${Math.max(0, Math.round(vv.offsetTop))}px`);  // what iOS has scrolled the page up by to show the field
       document.body.classList.toggle('kb-open', kb > 80);
     };
     vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit);

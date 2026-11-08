@@ -35,6 +35,32 @@ function opensWhen(ms) {
 }
 
 const isPhone = () => window.innerWidth <= 760;
+// The phone sheet's three sizes. A conversation opens tall; everything else opens at half, sharing the screen with the room.
+const HALF = 0.58, PEEK = 94;  // the same numbers as public/css/mobile.css: the room is told before the sheet has finished moving
+const CHAT_TABS = new Set(['chat', 'talk']);
+const PHONE_ROW = 4;  // the tabs that always show in the phone's row; the rest fold under More
+const cssPx = (name) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+/**
+ * Keeps a conversation on its newest line while the reader is there. Scrolled up, the list stays put and a small pill says there's more,
+ * and anything that resizes the list (the keyboard, the sheet) keeps the reader where they were. `rest` puts the list at its resting place.
+ */
+function followList(list, body, rest) {
+  const near = () => list.scrollHeight - list.scrollTop - list.clientHeight < 72;
+  let own = false;
+  const pill = h('button.new-pill', { type: 'button', hidden: true, 'data-new-pill': '', onclick: () => { f.pinned = true; f.settle(); } }, icon('caret-down'), 'New messages');
+  body.append(pill);
+  const place = () => { if (!pill.hidden) pill.style.bottom = `${body.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom + 10}px`; };
+  const f = {
+    list, pinned: true,
+    settle() { own = true; rest(); requestAnimationFrame(() => { own = false; }); pill.hidden = true; f.pinned = true; },
+    added() { if (f.pinned) f.settle(); else { pill.hidden = false; place(); } },
+    stop() { ro.disconnect(); pill.remove(); },
+  };
+  list.addEventListener('scroll', () => { if (own) return; f.pinned = near(); if (f.pinned) pill.hidden = true; }, { passive: true });
+  const ro = new ResizeObserver(() => { if (f.pinned) f.settle(); else place(); });
+  ro.observe(list);
+  return f;
+}
 const TALK_KIND = { assign: 'Assignment', plan: 'The plan', handoff: 'Handoff', findings: 'Findings', review: 'Review', question: 'Question', answer: 'Answer', ask: 'Asking', meeting: 'Meeting', banter: 'Small talk' };
 const NAME_INK = ['#b3261e', '#0b6e69', '#1d5fb8', '#8a5200', '#8a2f6b', '#2c7a31', '#a33f00', '#22577a'];
 const COLUMNS = [['todo', 'To do'], ['doing', 'Doing'], ['review', 'With manager'], ['done', 'Done']];
@@ -145,9 +171,11 @@ class FloorPage {
     this.bodyEl = h('div.tab-body');
     this.bannerEl = h('div.floor-banner', { hidden: true });
     this.grip = h('button.panel-grip', { type: 'button', 'aria-label': 'Open or close this panel', onclick: () => this.setPanel(!this.panelOpen) }, h('i'));
+    this.stepBtn = h('button.sheet-step', { type: 'button', 'data-sheet-step': '', 'aria-label': 'Make this panel bigger', onclick: () => this.stepSheet() }, icon('caret-up'));
     this.bindGrip();
-    const panel = h('aside.floor-panel', {}, this.grip, h('button.panel-close', { type: 'button', 'aria-label': 'Close this panel', onclick: () => this.setPanel(false) }, icon('x')), this.staffEl, this.tabsEl, this.bannerEl, this.bodyEl);
+    const panel = h('aside.floor-panel', {}, h('div.sheet-bar', {}, this.grip, this.stepBtn), h('button.panel-close', { type: 'button', 'aria-label': 'Close this panel', onclick: () => this.setPanel(false) }, icon('x')), this.staffEl, this.tabsEl, this.bannerEl, this.bodyEl);
     this.panel = panel;
+    panel.addEventListener('pointerdown', (e) => { if (this.moreOpen && !e.target.closest('.tabs')) this.setMore(false); });
     this.cardEl = h('div.card-more');
     this.logoEl = h('span.card-logo', { 'aria-hidden': 'true' });
     this.pillEl = h('button.talk-pill', { type: 'button', 'data-talk-pill': '', onclick: () => this.setTab(this.canSeeChat ? 'chat' : 'talk') });
@@ -229,7 +257,20 @@ class FloorPage {
     });
   }
   /** A panel is open or it isn't; on a phone closed means just the tabs showing at the bottom. Either way the room is told what's left for it. */
-  setPanel(open) { this.panelOpen = open; this.layout(); }
+  setPanel(open) { this.panelOpen = open; if (isPhone()) this.sheet = open ? this.openSize() : 'peek'; this.layout(); }
+  /** The size the phone's sheet opens at for the tab on show: tall for a conversation, unless the boss has chosen otherwise. */
+  openSize() { return CHAT_TABS.has(this.tab) ? (this.chatSheet || 'full') : (this.sheet === 'full' ? 'full' : 'half'); }
+  /** The phone's sheet: 'peek' is the handle and the tabs, 'half' shares the screen with the room, 'full' is the whole visible height. */
+  setSheet(size, { hand = false } = {}) {
+    if (!isPhone()) { this.setPanel(size !== 'peek'); return; }
+    this.sheet = size; this.panelOpen = size !== 'peek';
+    if (hand && size !== 'peek' && CHAT_TABS.has(this.tab)) this.chatSheet = size;
+    this.setMore(false);
+    this.layout();
+    if (hand && size === 'peek') document.activeElement?.blur?.();
+  }
+  /** The plain button beside the handle: a size bigger, or at full back to half. */
+  stepSheet() { this.setSheet(this.sheet === 'peek' ? this.openSize() : this.sheet === 'half' ? 'full' : 'half', { hand: true }); }
   layout() {
     if (this.dead || !this.panel) return;
     const phone = isPhone();
@@ -238,16 +279,19 @@ class FloorPage {
     const wasPhone = this.phoneLayout; this.phoneLayout = phone;
     if (wasPhone !== phone) {
       if (!phone) this.root.querySelector('.floor-top').append(this.cardEl);
-      if (!phone && this.tab === 'about') this.tab = this.canSeeChat ? 'chat' : 'talk';
-      if (wasPhone !== undefined) { this.renderTabs(); this.renderBody(); }
+      if (!phone && (this.tab === 'about' || this.tab === 'team')) this.tab = this.canSeeChat ? 'chat' : 'talk';
+      if (wasPhone !== undefined) { this.setMore(false); this.renderTabs(); this.renderBody(); }
     }
-    document.body.dataset.sheet = this.panelOpen ? 'half' : 'peek';
+    if (phone) { if (!this.panelOpen) this.sheet = 'peek'; else if (!this.sheet || this.sheet === 'peek') this.sheet = this.openSize(); }
+    document.body.dataset.sheet = phone ? this.sheet : this.panelOpen ? 'half' : 'peek';
+    if (this.stepBtn) { const up = !phone || this.sheet !== 'full'; this.stepBtn.replaceChildren(icon(up ? 'caret-up' : 'caret-down')); this.stepBtn.setAttribute('aria-label', up ? 'Make this panel bigger' : 'Make this panel smaller'); }
     this.pillEl.hidden = phone || this.panelOpen;
     if (!this.pillEl.hidden) this.pillEl.replaceChildren(icon(this.owner ? 'phone-call' : 'chats-teardrop'), this.canSeeChat ? (this.owner ? `Call ${this.manager?.name || 'your manager'}` : 'Read the chat') : 'See what they\'re saying');
     const w = window.innerWidth, h = window.innerHeight;
     if (!this.view) return;
     if (phone) {
-      const sheet = this.panelOpen ? h * 0.54 : 104;  // not measured: mid-slide the panel is still its old height
+      // Not measured: mid-slide the panel is still its old height. Behind a full sheet the room keeps the half-sheet framing, so it doesn't jump when the sheet comes down.
+      const sheet = this.sheet === 'peek' ? PEEK : h * HALF;
       this.view.setInsets({ left: 0, right: 0, top: businessActive(this) ? 112 : 58, bottom: sheet + 44 });
     } else {
       const card = this.root.querySelector('.floor-top').getBoundingClientRect();
@@ -255,16 +299,49 @@ class FloorPage {
       this.view.setInsets({ left: Math.min(w * 0.3, card.right + 6), right: Math.min(w * 0.42, taken + 6), top: businessActive(this) ? 92 : 20, bottom: 56 });
     }
   }
-  /** Drag the sheet's handle on a phone: up opens it, down closes it. A plain tap is handled by the click. */
+  /** The sheet's resting heights, in pixels, within what's visible right now (the keyboard takes its share). */
+  sheetSizes() {
+    const room = this.panel.offsetParent.clientHeight - cssPx('--kb') - cssPx('--vvt') - cssPx('--sa-t');
+    return { peek: this.grip.offsetHeight + this.tabsEl.offsetHeight + cssPx('--sa-b'), half: room * HALF, full: room };
+  }
+  /** Drag the sheet's handle on a phone: it follows the finger and settles on the nearest size, or the next one with a flick. A plain tap is handled by the click. */
   bindGrip() {
-    let from = null;
-    this.grip.addEventListener('pointerdown', (e) => { from = e.clientY; this.grip.setPointerCapture?.(e.pointerId); });
-    this.grip.addEventListener('pointerup', (e) => {
-      if (from === null) return;
-      const d = e.clientY - from; from = null;
-      if (Math.abs(d) > 24) { this.gripDragged = true; this.setPanel(d < 0); setTimeout(() => { this.gripDragged = false; }, 0); }
+    let d = null;
+    const g = this.grip;
+    const move = (e) => {
+      if (!d || e.pointerId !== d.id) return;
+      const up = d.startY - e.clientY;
+      if (!d.moved && Math.abs(up) < 5) return;
+      if (!d.moved) { d.moved = true; this.panel.classList.add('dragging'); document.activeElement?.blur?.(); }
+      d.trail.push([e.timeStamp, e.clientY]);
+      const { peek, full } = this.sheetSizes();
+      this.panel.style.height = `${Math.max(peek, Math.min(full, d.startH + up))}px`;
+    };
+    const end = (e) => {
+      if (!d || (e.pointerId !== undefined && e.pointerId !== d.id)) return;
+      const was = d; d = null;
+      if (!was.moved) return;
+      const now = this.panel.getBoundingClientRect().height, sizes = this.sheetSizes();
+      // How fast the finger was going at the end: only the last moments count, and a finger that stopped before lifting isn't a flick.
+      const recent = was.trail.filter(([t]) => e.timeStamp - t < 100), first = recent[0], last = recent.at(-1);
+      const v = first && last !== first && e.timeStamp - last[0] < 60 ? (first[1] - last[1]) / Math.max(1, last[0] - first[0]) : 0;
+      const order = ['peek', 'half', 'full'].sort((a, b) => sizes[a] - sizes[b]);
+      let target = order.reduce((best, k) => (Math.abs(sizes[k] - now) < Math.abs(sizes[best] - now) ? k : best), order[0]);
+      if (v > 0.6) target = order.find((k) => sizes[k] > now + 4) || order.at(-1);  // a flick up
+      if (v < -0.6) target = [...order].reverse().find((k) => sizes[k] < now - 4) || order[0];  // a flick down
+      this.panel.classList.remove('dragging'); this.panel.style.height = '';
+      this.gripDragged = true; setTimeout(() => { this.gripDragged = false; }, 0);
+      this.setSheet(target, { hand: true });
+    };
+    g.addEventListener('pointerdown', (e) => {
+      if (!isPhone()) return;
+      d = { id: e.pointerId, startY: e.clientY, startH: this.panel.getBoundingClientRect().height, trail: [[e.timeStamp, e.clientY]], moved: false };
+      g.setPointerCapture?.(e.pointerId);
     });
-    this.grip.addEventListener('click', (e) => { if (this.gripDragged) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+    g.addEventListener('pointermove', move);
+    g.addEventListener('pointerup', end);
+    g.addEventListener('pointercancel', end);
+    g.addEventListener('click', (e) => { if (this.gripDragged) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
   }
 
   renderAll() {
@@ -350,9 +427,10 @@ class FloorPage {
       const waiting = !busy && a.role === 'manager' && this.state.helpWaiting > 0;
       this.staffEl.append(h(`button.staff-chip${busy ? '.busy' : ''}`, { type: 'button', role: 'listitem', 'data-agent': a.id, title: a.activity || STATE_LABEL[a.state] || '', onclick: () => this.openAgent(a) },
         this.face(a),
-        h('span.staff-text', {}, h('small.staff-role', {}, a.title), h('b', {}, a.name), h('span.staff-state', {}, busy ? (STATE_LABEL[a.state] || a.state) : waiting ? 'Waiting on buddehbot' : 'At desk'))));
+        h('span.staff-text', {}, h('small.staff-role', {}, a.title), h('b', {}, a.name), h('span.staff-state', {}, busy ? (STATE_LABEL[a.state] || a.state) : waiting ? 'Waiting on buddehbot' : 'At desk'), h('small.staff-now', {}, this.nowDoing(a)))));
     }
   }
+  nowDoing(a) { const task = a.taskId ? this.state.tasks.find((t) => t.id === a.taskId) : null; return task?.title || a.activity || (a.state === 'idle' ? '' : STATE_LABEL[a.state] || ''); }
   /** A person's file: their badge, who they are, what they're on, and for the boss what they remember. Empty fields just aren't there. */
   openAgent(person) {
     if (this.profileOpen) return;
@@ -400,30 +478,58 @@ class FloorPage {
       const srv = serverTab(this); if (srv) tabs.push(srv);  // server slots (server-panel.js)
       tabs.push(['numbers', 'Numbers']);  // the company dashboard: boss-only (numbers-ui.js)
     }
-    if (isPhone()) tabs.push(['about', 'About']);  // on a phone the company card lives in the sheet
+    if (isPhone()) tabs.push(['team', 'Team'], ['about', 'About']);  // on a phone the staff and the company card live in the sheet
     return tabs;
   }
   renderTabs() {
     clear(this.tabsEl);
-    for (const [id, label] of this.tabsFor()) {
+    const tabs = this.tabsFor();
+    // A phone's row never cuts a label off: the first few tabs, then More, which opens right there to show the rest.
+    const folded = isPhone() && tabs.length > PHONE_ROW + 1 ? tabs.slice(PHONE_ROW) : [];
+    const shown = folded.length ? tabs.slice(0, PHONE_ROW) : tabs;
+    const tabEl = ([id, label], over) => {
       const m = (id === 'requests' || id === 'inbox') && label.match(/\d+/);
-      this.tabsEl.append(h(`button.tab${this.tab === id ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(this.tab === id), 'data-tab': id, onclick: () => this.setTab(id) }, tabIcon(id), m ? label.replace(/\s*\d+$/, '') : label, m ? h('i.tab-count', {}, ` ${m[0]}`) : null));
       if (id === 'requests' && this.pinEls?.requests) { this.pinEls.requests.badge.hidden = !m; this.pinEls.requests.badge.textContent = m ? m[0] : ''; }
+      return h(`button.tab${over ? '.overflow' : ''}${this.tab === id ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(this.tab === id), 'data-tab': id, onclick: () => this.setTab(id) }, tabIcon(id), m ? label.replace(/\s*\d+$/, '') : label, m ? h('i.tab-count', {}, ` ${m[0]}`) : null);
+    };
+    this.tabsEl.append(...shown.map((t) => tabEl(t, false)));
+    this.moreBtn = null;
+    if (folded.length) {
+      const here = folded.find(([id]) => id === this.tab);
+      const count = folded.reduce((n, [id, label]) => n + (id === 'requests' || id === 'inbox' ? Number(label.match(/\d+/)?.[0] || 0) : 0), 0);
+      this.moreBtn = h(`button.tab.more${here ? '.on' : ''}`, { type: 'button', 'data-tab-more': '', 'aria-expanded': String(!!this.moreOpen), onclick: () => this.setMore(!this.moreOpen) }, here ? tabIcon(here[0]) : icon('dots-three'), here ? here[1].replace(/\s*\d+$/, '') : 'More', count ? h('i.tab-count', {}, ` ${count}`) : null);
+      this.tabsEl.append(this.moreBtn, ...folded.map((t) => tabEl(t, true)),
+        this.owner ? h('button.tab.overflow.action', { type: 'button', 'data-more-action': 'customise', onclick: () => { this.setMore(false); this.openCustomise(); } }, icon('paint-roller'), 'Customise') : '',
+        h('button.tab.overflow.action', { type: 'button', 'data-more-action': 'lobby', onclick: () => window.officeGo('/') }, icon('elevator'), 'Lobby'));
     }
+  }
+  /** The phone's More: the folded tabs open in place, under the row. */
+  setMore(open) {
+    if (open && isPhone() && this.sheet === 'peek') this.setSheet('half');
+    this.moreOpen = !!open && !!this.moreBtn;
+    this.tabsEl.classList.toggle('more-open', this.moreOpen);
+    this.moreBtn?.setAttribute('aria-expanded', String(this.moreOpen));
   }
   setTab(id) {
     if (!this.tabsFor().some(([t]) => t === id)) return;
-    if (!this.panelOpen) this.setPanel(true);  // first, so a list can scroll to its newest line
-    this.tab = id; this.renderTabs(); this.renderBody();
+    this.setMore(false);
+    this.tab = id;
+    // First, so a list can scroll to its newest line.
+    if (isPhone()) { if (!this.panelOpen || CHAT_TABS.has(id)) { this.panelOpen = true; this.sheet = this.openSize(); this.layout(); } }
+    else if (!this.panelOpen) this.setPanel(true);
+    this.renderTabs(); this.renderBody();
   }
   renderBody() {
     this.renderBanner();
     if (this.tab === 'business' && businessUnchanged(this)) return;
+    if (this.staffEl.parentNode === this.bodyEl) this.panel.insertBefore(this.staffEl, this.tabsEl);  // the Team tab borrows the strip
+    this.chatFollow?.stop(); this.talkFollow?.stop(); this.chatFollow = this.talkFollow = null;
     clear(this.bodyEl);
     this.bodyEl.ondragover = this.bodyEl.ondragleave = this.bodyEl.ondrop = null;
     this.bodyEl.dataset.surface = this.tab;
     if (this.tab === 'chat') this.renderChat();
     if (this.tab === 'about') this.bodyEl.append(this.cardEl);
+    if (this.tab === 'team') this.bodyEl.append(this.staffEl);
     if (this.tab === 'talk') this.renderTalk();
     if (this.tab === 'work') this.renderWork();
     if (this.tab === 'tasks') this.renderTasks();
@@ -463,7 +569,10 @@ class FloorPage {
       h('div.intercom-who', {}, h('b', {}, mgr?.name || 'Office Manager'), h('small', {}, h('i'), this.streamBuf ? 'Talking…' : this.owner ? 'On the desk phone' : 'The boss\'s line')),
       h('div.intercom-grille', { 'aria-hidden': 'true' }));
     this.intercomEl.classList.toggle('on-air', !!this.streamBuf);
-    this.bodyEl.append(...(this.recoveryCard() ? [this.recoveryEl] : []), this.intercomEl, this.chatList);
+    // On a phone the recovery card sits in the conversation, so it scrolls with it rather than taking a fixed bite out of the page.
+    const inList = isPhone() && this.recoveryCard();
+    this.bodyEl.append(...(!inList && this.recoveryCard() ? [this.recoveryEl] : []), this.intercomEl, this.chatList);
+    if (inList) this.chatList.prepend(this.recoveryEl);
     // The launcher (public/js/launch-ui.js): three taps to a building team, then the maker card with Launch.
     this.lanesEl = this.isNewFloor() ? launchFlow(this) : makerCard(this);
     this.chatList.append(...(this.lanesEl ? [this.lanesEl] : []), this.questionsEl, this.streamEl);
@@ -495,7 +604,8 @@ class FloorPage {
     } else {
       this.bodyEl.append(h('p.readonly-note', {}, 'Only the boss of this floor can talk to the manager.'));
     }
-    this.scrollChat();
+    this.chatFollow = followList(this.chatList, this.bodyEl, () => this.restChat());
+    this.chatFollow.settle();
   }
   // ---- the three ways in ----
   isNewFloor() { return this.owner && this.state.floor.status === 'active' && !(this.state.messages || []).some((m) => m.role === 'boss') && !this.state.tasks.length; }
@@ -519,7 +629,7 @@ class FloorPage {
     const card = h('div.recovery-card', { 'data-recovery-card': '' },
       h('p', {}, h('b', {}, 'The keys are yours.'), ' Keep this recovery code somewhere safe: it is the only way back in from another device, and it won\'t be shown again.'),
       recoveryBox(rec.code),
-      h('button.btn.ghost', { type: 'button', 'data-recovery-done': '', onclick: () => { session.pendingRecovery = null; this.recoveryEl = null; card.remove(); } }, 'I\'ve saved it'));
+      h('button.btn.ghost', { type: 'button', 'data-recovery-done': '', onclick: () => { session.pendingRecovery = null; this.recoveryEl = null; card.remove(); this.chatFollow?.settle(); } }, 'I\'ve saved it'));
     return (this.recoveryEl = card);
   }
   dropLanes() { if (this.lanesEl && !this.lanesEl.matches('[data-maker]')) { this.lanesEl.remove(); this.lanesEl = null; } }
@@ -545,12 +655,23 @@ class FloorPage {
       } }, h('span.q-who', {}, `${q.agentName} asks`), h('p', {}, q.text), h('div.row', {}, a, h('button.btn.primary', { type: 'submit' }, 'Answer'))));
     }
   }
-  scrollChat() {
-    if (!this.chatList) return;
+  /** A new line in the chat, or the conversation redrawn: it follows along unless the boss has scrolled up to read. */
+  scrollChat({ line = false, force = false } = {}) {
+    const f = this.chatFollow; if (!f) return;
+    if (force || f.pinned || Date.now() < (this.landUntil || 0)) { f.pinned = true; f.settle(); }
+    else if (line) f.added();
+  }
+  /** Where the chat rests: the options on a brand-new floor, the step the team is on just after Go, otherwise the newest line. */
+  restChat() {
+    const list = this.chatList; if (!list) return;
+    const l = list.getBoundingClientRect();
     // Right after Go the chat stays on the step the team is on, even as the first messages come in, instead of the bottom of the step list.
-    const step = Date.now() < (this.landUntil || 0) ? this.chatList.querySelector('[data-step-state="doing"], [data-step-state="todo"]') : null;
-    if (step) { const l = this.chatList.getBoundingClientRect(), r = step.getBoundingClientRect(); this.chatList.scrollTop += r.top - l.top - (l.height - r.height) / 2; return; }
-    this.chatList.scrollTop = this.chatList.scrollHeight;
+    const step = Date.now() < (this.landUntil || 0) ? list.querySelector('[data-step-state="doing"], [data-step-state="todo"]') : null;
+    if (step) { const r = step.getBoundingClientRect(); list.scrollTop += r.top - l.top - (l.height - r.height) / 2; return; }
+    if (this.recoveryEl && list.contains(this.recoveryEl)) { list.scrollTop = 0; return; }  // the keys come first
+    const options = this.lanesEl?.matches?.('[data-launcher]') ? this.lanesEl : null;
+    if (options) { const r = options.getBoundingClientRect(); list.scrollTop += r.height <= l.height ? r.bottom - l.bottom : r.top - l.top; return; }
+    list.scrollTop = list.scrollHeight;
   }
 
   // ---- talk ----
@@ -568,7 +689,8 @@ class FloorPage {
     this.talkList = list;
     this.bodyEl.append(list);
     if (this.panelOpen) this.markTalkRead();
-    list.scrollTop = list.scrollHeight;
+    this.talkFollow = followList(list, this.bodyEl, () => { list.scrollTop = list.scrollHeight; });
+    this.talkFollow.settle();
   }
   /** One line of the group chat. The same speaker keeps talking without their face again, as in any office chat. */
   talkEl(l, prev) {
@@ -585,11 +707,10 @@ class FloorPage {
   }
   addTalkLine(l) {
     if (this.tab === 'talk' && this.talkList) {
-      const keep = this.talkList.scrollHeight - this.talkList.scrollTop - this.talkList.clientHeight < 60;
       this.talkList.querySelector('.empty')?.remove();
       this.talkList.append(this.talkEl(l, this.talkLast));
       this.talkLast = l;
-      if (keep) this.talkList.scrollTop = this.talkList.scrollHeight;
+      this.talkFollow?.added();
     }
     if (this.tab === 'talk' && this.panelOpen) { this.markTalkRead(); return; }
     if (l.kind === 'small' || l.kind === 'banter') return;
@@ -1017,7 +1138,7 @@ class FloorPage {
       this.state.messages.push(m);
       if (d.role === 'manager') { this.streamBuf = ''; this.showStream(); }
       if (d.role === 'boss') this.dropLanes();
-      if (this.tab === 'chat' && this.chatList) { this.chatList.insertBefore(this.messageEl(m), this.lanesEl || this.questionsEl); this.scrollChat(); }
+      if (this.tab === 'chat' && this.chatList) { this.chatList.insertBefore(this.messageEl(m), this.lanesEl || this.questionsEl); this.scrollChat({ line: true, force: d.role === 'boss' }); }
       // floors-plus: a report means an order ran, so the Orders tab and its history are stale.
       if (d.role === 'report') { if (this.tab !== 'chat') toast('A report from your manager is in the chat'); if (this.owner) this.refreshOrders(); }
     });
@@ -1107,6 +1228,8 @@ class FloorPage {
       const hired = now.length > was.length && was.every((k, i) => k === now[i]) && roomKey(next) === roomKey(this.state);
       const rebuild = !hired && sceneKey(next) !== sceneKey(this.state);
       const scroll = this.bodyEl.firstChild?.scrollTop;
+      const reading = [this.chatFollow, this.talkFollow].find((f) => f && !f.pinned);
+      const held = reading ? reading.list.scrollTop : null;
       const typing = this.bodyEl.querySelector('textarea, input');
       const draft = typing?.value; const focused = document.activeElement === typing;
       this.state = next;
@@ -1122,6 +1245,8 @@ class FloorPage {
       if (again && draft) again.value = draft;
       if (again && focused) again.focus();
       if (this.bodyEl.firstChild && scroll !== undefined && this.tab !== 'chat') this.bodyEl.firstChild.scrollTop = scroll;
+      const followed = this.tab === 'chat' ? this.chatFollow : this.tab === 'talk' ? this.talkFollow : null;
+      if (followed && held !== null) { followed.pinned = false; followed.list.scrollTop = held; }
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) { toast('This floor has been closed.'); window.officeGo('/'); }
     } finally {
