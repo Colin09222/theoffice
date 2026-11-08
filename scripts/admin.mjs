@@ -18,6 +18,7 @@ import { adsListing, adsListingText, pauseAll } from '../server/ads-guard.js';
 import { ensureAdSpend, resumeAds } from '../server/business.js';
 import { scrub } from '../server/llm.js';
 import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, MailError } from '../server/mail.js';
+import { chatAdminCommand } from '../server/cloud/chat.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -37,6 +38,8 @@ const usage = () => {
     '  node scripts/admin.mjs cloud ai status [PROJECT] [--floor N] [--json]   published apps\' AI: what is on, requests today and what is left. PROJECT is a subdomain label, or a slug with --floor',
     '  node scripts/admin.mjs cloud ai pause|resume PROJECT|--all [--floor N]   stop or restart AI for one project, or for the whole building',
     '  node scripts/admin.mjs cloud fetch status|pause|resume ...   the same, for fetching and scraping web pages',
+    '  node scripts/admin.mjs chat status [PROJECT] [--floor N] [--json]   the website chat: what is on, conversations and questions waiting. Counts only, never what anyone said',
+    '  node scripts/admin.mjs chat pause|resume PROJECT|--all [--floor N]   stop or restart the website chat for one project, or for the whole building',
     '  node scripts/admin.mjs filler list            list filler (demo) companies and removed ones',
     '  node scripts/admin.mjs filler seed            seed the filler companies, bringing back any that were removed',
     '  node scripts/admin.mjs filler remove --floor N  remove the filler company on floor N (stays removed)',
@@ -120,6 +123,9 @@ if (cmd === 'code') {
     if (!rest.includes('--yes')) die(`This deletes every account, document, save, score and file of ${p} on floor ${f.number}. Add --yes to do it.`);
     console.log(`Wiped ${p} on floor ${f.number}: ${store.wipeProject(f.id, p)} rows removed. Anyone in one of its rooms right now stays until they leave; their accounts are gone.`);
   } else usage();
+} else if (cmd === 'chat') {
+  // The website chat (docs/CHAT.md). On the database file alone: a running server sees a pause on its next message.
+  if (!chatAdminCommand(db, cfg, rest, { die, floorArg, lookupLabel })) usage();
 } else if (cmd === 'cloud' && (rest[0] === 'ai' || rest[0] === 'fetch')) {
   // AI and web fetching for published apps. Works on the database file alone: a running server sees a pause on its next call. Counts only.
   const [kind, sub] = rest;

@@ -231,6 +231,41 @@ export function chatStatusOf(db, cfg, F, p) {
   return { ...chatState(db, cfg, f, pr), conversations: c, waiting: w };
 }
 export const chatBuildingPaused = buildingPaused;
+/** scripts/admin.mjs chat status|pause|resume. Counts only, never what anyone said. Returns false for a bad command, so the caller can print its usage. */
+export function chatAdminCommand(db, cfg, rest, { die, floorArg, lookupLabel, print = console.log }) {
+  const [sub] = rest, given = rest[1] && !rest[1].startsWith('--') ? rest[1] : null;
+  const numberOf = (id) => get(db, 'SELECT number FROM floors WHERE id=?', id)?.number ?? '(closed)';
+  const findProject = () => {
+    const entry = lookupLabel(db, given);
+    if (entry) return { floorId: entry.floor_id, project: entry.project };
+    if (!slugPattern.test(given)) die('Give the project\'s subdomain label or its slug.');
+    let rows = all(db, 'SELECT floor_id, slug FROM projects WHERE slug=?', given);
+    if (rest.includes('--floor')) { const n = floorArg(); rows = rows.filter((r) => numberOf(r.floor_id) === n); }
+    if (!rows.length) die(`No project called ${given}.`);
+    if (rows.length > 1) die(`More than one floor has a project called ${given}: floors ${rows.map((r) => numberOf(r.floor_id)).join(', ')}. Add --floor N.`);
+    return { floorId: rows[0].floor_id, project: rows[0].slug };
+  };
+  const nameOf = (p) => `floor ${numberOf(p.floorId)} ${p.project}`;
+  if (sub === 'status') {
+    const projects = given ? [findProject()] : all(db, 'SELECT floor_id, project FROM chat_settings WHERE floor_id>0 UNION SELECT floor_id, project FROM chat_conversations').map((r) => ({ floorId: r.floor_id, project: r.project }));
+    const report = { on: cfg.officeChatEnabled !== false, buildingPaused: buildingPaused(db), projects: projects.map((p) => ({ ...p, ...chatStatusOf(db, cfg, p.floorId, p.project) })) };
+    if (rest.includes('--json')) { print(JSON.stringify(report, null, 2)); return true; }
+    print(`Website chat: ${!report.on ? 'switched off in the settings' : report.buildingPaused ? 'paused for the whole building' : 'on'}.`);
+    if (!report.projects.length) print('No project has used it yet or has a switch set.');
+    for (const x of report.projects) print(`${nameOf(x)}: ${x.stopped === 'paused' ? 'PAUSED' : x.on ? 'on' : x.private ? 'off (private)' : 'off'}, ${x.conversations} conversation${x.conversations === 1 ? '' : 's'}, ${x.waiting} waiting for the boss`);
+    return true;
+  }
+  if (sub === 'pause' || sub === 'resume') {
+    const on = sub === 'pause';
+    if (rest.includes('--all')) { setChatBuildingPaused(db, on); print(`Website chat ${on ? 'paused' : 'back on'} for the whole building.`); return true; }
+    if (!given) die('Name a project, or use --all for the whole building.');
+    const p = findProject();
+    setChatPaused(db, p.floorId, p.project, on);
+    print(`Website chat ${on ? 'paused' : 'back on'} for ${nameOf(p)}.`);
+    return true;
+  }
+  return false;
+}
 
 export function createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, engine }) {
   const secrets = [cfg.openrouterKey, cfg.anthropicKey, cfg.webSearchKey, cfg.namecheapKey];
