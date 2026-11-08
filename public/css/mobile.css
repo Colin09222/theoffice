@@ -211,6 +211,8 @@
   .floor-top .back .ico { fill: var(--m-ink-2); }
   .floor-num { font: 600 12px var(--display, sans-serif); color: var(--m-ink-3); letter-spacing: 0; background: none; box-shadow: none; }
   .floor-name { font: 700 15px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif; color: var(--m-ink); max-width: 56vw; text-shadow: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Open and working go without saying on a phone; Right now, below, says it in words. A closed or paused floor still shows here. */
+  .floor-meta .status-pill.ok, .floor-meta .status-pill.busy { display: none; }
   .floor-meta .status-pill { font: 600 11.5px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif; border-radius: 999px; padding: 3px 8px; box-shadow: none; }
   .hours-sign { display: none; }
   .floor-scrubber { top: max(8px, var(--sa-t)); right: 8px; width: 56px; padding: 5px 0; gap: 2px; border-radius: 16px; background: #fff; box-shadow: var(--m-shadow); }
@@ -224,7 +226,7 @@
   .controls .btn { min-height: 44px; padding: 0 14px; border-radius: 999px; background: #fff; color: var(--m-ink); box-shadow: var(--m-shadow); font: 600 13px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif; }
   .controls .btn .ico { width: 16px; height: 16px; fill: var(--m-ink-2); }
   .visitor-note { font: 500 13px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif; background: #fff; color: var(--m-ink-2); border-radius: 999px; padding: 8px 12px; white-space: normal; box-shadow: var(--m-shadow); }
-  .visitor-note { font-size: 11.5px; padding: 4px 11px; background: rgba(255, 255, 255, .78); color: var(--m-ink-2); box-shadow: none; max-width: 86%; }
+  .visitor-note { font-size: 11px; padding: 3px 10px; background: rgba(255, 255, 255, .8); color: var(--m-ink-2); box-shadow: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
   body[data-page='floor'] #toasts { top: calc(var(--sa-t) + 64px); bottom: auto; }
   body[data-page='floor'][data-sheet="peek"] #toasts { top: auto; bottom: calc(var(--peek) + var(--controls-h, 0px) + 14px); }
   .card-actions .btn { min-height: 44px; }

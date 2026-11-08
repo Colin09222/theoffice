@@ -101,7 +101,8 @@ function make(def) {
     const c = Number(line.slice(1)); const along = line[0] === 'h';
     const merged = []; for (const [a, b] of [...list].sort((p, q) => p[0] - q[0])) { const last = merged.at(-1); if (last && a <= last[1] + 1e-6) last[1] = Math.max(last[1], b); else merged.push([a, b]); }
     for (const [a, b] of merged) {
-      const gaps = (doors.get(line) || []).filter(([p, q]) => p >= a - 1e-6 && q <= b + 1e-6).filter((g, i, all) => all.findIndex((o) => Math.abs(o[0] - g[0]) < 1e-6) === i);
+      // A door near the end of a wall is trimmed to the wall it stands in; it still has to be wide enough to walk through.
+      const gaps = (doors.get(line) || []).filter(([p, q]) => q > a + 1e-6 && p < b - 1e-6).map(([p, q]) => [Math.max(p, a), Math.min(q, b)]).filter(([p, q]) => q - p >= 1.2).filter((g, i, all) => all.findIndex((o) => Math.abs(o[0] - g[0]) < 1e-6) === i);
       plan.walls.push(along ? [a, c, b, c, gaps] : [c, a, c, b, gaps]);
     }
   }

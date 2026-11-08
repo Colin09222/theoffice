@@ -727,7 +727,7 @@ export class OfficeView {
     if (pbr) textureSet('wood', { pbr: false }).then((set) => {
       if (!set?.map || this.dead || this.deck) return;
       const plate = TOWER_W * WORLD_SCALE + 1.1;
-      const deck = new THREE.Mesh(new THREE.PlaneGeometry(plate, plate), new THREE.MeshStandardMaterial({ map: repeating(set.map, { color: true, repeat: plate / 3.4 }), color: this.host ? '#ead9c0' : '#b9a78d', roughness: 0.82, metalness: 0 }));
+      const deck = new THREE.Mesh(new THREE.PlaneGeometry(plate, plate), new THREE.MeshStandardMaterial({ map: repeating(set.map, { color: true, repeat: plate / 3.4 }), color: this.host ? '#ead9c0' : '#a8967c', roughness: 0.82, metalness: 0 }));
       deck.rotation.x = -Math.PI / 2; deck.position.y = -0.055; deck.receiveShadow = true; deck.userData.keep = true;
       this.deck = deck; this.room.add(deck);
     });
@@ -779,16 +779,16 @@ export class OfficeView {
     out(primary, ROOM_W + 0.9, 0.012, ROOM_D + 0.9, 0, -0.022, 0, { recv: false, cast: false });
     const rail = new THREE.MeshStandardMaterial({ color: '#cfe0ec', roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false, envMap: env });
     for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(terrace, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
-    for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { out('#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); out('#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
+    if (this.host) for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { out('#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); out('#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
     // The terrace is part of the company too: planters along the rail in its colours and somewhere to sit outside. A timber deck follows in loadLooks.
     // On a floor page the terrace is quieter than the room, so the eye stays on the people. In the tower it is part of the outside and keeps its colours.
     const hush = (c) => (this.host ? c : mix(c, '#c9baa4', 0.55));
-    for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
+    if (this.host) for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
       const x = i * 6.4 + (sz < 0 ? 1.4 : 0), z = sz * (plate / 2 - 0.85);
       out(hush(mix(primary, '#cfc4b0', 0.62)), 1.9, 0.55, 0.85, x, 0, z);
       out(hush(i % 2 ? '#5c8650' : '#6c9452'), 1.7, 0.36 + ((i * i) % 3) * 0.14, 0.66, x, 0.55, z);
     }
-    for (const [x, z] of [[-10.5, plate / 2 - 2.9], [8.5, plate / 2 - 3.1]]) {
+    if (this.host) for (const [x, z] of [[-10.5, plate / 2 - 2.9], [8.5, plate / 2 - 3.1]]) {
       out('#a8825c', 1.25, 0.07, 1.25, x, 0.72, z, { geo: cyl }); out('#3d3b44', 0.09, 0.72, 0.09, x, 0, z, { geo: cyl });
       for (const a of [0.4, 2.5, 4.6]) { const sx = x + Math.cos(a) * 1.3, sz = z + Math.sin(a) * 1.3; out(mix(primary, '#ffffff', 0.32), 0.62, 0.1, 0.62, sx, 0.44, sz); out('#3d3b44', 0.07, 0.44, 0.07, sx, 0, sz, { cast: false }); }
     }
@@ -1324,9 +1324,9 @@ export class OfficeView {
         const label = r.kind === 'staff' ? (o?.info.name || '') : r.kind === 'corridor' ? (r.label === 'Corridor' ? '' : r.label) : (o?.info.name && r.id === 'manager' ? `${o.info.name} · ${r.label}` : r.label);
         if (!label) continue;
         const [x0, , , z1] = r.rect;
-        x.font = `700 ${Math.round(0.42 * ppu)}px ui-sans-serif, system-ui, sans-serif`;
-        x.fillStyle = 'rgba(255,255,255,.45)'; x.fillText(label.toUpperCase(), px(x0) + 0.22 * ppu + 1, pz(z1) - 0.14 * ppu + 1);
-        x.fillStyle = 'rgba(20,16,12,.62)'; x.fillText(label.toUpperCase(), px(x0) + 0.22 * ppu, pz(z1) - 0.14 * ppu);
+        x.font = `700 ${Math.round(0.36 * ppu)}px ui-sans-serif, system-ui, sans-serif`;
+        x.fillStyle = 'rgba(255,255,255,.28)'; x.fillText(label.toUpperCase(), px(x0) + 0.22 * ppu + 1, pz(z1) - 0.14 * ppu + 1);
+        x.fillStyle = 'rgba(20,16,12,.36)'; x.fillText(label.toUpperCase(), px(x0) + 0.22 * ppu, pz(z1) - 0.14 * ppu);
       }
       x.restore();
       // A soft dark line under every wall, so the rooms read from above even with no glass glint.
