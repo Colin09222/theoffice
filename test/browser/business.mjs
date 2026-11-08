@@ -22,7 +22,16 @@ const enter = async (p, c, slug) => {
   await p.goto(`${base}/floor/${slug || c.slug}?q=low`);
   await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
 };
-const shot = async (p, name) => { if (OUT) { await sleep(500); await p.shot(join(OUT, name)); } };
+// Before every picture: no bare "null" or "undefined" left on the page by a missing piece of the UI (one sat under the floor's controls).
+const STRAY = `(() => { const out = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) if (/^\\s*(null|undefined|NaN|\\[object Object\\])\\s*$/.test(n.nodeValue)) out.push(\`\${n.parentElement?.className || n.parentElement?.tagName}: \${n.nodeValue.trim()}\`);
+  return out.slice(0, 4).join(' | '); })()`;
+const shot = async (p, name) => {
+  await sleep(OUT ? 500 : 200);
+  const stray = await p.ev(STRAY);
+  check(`${name}: no stray null or undefined text on the page`, !stray, stray);
+  if (OUT) await p.shot(join(OUT, name));
+};
 const inView = (sel) => `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.left >= -1 && r.right <= innerWidth + 1 && r.top >= -1 && r.bottom <= innerHeight + 1; })()`;
 const noSideScroll = '(document.documentElement.scrollWidth <= innerWidth + 1)';
 

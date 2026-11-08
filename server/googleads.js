@@ -1,13 +1,14 @@
 // Google Ads, for Business mode's paid ads: a small REST client (API v26) and the campaign an approved AD SPEND request becomes. It all runs in
 // this process: the refresh token comes from the environment, the access token it buys lives in memory only, and neither ever reaches a prompt,
 // a tool result, a log line, the database or a floor. The limits that keep spending small are here as constants, so no setting can lift them:
-// a campaign's total budget is the boss's approved amount and never over $25, it ends within 7 days, it shows on Google Search only (no display,
+// a campaign's total budget is the boss's approved amount and never over $25, it runs 7 whole days, it shows on Google Search only (no display,
 // no search partners), and it bids Maximize Clicks with a ceiling on each click. See docs/ADS.md.
 
 export const API_VERSION = 'v26';
 export const HARD_MAX_USD = 25;
+// A total budget (CUSTOM_PERIOD) runs 7 whole days, always: the real v26 API refused one over 2 days (UNKNOWN on end_date_time) and took the
+// same budget over 7 (start 00:00:00, end on day 7 at 23:59:59), live, 2026-11-07. Validate-only tests refused 3 days too.
 export const MAX_DAYS = 7;
-const MIN_DAYS = 4;          // the real API refuses a total budget over 2 or 3 days and takes 4 to 7 (live and validate-only tests, 2026-11-07)
 const DAY = 86400000;
 export const LIMITS = { headline: 30, description: 90, path: 15, keyword: 80, keywordWords: 10, headlines: [3, 15], descriptions: [2, 4], keywords: [3, 10] };
 
@@ -86,6 +87,9 @@ const EMOJI = /\p{Extended_Pictographic}/u;
 const list = (v) => (Array.isArray(v) ? v : typeof v === 'string' ? v.split(/\n|;/) : []).map(tidy).filter(Boolean);
 const dedupe = (xs) => { const seen = new Set(); return xs.filter((x) => { const k = x.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }); };
 
+// Google counts a wide character (Chinese, Japanese, Korean, full-width forms) as two towards an ad's limits; one over and the whole ad is TOO_LONG.
+const WIDE = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/u;
+export const adLength = (x) => [...String(x)].reduce((n, ch) => n + (WIDE.test(ch) ? 2 : 1), 0);
 /** The Google search ad's words and keywords, as the marketer wrote them: the problems in plain words, or the cleaned-up set. */
 export function checkSearchAd({ headlines, descriptions, keywords, path1, path2 } = {}) {
   const problems = [];
@@ -93,10 +97,10 @@ export function checkSearchAd({ headlines, descriptions, keywords, path1, path2 
   const hs = dedupe(list(headlines)), ds = dedupe(list(descriptions));
   const ks = dedupe(list(keywords).map((k) => k.toLowerCase().replace(/[^\p{L}\p{N}\s&'.-]+/gu, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean));
   if (hs.length < L.headlines[0] || hs.length > L.headlines[1]) problems.push(`give ${L.headlines[0]} to ${L.headlines[1]} different search headlines, not ${hs.length}`);
-  for (const x of hs) if (x.length > L.headline) problems.push(`search headline "${x.slice(0, 40)}" is ${x.length} characters; ${L.headline} at most`);
+  for (const x of hs) if (adLength(x) > L.headline) problems.push(`search headline "${x.slice(0, 40)}" is ${adLength(x)} characters; ${L.headline} at most`);
   for (const x of hs) if (/!/.test(x)) problems.push(`search headline "${x.slice(0, 40)}" has an exclamation mark, which Google doesn't allow in headlines`);
   if (ds.length < L.descriptions[0] || ds.length > L.descriptions[1]) problems.push(`give ${L.descriptions[0]} to ${L.descriptions[1]} different search descriptions, not ${ds.length}`);
-  for (const x of ds) if (x.length > L.description) problems.push(`search description "${x.slice(0, 40)}…" is ${x.length} characters; ${L.description} at most`);
+  for (const x of ds) if (adLength(x) > L.description) problems.push(`search description "${x.slice(0, 40)}…" is ${adLength(x)} characters; ${L.description} at most`);
   for (const x of [...hs, ...ds]) if (EMOJI.test(x)) problems.push(`"${x.slice(0, 40)}" has an emoji, which Google refuses`);
   if (ks.length < L.keywords[0] || ks.length > L.keywords[1]) problems.push(`give ${L.keywords[0]} to ${L.keywords[1]} different keywords, not ${ks.length}`);
   for (const k of ks) if (k.length > L.keyword || k.split(' ').length > L.keywordWords) problems.push(`keyword "${k.slice(0, 40)}" is too long: ${L.keyword} characters and ${L.keywordWords} words at most`);
@@ -124,7 +128,7 @@ export function zonedMs(date, time, timeZone) {
 export const monthStartMs = (now, timeZone) => zonedMs(`${localParts(now, timeZone).date.slice(0, 8)}01`, '00:00:00', timeZone);
 
 /** Everything one campaign will be, worked out and checked before Google hears of it. Throws AdsError('plan') with the reason. */
-export function planCampaign({ requestId, tag, label = '', amountUsd, days = MAX_DAYS, cpcCeilingUsd = 0.5, now = Date.now(), timeZone = 'America/New_York', finalUrl,
+export function planCampaign({ requestId, tag, label = '', amountUsd, cpcCeilingUsd = 0.5, now = Date.now(), timeZone = 'America/New_York', finalUrl,
   headlines, descriptions, keywords, path1, path2, geo = [2840], language = 1000 }) {
   const amount = Number(amountUsd);
   if (!Number.isInteger(amount) || amount < 1 || amount > HARD_MAX_USD) throw new AdsError('plan', 'the amount has to be a whole number of dollars, $25 at most');
@@ -133,22 +137,19 @@ export function planCampaign({ requestId, tag, label = '', amountUsd, days = MAX
   if (url.protocol !== 'https:' || /^(localhost|127\.|10\.|192\.168\.)/.test(url.hostname)) throw new AdsError('plan', 'the ad has to point at the live site on the public web (https)');
   const words = checkSearchAd({ headlines, descriptions, keywords, path1, path2 });
   if (!words.ok) throw new AdsError('plan', words.problems.join('; '));
-  // v26 wants whole days: a start at 00:00:00 and an end at 23:59:59. It takes today's date as the start (it runs from now), or tomorrow's in
-  // the last minutes of a day, and the end is the last day that keeps the whole run within 7 days of now.
+  // v26 wants whole days: a start at 00:00:00 and an end at 23:59:59, 7 days of them. It takes today's date as the start (it runs from now), or
+  // tomorrow's in the last minutes of a day, so the start is never in the past by the time Google reads it.
   const here = localParts(now, timeZone);
   const start = { date: here.time >= '23:45:00' ? addDays(here.date, 1) : here.date, time: '00:00:00' };
   const startText = `${start.date} ${start.time}`;
-  let n = Math.min(MAX_DAYS, Math.max(MIN_DAYS, Math.round(Number(days) || MAX_DAYS)));
-  const endFor = (k) => `${addDays(start.date, k - 1)} 23:59:59`;
-  while (n > MIN_DAYS && zonedMs(...endFor(n).split(' '), timeZone) - now > MAX_DAYS * DAY) n--;
-  const endText = endFor(n);
-  const endsAt = zonedMs(...endText.split(' '), timeZone);
-  if (endsAt - now > MAX_DAYS * DAY) throw new AdsError('plan', 'the campaign would end more than 7 days from now');
+  const endText = `${addDays(start.date, MAX_DAYS - 1)} 23:59:59`;
+  const startsAt = zonedMs(start.date, start.time, timeZone), endsAt = zonedMs(...endText.split(' '), timeZone);
+  if (startsAt - now > DAY || endsAt - startsAt > MAX_DAYS * DAY + 3600000) throw new AdsError('plan', 'the campaign would run past 7 whole days from today');
   const ceiling = Math.max(0.1, Math.min(Number(cpcCeilingUsd) || 0.5, 2, amount));
   const name = `Office ad #${Number(requestId)} ${String(tag || '').replace(/[^a-z0-9]/gi, '').slice(0, 12)}${label ? ` · ${tidy(label).replace(/['"\\]/g, '').slice(0, 80)}` : ''}`;
   return {
     name, amountUsd: amount, totalMicros: amount * 1e6, cpcCeilingMicros: Math.round(ceiling * 100) * 10000,
-    startText, endText, startsAt: zonedMs(start.date, start.time, timeZone), endsAt, days: n,
+    startText, endText, startsAt, endsAt, days: MAX_DAYS,
     finalUrl: url.href, headlines: words.headlines, descriptions: words.descriptions, keywords: words.keywords, path1: words.path1, path2: words.path2,
     geo: geo.map(Number).filter((g) => Number.isInteger(g) && g > 0), language: Number(language) || 1000,
   };

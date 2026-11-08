@@ -92,7 +92,6 @@ export function loadConfig(env = process.env, overrides = {}) {
     adsPaidEnabled: /^(1|true|yes|on)$/i.test(String(env.ADS_PAID_ENABLED || '').trim()),
     adMonthlyCapUsd: Math.max(0, num(env.AD_MONTHLY_CAP_USD, 50)),
     adCpcCeilingUsd: num(env.AD_CPC_CEILING_USD, 0.5),
-    adCampaignDays: num(env.AD_CAMPAIGN_DAYS, 7),
     adsTickMs: num(env.ADS_TICK_MS, 60000),
     adsSyncMs: num(env.ADS_SYNC_MS, 15 * 60000),
     googleAds: {

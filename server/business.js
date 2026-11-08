@@ -3,7 +3,7 @@
 // module only keeps the journey's place, hands out each step's tasks, reads where they stand, and tells the manager what changed. See docs/BUSINESS.md.
 // Honesty: an idea card's links must have been opened or found on this floor, and every figure on it must come from one of them. Money: the only
 // figure anyone sees is the boss's own choice of ad money, and an ad request needs the boss's own click. Paid ads run on Google Search only, and
-// only with ADS_PAID_ENABLED on: the approval is recorded first, then the campaign is made PAUSED, then switched on; it ends within 7 days, never
+// only with ADS_PAID_ENABLED on: the approval is recorded first, then the campaign is made PAUSED, then switched on; it runs 7 whole days, never
 // costs more than the approved amount, and the building's monthly cap is checked before each one. See docs/ADS.md and server/googleads.js.
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
@@ -539,7 +539,7 @@ export function installBusiness(ext) {
       if (wrong) return closeSpend(r, 'failed', wrong, `the Google ad couldn't be set up: ${wrong}. Nothing was spent. Tell the boss plainly in a line; the building manager has to fix the account first.`);
       let plan;
       try {
-        plan = planCampaign({ requestId: r.id, tag: r.tag, label: `floor ${floor.number ?? floor.id} ${r.project}`, amountUsd: r.amount, days: cfg.adCampaignDays, cpcCeilingUsd: cfg.adCpcCeilingUsd,
+        plan = planCampaign({ requestId: r.id, tag: r.tag, label: `floor ${floor.number ?? floor.id} ${r.project}`, amountUsd: r.amount, cpcCeilingUsd: cfg.adCpcCeilingUsd,
           now: now(), timeZone: tz, finalUrl, ...words, geo: CONFIG.google?.geo, language: CONFIG.google?.language });
       } catch (e) {
         return closeSpend(r, 'failed', e.message, `the Google ad couldn't be set up: ${plain(e.message, 200)}. Nothing was spent. Tell the boss plainly in a line; once it's fixed you can file it again with request_ad_spend if they want.`);
@@ -713,7 +713,8 @@ export function installBusiness(ext) {
       researchTask: (() => { const t = taskRow(tasksOf(row).ideas); return t ? { status: t.status } : null; })(),
       ads, preview: !!row.project && stepIndex(row.step) >= 1,
       adMoney: { options: moneyOptions(), chosen: row.money_set ? row.ad_money : 0, set: !!row.money_set, ready: phase === 'money', paid: paidOn() },
-      channels: [{ id: 'google', label: 'Google Search', on: paidOn(), soon: !cfg.adsPaidEnabled || !gads }, { id: 'meta', label: 'Facebook & Instagram', on: false, soon: true }],
+      // Google Search is built: with paid ads off (the flag, no account, or stopped) it reads "off for now". Facebook & Instagram is still to come.
+      channels: [{ id: 'google', label: 'Google Search', on: paidOn() }, { id: 'meta', label: 'Facebook & Instagram', on: false, soon: true }],
       adSpend: adSpendView(f.id),
     };
   }

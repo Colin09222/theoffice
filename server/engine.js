@@ -229,7 +229,8 @@ export class Engine {
     const id = this.budget.hold(provider, { floorId: c.floor.id, agentId: c.agent.id, taskId: c.task?.id, usd });
     try {
       const r = await fn();
-      this.charge(c.floor.id, c.agent, model, r.usage.prompt, r.usage.completion, r.usage.cost, { taskId: c.task?.id, kind, provider });
+      // The model that did the work goes on the ledger: a video can come from the fallback model.
+      this.charge(c.floor.id, c.agent, typeof r.model === 'string' && r.model ? r.model : model, r.usage.prompt, r.usage.completion, r.usage.cost, { taskId: c.task?.id, kind, provider });
       return r;
     } catch (e) {
       if (c.signal?.aborted) this.charge(c.floor.id, c.agent, model, 0, 0, usd, { taskId: c.task?.id, kind, provider });
