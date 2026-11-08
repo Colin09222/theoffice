@@ -239,6 +239,23 @@ describe('caps: storage, people and messages', () => {
   });
 });
 
+describe('heartbeats', () => {
+  test('a connection that stops answering is dropped and the room is told; one that answers stays', async () => {
+    const t = await setup({ cloudRoomLimits: { pingMs: 80 } });
+    try {
+      const h = publish(t, t.floorA, 'beat');
+      const live = await joinRoom(t, h, 'r');
+      const dead = await joinRoom(t, h, 'r', { player: P2 });
+      dead.socket.removeAllListeners('data');
+      await until(() => t.app.cloud.rooms.conns.size === 1, { what: 'the silent one to be dropped', timeout: 3000 });
+      assert.equal((await live.type('leave')).id, dead.welcome.you.id);
+      await sleep(300);
+      assert.equal(t.app.cloud.rooms.conns.size, 1, 'the one that answers is still there');
+      live.close();
+    } finally { await t.close(); }
+  });
+});
+
 describe('rate limits', () => {
   test('per project and for the whole building', async () => {
     const t = await setup({ cloudRateScale: 1, cloudRates: { project: [10, 60000], all: [25, 60000] } });
