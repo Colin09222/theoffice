@@ -2,7 +2,7 @@
 // Building-manager CLI. The plaintext code goes to this terminal only; the database stores its hash and nothing logs it.
 import { loadConfig, loadModels } from '../server/config.js';
 import { openDb, all, get, run } from '../server/db.js';
-import { issueCode } from '../server/auth.js';
+import { issueCode, createSession, sha256 } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
 import { createStore } from '../server/cloud/store.js';
 import { slugPattern } from '../server/workspace.js';
@@ -25,6 +25,8 @@ const usage = () => {
     '  node scripts/admin.mjs mail status [--json]   email: sending and receiving, today\'s counts, each floor\'s address, pauses and alerts. No message text',
     '  node scripts/admin.mjs mail pause|resume [--floor N]   stop or restart sending for one floor, or for the whole building. Receiving carries on',
     '  node scripts/admin.mjs mail suppress <address>   never send to this address again, from any floor',
+    '  node scripts/admin.mjs login --floor N [--minutes M]   a short boss login to check floor N by hand (default 60 minutes, at most 240): the office_s cookie value, to this terminal only',
+    '  node scripts/admin.mjs login revoke           end such a login now: give its cookie value on stdin',
     '  node scripts/admin.mjs floors                 list floors',
     '  node scripts/admin.mjs floors hide|show --floor N   hide floor N from the lobby, directory and lift, or show it again. It still opens by its own link',
     '  node scripts/admin.mjs backend usage [--json]   every project\'s Office Cloud backend: accounts, documents, saves, scores, files and storage. Counts only',
@@ -61,6 +63,21 @@ if (cmd === 'code') {
     if (get(db, 'SELECT 1 x FROM floors WHERE number=?', floor)) { console.error(`Floor ${floor} is already taken.`); process.exit(1); }
   }
   console.log(issueCode(db, floor));
+} else if (cmd === 'login') {
+  // For checking a floor as its boss: a boss session like the one a claim or a recovery code gives, but short. Its value goes to this terminal only.
+  if (rest[0] === 'revoke') {
+    const token = readFileSync(0, 'utf8').trim();
+    const r = token ? run(db, "DELETE FROM sessions WHERE hash=? AND kind='owner'", sha256(token)) : { changes: 0 };
+    console.log(r.changes ? 'That login has ended.' : 'No such login.');
+  } else {
+    const n = floorArg();
+    const f = get(db, "SELECT id FROM floors WHERE number=? AND status!='killed'", n);
+    if (!f) die(`Floor ${n} has no company on it.`);
+    const i = rest.indexOf('--minutes');
+    const minutes = i >= 0 ? Number(rest[i + 1]) : 60;
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 240) die('--minutes must be 1 to 240');
+    console.log(createSession(db, 'owner', f.id, minutes * 60).token);
+  }
 } else if (cmd === 'floors' && (rest[0] === 'hide' || rest[0] === 'show')) {
   // Works on the database file alone. A running server leaves a hidden floor out of its next lobby reply.
   const n = floorArg();
