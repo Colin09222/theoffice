@@ -2,7 +2,7 @@
 // header lights up over the room, the research desk and the idea cards show, a card is picked, the four track lamps and the live preview follow,
 // the ads, the campaign plan and the ad money come next, and launching with ad money gives a request slip that the boss approves with one click
 // and that becomes a Google search campaign (against the mocked Google Ads API: nothing reaches Google), with Facebook and Instagram shown as
-// coming soon. A visitor sees the steps and the launched ads and never the money. BUSINESS_SHOTS=dir saves six pictures.
+// coming soon. A visitor sees the steps and the launched ads and never the money. BUSINESS_SHOTS=dir saves nine pictures.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { launch, sleep } from './cdp.mjs';
@@ -82,16 +82,22 @@ try {
     await p.until('!!document.querySelector("[data-pick=\'0\']")', 'the pick button');
     // Mock builds are quick, so the preview is watched for as it comes rather than looked for once.
     await p.ev('window.__sawPreview = false; new MutationObserver(() => { if (document.querySelector(".biz-frame")?.getAttribute("src")) window.__sawPreview = true; }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] }); true');
-    await p.click('[data-pick="0"]');
-    await p.until('document.querySelectorAll(".tracks .track").length === 4', 'four tracks');
-    const labels = await p.ev('[...document.querySelectorAll(".track-head b")].map((x) => x.textContent).join(",")');
-    if (labels !== 'Website,Product,Payments,Analytics') throw new Error(labels);
-    if (!/no Stripe/.test(await p.ev('document.querySelector("[data-track=payments]").textContent'))) throw new Error('payments note');
-    await p.until('window.__sawPreview === true', 'the live preview', 40000).catch(async (e) => { throw new Error(`${e.message}: step ${await p.ev('document.querySelector("[data-biz]")?.dataset.biz')}, box ${await p.ev('!!document.querySelector("[data-preview]")')}, api ${JSON.stringify(await p.ev(`fetch("/theoffice/api/floors/${c.slug}/business/preview", { credentials: "same-origin" }).then((r) => r.status + " " + r.statusText).catch((x) => String(x))`))}`); });
-    const head = await p.ev('[...document.querySelectorAll(".journey-slot .journey-steps li")].map((li) => li.className).join(",")');
-    if (head !== 'done,now,next,next') throw new Error(head);
-    await p.until('[...document.querySelectorAll(".track")].filter((x) => x.classList.contains("done") || x.classList.contains("working")).length >= 2', 'lamps lit', 30000);
-    await shot(p, 'business-2-desktop-build.jpg');
+    // A mock build is over in a blink, long before a real one, so the journey is held at Build (its runner paused; the team still works)
+    // until the preview has shown the page as saved.
+    t.app.engine.business.stop();
+    try {
+      await p.click('[data-pick="0"]');
+      await p.until('document.querySelectorAll(".tracks .track").length === 4', 'four tracks');
+      const labels = await p.ev('[...document.querySelectorAll(".track-head b")].map((x) => x.textContent).join(",")');
+      if (labels !== 'Website,Product,Payments,Analytics') throw new Error(labels);
+      if (!/no Stripe/.test(await p.ev('document.querySelector("[data-track=payments]").textContent'))) throw new Error('payments note');
+      await p.until('window.__sawPreview === true', 'the live preview', 40000).catch(async (e) => { throw new Error(`${e.message}: step ${await p.ev('document.querySelector("[data-biz]")?.dataset.biz')}, box ${await p.ev('!!document.querySelector("[data-preview]")')}, api ${JSON.stringify(await p.ev(`fetch("/theoffice/api/floors/${c.slug}/business/preview", { credentials: "same-origin" }).then((r) => r.status + " " + r.statusText).catch((x) => String(x))`))}`); });
+      if (!await p.ev('!!document.querySelector(".biz-frame")?.isConnected')) throw new Error('the preview is not on the page');
+      const head = await p.ev('[...document.querySelectorAll(".journey-slot .journey-steps li")].map((li) => li.className).join(",")');
+      if (head !== 'done,now,next,next') throw new Error(head);
+      await p.until('[...document.querySelectorAll(".track")].filter((x) => x.classList.contains("done") || x.classList.contains("working")).length >= 2', 'lamps lit', 30000);
+      await shot(p, 'business-2-desktop-build.jpg');
+    } finally { t.app.engine.business.start(); }
   });
 
   await step('desktop: the ads (pictures and captioned videos), the campaign plan and the ad money, $0 chosen to start with', async () => {
@@ -102,11 +108,17 @@ try {
     for (const w of ['Goal', 'Who', 'Where', 'Google Search', 'Keywords', 'mobile dog grooming', 'Sponsored', 'A vs B']) if (!plan.includes(w)) throw new Error(`plan has no ${w}`);
     const plates = await p.ev('[...document.querySelectorAll("[data-ad-where] .plate")].map((x) => x.dataset.channel + (x.classList.contains("on") ? "+on" : "") + (x.disabled ? "+off" : "") + ":" + x.textContent).join(" | ")');
     if (!/^google\+on:Google Search ads \| meta\+off:Facebook & Instagram adscoming soon$/.test(plates)) throw new Error(plates);
+    const said = await p.ev('document.querySelector("[data-ad-where] [data-channel=meta]").getAttribute("aria-label")');
+    if (said !== 'Facebook & Instagram ads: coming soon') throw new Error(`the plate reads "${said}"`);
     const coins = await p.ev('[...document.querySelectorAll(".coin")].map((x) => x.textContent + (x.classList.contains("on") ? "*" : "")).join(" ")');
     if (coins !== '$0just for fun* $5 $10 $25') throw new Error(coins);
     if (!/Launch for free/.test(await p.ev('document.querySelector("[data-launch]").textContent'))) throw new Error('launch label');
-    await p.ev('document.querySelector("[data-plan]").scrollIntoView({ block: "start" })');
+    // Every ad picture is a real picture, decoded at its own size: never one pixel of colour stretched over the slot.
+    await p.until('[...document.querySelectorAll(".ad.picture img")].every((i) => i.complete && i.naturalWidth >= 64)', 'the ad pictures drawn');
+    await p.ev('document.querySelector(".ad-wall").scrollIntoView({ block: "start" })');
     await shot(p, 'business-3-desktop-ads.jpg');
+    await p.ev('document.querySelector("[data-ad-where]").scrollIntoView({ block: "center" })');
+    await shot(p, 'business-3b-desktop-money.jpg');
   });
 
   await step('desktop: launching with $10 files an AD SPEND slip; one click approves it and it runs as a Google search ad', async () => {
@@ -122,7 +134,7 @@ try {
     if (!/Ends[A-Z][a-z]{2}, /.test(slip2) || !/Seen 0 times, 0 clicks/.test(slip2)) throw new Error(slip2.slice(0, 300));
     const camps = [...t.app.engine.business.ads.mock.campaigns.values()];
     if (camps.length !== 1 || camps[0].status !== 'ENABLED') throw new Error(JSON.stringify(camps.map((x) => x.status)));
-    if (!await p.ev('!!document.querySelector("[data-ad-where] [data-channel=meta][disabled]")')) throw new Error('no coming-soon plate at launch');
+    if (await p.ev('document.querySelector("[data-ad-where] [data-channel=meta][disabled]")?.getAttribute("aria-label")') !== 'Facebook & Instagram ads: coming soon') throw new Error('no coming-soon plate at launch');
     await p.until('document.querySelectorAll(".journey-slot .journey-steps li.done").length === 4', 'all four steps done', 30000);
     await p.ev('document.querySelector("[data-ad-spend]").scrollIntoView({ block: "start" })');
     await shot(p, 'business-4-desktop-launch.jpg');
@@ -144,7 +156,7 @@ try {
     vb.close();
   });
 
-  await step('phone: the step header fits, the idea cards and chips show in the sheet, and picking lights the tracks', async () => {
+  await step('phone: the step header fits, the idea cards and chips show in the sheet, picking lights the tracks, and the ads and the money follow', async () => {
     const mb = await launch();
     const m = await mb.newPage({ mobile: true, width: 390, height: 844 });
     await enter(m, phoneBoss);
@@ -166,6 +178,16 @@ try {
     if (!twoUp) throw new Error('tracks do not sit two by two');
     if (!await m.ev(noSideScroll)) throw new Error('the page scrolls sideways');
     await shot(m, 'business-6-phone-tracks.jpg');
+    // On to the ads: the pictures, then where paid ads run (Facebook & Instagram coming soon) and the ad money, $0 to start with.
+    await m.until('!!document.querySelector("[data-money-box] [data-launch]:not([disabled])")', 'the ads are ready', 60000);
+    await m.until('[...document.querySelectorAll(".ad.picture img")].every((i) => i.complete && i.naturalWidth >= 64)', 'the ad pictures drawn');
+    if (!/Facebook & Instagram adscoming soon/.test(await m.ev('document.querySelector("[data-ad-where] [data-channel=meta]").textContent'))) throw new Error('no coming-soon plate');
+    if (await m.ev('document.querySelector(".coin.on")?.textContent') !== '$0just for fun') throw new Error('$0 is not the choice to start with');
+    if (!await m.ev(noSideScroll)) throw new Error('the page scrolls sideways');
+    await m.ev('document.querySelector(".ad-wall").scrollIntoView({ block: "start" })');
+    await shot(m, 'business-7-phone-ads.jpg');
+    await m.ev('document.querySelector("[data-ad-where]").scrollIntoView({ block: "center" })');
+    await shot(m, 'business-8-phone-money.jpg');
     mb.close();
   });
 

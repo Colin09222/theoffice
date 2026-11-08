@@ -196,8 +196,9 @@ function whereEl(b) {
   if (!ch.length) return null;
   return h('div.ad-where', { role: 'radiogroup', 'aria-label': 'Where paid ads run', 'data-ad-where': '' }, ...ch.map((c) => {
     const off = !c.on;
-    return h(`button.plate${c.on ? '.on' : ''}${off ? '.soon' : ''}`, { type: 'button', role: 'radio', 'aria-checked': String(!!c.on), 'aria-disabled': String(off), disabled: off, 'data-channel': c.id },
-      h('i.plate-lamp', { 'aria-hidden': 'true' }), h('b', {}, `${c.label} ads`), off ? h('span.tape', {}, c.soon ? 'coming soon' : 'off for now') : null);
+    const tape = off ? (c.soon ? 'coming soon' : 'off for now') : '';
+    return h(`button.plate${c.on ? '.on' : ''}${off ? '.soon' : ''}`, { type: 'button', role: 'radio', 'aria-checked': String(!!c.on), 'aria-disabled': String(off), disabled: off, 'data-channel': c.id, 'aria-label': `${c.label} ads${tape ? `: ${tape}` : ''}` },
+      h('i.plate-lamp', { 'aria-hidden': 'true' }), h('b', {}, `${c.label} ads`), tape ? h('span.tape', {}, tape) : null);
   }));
 }
 function moneyEl(page, b) {
