@@ -158,6 +158,9 @@ describe('the journey in mock mode', () => {
       assert.ok(words.headlines.length >= 3 && words.headlines.every((x) => x.length <= 30) && words.descriptions.every((x) => x.length <= 90));
       assert.deepEqual(budget.adMoney, { options: [0, 5, 10, 25], chosen: 0, set: false, ready: true, paid: true });
       assert.deepEqual(budget.channels.map((x) => [x.id, x.on, !!x.soon]), [['google', true, false], ['meta', false, true]], 'Google on, Facebook and Instagram coming soon');
+      const told = t.app.engine.business.stateLine(t.db.prepare('SELECT id FROM floors WHERE slug=?').get(c.slug).id);
+      assert.match(told, /Paid ads run only as a Google search ad for now; Facebook and Instagram ads are coming soon/, 'the manager knows where paid ads run');
+      assert.match(told, /picture and video ads are for sharing/);
       assert.ok(budget.chips.includes('Skip ads for now') && budget.chips.includes('Change the ads'));
       const vtt = await c.raw('GET', `/api/floors/${c.slug}/business/file/video-1.vtt`);
       assert.match(await vtt.text(), /^WEBVTT[\s\S]*Grooming that comes to you/);
@@ -257,6 +260,7 @@ describe('the journey in mock mode', () => {
       assert.deepEqual(ready.adMoney.options, [0]);
       assert.equal(ready.adMoney.paid, false);
       assert.deepEqual(ready.channels.map((x) => [x.id, x.on, !!x.soon]), [['google', false, false], ['meta', false, true]], 'Google off for now, Facebook and Instagram coming soon');
+      assert.match(t.app.engine.business.stateLine(t.db.prepare('SELECT id FROM floors WHERE slug=?').get(c.slug).id), /Paid ads aren’t switched on in this building yet, so it launches free/, 'the manager knows only the free path is open');
       const paid = await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 5 });
       assert.equal(paid.status, 400);
       assert.match(paid.data.message || paid.data.error || JSON.stringify(paid.data), /switched on|bad_amount|ad amounts/);

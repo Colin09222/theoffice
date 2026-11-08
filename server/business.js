@@ -159,6 +159,10 @@ export function installBusiness(ext) {
   const moneyOptions = () => (paidOn() ? CONFIG.adMoney.filter((n) => n <= Math.min(CONFIG.adMaxUsd, HARD_MAX_USD)) : [0]);
   const roomFor = (amount, except = 0) => committedUsd(db, { now: now(), timeZone: tz, except }) + Number(amount) <= cfg.adMonthlyCapUsd;
   const dayText = (ms) => new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(ms));
+  // What the manager is told about where paid ads run, so a boss who asks about Instagram hears the truth: Google Search only, for now.
+  const adsWhere = () => (paidOn()
+    ? 'Paid ads run only as a Google search ad for now; Facebook and Instagram ads are coming soon and can’t be bought yet. The picture and video ads are for sharing.'
+    : 'Paid ads aren’t switched on in this building yet, so it launches free (Google search ads come first, then Facebook and Instagram). The picture and video ads are for sharing.');
   const PAID_OFF = 'Paid ads aren’t switched on yet. Launch for free and the ads still go up on the floor to share.';
   const NO_ROOM = 'The building can’t take another paid campaign this month. Launch for free and the ads still go up on the floor to share.';
   const seen = new Map();  // floorId -> what the floor last saw of the journey, so a change is announced once
@@ -326,7 +330,7 @@ export function installBusiness(ext) {
     const slug = row.project; const url = engine.liveUrl(floor, slug);
     const extra = notes ? ` What the boss asked for this time: "${plain(notes, 300)}".` : '';
     return {
-      pictures: `Business mode, Customers. Make ${CONFIG.ads.pictures} picture ads for "${idea.name}" (${idea.sell}, for ${idea.whoPays}; live at ${url}) with generate_image in project ${slug}, directory ads: name one ad-1 (aspect 1:1, for the feed) and one ad-2 (aspect 9:16, for stories). Each an illustration, never a photo pretending to be real; any words in the picture short and spelled out in your prompt. No prices, customer counts or claims.${extra} Don't publish.`,
+      pictures: `Business mode, Customers. Make ${CONFIG.ads.pictures} picture ads for "${idea.name}" (${idea.sell}, for ${idea.whoPays}; live at ${url}) with generate_image in project ${slug}, directory ads: name one ad-1 (aspect 1:1, for sharing in a feed) and one ad-2 (aspect 9:16, for sharing as a story). They are for the boss to share; paid ads run as a Google search ad. Each an illustration, never a photo pretending to be real; any words in the picture short and spelled out in your prompt. No prices, customer counts or claims.${extra} Don't publish.`,
       ads: `Business mode, Customers. Plan the ads for "${idea.name}" (${idea.sell}, for ${idea.whoPays}; live at ${url}; the offer is in projects/${slug}/notes/offer.md). Paid ads run as a Google search ad (Facebook and Instagram come later); the picture and video ads are for sharing. First call save_ad_plan with the headline and the primary text (for sharing), the goal, who it is for, an A-versus-B test (two headlines), and the Google search ad: ${LIMITS.headlines[0]} to ${LIMITS.headlines[1]} search_headlines of ${LIMITS.headline} characters or fewer with no exclamation marks, ${LIMITS.descriptions[0]} to ${LIMITS.descriptions[1]} search_descriptions of ${LIMITS.description} characters or fewer, and ${LIMITS.keywords[0]} to ${LIMITS.keywords[1]} keywords, the short phrases someone types into Google when they want this. Then make ${CONFIG.ads.videos} short vertical video ads with make_video_ad in project ${slug}: ${CONFIG.video.minSeconds} to ${CONFIG.video.maxSeconds} seconds each, one caption line each, named video-1 and video-2, showing the idea rather than any real person or place. Nothing invented: no customer numbers, testimonials or prices that aren't marked as planned in the offer.${extra} Don't publish.`,
     };
   }
@@ -343,7 +347,7 @@ export function installBusiness(ext) {
     delete ids.fallback;
     const ads = notes ? { ...adsOf(row), plan: null, videoFailed: '' } : {};
     patch(floor.id, { step: 'customers', tasks: JSON.stringify(ids), ads: JSON.stringify(ads), money_set: 0 });
-    tellManager(floor, `customers.${ids.ads}`, `${notes ? 'the boss wants the ads changed, and the team is remaking them.' : `the build is done: "${idea.name}" is live at ${engine.liveUrl(floor, row.project)}.`} Step 3 of 4, Customers: the team is making ${CONFIG.ads.pictures} picture ads, ${CONFIG.ads.videos} short vertical video ads with captions, the ad words and a campaign plan. When they're ready the boss chooses the ad money on the floor: nothing ("just for fun", the default) or a small amount they pick. In two or three lines, tell the boss what's happening.`);
+    tellManager(floor, `customers.${ids.ads}`, `${notes ? 'the boss wants the ads changed, and the team is remaking them.' : `the build is done: "${idea.name}" is live at ${engine.liveUrl(floor, row.project)}.`} Step 3 of 4, Customers: the team is making ${CONFIG.ads.pictures} picture ads, ${CONFIG.ads.videos} short vertical video ads with captions, the ad words and a campaign plan. When they're ready the boss chooses the ad money on the floor: nothing ("just for fun", the default)${paidOn() ? ' or a small amount they pick' : ''}. ${adsWhere()} In two or three lines, tell the boss what's happening.`);
     changed(floor.id);
   }
   function adFiles(floorId, slug) {
@@ -734,6 +738,7 @@ export function installBusiness(ext) {
       v.picked >= 0 ? `Picked: ${v.title}, project slug ${v.project}${v.liveUrl ? `, live at ${v.liveUrl}` : ''}. Tracks: ${tracks}.` : '',
       v.step === 'customers' || v.step === 'launch' ? `Ads: ${v.ads.pictures.length} pictures, ${v.ads.videos.length} videos${v.ads.plan ? `, words and plan saved (headline "${v.ads.plan.headline}")` : ''}${v.ads.videoFailed ? `; the AI video failed (${v.ads.videoFailed})` : ''}.` : '',
       v.step === 'launch' ? `Ad money: ${v.ads.skipped ? 'skipped for now' : v.adMoney.chosen ? `${v.adMoney.chosen}, the boss's own choice` : 'none, just for fun'}.${s ? ` Ad request #${s.id}: ${s.label.toLowerCase()}.` : ''}` : '',
+      v.step === 'customers' || v.step === 'launch' ? adsWhere() : '',
       'The boss picks ideas, chooses ad money and approves requests with buttons on the floor; you explain, answer anything, and keep the team on it. Their suggestions appear as chips, so never list options for them to choose from.'].filter(Boolean).join(' ');
   }
   function brief(floorId) {
@@ -774,7 +779,7 @@ export function installBusiness(ext) {
       if (tracks.every((t) => t.done === t.total)) startCustomers(floor, row);
     } else if (row.step === 'customers' && adsReady(row)) {
       const idea = parse(row.ideas, [])[row.picked];
-      tellManager(floor, `customers.money.${tasksOf(row).ads}`, `the ads for "${idea?.name}" are ready on the floor: pictures, videos and the plan. The boss now chooses the ad money with the buttons on the floor; nothing ("just for fun") is the default, and only they can choose an amount. In two or three lines, say what you'd test first and why, from the plan. Don't name any amounts.`);
+      tellManager(floor, `customers.money.${tasksOf(row).ads}`, `the ads for "${idea?.name}" are ready on the floor: pictures, videos and the plan. The boss now chooses the ad money with the buttons on the floor; nothing ("just for fun") is the default, and only they can choose an amount. ${adsWhere()} In two or three lines, say what you'd test first and why, from the plan. Don't name any amounts.`);
     } else if (row.step === 'launch') {
       publishAds(floor, row);
       if (!row.launched_at && project(floor.id, row.project)?.launch_report) { patch(floor.id, { launched_at: now() }); log('info', 'business launched', { floorId: floor.id }); }
