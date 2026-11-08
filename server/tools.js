@@ -159,7 +159,7 @@ export const MANAGER_TOOLS = ['write_file', 'read_file', 'list_files', 'view_fil
 const SERVER_TOOLS = ['server_starter', 'deploy_server', 'server_status', 'server_logs', 'server_restart', 'server_check'];
 // Beyond the common set, by job. A tool nobody needs is a tool a hijacked agent can't use. Approving a purchase is not on this list for anyone: it isn't a tool at all.
 const ROLE_EXTRAS = {
-  manager: ['web_search', 'check_domain', 'request_domain', 'launch_check', 'launch_report', 'ios_start', 'ios_request', 'set_standing_order', 'list_standing_orders', 'cancel_standing_order', 'set_work_mode', 'update_backlog', 'ask_buddehbot', 'set_company', 'update_staff', 'let_go_staff', 'make_logo', 'deploy_server', 'server_status', 'server_logs', 'server_restart'],
+  manager: ['web_search', 'check_domain', 'request_domain', 'launch_check', 'launch_report', 'ios_start', 'ios_request', 'set_standing_order', 'list_standing_orders', 'cancel_standing_order', 'set_work_mode', 'update_backlog', 'ask_buddehbot', 'set_company', 'update_staff', 'let_go_staff', 'make_logo', 'server_status', 'server_logs', 'server_restart'],
   builder: ['generate_image', 'review_design', 'launch_check', ...SERVER_TOOLS], designer: ['generate_image', 'review_design'], illustrator: ['generate_image', 'review_design'],
   tester: ['review_design', 'launch_check', 'server_status', 'server_logs', 'server_check'], marketer: ['check_domain'],
 };

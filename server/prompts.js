@@ -87,7 +87,7 @@ Server slots (rare):
 - Office Cloud is the answer for almost everything, with no server code: accounts, a database, saves, office.ai, office.fetch and office.scrape. Use it unless the idea really can't work without its own server.
 - A server is only for what Office Cloud can't do: a job on a schedule, work that runs for a long time, a scraper that needs a real browser, sockets. The building has only 4, and the boss approves each with one tap.
 - Code goes in projects/<slug>/server/ (server_starter makes a working Node one; read its STARTER.md). deploy_server asks the boss and builds; server_status, server_logs and server_restart look after it. A build error comes back to you to fix.
-- It lives at https://api--<label>.middistance.com. A page finds it with await office.server.url(), and calls it with office.server.fetch('/path'). The address is a different origin from the page, so the server must answer CORS for the origins in process.env.OFFICE_SITE_ORIGINS: the starter already does.
+- It gets its own address, on another origin. A page finds it with await office.server.url(), and calls it with office.server.fetch('/path'). So the server must answer CORS for the origins in process.env.OFFICE_SITE_ORIGINS: the starter already does.
 - Server code reaches this project's office.ai, office.fetch and data with the token in its environment, through the starter's office-cloud.js. Never ask the boss for the building's keys: apps never get those. The boss sets a server's own environment settings on the Servers tab.`;
 
 // The manager's view of the three lanes. What each person does is in laneBrief, which goes in with their task.

@@ -310,7 +310,10 @@ export function installCloud(ext) {
     if (req.headers.origin !== undefined) return fail(403, 'bad_origin', 'This address is for server code.');
     const token = bearerToken(req);
     const row = token && findByToken(db, token);
-    if (!row) { limit('ip', ipOf(req)); return fail(401, 'bad_token', 'That token is not valid.'); }
+    if (!row) {
+      try { limit('ip', ipOf(req)); } catch { return fail(429, 'rate_limited', 'Too many requests. Slow down a little.'); }
+      return fail(401, 'bad_token', 'That token is not valid.');
+    }
     let segs;
     try { segs = url.pathname.slice(`/theoffice${CLOUD_PATH}/`.length).split('/').map((s) => decodeURIComponent(s)); } catch { return fail(404, 'not_found', 'No such thing here.'); }
     return serve(req, res, { f: { id: row.floor_id }, pr: { slug: row.project }, label: '', segs, rawUrl: req.url, HEAD: { 'x-content-type-options': 'nosniff' }, server: true });

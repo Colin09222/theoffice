@@ -25,7 +25,7 @@ If the runner is installed later the Office needs no restart. Docker makes a mis
 
 A failed build keeps the slot on the runner, so a fix is one more deploy. Only **delete** frees a slot; **stop** keeps the app and the slot. The full-building message says exactly that, and only ever lists the boss's own servers.
 
-`server_starter`, `deploy_server`, `server_status`, `server_logs`, `server_restart` and (for testing) `server_check` are staff tools (Builder; the Tester gets status, logs and check; the manager gets deploy, status, logs and restart). Logs and build output are fenced before an agent sees them, and any `ofs_` token that got printed is hidden. Nothing a floor wrote reaches the runner except the files in its own server folder.
+`server_starter`, `deploy_server`, `server_status`, `server_logs`, `server_restart` and (for testing) `server_check` are staff tools (Builder; the Tester gets status, logs and check; the manager gets status, logs and restart, and never deploys: it reads every staff result and knows private titles, so it has no way to send anything out). Logs and build output are fenced before an agent sees them, and any `ofs_` token that got printed is hidden. Nothing a floor wrote reaches the runner except the files in its own server folder.
 
 The `server/` folder of a project is **never published** to its public site, if it holds a `package.json`, `office.json`, or a `server.js`/`index.js`/`app.js` at its top level.
 

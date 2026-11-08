@@ -194,12 +194,16 @@ export function createServers({ db, cfg, engine, httpFetch = fetch }) {
     engine.kick();
   }
   let ticking = false;
+  // A Builder waiting on its own deploy hears the result from the tool; the tick only tells the floor about builds nobody is waiting on.
+  const waiting = new Set();
+  const key = (r) => `${r.floor_id}:${r.project}`;
   async function tick() {
     if (ticking || !on()) return;
     ticking = true;
     try {
       await slots().catch(() => {});
       for (const r of all(db, 'SELECT * FROM server_apps WHERE building=1 LIMIT 20')) {
+        if (waiting.has(key(r))) continue;
         try {
           const a = await client.get(r.label);
           if (done(a) && claim(r)) await tell(r, a);
@@ -271,13 +275,16 @@ export function createServers({ db, cfg, engine, httpFetch = fetch }) {
       const built = collect(c.floor.id, project);
       if (!r || r.status !== 'approved') { await slots().catch(() => {}); return ask(c, project, why, built, r); }
       c.say('typing', 'Deploying the server', `deployed the server for ${project}`, { project });
-      await startBuild(r, built);
-      const a = await waitFor(r, cfg.runnerBuildWaitMs);
-      // Whoever claims the result reports it, so a build is never announced twice.
-      if (!a) return `Building. It can take a few minutes: check server_status. The address will be ${url(r.label)}.`;
-      if (!claim(r)) return `That build already finished: check server_status. The address is ${url(r.label)}.`;
-      if (a.build.status === 'failed') return `The server was not deployed.\n${wrap(r, await failure(r, a))}\nFix it and call deploy_server again.`;
-      return `Built. The server is at ${url(r.label)} and wakes on its first request. Check /health and one real flow with server_check.`;
+      waiting.add(key(r));
+      try {
+        await startBuild(r, built);
+        const a = await waitFor(r, cfg.runnerBuildWaitMs);
+        // Past the wait, the tick picks it up and tells the floor when it finishes.
+        if (!a) return `Building. It can take a few minutes: check server_status. The address will be ${url(r.label)}.`;
+        claim(r);
+        if (a.build.status === 'failed') return `The server was not deployed.\n${wrap(r, await failure(r, a))}\nFix it and call deploy_server again.`;
+        return `Built. The server is at ${url(r.label)} and wakes on its first request. Check /health and one real flow with server_check.`;
+      } finally { waiting.delete(key(r)); }
     }),
     status: forTool(async (c, project) => { const r = mustHave(c, project); return statusText(r, await client.get(r.label)); }),
     logs: forTool(async (c, project) => {
