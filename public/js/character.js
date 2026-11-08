@@ -342,8 +342,8 @@ export class Character {
 // their role (skin, hair, top...) and the material holds the palette, so everyone shares one shader. Poses are the shared walk and idle
 // clips with the rest solved live: hips onto the seat, feet on the floor, and every hand placed with two-bone IK.
 
-/** World height per model unit: the rig stands 1.86 tall, so a person is about 2.4 room units, right beside a 1.06 desk and a 0.5 seat. */
-export const MODEL_SCALE = 1.3;
+/** World height per model unit: the rig stands 1.86 tall, so a person is about 2.6 room units, right beside a 1.06 desk and a 0.5 seat. */
+export const MODEL_SCALE = 1.38;
 const BODIES = /^(male|female)-[a-f]$/;
 /** Outfits map to the people dressed closest; the hair style then picks a side, and the rest of the look picks within it. */
 const BY_OUTFIT = {
