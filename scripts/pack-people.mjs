@@ -33,6 +33,8 @@ const CLIPS = ['Idle_Neutral', 'Walk', 'Interact', 'Wave'];
 const KEEP = new Set(['Root', 'Body', 'Hips', 'Abdomen', 'Torso', 'Chest', 'Neck', 'Head',
   'Shoulder.L', 'UpperArm.L', 'LowerArm.L', 'Wrist.L', 'Shoulder.R', 'UpperArm.R', 'LowerArm.R', 'Wrist.R',
   'UpperLeg.L', 'LowerLeg.L', 'Foot.L', 'UpperLeg.R', 'LowerLeg.R', 'Foot.R']);
+// What a source model carries in its hand rather than wears: left out, so nobody sits at a desk holding it.
+const HELD = { 'male-d': ['Cube.204'] };
 const COMP = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
 const COMP_BYTES = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 };
 
@@ -105,7 +107,7 @@ function packBody(name, [gender, file, roles]) {
   const pos = [], nor = [], jnt = [], wgt = [], slot = [], idx = [];
   const palette = {};
   const toNew = new Map(skin.joints.map((node, i) => [i, order.indexOf(keptAncestor(node))]));
-  for (const m of j.meshes) for (const p of m.primitives) {
+  for (const m of j.meshes) if (!HELD[name]?.includes(m.name)) for (const p of m.primitives) {
     const matName = j.materials[p.material].name;
     let role = roles[matName];
     if (role === undefined) throw new Error(`${file}: material ${matName} has no role`);

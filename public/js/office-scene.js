@@ -1317,8 +1317,8 @@ export class OfficeView {
         const [x0, z0, x1, z1] = r.rect;
         if (tone[r.kind]) { x.fillStyle = tone[r.kind]; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); }
         const empty = r.kind === 'staff' && this.offices.get(r.id)?.info.role === 'vacant';
-        // A company's colour on the way through: a long runner down the middle of each corridor.
-        if (r.kind === 'corridor') { const mw = (x1 - x0) > (z1 - z0), inset = 0.42; x.fillStyle = this.tint(0.34); x.fillRect(px(x0 + (mw ? 0 : inset)), pz(z0 + (mw ? inset : 0)), px(x1) - px(x0) - (mw ? 0 : inset * 2) * ppu, pz(z1) - pz(z0) - (mw ? inset * 2 : 0) * ppu); }
+        // A company's colour on the way through: a long pale runner down the middle of each corridor. A plain wash of the colour over the boards turned to mud.
+        if (r.kind === 'corridor') { const mw = (x1 - x0) > (z1 - z0), inset = 0.42; x.globalAlpha = 0.8; x.fillStyle = mix(this.colors.primary, '#efe6d6', 0.58); x.fillRect(px(x0 + (mw ? 0 : inset)), pz(z0 + (mw ? inset : 0)), px(x1) - px(x0) - (mw ? 0 : inset * 2) * ppu, pz(z1) - pz(z0) - (mw ? inset * 2 : 0) * ppu); x.globalAlpha = 1; }
         // Nobody works there yet: the light is off, so the eye goes to the rooms with people in them.
         if (empty) { x.fillStyle = 'rgba(30,24,20,.42)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); continue; }
         if (r.desk) { const s = seatOf(r.desk).at; const g = x.createRadialGradient(px(s[0]), pz(s[1]), 0, px(s[0]), pz(s[1]), 3.1 * ppu); g.addColorStop(0, 'rgba(255,212,150,.44)'); g.addColorStop(0.55, 'rgba(255,212,150,.16)'); g.addColorStop(1, 'rgba(255,212,150,0)'); x.fillStyle = g; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); }
