@@ -10,34 +10,32 @@
 //
 // A person is ONE skinned mesh (one draw call): every part is baked into a single vertex-coloured geometry bound to a bone.
 import * as THREE from '../vendor/three/three.module.min.js';
+import { BODY_COLOR, SUIT_COLOR, TIE_COLOR } from './looks.js';
 
 // ---------- who someone is ----------
 
-/** The vinyl-toy range: each person gets one, for good. Colon's own pink comes first. */
-const VINYL = ['#ec1a86', '#ff5a5f', '#ff7a1a', '#ffae00', '#ffd21f', '#b6e11f', '#55d11f', '#12c46b', '#10c9a4', '#12c8e0', '#2aa8ff', '#2f6bff', '#5a55f2', '#8a4df4', '#c04bf0', '#f04fd0', '#ff7fb0', '#7cdb4a'];
 const hashOf = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
 const C = (hex) => new THREE.Color(hex);
 const dim = (hex, f) => `#${C(hex).multiplyScalar(f).getHexString()}`;
 const mixHex = (a, b, t) => `#${C(a).lerp(C(b), t).getHexString()}`;
 /** Body colour is the person; the suit picks a colour that stands apart from it, and the tie one that stands apart from the suit. Everything else is the same little fellow. */
-const SUITS = ['#1b2a57', '#3b3f47', '#5a1f2e', '#5a3820', '#8b9099', '#1e5737', '#b8955f', '#262a33', '#2c4f86', '#46307a'];
-const TIES = ['#e02a2a', '#f4b400', '#7a3df0', '#1a66e0', '#ff4f9a', '#f2711c', '#10a67c', '#e9ecf1'];
 const gap = (a, b) => { const x = C(a), y = C(b); return Math.hypot(x.r - y.r, x.g - y.g, x.b - y.b); };
 const apart = (list, start, from, min) => { for (let i = 0; i < list.length; i++) { const c = list[(start + i) % list.length]; if (from.every((f) => gap(c, f) >= min)) return c; } return list[start % list.length]; };
 /** Each job's hat and outfit. Today the whole office is in suits and bareheaded: change a line here and that job changes everywhere. outfit: none | tie | suit | waistcoat | hivis | labcoat. */
 export const JOBS = Object.fromEntries(['boss', 'manager', 'builder', 'designer', 'tester', 'lawyer', 'researcher', 'writer', 'analyst', 'marketer', 'illustrator'].map((r) => [r, { hat: 'none', outfit: 'suit' }]));
-/** The boss dresses themselves in the character builder, so their own look decides what they wear and whether there's a hat. */
+/** The boss picks their own hat and glasses in the character builder. An outfit saved before the suits stays on until they pick a suit or tie colour. */
 const OUTFIT_OF_LOOK = { labcoat: 'labcoat', overalls: 'hivis', shirt: 'tie', tee: 'none', hoodie: 'none' };
 
 /** Everything about a person that is theirs: from their own look and job, so it never changes across reloads. */
 export function specFor(look = {}, { role = '', accent = '#d9774a' } = {}) {
-  const key = JSON.stringify([look.skin, look.hair, look.hairColor, look.outfit, look.outfitColor, look.hat, look.glasses, look.wear]);
+  // Who someone is comes from the parts of their look the builder no longer changes, so trying on a hat never turns them a different colour.
+  const key = JSON.stringify([look.skin, look.hair, look.hairColor, look.outfit, look.outfitColor, look.wear]);
   const h = hashOf(key), job = JOBS[role] || { hat: 'none', outfit: 'suit' }, boss = role === 'boss';
-  const color = VINYL[h % VINYL.length];
-  const suit = apart(SUITS, (h >>> 4) % SUITS.length, [color], 0.32);
-  const tie = apart(TIES, (h >>> 9) % TIES.length, [suit, color], 0.4);
+  const color = look.bodyColor || BODY_COLOR[h % BODY_COLOR.length];
+  const suit = look.suitColor || apart(SUIT_COLOR, (h >>> 4) % SUIT_COLOR.length, [color], 0.32);
+  const tie = look.tieColor || apart(TIE_COLOR, (h >>> 9) % TIE_COLOR.length, [suit, color], 0.4);
   return {
-    id: h, role, accent, look, color, suit, tie, hat: boss && look.hat && look.hat !== 'none' ? look.hat : job.hat, outfit: boss ? (OUTFIT_OF_LOOK[look.outfit] || 'suit') : job.outfit,
+    id: h, role, accent, look, color, suit, tie, hat: boss && look.hat && look.hat !== 'none' ? look.hat : job.hat, outfit: boss && !look.suitColor && !look.tieColor ? (OUTFIT_OF_LOOK[look.outfit] || 'suit') : job.outfit,
     glasses: boss && look.glasses && look.glasses !== 'none' ? look.glasses : null, trousers: ((h >>> 13) % 5) < 2, phase: ((h >>> 7) % 628) / 100,
   };
 }

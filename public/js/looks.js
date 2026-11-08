@@ -10,6 +10,10 @@ export const GLASSES = ['none', 'round', 'shades', 'monocle', 'eyepatch'];
 export const WEAR = ['none', 'beard', 'moustache', 'scarf', 'bowtie', 'tie', 'badge', 'cape', 'backpack', 'wings'];
 // The twelve people in Kenney's Mini Characters. Each has their own face, clothes and hair shape.
 export const BODY = ['auto', 'male-a', 'male-b', 'male-c', 'male-d', 'male-e', 'male-f', 'female-a', 'female-b', 'female-c', 'female-d', 'female-e', 'female-f'];
+// What shows on a bean. Anyone who hasn't picked one gets their own from the rest of their look (cast.js), so an older saved look needs nothing new.
+export const BODY_COLOR = ['#ec1a86', '#ff5a5f', '#ff7a1a', '#ffae00', '#ffd21f', '#b6e11f', '#55d11f', '#12c46b', '#10c9a4', '#12c8e0', '#2aa8ff', '#2f6bff', '#5a55f2', '#8a4df4', '#c04bf0', '#f04fd0', '#ff7fb0', '#7cdb4a'];
+export const SUIT_COLOR = ['#1b2a57', '#3b3f47', '#5a1f2e', '#5a3820', '#8b9099', '#1e5737', '#b8955f', '#262a33', '#2c4f86', '#46307a'];
+export const TIE_COLOR = ['#e02a2a', '#f4b400', '#7a3df0', '#1a66e0', '#ff4f9a', '#f2711c', '#10a67c', '#e9ecf1'];
 export const FLOOR_STYLES = ['wood', 'carpet', 'terrazzo', 'concrete', 'parquet', 'checker', 'tile', 'rubber'];
 export const PETS = ['none', 'dog', 'cat', 'bunny', 'duck', 'tortoise', 'robot'];
 export const LAYOUTS = ['open', 'studio', 'garage', 'lounge', 'pods'];
@@ -18,6 +22,7 @@ export const ART_STYLES = ['shapes', 'skyline', 'posters', 'logo'];
 
 export const LOOK_FIELDS = {
   skin: SKIN, hair: HAIR, hairColor: HAIR_COLOR, outfit: OUTFIT, outfitColor: OUTFIT_COLOR, hat: HAT, glasses: GLASSES, wear: WEAR, body: BODY,
+  bodyColor: BODY_COLOR, suitColor: SUIT_COLOR, tieColor: TIE_COLOR,
 };
 
 export const DEFAULT_LOOK = { skin: SKIN[0], hair: 'short', hairColor: HAIR_COLOR[1], outfit: 'suit', outfitColor: OUTFIT_COLOR[0], hat: 'none', glasses: 'none', wear: 'none', body: 'auto' };
@@ -72,24 +77,24 @@ export const VIBES = {
   cosy: { label: 'Cosy studio', blurb: 'A big shared table, art and a cat.', tone: 'friendly', colors: { primary: '#c8643c', accent: '#f0c068' }, decor: { layout: 'studio', floor: 'wood', wall: '#f1e6d4', wallMat: 'paint', artStyle: 'logo', plants: 6, rug: true, art: true, coffee: true, arcade: false, neon: true, pet: 'cat' } },
   dreamy: { label: 'Dreamy lounge', blurb: 'Sofas, soft colours and a bunny.', tone: 'dreamy', colors: { primary: '#7a6fd0', accent: '#f6b6c8' }, decor: { layout: 'lounge', floor: 'terrazzo', wall: '#e8e2f4', wallMat: 'concrete', artStyle: 'skyline', plants: 8, rug: true, art: true, coffee: true, arcade: false, neon: true, pet: 'bunny' } },
 };
-// One tap for a person. Colours are left alone unless the look needs them.
+// One tap for the boss: a hat and glasses, the things that show on a bean. Colours are left alone.
 export const CHARACTER_PRESETS = {
-  founder: { label: 'Founder', look: { body: 'male-d', hat: 'none', glasses: 'none', wear: 'none', outfit: 'suit', outfitColor: '#27324a' } },
-  hacker: { label: 'Hacker', look: { body: 'male-f', hat: 'headphones', glasses: 'shades', wear: 'none', outfit: 'hoodie', outfitColor: '#111318' } },
-  scientist: { label: 'Scientist', look: { body: 'female-e', hat: 'none', glasses: 'round', wear: 'badge', outfit: 'labcoat', outfitColor: '#e6e0d2' } },
-  chef: { label: 'Chef', look: { body: 'male-b', hat: 'chef', glasses: 'none', wear: 'scarf', outfit: 'labcoat', outfitColor: '#e6e0d2' } },
-  wizard: { label: 'Wizard', look: { body: 'male-b', hat: 'wizard', glasses: 'none', wear: 'cape', outfit: 'dress', outfitColor: '#6a4c93' } },
-  pirate: { label: 'Pirate', look: { body: 'male-f', hat: 'pirate', glasses: 'eyepatch', wear: 'none', outfit: 'shirt', outfitColor: '#8c2f39' } },
-  rocker: { label: 'Rocker', look: { body: 'female-f', hat: 'none', glasses: 'shades', wear: 'none', hair: 'mohawk', hairColor: '#d65db1', outfit: 'tee', outfitColor: '#111318' } },
-  royal: { label: 'Royal', look: { body: 'female-d', hat: 'crown', glasses: 'monocle', wear: 'cape', outfit: 'dress', outfitColor: '#8c2f39' } },
-  cowboy: { label: 'Cowboy', look: { body: 'male-c', hat: 'cowboy', glasses: 'none', wear: 'bowtie', outfit: 'shirt', outfitColor: '#c9772b' } },
-  angel: { label: 'Angel', look: { body: 'female-b', hat: 'halo', glasses: 'none', wear: 'wings', outfit: 'dress', outfitColor: '#e6e0d2' } },
+  founder: { label: 'Founder', look: { hat: 'none', glasses: 'none' } },
+  hacker: { label: 'Hacker', look: { hat: 'headphones', glasses: 'shades' } },
+  scientist: { label: 'Scientist', look: { hat: 'none', glasses: 'round' } },
+  chef: { label: 'Chef', look: { hat: 'chef', glasses: 'none' } },
+  wizard: { label: 'Wizard', look: { hat: 'wizard', glasses: 'none' } },
+  pirate: { label: 'Pirate', look: { hat: 'pirate', glasses: 'eyepatch' } },
+  rocker: { label: 'Rocker', look: { hat: 'none', glasses: 'shades' } },
+  royal: { label: 'Royal', look: { hat: 'crown', glasses: 'monocle' } },
+  cowboy: { label: 'Cowboy', look: { hat: 'cowboy', glasses: 'none' } },
+  angel: { label: 'Angel', look: { hat: 'halo', glasses: 'none' } },
 };
 
-/** A random look from the full lists, for "Surprise me". `rand` is injectable so tests can pin it. */
+/** A random pick of what shows on a bean, for "Surprise me". `rand` is injectable so tests can pin it. */
 export function randomLook(rand = Math.random) {
   const pick = (arr) => arr[Math.floor(rand() * arr.length)];
-  return { skin: pick(SKIN), hair: pick(HAIR), hairColor: pick(HAIR_COLOR), outfit: pick(OUTFIT), outfitColor: pick(OUTFIT_COLOR), hat: rand() < 0.6 ? pick(HAT.slice(1)) : 'none', glasses: rand() < 0.35 ? pick(GLASSES.slice(1)) : 'none', wear: rand() < 0.4 ? pick(WEAR.slice(1)) : 'none', body: pick(BODY) };
+  return { bodyColor: pick(BODY_COLOR), suitColor: pick(SUIT_COLOR), tieColor: pick(TIE_COLOR), hat: rand() < 0.6 ? pick(HAT.slice(1)) : 'none', glasses: rand() < 0.35 ? pick(GLASSES.slice(1)) : 'none' };
 }
 
 /** What people actually type for their floor when signing in: the name as they remember it, the slug, or the whole link. The same rules as the server's slugify. */

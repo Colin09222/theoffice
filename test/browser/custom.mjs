@@ -138,7 +138,7 @@ for (const [label, opts, q] of [['desktop', { width: 1440, height: 900 }, 'low']
     if (await p.ev('document.querySelector("[data-let-go]") !== null && document.querySelector(".staff-pick [aria-checked=true]").textContent === window.__office.state.agents.find((a) => a.role === "manager").name')) throw new Error('the manager can be let go');
     const box = await p.ev('document.querySelector("[data-hire] h3").textContent');
     // No cap on staff by default, so the box doesn't compare it with one: the browser would otherwise read a null cap as "every desk is taken".
-    if (!/4 desks taken/.test(box) || /\bof\b/.test(box)) throw new Error(box);
+    if (!/5 desks taken/.test(box) || /\bof\b/.test(box)) throw new Error(box);
     await p.click('[data-hire-role=tester]');
     await p.until(`window.__office.state.agents.length === ${before + 1}`, 'hired');
     await p.until('[...document.querySelectorAll(".staff-pick .chip")].length === window.__office.state.agents.length', 'new person listed');
@@ -168,9 +168,43 @@ for (const [label, opts, q] of [['desktop', { width: 1440, height: 900 }, 'low']
     await shot('builder');
     await p.click('.custom-foot button[type=submit]');
     await panelClosed(p);
-    await p.until('window.__office.state.floor.boss.look.hat === "wizard" && window.__office.state.floor.boss.look.wear === "cape"', 'saved');
+    await p.until('window.__office.state.floor.boss.look.hat === "wizard"', 'saved');
     await p.until('window.__office.view.boss.char.look.hat === "wizard"', 'the boss in the room');
     await p.until('window.__office.view.boss.char.isModel === true', 'the real model');
+  });
+  await step(tag('the builder offers only what shows on a bean, and its preview is the person in the room'), async () => {
+    const offered = () => p.ev('[...document.querySelectorAll(".modal .opt-label")].map((e) => e.textContent).join("|")');
+    const inPreview = () => p.ev('document.querySelector(".char-preview").dataset.wearing');
+    const inRoom = (who) => `(() => { const s = ${who}.char.spec; return [s.color, s.suit, s.tie, s.hat, s.glasses, s.outfit].join(" "); })()`;
+    await openPanel(p);
+    await p.click('[data-custom=boss]');
+    await p.until('document.querySelector(".modal .char-preview") !== null', 'boss builder');
+    const forBoss = await offered();
+    if (forBoss !== 'Quick looks|Body colour|Suit colour|Tie colour|Hat|Glasses') throw new Error(`boss offered: ${forBoss}`);
+    await p.click('.modal [aria-label="Body colour"] [data-v="#2aa8ff"]');
+    await p.click('.modal [aria-label="Suit colour"] [data-v="#5a1f2e"]');
+    await p.click('.modal [aria-label="Tie colour"] [data-v="#f4b400"]');
+    await p.click('.modal [aria-label=Glasses] [data-v=shades]');
+    await p.until('document.querySelector(".char-preview").dataset.wearing === "#2aa8ff #5a1f2e #f4b400 wizard shades suit"', 'the preview follows the boss\'s picks');
+    await shot('builder-bean');
+    const boss = await inPreview();
+    await p.click('.custom-foot button[type=submit]');
+    await panelClosed(p);
+    await p.until('window.__office.state.floor.boss.look.bodyColor === "#2aa8ff"', 'the boss saved');
+    await p.until(`${inRoom('window.__office.view.boss')} === ${JSON.stringify(boss)}`, 'the boss in the room is the one in the preview');
+    const w = await p.ev('window.__office.state.agents.find((a) => a.role === "writer").id');
+    await p.click(`.staff-chip[data-agent="${w}"]`);
+    await p.click(`[data-profile-edit="${w}"]`);
+    await p.until('document.querySelector(".modal .staff-pick") !== null && document.querySelector(".modal .char-preview") !== null', 'staff builder');
+    const forStaff = await offered();
+    if (forStaff !== 'Quick looks|Body colour|Suit colour|Tie colour') throw new Error(`staff offered: ${forStaff}`);
+    if (await p.ev('document.querySelector(".modal [data-preset]") !== null')) throw new Error('quick looks are offered to staff, who cannot show them');
+    await p.click('.modal [aria-label="Tie colour"] [data-v="#10a67c"]');
+    await p.until('document.querySelector(".char-preview").dataset.wearing.split(" ")[2] === "#10a67c"', 'the preview follows the staff pick');
+    const writer = await inPreview();
+    await p.click('.custom-foot button[type=submit]');
+    await panelClosed(p);
+    await p.until(`${inRoom(`window.__office.view.actors.get(${w})`)} === ${JSON.stringify(writer)}`, 'the writer in the room is the one in the preview');
   });
   await step(tag('a visitor sees the room and the titles, with no panel and nothing private'), async () => {
     const b2 = await launch(); const v = await b2.newPage(opts);

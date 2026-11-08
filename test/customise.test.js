@@ -412,7 +412,7 @@ describe('looks and the room', () => {
   test('every preset person is made of values the server accepts, and Surprise me always is too', () => {
     for (const [id, p] of Object.entries(LOOKS.CHARACTER_PRESETS)) for (const [k, v] of Object.entries(p.look)) assert.ok(LOOKS.LOOK_FIELDS[k].includes(v), `${id}.${k}=${v}`);
     let seed = 1; const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-    for (let i = 0; i < 200; i++) { const look = LOOKS.randomLook(rand); assert.deepEqual(validLook(look), look); }
+    for (let i = 0; i < 200; i++) { const look = LOOKS.randomLook(rand); assert.deepEqual(validLook(look), { ...LOOKS.DEFAULT_LOOK, ...look }); }
     const seeded = LOOKS.seededLook(7);
     assert.deepEqual(validLook(seeded), seeded);
     assert.equal(seeded.wear, 'none'); assert.ok(LOOKS.HAT.slice(0, 8).includes(seeded.hat), 'the staff a new floor starts with look ordinary');

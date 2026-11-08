@@ -96,7 +96,7 @@ export class Character {
 export const drawnPortrait = (look, accent) => drawnFace(specFor(look || {}, { role: jobOf(look), accent }));
 
 /** A turntable preview for the character builder, with its own small renderer. */
-export function createPreview(canvas, look, accent) {
+export function createPreview(canvas, look, accent, role = 'boss') {
   let renderer;
   try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); } catch { canvas.hidden = true; return { update() {}, dispose() {} }; }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -111,7 +111,8 @@ export function createPreview(canvas, look, accent) {
   const floor = new THREE.Mesh(new THREE.CircleGeometry(1.1, 28), new THREE.ShadowMaterial({ opacity: 0.22 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
   const cam = new THREE.PerspectiveCamera(26, (rect.width || 200) / (rect.height || 240), 0.1, 30);
   cam.position.set(0, 1.65, 6.3); cam.lookAt(0, 1.12, 0);  // room above the head for the tallest hat
-  const make = (l, a) => { const c = new Character(l, { accent: a, scale: 1.4, role: 'boss' }); c.setAnim('stand'); return c; };  // this is the boss choosing their own look
+  // The person being dressed, as the room will show them. `wearing` lets a test hold this up against the real thing.
+  const make = (l, a) => { const c = new Character(l, { accent: a, scale: 1.4, role }); c.setAnim('stand'); const s = c.spec; canvas.dataset.wearing = [s.color, s.suit, s.tie, s.hat, s.glasses, s.outfit].join(' '); return c; };
   let ch = make(look, accent); scene.add(ch.group);
   let raf, dead = false, last = performance.now(), shown = '';
   const loop = (now) => {

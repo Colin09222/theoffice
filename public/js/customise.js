@@ -195,7 +195,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
           field('More about them', area(a.persona.notes, LIMITS.notes, 2, (v) => { a.persona.notes = v; }, { name: 'staff-notes', placeholder: 'Obsessed with trains. Thinks everything could be shorter.' }), 'Private: visitors see the label above, never this.'),
           field('Their focus', text(a.persona.focus, LIMITS.focus, (v) => { a.persona.focus = v; }, { name: 'staff-focus', placeholder: 'Headlines first. Pixel art only.' }), 'The manager reads this when deciding who does what.'),
           holder, leave);
-        const b = characterBuilder(holder, a.look, draft.colors.accent, { onChange: (look) => { a.look = { ...look }; } });
+        const b = characterBuilder(holder, a.look, draft.colors.accent, { role: a.role, onChange: (look) => { a.look = { ...look }; } });
         cleanup = () => b.dispose();
       };
       for (const a of draft.staff) list.append(h('button.chip', { type: 'button', 'data-v': String(a.id), role: 'radio', onclick: () => pick(a) }, a.name));
