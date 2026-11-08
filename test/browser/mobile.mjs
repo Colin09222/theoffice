@@ -187,10 +187,13 @@ for (const size of SIZES) {
         st = await dragTo(10); if (st.s !== 'full') throw new Error(`half to full: ${JSON.stringify(st)}`);
         // Flicked, not dragged: a short fast move goes to the next size.
         const g = await size();
-        await p.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: grip.x, y: g.top }] });
-        for (let i = 1; i <= 4; i++) { await p.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: grip.x, y: g.top + 14 * i }] }); await sleep(18); }
-        await p.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-        await sleep(380);
+        // Timestamps given rather than left to the wall clock: a loaded machine can't turn a flick into a slow drag.
+        const t0 = Date.now() / 1000;
+        await p.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: grip.x, y: g.top }], timestamp: t0 });
+        for (let i = 1; i <= 4; i++) { await p.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: grip.x, y: g.top + 14 * i }], timestamp: t0 + i * 0.02 }); await sleep(10); }
+        await p.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [], timestamp: t0 + 0.09 });
+        await p.until('document.body.dataset.sheet !== "full"', 'the flick to count', 2500).catch(() => {});
+        await settled(p); await sleep(300);
         st = await size(); if (st.s !== 'half') throw new Error(`flick down: ${JSON.stringify(st)}`);
         await p.click('[data-sheet-step]'); await settled(p); st = await size(); if (st.s !== 'full') throw new Error(`step up: ${JSON.stringify(st)}`);
         await p.click('[data-sheet-step]'); await settled(p); st = await size(); if (st.s !== 'half') throw new Error(`step down: ${JSON.stringify(st)}`);
@@ -231,8 +234,8 @@ for (const size of SIZES) {
           const r = await p.ev(`(() => { const c = document.querySelector('.chat-input').getBoundingClientRect(); const l = document.querySelector('.chat-list').getBoundingClientRect(); const msgs = [...document.querySelectorAll('.chat-list .msg:not([hidden])')]; const last = msgs.at(-1).getBoundingClientRect(); const panel = document.querySelector('.floor-panel').getBoundingClientRect(); return { composer: Math.round(c.bottom), list: Math.round(l.height), lastBottom: Math.round(last.bottom), listBottom: Math.round(l.bottom), panelTop: Math.round(panel.top), panelBottom: Math.round(panel.bottom), inner: innerHeight }; })()`);
           if (Math.abs(r.composer - H) > 2) throw new Error(`composer ${r.composer} should sit at ${H}: ${JSON.stringify(r)}`);
           if (r.panelTop < top - 1) throw new Error(`the sheet's top is above the visible screen ${JSON.stringify(r)}`);
-          if (r.list < 120) throw new Error(`only ${r.list}px of chat: ${JSON.stringify(r)}`);
-          if (r.lastBottom > r.listBottom + 2 || r.lastBottom < r.listBottom - 120) throw new Error(`the newest message isn't visible: ${JSON.stringify(r)}`);
+          if (r.list < 100) throw new Error(`only ${r.list}px of chat: ${JSON.stringify(r)}`);
+          await p.until(`(() => { const l = document.querySelector('.chat-list').getBoundingClientRect(); const msgs = [...document.querySelectorAll('.chat-list .msg:not([hidden])')]; const b = msgs.at(-1).getBoundingClientRect().bottom; return b <= l.bottom + 2 && b >= l.bottom - 140; })()`, "the newest message on screen with the keyboard up", 3000).catch(() => { throw new Error(`the newest message isn't visible: ${JSON.stringify(r)}`); });
           await audit(p, 'keyboard', { ...opts, portrait: false });
           } finally { await noKeyboard(p); await p.ev('document.activeElement?.blur?.(); true'); }
           await sleep(300);

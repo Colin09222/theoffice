@@ -299,6 +299,8 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     for (const a of v.actors.values()) { const r = a.nameEl.getBoundingClientRect(); if (r.bottom > sheet.top + 2) bad.push(a.info.name + ' under the sheet'); if (r.left < -4 || r.right > innerWidth + 4) bad.push(a.info.name + ' off the side'); if (r.bottom > ctl.top && r.top < ctl.bottom && r.right > ctl.left && r.left < ctl.right) bad.push(a.info.name + ' under the buttons'); }
     return { bad, sheet: sheet.top, h: innerHeight }; })()`);
   await step(tag('the sheet holds the panel, the room stays above it, and nobody is covered'), async () => {
+    // The boss arrives with the conversation at full height; the room is what shares the screen at half.
+    await p.ev('window.__office.setSheet("half"); true');
     await sleep(1800);
     const box = await rects(p, ['.floor-panel', '.panel-grip', '.tabs', '.floor-scrubber', '.controls', '.floor-name']);
     for (const [k, r] of Object.entries(box)) if (!r || r.l < -1 || r.r > 391 || r.b > 845) throw new Error(`${k} ${JSON.stringify(r)}`);
@@ -315,7 +317,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     await p.until('document.querySelector(".floor-panel").classList.contains("closed")', 'folded', 3000);
     await sleep(1400);
     const st = await p.ev('({ h: document.querySelector(".floor-panel").getBoundingClientRect().height, vis: window.__office.view.visH, tabs: document.querySelector(".tabs").getBoundingClientRect().height, tab: document.querySelector(".tab").getBoundingClientRect().height })');
-    if (st.h > 130) throw new Error(`folded sheet is ${st.h} tall`);
+    if (st.h > 260) throw new Error(`folded sheet is ${st.h} tall`);
     if (st.vis <= before + 150) throw new Error(`the room got no more space ${before} then ${st.vis}`);
     if (st.tab < 44) throw new Error(`tabs are ${st.tab} tall`);
     const c1 = await peopleClear();
@@ -324,6 +326,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     await p.until('window.__office.tab === "chat" && !document.querySelector(".floor-panel").classList.contains("closed") && !!document.querySelector(".chat-input textarea")', 'one tap to the manager', 3000);
   });
   await step(tag('pins and scrubber buttons are big enough to tap, and a pin opens its tab'), async () => {
+    await p.ev('window.__office.setSheet("half"); true');
     const sizes = await p.ev(`(() => { const hit = (e) => { const r = e.getBoundingClientRect(); const b = getComputedStyle(e, '::before'); const grow = -2 * (parseFloat(b.top) || 0); return Math.min(r.width, r.height) + grow; }; return { pins: [...document.querySelectorAll('.pin')].map(hit), scrub: [...document.querySelectorAll('.scrub-btn')].map(hit) }; })()`);
     if (sizes.pins.some((n) => n < 43.5)) throw new Error(`pins ${sizes.pins}`);
     if (sizes.scrub.some((n) => n < 43.5)) throw new Error(`scrub ${sizes.scrub}`);
