@@ -73,7 +73,7 @@ ${apps ? CLOUD_DOCS : `Saved data, on by default for anything worth keeping. Add
 
 Launching it as a real product:
 - Metadata on every site: a real <title>, <meta name="description">, viewport, <html lang>, og:title, og:description, og:image and twitter:card, and <link rel="icon">.
-- Waitlists and contact forms: await Office.submitForm('waitlist', {email, name, message}) stores it for the boss, who reads them on the project card. Visitors can't read them back and neither can you. Show a clear thank-you, handle a rejected promise by showing its message, and add a hidden input named website as a spam trap, passing its value along. Never a mailto link for a form.${apps ? '' : ' Forms need the project\'s own origin, which this building does not have switched on, so tell the boss they won\'t store anything yet.'}
+- Waitlists and contact forms: await Office.submitForm('waitlist', {email, name, message}) stores it for the boss, who reads them on the project card. A contact form (named contact, or with a message field) also lands in the company's email inbox, so it can be answered from there. Visitors can't read them back. Show a clear thank-you, handle a rejected promise by showing its message, and add a hidden input named website as a spam trap, passing its value along. Never a mailto link for a form.${apps ? '' : ' Forms need the project\'s own origin, which this building does not have switched on, so tell the boss they won\'t store anything yet.'}
 - Taking money: <a href="_office/pay">Buy</a>. It goes to the boss's Stripe Payment Link. Mention it only if the boss has set one; the Office note or the state message tells you.
 - Visitor counts are built in. Add no analytics script.`;
 }
