@@ -13,6 +13,7 @@ import { textureSet, environmentMap, readyEnvironment, forgetEnvironment, repeat
 import { FloorLife, planProgress } from './life.js';
 import { tidyLabels } from './labels.js';
 import { cutaway, cutAmount, onWall, CUT } from './cutaway.js';
+import { toonMaterial, warmFlat } from './toon.js';
 
 stage.onRestored.add(forgetEnvironment);  // the shared panorama lived on the GPU
 
@@ -25,9 +26,6 @@ const WORLD_SCALE = ROOM_W / TOWER_W;  // the room is one tower floor, blown up 
 const SUN_DIR = new THREE.Vector3(0.74, 0.47, -0.32).normalize();
 const SUN_FAR = 64;  // the sun's distance, and its shadow box, scale with the floor
 const ZOOM_MIN = 0.8, ZOOM_MAX = 3.6;
-// The CC0 texture each floor finish uses, and how many room units one repeat of it covers. Checker and rubber stay drawn by hand.
-const FLOOR_TEX = { wood: ['wood', 3.2], darkwood: ['darkwood', 3.0], parquet: ['parquet', 2.2], concrete: ['concrete', 5], tile: ['tile', 2.6], carpet: ['carpet', 2.4], terrazzo: ['terrazzo', 3.2] };
-const WALL_TEX = { paint: 'plaster', concrete: 'cast', brick: 'brick' };
 const ROLE_TITLE = { manager: 'Office Manager', researcher: 'Researcher', writer: 'Writer', builder: 'Builder', designer: 'Designer', analyst: 'Analyst', marketer: 'Marketer', tester: 'Tester', illustrator: 'Illustrator' };
 /** A person's job as their name tag and the staff list put it: the title they were hired with, else their role's. */
 export const jobTitle = (info, isBoss = false) => (isBoss ? 'Boss' : info.title || ROLE_TITLE[info.role] || (info.role ? info.role[0].toUpperCase() + info.role.slice(1) : 'Staff'));
@@ -37,12 +35,16 @@ const box = new THREE.BoxGeometry(1, 1, 1);
 const cyl = new THREE.CylinderGeometry(1, 1, 1, 16);
 const cone = new THREE.ConeGeometry(1, 1, 12); const ico = new THREE.IcosahedronGeometry(0.5, 0);
 const sph = new THREE.SphereGeometry(0.5, 14, 10);
-const ROOM_MAT = cutaway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 }), 'room');
+const ROOM_MAT = cutaway(toonMaterial({ vertexColors: true }), 'room');
 // The room's front and right walls: only the tower ever turns far enough round to see them, from behind (see cutaway.js).
-const FAR_MAT = cutaway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 }), 'far');
-const mats = new Map();
-/** A colour holder: every plain piece bakes into the shared vertex-coloured material, so the material object itself never draws. */
-function lam(color) { let m = mats.get(color); if (!m) { m = new THREE.MeshLambertMaterial({ color }); mats.set(color, m); } return m; }
+const FAR_MAT = cutaway(toonMaterial({ vertexColors: true }), 'far');
+// The terrace is outside, so it keeps the real material and its true colours.
+const OUT_MAT = cutaway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 }), 'room');
+const mats = new Map(), outs = new Map();
+/** A colour holder: every plain piece bakes into the shared vertex-coloured material, so the material object itself never draws. Colours go through the room's warm flat palette. */
+function lam(color) { let m = mats.get(color); if (!m) { m = new THREE.MeshLambertMaterial({ color: warmFlat(color) }); mats.set(color, m); } return m; }
+/** The same, for the terrace: its true colour, untouched. */
+function outdoor(color) { let m = outs.get(color); if (!m) { m = new THREE.MeshLambertMaterial({ color }); outs.set(color, m); } return m; }
 function piece(parent, color, w, hh, d, x, y, z, { cast = true, recv = true, geo = box, mat, shade, ry = 0 } = {}) {
   const m = new THREE.Mesh(geo, mat || lam(color));
   m.scale.set(w, hh, d); m.position.set(x, y + hh / 2, z); m.castShadow = cast; m.receiveShadow = recv;
@@ -71,78 +73,79 @@ function drawFloorTile(style) {
   const r = seeded(7);
   const c = document.createElement('canvas');
   const x = c.getContext('2d');
-  if (style === 'wood') {
+  // Everything here reads from across the room: chunky shapes in flat colours and a bold seam, no grain.
+  if (style === 'wood' || style === 'darkwood') {
     c.width = c.height = 512;
-    x.fillStyle = '#9a6b45'; x.fillRect(0, 0, 512, 512);
-    for (let row = 0; row < 8; row++) {
-      let px = -(row % 2) * 90;
+    const [a, b, d, seam] = style === 'wood' ? ['#f4c592', '#f0bd88', '#ebb57d', 'rgba(150,92,46,.42)'] : ['#c88a5e', '#c18054', '#b9774c', 'rgba(92,52,28,.42)'];
+    x.fillStyle = a; x.fillRect(0, 0, 512, 512);
+    const H = 512 / 6;
+    for (let row = 0; row < 6; row++) {
+      let px = -(row % 2) * 110;
       while (px < 512) {
-        const len = 150 + r() * 90; const l = 46 + r() * 12;
-        x.fillStyle = `hsl(${24 + r() * 7},${42 + r() * 10}%,${l - 8}%)`; x.fillRect(px, row * 64, len, 63);
-        x.strokeStyle = 'rgba(70,40,20,.14)'; x.lineWidth = 1;
-        for (let g = 0; g < 4; g++) { x.beginPath(); const gy = row * 64 + r() * 60; x.moveTo(px, gy); x.bezierCurveTo(px + len / 3, gy + 3, px + len / 2, gy - 3, px + len, gy); x.stroke(); }
-        x.fillStyle = 'rgba(255,230,200,.07)'; x.fillRect(px, row * 64, len, 2);
-        px += len + 1;
+        const len = 170 + Math.floor(r() * 70);
+        x.fillStyle = [a, b, d][Math.floor(r() * 3)]; x.fillRect(px, row * H, len, H);
+        x.fillStyle = 'rgba(255,255,255,.14)'; x.fillRect(px, row * H, len, 4);
+        x.fillStyle = seam; x.fillRect(px + len - 3, row * H, 3, H);
+        px += len;
       }
+      x.fillStyle = seam; x.fillRect(0, row * H + H - 2.5, 512, 2.5);
     }
     return { c, across: 3 };
   }
   if (style === 'carpet') {
     c.width = c.height = 256;
-    x.fillStyle = '#56637c'; x.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 9000; i++) { x.fillStyle = `rgba(${r() < 0.5 ? '255,255,255' : '0,0,0'},${r() * 0.09})`; x.fillRect(r() * 256, r() * 256, 2, 2); }
-    x.strokeStyle = 'rgba(0,0,0,.16)'; x.lineWidth = 2; x.strokeRect(0, 0, 256, 256);
-    x.strokeStyle = 'rgba(255,255,255,.05)'; x.strokeRect(3, 3, 250, 250);
+    x.fillStyle = '#c9dfc5'; x.fillRect(0, 0, 256, 256);
+    x.fillStyle = '#d3e7cd'; for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) if ((i + j) % 2) x.fillRect(i * 64, j * 64, 64, 64);
+    x.strokeStyle = 'rgba(90,130,90,.3)'; x.lineWidth = 3; x.strokeRect(0, 0, 256, 256);
     return { c, across: 7 };
   }
   if (style === 'terrazzo') {
     c.width = c.height = 512;
-    x.fillStyle = '#e6dfd1'; x.fillRect(0, 0, 512, 512);
-    const cs = ['#c98d6c', '#6f7f8f', '#3f4048', '#d9b86e', '#a9b8a0', '#ffffff', '#b2675a'];
-    for (let i = 0; i < 700; i++) {
+    x.fillStyle = '#f6efdc'; x.fillRect(0, 0, 512, 512);
+    const cs = ['#f09a6c', '#7fb8d8', '#f6c75c', '#8fcf9f', '#f28a9a', '#ffffff'];
+    for (let i = 0; i < 90; i++) {
       x.fillStyle = cs[Math.floor(r() * cs.length)];
-      x.beginPath(); const px = r() * 512, py = r() * 512, s = 2 + r() * 9;
+      x.beginPath(); const px = r() * 512, py = r() * 512, s = 8 + r() * 12;
       x.moveTo(px, py); for (let k = 0; k < 5; k++) x.lineTo(px + (r() - 0.5) * s * 2, py + (r() - 0.5) * s * 2); x.fill();
     }
-    x.strokeStyle = 'rgba(90,80,70,.18)'; x.lineWidth = 3; x.strokeRect(0, 0, 512, 512);
+    x.strokeStyle = 'rgba(120,96,70,.24)'; x.lineWidth = 3; x.strokeRect(0, 0, 512, 512);
     return { c, across: 3 };
   }
   if (style === 'parquet') {
     c.width = c.height = 512;
-    x.fillStyle = '#7d5230'; x.fillRect(0, 0, 512, 512);
+    x.fillStyle = '#dc9a5e'; x.fillRect(0, 0, 512, 512);
     // Blocks of four strips, each block turned from its neighbour.
     for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
-      for (let k = 0; k < 4; k++) {
-        x.fillStyle = `hsl(${25 + r() * 7},${40 + r() * 14}%,${30 + r() * 12}%)`;
-        if ((i + j) % 2) x.fillRect(i * 128 + k * 32, j * 128, 31, 127); else x.fillRect(i * 128, j * 128 + k * 32, 127, 31);
+      for (let k = 0; k < 3; k++) {
+        x.fillStyle = ['#e7a86a', '#dc9a5e', '#d28f54'][Math.floor(r() * 3)];
+        if ((i + j) % 2) x.fillRect(i * 128 + k * 43, j * 128, 42, 127); else x.fillRect(i * 128, j * 128 + k * 43, 127, 42);
       }
-      x.strokeStyle = 'rgba(40,22,10,.35)'; x.lineWidth = 1.5; x.strokeRect(i * 128, j * 128, 128, 128);
+      x.strokeStyle = 'rgba(120,72,34,.42)'; x.lineWidth = 2.5; x.strokeRect(i * 128, j * 128, 128, 128);
     }
     return { c, across: 3 };
   }
   if (style === 'checker') {
     c.width = c.height = 256;
-    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) { x.fillStyle = (i + j) % 2 ? '#2d2a33' : '#f1ebdd'; x.fillRect(i * 128, j * 128, 128, 128); }
-    x.strokeStyle = 'rgba(0,0,0,.12)'; x.lineWidth = 1.5; for (const v of [0, 128]) { x.beginPath(); x.moveTo(v, 0); x.lineTo(v, 256); x.moveTo(0, v); x.lineTo(256, v); x.stroke(); }
+    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) { x.fillStyle = (i + j) % 2 ? '#6e5a7c' : '#f6ecd8'; x.fillRect(i * 128, j * 128, 128, 128); }
     return { c, across: 5 };
   }
   if (style === 'tile') {
     c.width = c.height = 256;
-    x.fillStyle = '#b8c6c9'; x.fillRect(0, 0, 256, 256);
-    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) { const l = 82 + r() * 7; x.fillStyle = `hsl(190,16%,${l}%)`; x.fillRect(i * 64 + 2, j * 64 + 2, 60, 60); x.fillStyle = 'rgba(255,255,255,.18)'; x.fillRect(i * 64 + 2, j * 64 + 2, 60, 5); }
+    x.fillStyle = '#a7c4bd'; x.fillRect(0, 0, 256, 256);
+    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) { x.fillStyle = (i + j) % 2 ? '#cfe6dc' : '#d8ecdf'; x.fillRect(i * 128 + 4, j * 128 + 4, 120, 120); x.fillStyle = 'rgba(255,255,255,.35)'; x.fillRect(i * 128 + 4, j * 128 + 4, 120, 10); }
     return { c, across: 3 };
   }
   if (style === 'rubber') {
     c.width = c.height = 256;
-    x.fillStyle = '#34363d'; x.fillRect(0, 0, 256, 256);
-    for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) { x.fillStyle = 'rgba(255,255,255,.1)'; x.beginPath(); x.arc(16 + i * 32 + (j % 2) * 16, 16 + j * 32, 7, 0, 7); x.fill(); x.fillStyle = 'rgba(0,0,0,.28)'; x.beginPath(); x.arc(17 + i * 32 + (j % 2) * 16, 18 + j * 32, 6, 0, 7); x.fill(); }
+    x.fillStyle = '#5d7a80'; x.fillRect(0, 0, 256, 256);
+    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) { x.fillStyle = 'rgba(255,255,255,.2)'; x.beginPath(); x.arc(32 + i * 64 + (j % 2) * 32, 32 + j * 64, 15, 0, 7); x.fill(); }
     return { c, across: 4 };
   }
+  // Concrete: a warm pale slab with a couple of joints.
   c.width = c.height = 512;
-  x.fillStyle = '#9a9894'; x.fillRect(0, 0, 512, 512);
-  for (let i = 0; i < 6000; i++) { x.fillStyle = `rgba(${r() < 0.5 ? '255,255,255' : '0,0,0'},${r() * 0.05})`; x.fillRect(r() * 512, r() * 512, 3, 3); }
-  for (let i = 0; i < 6; i++) { x.strokeStyle = 'rgba(60,60,60,.08)'; x.lineWidth = 1; x.beginPath(); x.moveTo(r() * 512, r() * 512); x.lineTo(r() * 512, r() * 512); x.stroke(); }
-  x.strokeStyle = 'rgba(40,40,40,.25)'; x.lineWidth = 3; x.strokeRect(1, 1, 510, 510);
+  x.fillStyle = '#d9d0c0'; x.fillRect(0, 0, 512, 512);
+  x.fillStyle = '#e0d8c9'; x.fillRect(0, 0, 256, 256); x.fillRect(256, 256, 256, 256);
+  x.strokeStyle = 'rgba(120,104,84,.32)'; x.lineWidth = 3; x.strokeRect(1.5, 1.5, 509, 509); x.beginPath(); x.moveTo(256, 0); x.lineTo(256, 512); x.moveTo(0, 256); x.lineTo(512, 256); x.stroke();
   return { c, across: 3 };
 }
 
@@ -660,8 +663,8 @@ export class OfficeView {
     this.root = new THREE.Group(); this.root.name = `floor-${state.floor.number}`;
     if (!host) this.scene.add(this.root);
     // Late afternoon light with a gentle grade: gold in the highlights, a little violet in the shadows, and enough contrast to pull the rooms apart.
-    this.grade = { vignette: 0.3, grain: 0.014, warm: 0.62 };
-    this.ao = { radius: 1.05, intensity: 2.3, color: '#22140b', falloff: 1 };
+    this.grade = { vignette: 0.22, grain: 0, warm: 0.62 };
+    this.ao = { radius: 0.9, intensity: 1.15, color: '#5a3a24', falloff: 1 };
     this.bloom = 0.16;
     this.floorNumber = state.floor.number;
     this.camera = host ? host.camera : new THREE.PerspectiveCamera(24, 1, 1, 3800);
@@ -670,7 +673,7 @@ export class OfficeView {
     this.pan = new THREE.Vector2(); this.targetPan = new THREE.Vector2();
     // A preview rebuilds the room under the same camera, with no walk-in, so changing an option just changes the room.
     if (keep) { this.yaw = keep.yaw; this.targetYaw = keep.targetYaw; this.zoom = keep.zoom; this.targetZoom = keep.targetZoom; this.intro = 1; if (keep.pan) { this.pan.copy(keep.pan); this.targetPan.copy(keep.targetPan); } this.kept = true; }
-    this.offices = new Map(); this.owners = new Map(); this.floorSets = new Map(); this.selected = null;
+    this.offices = new Map(); this.owners = new Map(); this.selected = null;
     this.claims = new Map(); this.actors = new Map(); this.nav = makeNav(); this.deskSlots = []; this.plantSpots = []; this.sway = []; this.tasks = state.tasks || []; this.pins = []; this.insets = null;
     this.life = new FloorLife(this, { onSmallTalk: onSmallTalk || null });
     this.detailOn = (stage.q?.density ?? 1) >= 0.6;
@@ -700,7 +703,7 @@ export class OfficeView {
     this.bakeQueued = true;
     Promise.resolve(this.turn()).then(() => { this.bakeQueued = false; if (!this.dead) this.bakeFloor(); });
   }
-  /** Normal and roughness maps where the tier allows; in the tower, where there are several floors at once, only on a desktop's top tier. */
+  /** The terrace's timber deck and the shared panorama where the tier allows; in the tower, where there are several floors at once, only on a desktop's top tier. */
   get pbr() { return (stage.q?.density ?? 1) >= (this.host ? 1 : 0.6); }
   /** The real materials, a set at a time: floor and wall textures, and a panorama to light and reflect the room. All optional. */
   loadLooks() {
@@ -715,17 +718,6 @@ export class OfficeView {
       deck.rotation.x = -Math.PI / 2; deck.position.y = -0.055; deck.receiveShadow = true; deck.userData.keep = true;
       this.deck = deck; this.room.add(deck);
     });
-    const style = this.decor.wallMat || 'paint';
-    if (WALL_TEX[style]) textureSet(WALL_TEX[style], { pbr }).then((set) => { if (set && !this.dead) this.skinWalls(style, set); });
-    this.loadFloorSets();
-  }
-  /** Fetches any floor textures the rooms now need, then bakes the floor again with them. */
-  loadFloorSets() {
-    const pbr = this.pbr;
-    const want = new Set([this.decor.floor, 'carpet', 'tile', ...[...this.offices.values()].map((o) => o.theme.floor)].filter((f) => FLOOR_TEX[f] && !this.floorSets.has(f)));
-    if (!want.size) return;
-    for (const f of want) this.floorSets.set(f, null);
-    Promise.all([...want].map((f) => textureSet(FLOOR_TEX[f][0], { pbr }).then((set) => { if (set) this.floorSets.set(f, set); }))).then(() => { if (!this.dead) this.bakeSoon(); });
   }
   /** The city below and the tower under our feet: the same world the lobby orbits, scaled so one tower floor is this room. */
   buildWorld() {
@@ -764,25 +756,28 @@ export class OfficeView {
     const wallZ = -ROOM_D / 2, wallX = -ROOM_W / 2;
 
     // The floor plate is the top of the tower: a stone slab the size of the shaft, with a glass rail around the terrace left over.
+    // All of it stays on the real material with its true colours (see OUT_MAT): the terrace is part of the outside.
+    const terrace = new THREE.Group(); R.add(terrace); this.terrace = terrace;
+    const out = (c, w, hh, dd, x, y, z, o = {}) => piece(terrace, c, w, hh, dd, x, y, z, { ...o, mat: o.mat || outdoor(c) });
     const plate = TOWER_W * WORLD_SCALE + 1.2;
-    piece(room, '#e9dfcf', plate, 0.42, plate, 0, -0.48, 0);
-    piece(room, '#d4c8b6', plate + 0.3, 0.12, plate + 0.3, 0, -0.6, 0, { cast: false });
-    piece(room, '#d9d0c0', ROOM_W + 1.1, 0.05, ROOM_D + 1.1, 0, -0.08, 0, { recv: true, cast: false });
-    piece(room, primary, ROOM_W + 0.9, 0.012, ROOM_D + 0.9, 0, -0.022, 0, { recv: false, cast: false });
+    out('#e9dfcf', plate, 0.42, plate, 0, -0.48, 0);
+    out('#d4c8b6', plate + 0.3, 0.12, plate + 0.3, 0, -0.6, 0, { cast: false });
+    out('#d9d0c0', ROOM_W + 1.1, 0.05, ROOM_D + 1.1, 0, -0.08, 0, { recv: true, cast: false });
+    out(primary, ROOM_W + 0.9, 0.012, ROOM_D + 0.9, 0, -0.022, 0, { recv: false, cast: false });
     const rail = new THREE.MeshStandardMaterial({ color: '#cfe0ec', roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false, envMap: env });
-    for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(room, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
-    for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { piece(room, '#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); piece(room, '#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
+    for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(terrace, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
+    for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { out('#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); out('#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
     // The terrace is part of the company too: planters along the rail in its colours and somewhere to sit outside. A timber deck follows in loadLooks.
     for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
       const x = i * 6.4 + (sz < 0 ? 1.4 : 0), z = sz * (plate / 2 - 0.85);
-      piece(room, mix(primary, '#cfc4b0', 0.62), 1.9, 0.55, 0.85, x, 0, z);
-      piece(room, i % 2 ? '#5c8650' : '#6c9452', 1.7, 0.36 + ((i * i) % 3) * 0.14, 0.66, x, 0.55, z);
+      out(mix(primary, '#cfc4b0', 0.62), 1.9, 0.55, 0.85, x, 0, z);
+      out(i % 2 ? '#5c8650' : '#6c9452', 1.7, 0.36 + ((i * i) % 3) * 0.14, 0.66, x, 0.55, z);
     }
     for (const [x, z] of [[-10.5, plate / 2 - 2.9], [8.5, plate / 2 - 3.1]]) {
-      piece(room, '#a8825c', 1.25, 0.07, 1.25, x, 0.72, z, { geo: cyl }); piece(room, '#3d3b44', 0.09, 0.72, 0.09, x, 0, z, { geo: cyl });
-      for (const a of [0.4, 2.5, 4.6]) { const sx = x + Math.cos(a) * 1.3, sz = z + Math.sin(a) * 1.3; piece(room, mix(primary, '#ffffff', 0.32), 0.62, 0.1, 0.62, sx, 0.44, sz); piece(room, '#3d3b44', 0.07, 0.44, 0.07, sx, 0, sz, { cast: false }); }
+      out('#a8825c', 1.25, 0.07, 1.25, x, 0.72, z, { geo: cyl }); out('#3d3b44', 0.09, 0.72, 0.09, x, 0, z, { geo: cyl });
+      for (const a of [0.4, 2.5, 4.6]) { const sx = x + Math.cos(a) * 1.3, sz = z + Math.sin(a) * 1.3; out(mix(primary, '#ffffff', 0.32), 0.62, 0.1, 0.62, sx, 0.44, sz); out('#3d3b44', 0.07, 0.44, 0.07, sx, 0, sz, { cast: false }); }
     }
-    this.floorMat = new THREE.MeshStandardMaterial({ roughness: { carpet: 0.95, rubber: 0.8, tile: 0.35, checker: 0.35 }[d.floor] ?? 0.55, metalness: 0, envMapIntensity: 0.6 });
+    this.floorMat = toonMaterial();
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), this.floorMat);
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.userData.keep = true; room.add(floor);
     this.floorTile = floorTile(d.floor);
@@ -800,11 +795,11 @@ export class OfficeView {
       piece(room, wall, b - a, 1.0, 0.3, (a + b) / 2, 0, wallZ - 0.15, { shade: wshade });
       piece(room, wall, b - a, 0.36, 0.3, (a + b) / 2, WALL_H - 0.36, wallZ - 0.15, { shade: wshade });
       const w = new THREE.Mesh(new THREE.PlaneGeometry(b - a, WALL_H - 1.36), winMat); w.position.set((a + b) / 2, 1 + (WALL_H - 1.36) / 2, wallZ - 0.15); w.userData.keep = true; room.add(w);
-      piece(room, '#2f343d', b - a + 0.1, 0.08, 0.36, (a + b) / 2, 0.96, wallZ - 0.15, { cast: false });
+      piece(room, '#b8a890', b - a + 0.1, 0.12, 0.36, (a + b) / 2, 0.94, wallZ - 0.15, { cast: false });
       piece(room, trim, b - a + 0.1, 0.05, 0.5, (a + b) / 2, 0.92, wallZ - 0.1, { cast: false });
-      piece(room, '#2f343d', b - a + 0.1, 0.08, 0.36, (a + b) / 2, WALL_H - 0.4, wallZ - 0.15, { cast: false });
-      for (let mx = a; mx <= b + 0.01; mx += (b - a) / 4) piece(room, '#2f343d', 0.07, WALL_H - 1.36, 0.14, mx, 1, wallZ - 0.15, { cast: false });
-      piece(room, '#2f343d', b - a, 0.05, 0.14, (a + b) / 2, 2.6, wallZ - 0.15, { cast: false });
+      piece(room, '#b8a890', b - a + 0.1, 0.12, 0.36, (a + b) / 2, WALL_H - 0.42, wallZ - 0.15, { cast: false });
+      for (let mx = a; mx <= b + 0.01; mx += (b - a) / 4) piece(room, '#b8a890', 0.13, WALL_H - 1.36, 0.16, mx, 1, wallZ - 0.15, { cast: false });
+      piece(room, '#b8a890', b - a, 0.1, 0.16, (a + b) / 2, 2.58, wallZ - 0.15, { cast: false });
     }
     piece(room, wall, 0.3, WALL_H, ROOM_D + 0.3, wallX - 0.15, 0, 0, { shade: wshade });
     // Cornice and a sliver of ceiling along both walls; skirting along the bottom.
@@ -956,7 +951,7 @@ export class OfficeView {
       R.add(this.pet.group); this.petPath = []; this.petWait = 3;
     }
     // Where a room is put together out of sight (the tower, or ahead for the lift), the merge is a step of its own. It comes before the steps queued below.
-    const merge = () => { if (this.dead) return; mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT); mergeColored(legacy, ROOM_MAT); this.buildFarWalls(); this.cutWalls(); };
+    const merge = () => { if (this.dead) return; mergeColored(terrace, OUT_MAT); mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT); mergeColored(legacy, ROOM_MAT); this.buildFarWalls(); this.cutWalls(); };
     if (this.host || this.pace) Promise.resolve(this.turn()).then(merge); else merge();
     this.loading = { settled: false };
     this.loadModels().catch((e) => { console.warn('furniture models unavailable, keeping the stand-ins', e); }).finally(() => { this.loading.settled = true; });
@@ -970,7 +965,7 @@ export class OfficeView {
    * ones are cut away (cutaway.js): painted like the others, with the same windows on the city. Nothing draws them until then.
    */
   buildFarWalls() {
-    const g = new THREE.Group(), L = this.plan, wall = this.decor.wall, trim = mix(wall, '#ffffff', 0.55), frame = '#2f343d';
+    const g = new THREE.Group(), L = this.plan, wall = this.decor.wall, trim = mix(wall, '#ffffff', 0.55), frame = '#b8a890';
     const fz = ROOM_D / 2 + 0.15, fx = ROOM_W / 2 + 0.15, o = { cast: false, recv: false };
     let at = -ROOM_W / 2;
     for (const [a, b] of L.windows) {
@@ -1019,11 +1014,11 @@ export class OfficeView {
   }
   buildWalls(room, env) {
     const { primary, accent } = this.colors; const L = this.plan;
-    const GH = 3.1, frame = L.frame || mix(this.decor.wall, '#3a2d22', 0.74);
-    const dado = L.frame ? '#8a6a45' : mix(this.decor.wall, '#f4efe6', 0.55), dadoCap = L.frame ? '#5e4430' : mix(frame, '#ffffff', 0.15);
+    const GH = 3.1, frame = L.frame || mix(this.decor.wall, '#fff2dd', 0.7);
+    const dado = L.frame ? '#8a6a45' : mix(this.decor.wall, '#fff6e8', 0.62), dadoCap = L.frame ? '#5e4430' : mix(accent, '#fff6e8', 0.35);
     const pos = [], idx = [];
     const pane = (x0, z0, x1, z1, y0, y1) => { const b = pos.length / 3; pos.push(x0, y0, z0, x1, y0, z1, x1, y1, z1, x0, y1, z0); idx.push(b, b + 1, b + 2, b, b + 2, b + 3); };
-    const bar = (x0, z0, x1, z1, y, h, t = 0.08, color = frame) => { const along = x0 !== x1; piece(room, color, along ? x1 - x0 : t, h, along ? t : z1 - z0, (x0 + x1) / 2, y, (z0 + z1) / 2, { cast: false }); };
+    const bar = (x0, z0, x1, z1, y, h, t = 0.2, color = frame) => { const along = x0 !== x1; piece(room, color, along ? x1 - x0 : t, h, along ? t : z1 - z0, (x0 + x1) / 2, y, (z0 + z1) / 2, { cast: false }); };
     for (const w of wallLines(L)) {
       if (w.low) {
         const along = w.x0 !== w.x1;
@@ -1034,15 +1029,15 @@ export class OfficeView {
       // A solid dado to waist height, so each room reads as a room, and glass above it so the camera still sees in.
       const along = w.x0 !== w.x1;
       piece(room, dado, along ? w.x1 - w.x0 : 0.12, 1.0, along ? 0.12 : w.z1 - w.z0, (w.x0 + w.x1) / 2, 0, (w.z0 + w.z1) / 2, { shade: [0, 1, 0.82, 1] });
-      bar(w.x0, w.z0, w.x1, w.z1, 1.0, 0.06, 0.16, dadoCap);
+      bar(w.x0, w.z0, w.x1, w.z1, 1.0, 0.1, 0.26, dadoCap);
       pane(w.x0, w.z0, w.x1, w.z1, 1.06, GH - 0.1);
-      bar(w.x0, w.z0, w.x1, w.z1, GH - 0.1, 0.1);
-      for (const [x, z] of [[w.x0, w.z0], [w.x1, w.z1]]) piece(room, frame, 0.09, GH, 0.09, x, 0, z, { cast: false });
+      bar(w.x0, w.z0, w.x1, w.z1, GH - 0.2, 0.2);
+      for (const [x, z] of [[w.x0, w.z0], [w.x1, w.z1]]) piece(room, frame, 0.22, GH, 0.22, x, 0, z, { cast: false });
     }
     // A beam over every door, so a gap in the glass reads as a way through.
     for (const d of doorways(L)) {
       const half = d.width / 2;
-      if (d.along) bar(d.x - half, d.z, d.x + half, d.z, GH - 0.1, 0.1); else bar(d.x, d.z - half, d.x, d.z + half, GH - 0.1, 0.1);
+      if (d.along) bar(d.x - half, d.z, d.x + half, d.z, GH - 0.2, 0.2); else bar(d.x, d.z - half, d.x, d.z + half, GH - 0.2, 0.2);
     }
     if (!pos.length) return;
     const geo = new THREE.BufferGeometry();
@@ -1088,7 +1083,7 @@ export class OfficeView {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.setIndex(idx);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: wallSkin(style, wall), vertexColors: true, roughness: style === 'panels' ? 0.6 : 0.92, metalness: 0, side: THREE.DoubleSide }));
+    const mesh = new THREE.Mesh(geo, toonMaterial({ map: wallSkin(style, wall), vertexColors: true, side: THREE.DoubleSide }));
     mesh.receiveShadow = true; mesh.userData.keep = true;
     return mesh;
   }
@@ -1271,26 +1266,23 @@ export class OfficeView {
     const { c: tile, across } = this.floorTile;
     const base = this.decor.floor;
     const finish = (r) => (r.kind === 'staff' || r.kind === 'office') ? this.offices.get(r.id)?.theme.floor || base : r.kind === 'kitchen' && !['checker', 'tile'].includes(base) ? 'tile' : r.kind === 'meeting' && base === 'concrete' ? 'carpet' : base;
-    const pbr = [...this.floorSets.values()].some((v) => v?.normal);
     const fillWith = (x, img, unitsPerTile, rect) => {
       const sc = (ppu * unitsPerTile) / img.width; const pat = x.createPattern(img, 'repeat');
       x.save(); x.beginPath(); x.rect(px(rect[0]), pz(rect[1]), (rect[2] - rect[0]) * ppu, (rect[3] - rect[1]) * ppu); x.clip(); x.scale(sc, sc); x.fillStyle = pat; x.fillRect(0, 0, W / sc, H / sc); x.restore();
     };
-    const paintRooms = (x, layer) => {
+    const paintRooms = (x) => {
       const whole = [-ROOM_W / 2, -ROOM_D / 2, ROOM_W / 2, ROOM_D / 2];
       const rooms = [{ rect: whole, kind: 'all' }, ...(this.plan.rooms || []).filter((r) => r.kind !== 'corridor')];
       for (const r of rooms) {
-        const f = r.kind === 'all' ? base : finish(r); const set = this.floorSets.get(f); const img = set?.[layer];
-        if (img) fillWith(x, img, FLOOR_TEX[f][1], r.rect);
-        else if (layer === 'map' && r.kind === 'all') fillWith(x, tile, 22 / across, r.rect);
-        else if (layer === 'map' && (f !== base || r.kind === 'all')) { const t = floorTile(f); fillWith(x, t.c, 22 / t.across, r.rect); }
-        else if (layer !== 'map') { x.fillStyle = layer === 'normal' ? 'rgb(128,128,255)' : `rgb(${f === 'carpet' ? 240 : f === 'tile' || f === 'checker' ? 90 : 150},${f === 'carpet' ? 240 : f === 'tile' || f === 'checker' ? 90 : 150},${f === 'carpet' ? 240 : f === 'tile' || f === 'checker' ? 90 : 150})`; x.fillRect(px(r.rect[0]), pz(r.rect[1]), (r.rect[2] - r.rect[0]) * ppu, (r.rect[3] - r.rect[1]) * ppu); }
+        const f = r.kind === 'all' ? base : finish(r);
+        if (r.kind === 'all') fillWith(x, tile, 22 / across, r.rect);
+        else if (f !== base) { const t = floorTile(f); fillWith(x, t.c, 22 / t.across, r.rect); }
       }
     };
-    const old = [this.floorMat.map, this.floorMat.normalMap, this.floorMat.roughnessMap];
+    const old = this.floorMat.map;
     // The painting comes in a few pieces, so a room built out of sight (the tower, or ahead for the lift) can take them over several frames.
     const paint = function* (x) {
-      paintRooms(x, 'map');
+      paintRooms(x);
       yield;
       // Window light: warm pools, leaning the way the sun does.
       for (const [a, b] of this.plan.windows) {
@@ -1306,7 +1298,7 @@ export class OfficeView {
         // A company's colour on the way through: a long pale runner down the middle of each corridor. A plain wash of the colour over the boards turned to mud.
         if (r.kind === 'corridor') { const mw = (x1 - x0) > (z1 - z0), inset = 0.42; x.globalAlpha = 0.8; x.fillStyle = mix(this.colors.primary, '#efe6d6', 0.58); x.fillRect(px(x0 + (mw ? 0 : inset)), pz(z0 + (mw ? inset : 0)), px(x1) - px(x0) - (mw ? 0 : inset * 2) * ppu, pz(z1) - pz(z0) - (mw ? inset * 2 : 0) * ppu); x.globalAlpha = 1; }
         // Nobody works there yet: the light is off, so the eye goes to the rooms with people in them.
-        if (empty) { x.fillStyle = 'rgba(30,24,20,.42)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); continue; }
+        if (empty) { x.fillStyle = 'rgba(110,82,62,.13)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); continue; }
         if (r.desk) { const s = seatOf(r.desk).at; const g = x.createRadialGradient(px(s[0]), pz(s[1]), 0, px(s[0]), pz(s[1]), 3.1 * ppu); g.addColorStop(0, 'rgba(255,212,150,.44)'); g.addColorStop(0.55, 'rgba(255,212,150,.16)'); g.addColorStop(1, 'rgba(255,212,150,0)'); x.fillStyle = g; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); }
       }
       // Pools of warm light around the meeting table and the manager's and boss's desks.
@@ -1330,18 +1322,18 @@ export class OfficeView {
       }
       x.restore();
       // A soft dark line under every wall, so the rooms read from above even with no glass glint.
-      x.strokeStyle = 'rgba(20,16,12,.34)'; x.lineWidth = 3 * k; x.beginPath(); for (const w of wallLines(this.plan)) { x.moveTo(px(w.x0), pz(w.z0)); x.lineTo(px(w.x1), pz(w.z1)); } x.stroke();
-      const rim = (x0, y0, x1, y1, a) => { const g = x.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, `rgba(20,16,12,${a})`); g.addColorStop(1, 'rgba(20,16,12,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H); };
-      rim(0, 0, 0, 70 * k, 0.34); rim(0, 0, 70 * k, 0, 0.34); rim(W, 0, W - 40 * k, 0, 0.12); rim(0, H, 0, H - 40 * k, 0.12);
+      x.strokeStyle = 'rgba(96,62,44,.4)'; x.lineWidth = 3 * k; x.beginPath(); for (const w of wallLines(this.plan)) { x.moveTo(px(w.x0), pz(w.z0)); x.lineTo(px(w.x1), pz(w.z1)); } x.stroke();
+      const rim = (x0, y0, x1, y1, a) => { const g = x.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, `rgba(96,62,44,${a})`); g.addColorStop(1, 'rgba(96,62,44,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H); };
+      rim(0, 0, 0, 70 * k, 0.26); rim(0, 0, 70 * k, 0, 0.26); rim(W, 0, W - 40 * k, 0, 0.1); rim(0, H, 0, H - 40 * k, 0.1);
       yield;
       // Contact shadows under furniture, pulled slightly toward the camera side of the sun. Drawn an eighth the size and stretched, which
       // blurs them for nearly nothing: a canvas shadow blur on every piece was most of the cost of a bake.
       const sw = Math.ceil(W / 8), sh = Math.ceil(H / 8), small = shadowCanvas(sw, sh), s = small.getContext('2d');
-      s.clearRect(0, 0, sw, sh); s.filter = 'blur(1.4px)'; s.fillStyle = 'rgba(15,12,10,.5)';
+      s.clearRect(0, 0, sw, sh); s.filter = 'blur(1.6px)'; s.fillStyle = 'rgba(96,62,44,.42)';
       for (const [fx, fz, fw, fd] of this.nav.footprints) s.fillRect((px(fx - fw / 2) + 4 * k) / 8, (pz(fz - fd / 2) + 4 * k) / 8, (fw * ppu - 8 * k) / 8, (fd * ppu - 8 * k) / 8);
       s.filter = 'none';
       x.save(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high'; x.drawImage(small, 0, 0, sw, sh, -6 * k, 5 * k, sw * 8, sh * 8); x.restore();
-      x.fillStyle = 'rgba(15,12,10,.18)';
+      x.fillStyle = 'rgba(96,62,44,.12)';
       for (const [fx, fz, fw, fd] of this.nav.footprints) x.fillRect(px(fx - fw / 2) + 4 * k, pz(fz - fd / 2) + 4 * k, fw * ppu - 8 * k, fd * ppu - 8 * k);
     };
     const paced = this.host || this.pace, token = this.bakeToken = (this.bakeToken || 0) + 1;
@@ -1353,18 +1345,10 @@ export class OfficeView {
       for (const _ of paint.call(this, x)) { await this.turn(); if (gone()) { tex.dispose(); return; } }  // eslint-disable-line no-unused-vars
       tex.needsUpdate = true;
     } else tex = canvasTex(W, H, (x) => { for (const _ of paint.call(this, x)); });  // eslint-disable-line no-unused-vars
-    let normal = null, rough = null;
-    if (pbr) {
-      if (paced) { await this.turn(); if (gone()) { tex.dispose(); return; } }
-      normal = canvasTex(W, H, (x) => paintRooms(x, 'normal')); normal.colorSpace = THREE.NoColorSpace;
-      if (paced) { await this.turn(); if (gone()) { tex.dispose(); normal.dispose(); return; } }
-      rough = canvasTex(W, H, (x) => paintRooms(x, 'rough')); rough.colorSpace = THREE.NoColorSpace;
-    }
     tex.anisotropy = 8; tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     this.floorMat.map = tex;
-    if (pbr) { this.floorMat.normalMap = normal; this.floorMat.normalScale.set(0.7, 0.7); this.floorMat.roughnessMap = rough; this.floorMat.roughness = 1; }
     this.floorMat.needsUpdate = true; this.baked = true;
-    for (const t of old) if (t && t !== this.floorMat.map && t !== this.floorMat.normalMap && t !== this.floorMat.roughnessMap) t.dispose();
+    if (old && old !== this.floorMat.map) old.dispose();
   }
   tint(a) { const c = new THREE.Color(this.colors.primary); return `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${a})`; }
   drawClock(x) {
@@ -1484,7 +1468,7 @@ export class OfficeView {
     // The rooms nobody has yet are still furnished, and say so on the door, ready for the next hire.
     const owned = new Set(this.owners.values()); let vacant = 0;
     for (const r of this.plan.rooms) if (r.kind === 'staff' && !owned.has(r.id) && !this.offices.has(r.id)) { this.nav.block(...deskRect(r.desk)); this.addOffice(r, { id: `free-${r.id}`, role: 'vacant', name: null }, { own: true }); vacant++; }
-    if (fresh.length || vacant || !this.floorMat.map) { this.rebuildOffices(); this.bakeSoon(); this.loadFloorSets(); if (this.modelsOn) this.furnishOffices(); }
+    if (fresh.length || vacant || !this.floorMat.map) { this.rebuildOffices(); this.bakeSoon(); if (this.modelsOn) this.furnishOffices(); }
     // The boss sees which rooms are free to hire into; a visitor doesn't. A room built in the tower learns who is looking when the page takes it over.
     if (state.viewer && !!state.viewer.owner !== this.bossView) { this.bossView = !!state.viewer.owner; this.drawSigns(); }
     const seen = new Set();
@@ -1653,17 +1637,6 @@ export class OfficeView {
     tex.anisotropy = 8;
     this.signMesh2 = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, toneMapped: false }));
     this.root.add(this.signMesh2);
-  }
-  /** The outer walls in a real material, tinted by the wall colour, with its normal and roughness maps where the tier allows. */
-  skinWalls(style, set) {
-    const wall = this.decor.wall;
-    if (!this.wallSkin) { const back = []; { let at = -ROOM_W / 2; for (const [a, b] of this.plan.windows) { back.push([at, a]); at = b; } back.push([at, ROOM_W / 2]); } this.wallSkin = this.wallSkinMesh('paint', wall, back); this.room.add(this.wallSkin); }
-    const m = this.wallSkin.material;
-    m.map?.dispose(); m.map = repeating(set.map, { color: true });
-    if (set.normal) { m.normalMap = repeating(set.normal); m.normalScale.set(0.8, 0.8); }
-    if (set.rough) { m.roughnessMap = repeating(set.rough); m.roughness = 1; }
-    m.color.set(style === 'brick' ? mix(wall, '#ffffff', 0.7) : style === 'paint' ? mix(wall, '#ffffff', 0.15) : mix(wall, '#ffffff', 0.45));
-    m.needsUpdate = true;
   }
   /** Shows who was tapped: a ring at their feet and a lit name tag, until someone else (or nobody) is. */
   highlight(id) {
@@ -1870,13 +1843,11 @@ export class OfficeView {
     this.actors.clear();
     if (this.world) this.scene.remove(this.world.group);  // shared with the lobby, so never disposed here
     this.root.removeFromParent();
-    for (const root of [this.room, this.detail, this.legacy, this.models, this.officeStatic, this.officeDetail, this.officeLegacy, this.officeModels, this.stub?.group, this.pet?.group].filter(Boolean)) this.disposeTree(root);
+    for (const root of [this.terrace, this.room, this.detail, this.legacy, this.models, this.officeStatic, this.officeDetail, this.officeLegacy, this.officeModels, this.stub?.group, this.pet?.group].filter(Boolean)) this.disposeTree(root);
     this.deck?.geometry.dispose(); this.deck?.material.map?.dispose(); this.deck?.material.dispose();
     this.glassGeo?.dispose(); this.glassMat?.dispose();
     this.ring?.geometry.dispose(); this.ring?.material.dispose();
     if (this.signMesh2) { this.signMesh2.geometry.dispose(); this.signMesh2.material.map.dispose(); this.signMesh2.material.dispose(); }
-    for (const t of [this.floorMat.normalMap, this.floorMat.roughnessMap]) t?.dispose();
-    for (const k of ['normalMap', 'roughnessMap']) this.wallSkin?.material[k]?.dispose();
     this.codeTex.dispose(); this.pageTex.dispose(); this.idleTex.dispose(); this.glowTex.dispose(); this.discGeo.dispose(); this.discMat.map.dispose(); this.discMat.dispose();
   }
   resize(w, h) {
