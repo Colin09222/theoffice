@@ -141,7 +141,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
   });
   await step(tag('the room sits in the space between the card and the panel'), async () => {
     await sleep(1200);
-    const bad = await p.ev(`(() => { const v = window.__office.view; const card = document.querySelector('.floor-top').getBoundingClientRect(), panel = document.querySelector('.floor-panel').getBoundingClientRect(); return [...v.actors.values()].filter((a) => a.tagX < card.right - 4 || a.tagX > panel.left + 4).map((a) => a.info.name + ' ' + Math.round(a.tagX)); })()`);
+    const bad = await p.ev(`(() => { const v = window.__office.view; const card = document.querySelector('.floor-top').getBoundingClientRect(), panel = document.querySelector('.floor-panel').getBoundingClientRect(); return [...v.actors.values()].filter((a) => !a.tag.classList.contains('no-name') && (a.tagX < card.right - 4 || a.tagX > panel.left + 4)).map((a) => a.info.name + ' ' + Math.round(a.tagX)); })()`);
     if (bad.length) throw new Error(bad.join(', '));
   });
   await step(tag('pins float over the rooms and open Tasks, Projects, Talk, Requests, Orders and the manager chat'), async () => {
@@ -296,7 +296,8 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
   const tag = (s) => `phone: ${s}`;
   await asOwner(p, neighbour);
   const peopleClear = () => p.ev(`(() => { const v = window.__office.view; const sheet = document.querySelector('.floor-panel').getBoundingClientRect(); const tops = document.querySelector('.floor-top').getBoundingClientRect(); const ctl = document.querySelector('.controls').getBoundingClientRect(); const bad = [];
-    for (const a of v.actors.values()) { const r = a.nameEl.getBoundingClientRect(); if (r.bottom > sheet.top + 2) bad.push(a.info.name + ' under the sheet'); if (r.left < -4 || r.right > innerWidth + 4) bad.push(a.info.name + ' off the side'); if (r.bottom > ctl.top && r.top < ctl.bottom && r.right > ctl.left && r.left < ctl.right) bad.push(a.info.name + ' under the buttons'); }
+    // Up close only some of the team are in the picture; anyone whose name is showing has to be clear of everything.
+    for (const a of v.actors.values()) { if (a.tag.classList.contains('no-name')) continue; const r = a.nameEl.getBoundingClientRect(); if (r.bottom > sheet.top + 2) bad.push(a.info.name + ' under the sheet'); if (r.left < -4 || r.right > innerWidth + 4) bad.push(a.info.name + ' off the side'); if (r.bottom > ctl.top && r.top < ctl.bottom && r.right > ctl.left && r.left < ctl.right) bad.push(a.info.name + ' under the buttons'); }
     return { bad, sheet: sheet.top, h: innerHeight }; })()`);
   await step(tag('the sheet holds the panel, the room stays above it, and nobody is covered'), async () => {
     // The boss arrives with the conversation at full height; the room is what shares the screen at half.
@@ -331,7 +332,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     await p.ev('(() => { const v = window.__office.view; v.targetZoom = 1.2; })()');
     await p.until('Math.abs(window.__office.view.zoom - 1.2) < 0.05', 'pulled back', 20000);
     await sleep(600);
-    const sizes = await p.ev(`(() => { const hit = (e) => { const r = e.getBoundingClientRect(); const b = getComputedStyle(e, '::before'); const grow = -2 * (parseFloat(b.top) || 0); return Math.min(r.width, r.height) + grow; }; return { pins: [...document.querySelectorAll('.pin')].map(hit), scrub: [...document.querySelectorAll('.scrub-btn')].map(hit) }; })()`);
+    const sizes = await p.ev(`(() => { const hit = (e) => { const r = e.getBoundingClientRect(); const b = getComputedStyle(e, '::before'); const grow = -2 * (parseFloat(b.top) || 0); return Math.min(r.width, r.height) + grow; }; return { pins: [...document.querySelectorAll('.pin:not([hidden])')].map(hit), scrub: [...document.querySelectorAll('.scrub-btn')].map(hit) }; })()`);
     if (sizes.pins.some((n) => n < 43.5)) throw new Error(`pins ${sizes.pins}`);
     if (sizes.scrub.some((n) => n < 43.5)) throw new Error(`scrub ${sizes.scrub}`);
     // The room eases into its new space a frame at a time, and on this renderer that takes a while.

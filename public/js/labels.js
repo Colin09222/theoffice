@@ -28,6 +28,7 @@ export function layoutLabels(items, { width = Infinity, minX = 0, top = 0, botto
       }
       if (lift > maxLift) { lift = maxLift; if (!it.full && boxes.some((p) => hit(box(lift), p))) name = false; }
       if (name && !it.full && blocks.some((p) => hit(box(lift), p))) name = false;  // never tucked under the card or the lift
+      if (name && !inside(box(lift))) name = false;  // nor off the edge of the room: it comes back when they do
     }
     if (name) boxes.push(box(lift));
     out.set(it.id, { lift, side: it.side, name, bubble: false, bx: 0, by: 0 });
