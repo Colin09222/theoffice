@@ -132,6 +132,10 @@ All four lines must say `ok`. `1011150` means hz's address isn't on the allow-li
 
 **Read the balance line, then do one real purchase on a test floor** (see step 8). The real API has never been called from this code, so that first purchase is the real test of `domains.create`.
 
+## 6b. Short project addresses (no change needed)
+
+A launched project gets `<project>.middistance.com`. That is one label under the existing `*.middistance.com` site, so the current wildcard, the on-demand TLS `ask` (`/theoffice/api/apps/tls-check`, which now knows short labels) and the DNS wildcard all cover it, and Caddy needs **no change**. Confirmed against /opt/edge/Caddyfile on hz (2026-11-08). The `api--<label>` names stay reserved for the runner: a short label can never contain `--`.
+
 ## 7. Check origins
 
 ```sh

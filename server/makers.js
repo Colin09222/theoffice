@@ -168,7 +168,7 @@ export function decide(job, ev, cfg = CONFIG) {
   const merged = { ...best }; if (passing) for (const [k, v] of Object.entries(r.rules)) if (v !== null) merged[k] = v;
   // A rule marked serious that came back false is a bug even if the Tester didn't list it, a cheat left in the shipped build for one.
   const seriousRules = rulesFor.filter((x) => x.serious && r.rules[x.id] === false && !browserBroken.includes(x.text)).map((x) => ({ severity: x.serious, text: `Done-rule failing: ${x.text}` }));
-  const bugs = [...regressions.map((t) => ({ severity: 'blocker', text: `Regression: ${t}` })), ...browserBroken.filter((t) => !regressions.includes(t)).map((t) => ({ severity: 'blocker', text: `Done-rule failing: ${t}` })), ...seriousRules, ...r.bugs].slice(0, 30);
+  const bugs = [...regressions.map((t) => ({ severity: 'blocker', text: `Regression: ${t}` })), ...browserBroken.filter((t) => !regressions.includes(t)).map((t) => ({ severity: 'blocker', text: `Done-rule failing: ${t}` })), ...r.bugs, ...seriousRules].slice(0, 30);
   // Anything major or worse holds Launch and goes straight to a fix pass, which doesn't use up a depth pass.
   const serious = bugs.filter((b) => b.severity === 'major' || b.severity === 'blocker');
   const fixLimit = cfg.passes.fixesBeforeAsking || 2;

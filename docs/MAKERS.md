@@ -36,7 +36,7 @@ The flow upgrades the existing pipeline rather than running beside it.
    - the look;
    - what each pass adds.
 3. **The first playable version**, built by the Builder. Then the **Tester** plays it.
-4. **Up to 3 depth passes** (`passes.depth` in config). Each pass is a Builder task followed by a Tester task:
+4. **Depth passes, at least `minDepthPasses` for the type** (game 3, app 1, website 1, per `passes.depth` and each type's `minDepthPasses` in config). A job runs them even when every done-rule already passes. Each game pass has its own job (`passJobs`): more mechanics and content, then progression and meta, then balance, onboarding, juice and audio. Each pass is a Builder task followed by a Tester task, and the Tester re-checks the late game (final boss, win screen) on a debug copy that never ships:
    - the Tester's bug list goes into the next Builder brief, along with any regressions and the done-rules not yet met;
    - regressions are listed first, as blockers.
 5. **Decisions after every test.** `decide()` in `server/makers.js` is a pure function, unit-tested.
@@ -44,10 +44,11 @@ The flow upgrades the existing pipeline rather than running beside it.
    | Situation | What happens |
    |---|---|
    | The Tester passes a version (no blockers, no failing browser rule, no regression) | It becomes **launchable** and is snapshotted |
-   | Every done-rule passes | It stops early (**ready**) |
+   | Every done-rule passes and the minimum depth passes ran | It stops (**ready**), and the passes left over show as skipped |
+   | An open major or blocker bug (or a cheat left in the build) | Launch is **held**, the team goes straight to a **fix pass** (no depth pass used), and after two failed fixes the boss chooses: keep trying, or launch anyway with a clear warning |
    | A regression | Blocks: not passing, and the snapshot stays at the last good version |
-   | A pass fails twice in a row (`passes.failsBeforeAsking`) | It **asks the boss** instead of looping: Try again, Launch what works, or Stop. Also used when a Builder or Tester task fails twice |
-   | Out of passes, or past `passes.maxJobTokens` model tokens since the start | Ready if something passed, otherwise ask the boss |
+   | A pass with no serious bug fails twice in a row (`passes.failsBeforeAsking`) | It **asks the boss** instead of looping: Try again, Launch what works, or Stop. Also used when a Builder or Tester task fails twice |
+   | Out of passes, or past `passes.maxJobTokens` model tokens since the start | Ready if something passed and nothing serious is open (any skipped passes say so on the card), otherwise ask the boss |
 
 6. **Before Launch**, nobody else publishes the project: the manager's "still not live" nudge skips it (`makers.holds`). A report counts only if it was written during that test, so a stale `TEST-REPORT.md` can't pass a new version.
 7. **Launch** publishes the snapshot (`maker_snapshots`), never a pass still being built, through the same pre-publish checklist and gate as `publish_project`. After launch, each later pass that passes the Tester updates the live version, and the chat says so.
@@ -145,3 +146,9 @@ Nothing new to set. The tables are made at boot, Phaser is served from `public/v
   - The app passes sign up, create, reload, and sign out and back in, at both sizes.
   - The site passes the phone layout, links, meta and the form.
 - **Screenshots:** four, in `media/out/office-makers/`.
+
+## After Launch
+
+Right after Launch, and after every automatic update of a launched job, the server goes to the live link and checks it the way a player's browser would (`server/live-check.js`): the page, a save written and read back, a score on a hidden board, and that the shipped game really calls saves and the leaderboard. Office Cloud can't run on the Tester's local preview, so this is where it is proved. A failure goes to the team as a major bug and starts a fix pass, at most twice; if the link can't be reached at all, nothing is reported, because the team couldn't fix that.
+
+A launched project gets the short address `<project>.middistance.com` when that name is free and not reserved (`RESERVED_LABELS` in `server/apps.js`); otherwise it stays on `<project>--<floor>`. Both keep working for good.
