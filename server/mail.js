@@ -194,18 +194,22 @@ export function installMail(ext) {
       try { ev = JSON.parse(raw.toString('utf8')); } catch { return reply(400, { error: 'bad_json' }); }
       if (!ev || typeof ev !== 'object' || typeof ev.type !== 'string' || !ev.data || typeof ev.data !== 'object') return reply(400, { error: 'bad_event' });
       const svixId = oneLine(h('svix-id'), 120);
-      if (!run(db, 'INSERT OR IGNORE INTO mail_webhooks (svix_id,type,created_at) VALUES (?,?,?)', svixId, oneLine(ev.type, 40), now()).changes) return reply(200, { ok: true, duplicate: true });
-      if (ev.type === 'email.received') {
-        const id = String(ev.data.email_id || '');
-        if (!/^[A-Za-z0-9-]{8,80}$/.test(id)) return reply(400, { error: 'bad_email_id' });
-        const meta = { to: (Array.isArray(ev.data.to) ? ev.data.to : []).slice(0, 50), cc: (Array.isArray(ev.data.cc) ? ev.data.cc : []).slice(0, 50), receivedFor: (Array.isArray(ev.data.received_for) ? ev.data.received_for : []).slice(0, 20) };
-        const fresh = run(db, 'INSERT OR IGNORE INTO mail_inbound (email_id,meta,created_at) VALUES (?,?,?)', id, JSON.stringify(meta), now()).changes;
-        reply(200, { ok: true, ...(fresh ? {} : { duplicate: true }) });
-        if (fresh) setImmediate(() => { drain().catch((e) => log('error', 'mail_drain', { err: hide(e?.message || e).slice(0, 200) })); });
-        return undefined;
-      }
-      if (ev.type === 'email.bounced' || ev.type === 'email.complained' || ev.type === 'email.suppressed' || ev.type === 'email.failed' || ev.type === 'email.delivered') outcome(ev);
-      return reply(200, { ok: true });
+      const received = ev.type === 'email.received';
+      const id = received ? String(ev.data.email_id || '') : '';
+      if (received && !/^[A-Za-z0-9-]{8,80}$/.test(id)) return reply(400, { error: 'bad_email_id' });
+      // The delivery is marked handled in the same transaction as what it brings, so a crash can't lose one or take it twice.
+      const outcomeOf = tx(db, () => {
+        if (!run(db, 'INSERT OR IGNORE INTO mail_webhooks (svix_id,type,created_at) VALUES (?,?,?)', svixId, oneLine(ev.type, 40), now()).changes) return 'duplicate';
+        if (received) {
+          const meta = { to: (Array.isArray(ev.data.to) ? ev.data.to : []).slice(0, 50), cc: (Array.isArray(ev.data.cc) ? ev.data.cc : []).slice(0, 50), receivedFor: (Array.isArray(ev.data.received_for) ? ev.data.received_for : []).slice(0, 20) };
+          return run(db, 'INSERT OR IGNORE INTO mail_inbound (email_id,meta,created_at) VALUES (?,?,?)', id, JSON.stringify(meta), now()).changes ? 'queued' : 'duplicate';
+        }
+        if (['email.bounced', 'email.complained', 'email.suppressed', 'email.failed', 'email.delivered'].includes(ev.type)) outcome(ev);
+        return 'done';
+      });
+      reply(200, { ok: true, ...(outcomeOf === 'duplicate' ? { duplicate: true } : {}) });
+      if (outcomeOf === 'queued') setImmediate(() => { drain().catch((e) => log('error', 'mail_drain', { err: hide(e?.message || e).slice(0, 200) })); });
+      return undefined;
     } catch (e) {
       if (e instanceof HttpError) return reply(e.status, { error: e.code });
       log('error', 'mail_hook', { err: hide(e?.message || e).slice(0, 200) });
