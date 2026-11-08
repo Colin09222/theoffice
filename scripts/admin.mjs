@@ -17,6 +17,8 @@ import { googleAdsFromConfig } from '../server/googleads.js';
 import { adsListing, adsListingText, pauseAll } from '../server/ads-guard.js';
 import { ensureAdSpend, resumeAds } from '../server/business.js';
 import { scrub } from '../server/llm.js';
+import { createRunnerClient, runnerConfigured } from '../server/runner.js';
+import { ensureServerSchema } from '../server/servers.js';
 import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, MailError } from '../server/mail.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
@@ -37,6 +39,11 @@ const usage = () => {
     '  node scripts/admin.mjs cloud ai status [PROJECT] [--floor N] [--json]   published apps\' AI: what is on, requests today and what is left. PROJECT is a subdomain label, or a slug with --floor',
     '  node scripts/admin.mjs cloud ai pause|resume PROJECT|--all [--floor N]   stop or restart AI for one project, or for the whole building',
     '  node scripts/admin.mjs cloud fetch status|pause|resume ...   the same, for fetching and scraping web pages',
+    '  node scripts/admin.mjs runner status [--json]   server slots: how full the building is, and each server with its floor, project and state. Run it in the container',
+    '  node scripts/admin.mjs runner stop <label>     stop one server. It keeps its slot and answers 503 until it is started again',
+    '  node scripts/admin.mjs runner remove <label>   delete one server, its data and token, freeing its slot',
+    '  node scripts/admin.mjs runner kill-all         stop every app and build at once. New starts are refused until release',
+    '  node scripts/admin.mjs runner release          lift the kill switch',
     '  node scripts/admin.mjs filler list            list filler (demo) companies and removed ones',
     '  node scripts/admin.mjs filler seed            seed the filler companies, bringing back any that were removed',
     '  node scripts/admin.mjs filler remove --floor N  remove the filler company on floor N (stays removed)',
@@ -221,6 +228,31 @@ if (cmd === 'code') {
     try { decidePurchase(db, id, status, valueOf('--note') ?? ''); } catch (e) { if (e instanceof PurchaseError) die(e.message); throw e; }
     console.log(`Marked #${id} ${status}. The floor hears on the server's next tick.`);
   } else usage();
+} else if (cmd === 'runner') {
+  ensureServerSchema(db);
+  if (!runnerConfigured(cfg)) die('No runner socket or token here. Run this in the theoffice container, once office-runner is installed.');
+  const runner = createRunnerClient(cfg);
+  const ownerOf = (label) => get(db, 'SELECT s.project, s.status, f.number FROM server_apps s LEFT JOIN floors f ON f.id=s.floor_id WHERE s.label=?', label);
+  try {
+    const [sub, label] = rest;
+    if (sub === 'status') {
+      const h = await runner.health(), { apps } = await runner.list();
+      const rows = apps.map((a) => { const o = ownerOf(a.label); return { label: a.label, status: a.status, tier: a.tier, floor: o?.number ?? null, project: o?.project ?? null, build: a.build?.status ?? null, jobs: (a.cron || []).length, known: !!o }; });
+      if (rest.includes('--json')) console.log(JSON.stringify({ health: h, apps: rows }, null, 2));
+      else {
+        console.log(`runner: ${h.apps} of ${h.maxApps} slots used (${h.browserApps} of ${h.maxBrowserApps} browser), kill switch ${h.killed ? 'ON' : 'off'}`);
+        for (const r of rows) console.log(`${r.label}  ${r.status}  ${r.tier}  ${r.known ? `floor ${r.floor ?? '?'} ${r.project}` : 'not one of the Office\'s'}  build: ${r.build ?? 'none'}  jobs: ${r.jobs}`);
+        if (!rows.length) console.log('No servers.');
+      }
+    } else if (sub === 'stop' && label) { await runner.stop(label); console.log(`${label} stopped. It keeps its slot.`); }
+    else if (sub === 'remove' && label) {
+      await runner.remove(label).catch((e) => { if (e.status !== 404) throw e; });
+      run(db, "UPDATE server_apps SET status='removed', building=0, token_hash=NULL, env_ok=0, updated_at=? WHERE label=?", Date.now(), label);
+      console.log(`${label} removed. Its slot is free and its token no longer works.`);
+    } else if (sub === 'kill-all') { const r = await runner.killAll(); console.log(`Kill switch on: ${r.killed} containers stopped. New starts are refused until "runner release".`); }
+    else if (sub === 'release') { await runner.release(); console.log('Kill switch off: servers can start again.'); }
+    else usage();
+  } catch (e) { die(`runner: ${String(e?.message || e).slice(0, 300)}`); }
 } else if (cmd === 'ads') {
   // Needs the server's environment (GOOGLE_ADS_*, AD_MONTHLY_CAP_USD), so run it in the container. It prints no token.
   const api = googleAdsFromConfig(cfg);

@@ -128,3 +128,6 @@ if (r.status === 200) render(r.json());                         // json() parses
 - Too many requests get `rate_limited`; a full project gets `quota`. Show the message and carry on.
 
 The example in `.office/examples/cloud-game/index.html` uses all of the main parts in one small page.
+
+## This project's own server (rare)
+Office Cloud covers almost everything. If the boss has allowed this project a server, `await office.server.url()` gives its address (or null), and `await office.server.fetch('/path', options)` calls it. It is a separate origin, so the server answers CORS (see the Node server starter's STARTER.md, or server_starter).

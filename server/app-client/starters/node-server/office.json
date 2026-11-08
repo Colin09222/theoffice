@@ -1,0 +1,6 @@
+{
+  "start": "node server.js",
+  "cron": [
+    { "name": "refresh", "schedule": "*/30 * * * *", "run": "node jobs/refresh.js", "timeoutMinutes": 5 }
+  ]
+}
