@@ -434,7 +434,7 @@ export class Actor {
     if (view.host) { this.tagOff = true; this.tag.style.visibility = 'hidden'; }  // the tower shows it once the floor is in view
     view.labels.append(this.tag);
     // The kit's model takes over from the stand-in when it lands; a failed load changes nothing.
-    Promise.resolve(view.turn()).then(() => (this.dead ? null : loadModelCharacter(info.look, { accent: view.colors.accent }))).then((mc) => mc && this.swapChar(mc)).catch((e) => { if (!this.dead) console.warn('character model unavailable', e); });
+    Promise.resolve(view.turn()).then(() => (this.dead ? null : loadModelCharacter(info.look, { accent: view.colors.accent, far: !!view.host }))).then((mc) => mc && this.swapChar(mc)).catch((e) => { if (!this.dead) console.warn('character model unavailable', e); });
   }
   /** Same place, same pose, same props: the viewer only sees the person get a little more real. */
   swapChar(next) {
@@ -1468,6 +1468,8 @@ export class OfficeView {
     const owned = new Set(this.owners.values()); let vacant = 0;
     for (const r of this.plan.rooms) if (r.kind === 'staff' && !owned.has(r.id) && !this.offices.has(r.id)) { this.nav.block(...deskRect(r.desk)); this.addOffice(r, { id: `free-${r.id}`, role: 'vacant', name: null }, { own: true }); vacant++; }
     if (fresh.length || vacant || !this.floorMat.map) { this.rebuildOffices(); this.bakeSoon(); this.loadFloorSets(); if (this.modelsOn) this.furnishOffices(); }
+    // The boss sees which rooms are free to hire into; a visitor doesn't. A room built in the tower learns who is looking when the page takes it over.
+    if (state.viewer && !!state.viewer.owner !== this.bossView) { this.bossView = !!state.viewer.owner; this.drawSigns(); }
     const seen = new Set();
     const mgr = state.agents.find((a) => a.role === 'manager');
     if (mgr) {
@@ -1824,6 +1826,8 @@ export class OfficeView {
       this.insetsHeldUntil = performance.now() + 600;  // whatever the page then asks for waits until the cross-fade is over
     }
     this.buildWorld(); this.bind();
+    // Up close now: the full-detail people take over from the tower's coarse ones, one by one.
+    for (const a of this.actors.values()) if (a.char.far) loadModelCharacter(a.info.look, { accent: this.colors.accent }).then((mc) => a.swapChar(mc)).catch(() => {});
     // The same light the tower gave it. Its materials are already the floor page's own, so nothing reloads or bakes again under the camera.
     this.pageLight();
   }

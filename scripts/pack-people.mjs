@@ -147,7 +147,8 @@ function packBody(name, [gender, file, roles]) {
     const a = newIndex[idx[i]], b = newIndex[idx[i + 1]], c = newIndex[idx[i + 2]];
     if (a !== b && b !== c && a !== c) wIdx.push(a, b, c);
   }
-  // Write it as one skinned mesh.
+  // Write it as one skinned mesh, in full and as a coarse copy for the rooms far down the tower.
+  const emit = (fileName, wPos, wJnt, wWgt, wSlot, wIdx) => {
   const g = glbParts();
   const vc = wPos.length / 3, tris = wIdx.length / 3;
   const posBuf = Buffer.alloc(vc * 12), jntBuf = Buffer.alloc(vc * 4), wgtBuf = Buffer.alloc(vc * 4), slotBuf = Buffer.alloc(vc * 4);
@@ -177,15 +178,41 @@ function packBody(name, [gender, file, roles]) {
   const allNodes = [...nodes, meshNode];
   const roots = [order.findIndex((n) => parent[n] === armatureRoot || !outIndex.has(parent[n]))];
   const json = {
-    asset: { version: '2.0', generator: 'pack-people.mjs' }, extensionsUsed: ['KHR_mesh_quantization'], extensionsRequired: ['KHR_mesh_quantization'],
+    asset: { version: '2.0', generator: 'pack-people.mjs' },
     scene: 0, scenes: [{ nodes: [...roots, allNodes.length - 1] }], nodes: allNodes,
     meshes: [{ name: 'person', primitives: [{ attributes: { POSITION: aPos, JOINTS_0: aJnt, WEIGHTS_0: aWgt, _SLOT: aSlot }, indices: aIdx }] }],
     skins: [{ joints: order.map((n, k) => k), inverseBindMatrices: aIbm }],
     accessors, bufferViews: g.views, buffers: [{ byteLength: g.len }],
     extras: { palette, roles: ROLES, tris },
   };
-  writeGlb(join(OUT, `${name}.glb`), json, g.bin());
+  writeGlb(join(OUT, `${fileName}.glb`), json, g.bin());
   return { vc, tris };
+  };
+  const full = emit(name, wPos, wJnt, wWgt, wSlot, wIdx);
+  // The coarse copy: vertices snapped to a grid cell by cell (one cell per role, so colours keep their edges), about 1400 triangles.
+  const collapse = (cell) => {
+    const map = new Map(), P = [], J = [], W = [], S = [], n = [], back = new Int32Array(wPos.length / 3);
+    for (let v = 0; v < wPos.length / 3; v++) {
+      const key = `${Math.floor(wPos[v * 3] / cell)},${Math.floor(wPos[v * 3 + 1] / cell)},${Math.floor(wPos[v * 3 + 2] / cell)},${wSlot[v]}`;
+      let c = map.get(key);
+      if (c === undefined) { c = P.length / 3; map.set(key, c); P.push(0, 0, 0); for (let b = 0; b < 4; b++) { J.push(wJnt[v * 4 + b]); W.push(wWgt[v * 4 + b]); } S.push(wSlot[v]); n.push(0); }
+      P[c * 3] += wPos[v * 3]; P[c * 3 + 1] += wPos[v * 3 + 1]; P[c * 3 + 2] += wPos[v * 3 + 2]; n[c]++; back[v] = c;
+    }
+    for (let c = 0; c < n.length; c++) for (let a = 0; a < 3; a++) P[c * 3 + a] /= n[c];
+    const I = [], seen = new Set();
+    for (let t = 0; t < wIdx.length; t += 3) {
+      const a = back[wIdx[t]], b = back[wIdx[t + 1]], c = back[wIdx[t + 2]];
+      if (a === b || b === c || a === c) continue;
+      const k = [a, b, c].sort((x, y) => x - y).join(',');
+      if (seen.has(k)) continue;
+      seen.add(k); I.push(a, b, c);
+    }
+    return { P, J, W, S, I };
+  };
+  let lo = 0.012, hi = 0.14, best = collapse(hi);
+  for (let i = 0; i < 12; i++) { const mid = (lo + hi) / 2, c = collapse(mid); if (c.I.length / 3 > 1500) lo = mid; else { hi = mid; best = c; } }
+  const far = emit(`${name}-far`, best.P, best.J, best.W, best.S, best.I);
+  return { ...full, farTris: far.tris };
 }
 
 /** The clips, once, for everybody: every bone sampled at 15 frames a second, rotations as small integers, a translation only where a bone really moves. */
@@ -273,9 +300,9 @@ function packClips() {
 
 let total = 0;
 for (const [name, def] of Object.entries(BODIES)) {
-  const { vc, tris } = packBody(name, def);
+  const { vc, tris, farTris } = packBody(name, def);
   const bytes = readFileSync(join(OUT, `${name}.glb`)).length;
-  total += bytes; console.log(name.padEnd(10), 'verts', vc, 'tris', tris, 'bytes', bytes);
+  total += bytes; console.log(name.padEnd(10), 'verts', vc, 'tris', tris, 'far', farTris, 'bytes', bytes);
 }
 packClips();
 console.log('clips bytes', readFileSync(join(OUT, 'clips.glb')).length, 'total', total);

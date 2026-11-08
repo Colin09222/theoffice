@@ -441,7 +441,7 @@ export class ModelCharacter {
     this.look = look; this.accent = accent; this.scale = scale; this.variant = variant;
     this.t = Math.random() * 10;
     this.anim = 'stand'; this.blend = Object.fromEntries(ANIMS.map((n) => [n, 0]));
-    this.isModel = true;
+    this.isModel = true; this.far = !!asset.far;
     const model = utils.clone(asset.scene);
     this.model = model;
     this.group.add(model);
@@ -684,7 +684,7 @@ export class ModelCharacter {
  */
 export async function loadModelCharacter(look, opts = {}) {
   const variant = variantFor(look);
-  const [asset, utils, clips] = await Promise.all([loadPersonAsset(variant), skeletonUtils(), personClips()]);
+  const [asset, utils, clips] = await Promise.all([loadPersonAsset(variant, { far: !!opts.far }), skeletonUtils(), personClips()]);
   return new ModelCharacter(asset, utils, clips, look, { ...opts, variant });
 }
 

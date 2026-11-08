@@ -75,19 +75,20 @@ export function place(tpl, { x = 0, y = 0, z = 0, ry = 0, scale = 1, tint = null
 const peopleCache = new Map();
 /**
  * One person's template: a skinned mesh with the role of each vertex (skin, hair, top...) in `_slot`, plus the rig, its palette and its
- * bones' bind pose. Variants: male-a .. male-f, female-a .. female-f. Packed by scripts/pack-people.mjs; see /models/NOTICE.txt.
+ * bones' bind pose. Variants: male-a .. male-f, female-a .. female-f; `far` picks the coarse copy for floors seen across the tower. Packed by scripts/pack-people.mjs; see /models/NOTICE.txt.
  */
-export async function person(variant) {
-  if (!peopleCache.has(variant)) {
-    peopleCache.set(variant, fetchGLTF(`people/${variant}.glb`).then((gltf) => {
+export async function person(variant, { far = false } = {}) {
+  const key = far ? `${variant}-far` : variant;
+  if (!peopleCache.has(key)) {
+    peopleCache.set(key, fetchGLTF(`people/${key}.glb`).then((gltf) => {
       let mesh = null;
       gltf.scene.traverse((o) => { if (o.isSkinnedMesh) mesh = o; });
       const slots = new Uint8Array(mesh.geometry.attributes._slot.count);
       for (let i = 0, a = mesh.geometry.attributes._slot.array; i < slots.length; i++) slots[i] = a[i * 4];
-      return { scene: gltf.scene, mesh, slots, extras: gltf.parser.json.extras, variant };
-    }).catch((e) => { peopleCache.delete(variant); throw e; }));
+      return { scene: gltf.scene, mesh, slots, extras: gltf.parser.json.extras, variant, far };
+    }).catch((e) => { peopleCache.delete(key); throw e; }));
   }
-  return peopleCache.get(variant);
+  return peopleCache.get(key);
 }
 let clips = null;
 /** The walk, the idle and the gestures, one file for everyone on the shared rig. */
