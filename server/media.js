@@ -4,6 +4,13 @@ import { ProviderError, scrub } from './llm.js';
 const MAX_RESPONSE = 40 * 1024 * 1024;
 export const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const ASPECTS = new Set(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3']);
+const MAX_VIDEO_BYTES = 8 * 1024 * 1024;
+/** An mp4 or a webm, from its first bytes. */
+export function sniffVideo(b) {
+  if (b.length > 12 && b.toString('latin1', 4, 8) === 'ftyp') return { mime: 'video/mp4', ext: 'mp4' };
+  if (b.length > 4 && b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return { mime: 'video/webm', ext: 'webm' };
+  return null;
+}
 
 /** The real type of some image bytes, from their first bytes and nothing else. A name or a header can lie. */
 export function sniffImage(b) {
@@ -33,8 +40,43 @@ export function createMedia({ cfg, tools, httpFetch = fetch }) {
     return j;
   }
   const usageOf = (j, fallbackUsd) => ({ prompt: j.usage?.prompt_tokens ?? 0, completion: j.usage?.completion_tokens ?? 0, cost: typeof j.usage?.cost === 'number' ? j.usage.cost : fallbackUsd });
+  // The video API is a job: submit, poll until it settles, then fetch the bytes. Each call has its own deadline inside the whole job's.
+  async function call(method, path, body, signal, { bytes = false } = {}) {
+    if (!cfg.openrouterKey) throw new ProviderError('OpenRouter is not set up on this server.', { status: 401 });
+    let res;
+    try {
+      res = await httpFetch(`${cfg.openrouterBase}${path}`, { method, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000), headers: { authorization: `Bearer ${cfg.openrouterKey}`, ...(body ? { 'content-type': 'application/json' } : {}), 'x-title': 'The Office' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    } catch (e) { if (signal?.aborted) throw e; throw new ProviderError('Could not reach the model provider.', { retryable: true }); }
+    if (bytes && res.ok) {
+      const b = Buffer.from(await res.arrayBuffer());
+      if (b.length > MAX_VIDEO_BYTES) throw new ProviderError('The video came back too large.');
+      return b;
+    }
+    const raw = await res.text().catch(() => '');
+    let j = null; try { j = JSON.parse(raw); } catch { /* handled below */ }
+    if (!res.ok || !j || j.error) throw new ProviderError(`Model provider said ${res.status}${j?.error?.message ? `: ${scrub(j.error.message, cfg)}` : ''}`, { status: res.status, retryable: res.status === 429 || res.status >= 500 });
+    return j;
+  }
+  const v = tools.video || {};
   return {
-    image: tools.image, review: tools.review,
+    image: tools.image, review: tools.review, video: v.model ? v : null,
+    async generateVideo({ prompt, seconds, signal }) {
+      if (!v.model) throw new ProviderError('Video making is not set up here.');
+      const job = await call('POST', '/videos', { model: v.model, prompt, duration: seconds, size: v.size || '720x1280', generate_audio: !!v.audio }, signal);
+      if (!job.id) throw new ProviderError('The video model did not start a job.');
+      const until = Date.now() + (v.timeoutMs || 420000);
+      let j = job;
+      while (!['completed', 'failed', 'cancelled', 'expired'].includes(j.status)) {
+        if (Date.now() > until) throw new ProviderError('The video took too long to make.');
+        await new Promise((r, rej) => { const t = setTimeout(r, v.pollMs || 5000); signal?.addEventListener('abort', () => { clearTimeout(t); rej(signal.reason); }, { once: true }); });
+        j = await call('GET', `/videos/${encodeURIComponent(job.id)}`, null, signal);
+      }
+      if (j.status !== 'completed') throw new ProviderError(`The video model said the job ${j.status}${j.error ? `: ${scrub(String(j.error?.message || j.error), cfg).slice(0, 160)}` : ''}.`);
+      const bytes = await call('GET', `/videos/${encodeURIComponent(job.id)}/content`, null, signal, { bytes: true });
+      const type = sniffVideo(bytes);
+      if (!type) throw new ProviderError('The video model returned something that is not a video.');
+      return { bytes, ...type, usage: { prompt: 0, completion: 0, cost: typeof j.usage?.cost === 'number' ? j.usage.cost : (v.usdPerSecond || 0.1) * seconds } };
+    },
     async generateImage({ prompt, aspect, signal }) {
       const aspect_ratio = ASPECTS.has(aspect) ? aspect : '1:1';
       const j = await post({ model: tools.image.model, modalities: ['image', 'text'], image_config: { aspect_ratio }, messages: [{ role: 'user', content: prompt }] }, signal);
@@ -61,8 +103,14 @@ export function createMedia({ cfg, tools, httpFetch = fetch }) {
 
 // AI_MODE=mock: a real one-pixel PNG, no key and no spend.
 const TINY = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEAQH/rcg7WQAAAABJRU5ErkJggg==', 'base64');
+// The smallest well-formed mp4 header a browser will name as one. Nothing plays it; nothing pays for it either.
+const TINY_MP4 = Buffer.from('AAAAHGZ0eXBpc29tAAACAGlzb21pc28ybXA0MQAAAAhmcmVl', 'base64');
 export const createMockMedia = (tools) => ({
-  image: tools.image, review: tools.review,
+  image: tools.image, review: tools.review, video: tools.video?.model ? tools.video : null,
+  async generateVideo({ prompt }) {
+    if (/\[videofail\]/.test(prompt)) throw new ProviderError('Model provider said 502: the upstream generation failed', { status: 502 });
+    return { bytes: TINY_MP4, mime: 'video/mp4', ext: 'mp4', usage: { prompt: 0, completion: 0, cost: 0.42 } };
+  },
   async generateImage() { return { bytes: TINY, mime: 'image/png', ext: 'png', usage: { prompt: 10, completion: 10, cost: 0.04 } }; },
   async reviewDesign() { return { text: '1. The heading is timid. Make it larger.\n2. None seen.\n3. FIX FIRST.', usage: { prompt: 100, completion: 40, cost: 0.01 } }; },
 });

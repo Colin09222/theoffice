@@ -12,6 +12,7 @@ import { LANES } from './prompts.js';
 import { OrderError } from './orders.js';
 import { ModeError } from './modes.js';
 import { HelpError, HELP_LIMITS, flatText } from './help.js';
+import { BusinessError } from './business.js';
 import { LAYOUTS, TONES, VIBES } from '../public/js/looks.js';
 
 const LINK_SCAN_CHARS = 24 * 1000 * 1000, MAX_LINKS_CHECKED = 100;
@@ -105,6 +106,34 @@ const DEFS = {
   list_standing_orders: fn('list_standing_orders', 'List this floor\'s standing orders with their ids, schedules and next run.', {}, []),
   cancel_standing_order: fn('cancel_standing_order', 'Delete a standing order the boss no longer wants.', { id: { type: 'integer', description: 'Order id from list_standing_orders' } }),
   ask_buddehbot: fn('ask_buddehbot', 'Ask buddehbot, the building owner\'s assistant, for guidance when you or your staff are truly blocked and the boss can\'t settle it. Don\'t wait for the answer: carry on with anything else you can do. Your own words only: no pasted pages, files or private details.', { question: S(`What you need to know, up to ${HELP_LIMITS.question} characters`), what_was_tried: S(`What you already tried, up to ${HELP_LIMITS.tried} characters`) }),
+  // Business mode: the guided Idea, Build, Customers, Launch journey (server/business.js). Picking, ad money and approving are the boss's own buttons, never a tool.
+  start_business: fn('start_business', 'Start Business mode when the boss asks you to find them a business idea and build it: the researcher finds 2 or 3 ideas with real research, the boss picks one, the team builds it in four tracks, makes the ads, and launches. Use it only because the boss asked.', {
+    wish: S('What the boss said they want, if anything: a field, a budget of time, a kind of customer'),
+  }, []),
+  business_action: fn('business_action', 'In Business mode, do what the boss just asked: more_ideas (they want different idea cards), pick (they named a card: idea is its number, from 1), redo_ads (they want the ads changed: say how in notes), skip_ads (launch without ads for now). Use it only because the boss asked.', {
+    action: { type: 'string', enum: ['more_ideas', 'pick', 'redo_ads', 'skip_ads'] }, idea: { type: 'integer', description: 'For pick: the card number, from 1' }, notes: S('What the boss wants instead, in their words'),
+  }, ['action']),
+  request_ad_spend: fn('request_ad_spend', 'In Business mode at launch, file the ad money the boss chose as a request. It needs the boss\'s own Approve click, then goes to the building manager. It never spends anything itself.', {
+    amount: { type: 'integer', description: 'Exactly the amount the boss chose' }, audience: S('Who the ads are shown to, from the campaign plan'),
+    ads: { type: 'array', items: { type: 'string' }, description: 'The ad file names in the project\'s ads folder, such as ad-1.png' },
+  }, ['amount', 'audience']),
+  propose_ideas: fn('propose_ideas', 'Business mode idea task only: pin your 2 or 3 idea cards up for the boss. Every link must be a page you opened or found in a search on this floor, and every figure on a card must be quoted in what one of its links shows.', {
+    ideas: { type: 'array', description: 'The idea cards', items: { type: 'object', properties: {
+      name: S('A short name for the business'), who_pays: S('Who pays for it'), problem: S('Their problem, in their terms'), what_you_sell: S('What you would sell them'), why_now: S('Why now'),
+      evidence: { type: 'array', description: '2 to 4 links that back the card up', items: { type: 'object', properties: { url: S('http(s) URL you opened or found'), title: S('Page title'), shows: S('What this page shows, with any figure you use quoted') }, required: ['url', 'shows'] } },
+      revenue: { type: 'object', description: 'Optional. Only with every assumption stated and sourced', properties: { low: { type: 'number' }, high: { type: 'number' }, per: { type: 'string', enum: ['month', 'year'] }, assumptions: { type: 'array', items: { type: 'object', properties: { text: S('The assumption'), source_url: S('The page it comes from') }, required: ['text', 'source_url'] } } } },
+    }, required: ['name', 'who_pays', 'problem', 'what_you_sell', 'why_now', 'evidence'] } },
+    markets_checked: { type: 'array', items: { type: 'string' }, description: 'The markets you looked at' },
+    compared: { type: 'array', description: 'How the ideas compared, including any you dropped', items: { type: 'object', properties: { idea: S('Idea'), verdict: S('Why it made the cut or didn\'t') }, required: ['idea', 'verdict'] } },
+  }, ['ideas', 'markets_checked', 'compared']),
+  save_ad_plan: fn('save_ad_plan', 'Business mode ads task only: save the ad words and the campaign plan the boss sees on the floor.', {
+    headline: S('Up to about 40 characters'), primary_text: S('Up to about 125 characters'), goal: S('What the campaign is for, such as sign-ups for the notify-me list'), who: S('Who it is shown to'),
+    where: { type: 'array', items: { type: 'string' }, description: 'Where it runs, Facebook and Instagram first' }, test_a: S('Version A of the test'), test_b: S('Version B of the test'), test_measure: S('How the winner is picked'),
+  }, ['headline', 'primary_text', 'goal', 'who', 'where', 'test_a', 'test_b']),
+  make_video_ad: fn('make_video_ad', 'Business mode ads task only: make one short vertical video ad with a video model, saved in the project\'s ads folder with its caption. Costs real money, so make each one count.', {
+    project: S('Project slug'), name: S('File name without extension, such as video-1'), prompt: S('What the video shows, up to 1000 characters. No on-screen text: the caption is added separately'),
+    caption: S('The one caption line people read with the sound off'), seconds: { type: 'integer', description: 'Length, 6 to 10 seconds' },
+  }, ['name', 'prompt', 'caption']),
 };
 
 // A refusal quotes the link, and reading a draft back shows it again. Neither means anyone has seen the page.
@@ -126,6 +155,8 @@ const mediaOn = (cfg) => !!(cfg.openrouterKey || cfg.mediaMock);
 export function toolAvailable(name, cfg, role) {
   if (name === 'web_search') return !!cfg.webSearchKey || (serverSearch(cfg) && (role === undefined ? false : SEARCH_ROLES.has(role)));
   if (name === 'generate_image' || name === 'review_design' || name === 'make_logo') return mediaOn(cfg);
+  if (name === 'make_video_ad') return mediaOn(cfg);
+  if (['start_business', 'business_action', 'request_ad_spend'].includes(name)) return role === undefined || role === 'manager';
   if (name === 'check_domain' || name === 'request_domain') return domainsConfigured(cfg);
   if (name === 'ios_start' || name === 'ios_request') return !!cfg.iosEnabled;
   // Only ever the manager: anyone else who is stuck says so in their report, and the manager decides whether to ask.
@@ -587,6 +618,51 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       c.say('thinking', 'Waiting to hear from buddehbot', 'asked buddehbot for help');
       return `Sent to buddehbot as #${r.id} (${r.used} of ${cfg.helpPerFloorDay} today). Do not wait for it: carry on with anything else you can do, and tell the boss you have asked. An answer arrives as a new message labelled as guidance from buddehbot. If nothing comes within ${cfg.helpTimeoutMin} minutes it expires and you will be told.`;
     },
+    // Business mode. The journey's own steps are engine.business's; these only check who is asking and turn its refusals into words for the model.
+    start_business(c, a) {
+      bossAsked(c);
+      const r = biz(() => engine.business.start(c.floor, { wish: str(a, 'wish', 300, false), by: 'manager' }));
+      return r.already ? 'Business mode is already on for this floor. Carry on with the step it is at.' : 'Business mode is on. The researcher is finding ideas now and the floor shows the four steps. Tell the boss what happens next in two or three lines.';
+    },
+    business_action(c, a) {
+      bossAsked(c);
+      return biz(() => engine.business.action(c.floor, { action: str(a, 'action', 20), idea: a.idea, notes: str(a, 'notes', 300, false) }, { by: 'manager' }));
+    },
+    request_ad_spend(c, a) { return biz(() => engine.business.requestAdSpend(c, a)); },
+    propose_ideas(c, a) {
+      const unseen = (urls) => {
+        const key = (u) => String(u).toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/[#?].*$/, '').replace(/\/+$/, '');
+        return stillUnseen(c.floor.id, '\u0000', urls.map(key));
+      };
+      return biz(() => engine.business.proposeIdeas(c, a, { unseen }));
+    },
+    save_ad_plan(c, a) { return biz(() => engine.business.saveAdPlan(c, a)); },
+    async make_video_ad(c, a) {
+      if (!engine.media?.generateVideo) throw new WorkspaceError('video making is not available');
+      const v = biz(() => engine.business.videoTarget(c, a));
+      const prompt = `${v.prompt || 'A short, bright, vertical advert that shows the idea in use.'} Vertical 9:16, ${v.seconds} seconds, smooth simple motion, no on-screen text, no logos, no real people or brands.`;
+      outbound(c, prompt, 'video description');
+      const estimate = (engine.media.video?.usdPerSecond || 0.1) * v.seconds;
+      roomFor(c, estimate, 'openrouter');
+      c.say('typing', `Filming ${v.name}`, `is making a video ad: ${v.name}`, { project: v.project });
+      let vid;
+      try { vid = await engine.brokerCall(c, { provider: 'openrouter', usd: estimate, model: engine.media.video.model, kind: 'video' }, () => engine.media.generateVideo({ prompt, seconds: v.seconds, signal: c.signal })); } catch (e) {
+        if (c.signal?.aborted || !(e instanceof ProviderError)) throw e;
+        engine.log('warn', 'video ad failed', { status: e.status, err: scrub(e.message, cfg) });
+        return `The AI video didn't work: ${plainProviderText(e)}. ${engine.business.videoFailed(c, v, plainProviderText(e))}`;
+      }
+      const at = `projects/${v.project}/ads/${v.name}`;
+      const saved = writeBinaryFile(db, c.floor.id, `${at}.${vid.ext}`, vid.bytes, c.agent.id, cfg.quotaBytes);
+      const stamp = (s) => `00:00:${String(s).padStart(2, '0')}.000`;
+      writeFile(db, c.floor.id, `${at}.vtt`, `WEBVTT\n\n${stamp(0)} --> ${stamp(v.seconds)}\n${v.caption}\n`, c.agent.id, cfg.quotaBytes);
+      engine.business.videoSaved(c, v);
+      engine.emitProject(c.floor.id, v.project);
+      return `Made ${saved.path} (${Math.ceil(saved.size / 1024)} KB, ${v.seconds} seconds) with its caption in ${at}.vtt.`;
+    },
+  };
+  const biz = (fn) => {
+    if (!engine.business) throw new WorkspaceError('Business mode is not available here');
+    try { return fn(); } catch (e) { if (e instanceof BusinessError) throw new WorkspaceError(e.message); throw e; }
   };
 
   return {
@@ -598,6 +674,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (!args || typeof args !== 'object' || Array.isArray(args)) return 'Error: arguments must be an object.';
       try {
         const r = await handlers[name](ctx, args);
+        // The idea step shows the researcher's searches and pages as its work.
+        if ((name === 'web_search' || name === 'fetch_url') && engine.business) engine.business.sawTool(ctx, name, args);
         // A file to show comes back as { text, files }; everything else is words.
         return r && typeof r === 'object' && Array.isArray(r.files) ? { text: String(r.text), files: r.files } : String(r);
       } catch (e) {

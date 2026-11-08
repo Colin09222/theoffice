@@ -8,6 +8,7 @@ import { createTools, toolDefs, toolsForRole, publicUrl, wrapUntrusted, mentions
 import { createDomainBroker } from './domains.js';
 import { createIos } from './ios.js';
 import { createMedia, createMockMedia } from './media.js';
+import { loadBusinessConfig } from './business.js';
 import { createSearch, createMockSearch } from './search.js';
 import { appLabel, appOrigin } from './apps.js';
 import { formCount } from './launch.js';
@@ -55,7 +56,8 @@ export class Engine {
     this.domains = createDomainBroker({ db, cfg, engine: this, client: namecheap });
     this.ios = createIos({ db, cfg, engine: this });
     this.people = createPeople(this);
-    const brokers = models.tools || {};
+    // Video ads (Business mode) use the image key and ledger; their model and pricing live in config/business.json.
+    const brokers = { ...(models.tools || {}), video: models.tools?.video || loadBusinessConfig().video };
     // A mock building never reaches a paid broker, whatever keys happen to be set.
     const real = cfg.aiMode !== 'mock';
     this.media = media || (cfg.mediaMock ? createMockMedia(brokers) : real && cfg.openrouterKey && brokers.image ? createMedia({ cfg, tools: brokers, httpFetch: httpFetch || fetch }) : null);
@@ -339,6 +341,7 @@ export class Engine {
       ...(this.domains.enabled ? [`Domains: ${domainLines.length ? domainLines.join(' | ') : 'none'}. Limit: ${this.cfg.domainsPerFloorDay} a day, and only the boss's click buys one.`] : []),
       ...(this.help && this.cfg.helpEnabled !== false ? [this.help.stateLine(floor.id)] : []),
       ...(this.modes ? [this.modes.stateLine(floor.id)] : []),
+      ...(this.business?.active(floor.id) ? [this.business.stateLine(floor.id)] : []),
     ].join('\n');
     // 'office' notices (outage, stop) are for the boss only. If they reached the model it would lose the thread.
     // Reports stay out too: they quote what was found on pages, and the manager has the facts in the state message.
@@ -360,6 +363,7 @@ export class Engine {
     const toReview = tasks.filter((t) => t.status === 'review');
     return { messages: out, meta: {
       kind: 'manager', setup: !floor.name, floorId: floor.id, floorSlug: floor.slug, step: 0, lastBoss: bossMsgs[bossMsgs.length - 1]?.text || '', bossFiles: out.filter((m) => m.role === 'user' && m.files).flatMap((m) => m.files), allBoss: bossMsgs.map((m) => m.text).join(' '),
+      business: this.business?.active(floor.id) ? { ...this.business.brief(floor.id), note: last?.role === 'note' && last.text.startsWith('Business mode:') ? last.text : '' } : null,
       autopilot: last?.role === 'note' && last.text.startsWith('Work mode:') && this.modes ? this.modes.brief(floor.id) : null,
       goalNeeded: last?.role === 'note' && last.text.startsWith('Goal needed:'), needsGoal: !!this.modes?.needsGoal(floor.id),
       isFreshBoss: last?.role === 'boss', answered: last?.role === 'note' && /answered/.test(last.text), guidance: last?.role === 'help' ? last.text : '', helpDeadEnd: last?.role === 'note' && /buddehbot/.test(last.text),
@@ -373,7 +377,7 @@ export class Engine {
     const mgr = get(this.db, 'SELECT * FROM agents WHERE id=?', agentId);
     const signal = ctl.signal;
     const { messages, meta } = this.managerContext(floor, mgr);
-    const names = toolsForRole('manager');
+    const names = [...toolsForRole('manager'), ...(this.business?.toolsFor(floorId, 'manager') || [])];
     const defs = toolDefs(names, this.cfg, 'manager');
     const ctx = this.toolCtx(floor, mgr, null, names);
     ctx.signal = signal;
@@ -382,6 +386,7 @@ export class Engine {
     const newestBoss = get(this.db, "SELECT MAX(id) n FROM messages WHERE floor_id=? AND role='boss'", floorId).n ?? 0;
     ctx.bossTurn = !!meta.isFreshBoss || newestBoss > (this.bossRead.get(floorId) ?? Infinity);
     this.bossRead.set(floorId, newestBoss);
+    meta.bossTurn = ctx.bossTurn;
     // The boss's answer to the manager's own question is their word too, for the work-mode goal they picked.
     ctx.bossAnswered = !ctx.bossTurn && !!meta.answered;
     // Woken to ask the boss for a work-mode goal: that turn asks, and hands out no work.
@@ -468,7 +473,7 @@ export class Engine {
     let task = get(this.db, 'SELECT * FROM tasks WHERE id=?', taskId);
     const signal = ctl.signal;
     const roleCfg = this.models.all[agent.role];
-    const names = toolsForRole(agent.role);
+    const names = [...toolsForRole(agent.role), ...(this.business?.toolsFor(floorId, agent.role, task) || [])];
     const defs = toolDefs(names, this.cfg, agent.role);
     const ctx = this.toolCtx(floor, agent, task, names);
     ctx.signal = signal;
@@ -796,6 +801,7 @@ export class Engine {
   filePurchase(floor, agent, { item, price, why, link }) {
     const r = run(this.db, 'INSERT INTO purchases (floor_id,agent_id,item,price,why,link,created_at) VALUES (?,?,?,?,?,?,?)', floor.id, agent.id, item, price, why, link, this.now());
     this.emit(floor.id, 'purchase', get(this.db, 'SELECT * FROM purchases WHERE id=?', Number(r.lastInsertRowid)), { ownerOnly: true });
+    return Number(r.lastInsertRowid);
   }
 
   // ---- boss controls ----

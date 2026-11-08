@@ -32,6 +32,7 @@ import { installPurchases } from './purchases.js';
 import { budgetReport } from './budget.js';
 import { installCustomise } from './customise.js';
 import { installModes } from './modes.js';
+import { installBusiness } from './business.js';
 import { absoluteMeta } from './metaabs.js';
 
 const BASE = '/theoffice';
@@ -547,6 +548,11 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     if (!pr) throw new HttpError(404, 'not_found');
     json(res, 200, { url: previewUrl(f, pr.slug) });
   });
+  // The boss's live look at a project while it is being built: its working files, not the published ones. Signed for this floor and project only.
+  const workspacePreviewUrl = (f, slug) => {
+    const exp = Math.floor(now() / 1000) + 3600;
+    return `${BASE}/f/${f.slug}/${slug}/~w${exp}.${A.signPreview(secret, f.id, `w:${slug}`, exp)}/`;
+  };
   const previewUrl = (f, slug) => {
     const exp = Math.floor(now() / 1000) + 3600;
     const token = `~p${exp}.${A.signPreview(secret, f.id, slug, exp)}`;
@@ -677,8 +683,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
 
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
-  const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext)].filter(Boolean);
+  const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext)].filter(Boolean);
   // Their timers run with the engine's: started by whoever starts the engine, stopped on close.
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
@@ -723,6 +729,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (!slugPattern.test(fslug || '') || !slugPattern.test(pslug || '')) return miss();
     const f = get(db, 'SELECT * FROM floors WHERE slug=?', fslug);
     if (!f || f.status !== 'active') return miss();
+    if (rest[0]?.startsWith('~w')) return serveWorking(req, res, f, pslug, rest, SITE, miss);
     const pr = get(db, 'SELECT * FROM projects WHERE floor_id=? AND slug=? AND published_at IS NOT NULL', f.id, pslug);
     if (!pr) return miss();
     // Private projects answer exactly like missing ones, unless a valid owner session or signed link is present.
@@ -764,6 +771,25 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     const cors = /^text\/html/.test(hit.type) ? {} : { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' };
     res.writeHead(200, { ...SITE, ...cors, 'content-type': hit.type });
     res.end(req.method === 'HEAD' ? undefined : hit.body);
+  }
+  // Work in progress, for the boss's live preview: the drive's copy of a project, under the same sandbox as any published page, never counted as a visit.
+  function serveWorking(req, res, f, slug, rest, SITE, miss) {
+    const m = rest[0].match(/^~w(\d{1,12})\.([A-Za-z0-9_-]{20,64})$/);
+    if (!m) return miss();
+    const exp = Number(m[1]);
+    if (exp * 1000 < now() || !A.safeEqual(m[2], A.signPreview(secret, f.id, `w:${slug}`, exp))) return miss();
+    const tail = rest.slice(1);
+    const lib = sharedAsset(tail);
+    if (lib) { res.writeHead(200, { ...SITE, 'content-type': lib.type, 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' }); return res.end(req.method === 'HEAD' ? undefined : lib.body); }
+    let path = tail.filter((s, i) => !(s === '' && i === tail.length - 1)).join('/');
+    if (path === '' || req.url.split('?')[0].endsWith('/')) path = path ? `${path}/index.html` : 'index.html';
+    let safe; try { safe = cleanPath(`projects/${slug}/${path}`, { binary: true }); } catch { return miss(); }
+    const file = readFile(db, f.id, safe);
+    if (!file) return miss();
+    const type = mimeOf(safe);
+    const cors = /^text\/html/.test(type) ? {} : { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' };
+    res.writeHead(200, { ...SITE, ...cors, 'content-type': type });
+    res.end(req.method === 'HEAD' ? undefined : file.content);
   }
   // The boss's Stripe link lives on the server, so a hijacked bot can't swap the money for its own: pages can only link here.
   function servePay(res, pr, head) {

@@ -79,9 +79,90 @@ function modeSaid(boss) {
   return { mode: 'hours', start: pad(start, m[2]), end: pad(end, m[4]), days: DAYS_SAID.find(([re]) => re.test(boss))[1] };
 }
 
+// Business mode (server/business.js), scripted. The ideas cite only pages the mock search really returned on this floor.
+const BUSINESS_ASK = /\bbusiness idea\b/i;
+const IDEA_LINKS = { findings: 'https://example.com/findings', dogs: 'https://example.org/dog-grooming-at-home', meals: 'https://example.org/meal-prep-for-shift-workers' };
+function ideaCards(unsourced) {
+  const ev = (k, shows) => ({ url: IDEA_LINKS[k], title: k, shows });
+  return {
+    ideas: [
+      { name: 'Doorstep Dog Groom', who_pays: 'Busy dog owners', problem: 'Grooming salons are booked up for weeks', what_you_sell: unsourced ? 'Home grooming visits in a $2 billion market' : 'Home grooming visits booked online', why_now: 'More people work from home and want services that come to them',
+        evidence: [ev('findings', 'Small services that come to you tend to do well'), ev('dogs', 'Owners complain that salons have long waits')],
+        revenue: { low: 2000, high: 6000, per: 'month', assumptions: [{ text: 'Between 20 and 60 visits a month at a planned price', source_url: IDEA_LINKS.dogs }] } },
+      { name: 'Shift Supper', who_pays: 'Nurses and other night-shift workers', problem: 'Nothing healthy is open when their shift ends', what_you_sell: 'A weekly box of ready meals for the night shift', why_now: 'Meal prep is popular and shift work is not going away',
+        evidence: [ev('meals', 'Shift workers ask for meals that suit odd hours'), ev('findings', 'Small things that work tend to do well')] },
+      { name: 'Night Desk Notes', who_pays: 'Shift supervisors', problem: 'Handover notes get lost between shifts', what_you_sell: 'A simple handover notebook app', why_now: 'Teams already share notes on their phones',
+        evidence: [ev('meals', 'Night-shift teams describe messy handovers'), ev('findings', 'Simple tools that do one job well')] },
+    ],
+    markets_checked: ['Pet services at home', 'Meals for shift workers'],
+    compared: [{ idea: 'Doorstep Dog Groom', verdict: 'Clear demand and simple to start' }, { idea: 'Shift Supper', verdict: 'Real need, harder to deliver' }, { idea: 'Dog cafe', verdict: 'Dropped: it needs premises' }],
+  };
+}
+const OFFER = '# The offer\n\nHome grooming visits, booked online. Planned price: $45 a visit (planned, not final).\n\n- Comes to you\n- No salon wait\n- Calm, one dog at a time\n\nNot open yet: join the notify-me list.\n';
+const PRICES = '# Rival prices\n\n- Salon A: $60 a groom (https://example.org/dog-grooming-at-home)\n- Mobile van B: could not confirm a price\n';
+function businessManager(meta, boss) {
+  const b = meta.business;
+  // A boss line that arrived while another turn was running is still theirs to answer.
+  const fresh = meta.isFreshBoss || !!meta.bossTurn;
+  if (fresh && !b && BUSINESS_ASK.test(boss)) {
+    if (meta.step === 0) return { toolCalls: [call('start_business', { wish: boss.replace(/^.*?build it[:.]?\s*/i, '') })] };
+    return { content: 'Business mode is on, boss. The researcher is out looking for ideas now, and the cards will appear on the floor.' };
+  }
+  if (!b) return null;
+  if (fresh) {
+    if (/other ideas/i.test(boss)) return meta.step === 0 ? { toolCalls: [call('business_action', { action: 'more_ideas', notes: boss })] } : { content: 'Fresh ideas are on their way, boss.' };
+    if (/skip ads/i.test(boss)) {
+      if (meta.step === 0) return { toolCalls: [call('business_action', { action: 'skip_ads' })] };
+      if (meta.step === 1) return { toolCalls: [call('launch_report', { project: b.project, headline: 'It is live.', next_steps: 'Send the link to ten people who have this problem.' })] };
+      return { content: 'Launched without ads, boss. We can make some any time.' };
+    }
+    if (/change the ads/i.test(boss)) return meta.step === 0 ? { toolCalls: [call('business_action', { action: 'redo_ads', notes: boss })] } : { content: 'The team is remaking the ads now.' };
+    if (/^let's go with/i.test(boss)) return { content: 'Great pick, boss. The four tracks are lighting up on the floor now.' };
+    if (BUSINESS_ASK.test(boss)) return { content: 'On it, boss. The researcher is out looking, and the cards will appear on the floor.' };
+    return { content: `Good question, boss. ${b.step === 'idea' ? 'Each card shows who pays, their problem and the pages it came from.' : 'The tracks on the floor show where everything stands, live.'}` };
+  }
+  // At launch it goes by where things stand, not by which note came last: a turn already running can swallow the note.
+  if (b.step === 'launch' && !b.reported && !fresh) {
+    const calls = [];
+    if (b.budget > 0 && !b.adSpend) calls.push(call('request_ad_spend', { amount: b.budget, audience: 'Dog owners nearby who work from home', ads: ['ad-1.png', 'video-1.mp4'] }));
+    calls.push(call('launch_report', { project: b.project, headline: 'It is live.', next_steps: 'Share the ads and the link with ten people who have this problem.' }));
+    if (meta.step < calls.length) return { toolCalls: [calls[meta.step]] };
+    return { content: b.budget > 0 && !b.adSpend ? 'The ad request is on the floor for your one click, boss. After that it is queued for the building manager.' : 'We are live, boss. The ads are on the floor to share.' };
+  }
+  if (b.note && !fresh) {
+    return { content: 'Business mode, boss: the team is on the next step. Ask me anything.' };
+  }
+  return null;
+}
+function businessStaff(meta) {
+  const { role, task } = meta;
+  const b = task.brief || '';
+  if (!/^Business mode/.test(b)) return null;
+  const p = task.project || 'project';
+  if (/propose_ideas/.test(b)) {
+    const bad = /\[unsourced\]/.test(b);
+    return [call('web_search', { query: 'dog grooming at home' }), call('web_search', { query: 'meal prep for shift workers' }), ...(bad ? [call('propose_ideas', ideaCards(true))] : []), call('propose_ideas', ideaCards(false))];
+  }
+  if (/picture ads/.test(b)) return [call('generate_image', { prompt: 'A friendly illustrated advert', name: 'ad-1', project: p, directory: 'ads', aspect: '1:1' }), call('generate_image', { prompt: 'A tall illustrated advert', name: 'ad-2', project: p, directory: 'ads', aspect: '9:16' })];
+  if (/save_ad_plan/.test(b)) {
+    const fail = /\[videofail\]/.test(meta.allBoss || '') ? ' [videofail]' : '';
+    return [call('save_ad_plan', { headline: 'Grooming that comes to you', primary_text: 'Doorstep Dog Groom brings the salon to your door. Join the notify-me list.', goal: 'Sign-ups for the notify-me list', who: 'Dog owners nearby who work from home', where: ['Facebook', 'Instagram'], test_a: 'Headline: Grooming that comes to you', test_b: 'Headline: No more salon waits', test_measure: 'More sign-ups per view' }),
+      call('make_video_ad', { project: p, name: 'video-1', prompt: `A happy dog being groomed at home${fail}`, caption: 'Grooming that comes to you', seconds: 6 }),
+      call('make_video_ad', { project: p, name: 'video-2', prompt: `A calm grooming visit on a doorstep${fail}`, caption: 'Join the notify-me list', seconds: 8 })];
+  }
+  if (/Record the site/.test(b)) return [];
+  if (/notes\/look\.md/.test(b) && role !== 'builder') return [call('write_file', { path: `projects/${p}/style.css`, content: CSS }), call('write_file', { path: `projects/${p}/notes/look.md`, content: '# The look\n\nWarm paper and one bold colour.\n' })];
+  if (/notes\/offer\.md/.test(b) && role !== 'builder') return [call('write_file', { path: `projects/${p}/notes/offer.md`, content: OFFER })];
+  if (/notes\/prices\.md/.test(b) && role !== 'builder') return [call('write_file', { path: `projects/${p}/notes/prices.md`, content: PRICES })];
+  return null;
+}
+
 function managerStep(meta, messages = []) {
   const boss = meta.lastBoss || '';
   const slug = meta.slugFor(boss);
+  // Business mode comes first: "build it" would otherwise set off an ordinary plan.
+  const biz = businessManager(meta, boss);
+  if (biz) return biz;
   // A company made by talking. It comes before everything else: nothing else makes sense until there is a company.
   if (meta.setup && meta.isFreshBoss && !meta.toReview.length) {
     const called = boss.match(/called ([A-Z][\w' -]{1,40}?)(?:[.,!]|$)/)?.[1];
@@ -193,6 +274,8 @@ function managerStep(meta, messages = []) {
 
 function staffStep(meta) {
   const { role, task, step, floorSlug } = meta;
+  const biz = businessStaff(meta);
+  if (biz) return step < biz.length ? { toolCalls: [biz[step]] } : { content: `Finished "${task.title}".` };
   const p = task.project || 'project';
   const dir = `projects/${p}`;
   const b = task.brief;
