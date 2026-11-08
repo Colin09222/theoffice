@@ -269,7 +269,7 @@ export function createServers({ db, cfg, engine, httpFetch = fetch }) {
       if (r?.status === 'removing') throw new WorkspaceError('the old server is still being cleared away. Try again in a minute.');
       if (r?.status === 'awaiting_boss') return 'Still waiting on the boss\'s yes for this server.';
       const built = collect(c.floor.id, project);
-      if (!r || r.status !== 'approved') return ask(c, project, why, built, r);
+      if (!r || r.status !== 'approved') { await slots().catch(() => {}); return ask(c, project, why, built, r); }
       c.say('typing', 'Deploying the server', `deployed the server for ${project}`, { project });
       await startBuild(r, built);
       const a = await waitFor(r, cfg.runnerBuildWaitMs);

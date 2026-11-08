@@ -19,7 +19,7 @@ The page and the server are different origins. In the page: `const office = Offi
 
 ## Office Cloud from server code
 `office-cloud.js` uses `OFFICE_CLOUD_URL` and `OFFICE_TOKEN`, which the Office puts in the environment. `office.ai.chat`, `office.fetch`, `office.scrape` and `office.db` work under the same daily limits as the project's pages, and reach only this project.
-To act for a signed-in visitor, have the page send its session (`office.auth.session`) and pass it as `office.asVisitor(session)`.
+To act for a signed-in visitor, have the page send `office.auth.token()` (say, as an `Authorization: Bearer` header), and on the server look it up with `office.asVisitor(token)`, which answers who they are, or null.
 
 ## A real browser
 Only if the page truly can't be read with `office.scrape`: set `"tier": "browser"` in `office.json` and add `"playwright-core": "1.65.0"` to `dependencies`, then use `browser.js` from the job. Browser servers are even rarer than slots.

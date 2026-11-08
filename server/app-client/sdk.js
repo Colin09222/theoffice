@@ -75,6 +75,8 @@
     // ---- accounts ----
     var localUsers = function () { return parse(store.get('office.cloud.users'), {}); };
     var auth = {
+      /** This visitor's session token, to hand to this project's own server, or null. */
+      token: function () { return session && session !== 'local' ? session : null; },
       get user() { return user; },
       /** {username or email, password (8+ characters), name}. Resolves to the new user, who is now logged in. */
       signUp: function (o) {
