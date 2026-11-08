@@ -53,7 +53,7 @@ describe('the manager reads a vague boss', () => {
   test('facts only the boss knows never hold up the work, and are left out rather than made up', () => {
     assert.match(p, /Facts only they know .* never hold up the work: leave them out, and ask for them at the end/);
     const site = p.slice(p.indexOf('WEBSITE\n'), p.indexOf('BUSINESS\n'));
-    assert.match(site, /never made up/); assert.match(site, /Ask the boss for them at the end, not before/);
+    assert.match(site, /never made up/); assert.match(site, /Ask the boss for them when you start/);
   });
   test('it talks like a person: short, plain, with the link first when something is live', () => {
     assert.match(p, /Under 50 words/); assert.match(p, /never "slug", "deploy", "repo"/); assert.match(p, /no emoji/); assert.match(p, /Don't open with praise/);
@@ -93,7 +93,7 @@ describe('what good work means, per job', () => {
     assert.match(r, /that really operate where this business would/); assert.match(r, /publishing checks each link/); assert.match(r, /the gap to aim at, the price to beat, and the biggest risk/);
   });
   test('computers work in big steps, and only makers read what a page can do', () => {
-    assert.match(computerPrompt(FULL, 'builder', {}), /work in big steps/); assert.match(computerPrompt(FULL, 'builder', {}), /twice is the limit/);
+    assert.match(computerPrompt(FULL, 'builder', {}), /work in big steps/); assert.match(computerPrompt(FULL, 'builder', {}), /a second review is expected/);
     const writer = staffPrompt(floor, { name: 'S', title: 'Writer', role: 'writer' }, {}, {}, FULL);
     const builder = staffPrompt(floor, { name: 'S', title: 'Builder', role: 'builder' }, {}, {}, FULL);
     assert.doesNotMatch(writer, /office\.leaderboard\.submit/); assert.match(builder, /office\.leaderboard\.submit/);
