@@ -21,7 +21,7 @@ const AUDIT = (name, { portrait }) => `(() => {
   const say = (el) => (el.tagName.toLowerCase() + (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\\s+/).slice(0, 3).join('.') : '') + ' "' + (el.value || el.textContent || '').trim().slice(0, 28) + '"');
   const visible = (el) => { const r = el.getBoundingClientRect(); if (r.width < 1 || r.height < 1) return false; const s = getComputedStyle(el); if (s.visibility === 'hidden' || s.display === 'none' || +s.opacity === 0) return false; return !el.closest('[hidden]'); };
   // A dialog covers the page on purpose: then it's the dialog that's being checked.
-  const dialog = document.querySelector('.modal-back');
+  const dialog = document.querySelector('.modal-back, [data-setup-flow]');
   const more = document.querySelector('.tabs.more-open .more-pop');
   const roots = dialog ? [dialog] : more ? [more] : [document.querySelector('#ui'), ...document.querySelectorAll('#toasts')].filter(Boolean);
   const all = roots.flatMap((r) => [r, ...r.querySelectorAll('*')]).filter((el) => !(el instanceof SVGElement) && visible(el));
@@ -44,7 +44,7 @@ const AUDIT = (name, { portrait }) => `(() => {
     if (s.overflowY !== 'visible' && el.scrollHeight > el.clientHeight + 2 && el.childElementCount < 4) bad.push('clipped text (lines): ' + say(el) + ' ' + el.scrollHeight + '>' + el.clientHeight);
   }
   // Primary controls: big enough for a thumb, and a scroll away at most.
-  const primary = all.filter((el) => el.matches('.floor-panel > .tabs .tab, .btn:not(.small):not(.link), .send, .attach, .sheet-step, .launch-type, .launch-card, .icon-btn, .scrub-btn:not(:disabled)'));
+  const primary = all.filter((el) => el.matches('.setup-choice, .floor-panel > .tabs .tab, .btn:not(.small):not(.link), .send, .attach, .sheet-step, .launch-type, .launch-card, .icon-btn, .scrub-btn:not(:disabled)'));
   for (const el of primary) {
     const r = el.getBoundingClientRect();
     if (${portrait ? 'true' : 'false'} && Math.min(r.width, r.height) < 43.5) bad.push('tap target ' + Math.round(r.width) + 'x' + Math.round(r.height) + ': ' + say(el));
@@ -115,28 +115,43 @@ for (const size of SIZES) {
     p.close();
   })();
 
-  // ---- a brand new floor: the recovery code, then the options ----
+  // ---- a brand new floor: its full-screen Setup, from the recovery code to Ready ----
   await (async () => {
-    const p = await newPage(); const see = screen(p, `${tag} new boss`, opts);
+    const p = await newPage(); const see = screen(p, `${tag} setup`, opts);
     await p.goto(`${base}?q=low`);
     await p.until('document.documentElement.classList.contains("ready") && document.body.dataset.page === "lobby"', 'the lobby', 45000);
-    await step(`${tag} new boss: opens a new office`, async () => {
+    await step(`${tag} setup: opens a new office`, async () => {
       await p.click('.open-pill');
       await p.until('!!document.querySelector(".modal .code-input")', 'dialog');
       await p.type('.code-input', t.code());
       await p.click('.modal button[type=submit]');
       await onFloor(p);
-      await p.until('document.querySelector("[data-recovery-card] [data-recovery]") !== null', 'recovery code', 15000);
-      await sleep(600);
+      await p.until('!!document.querySelector("[data-setup-flow] [data-recovery]")', 'the recovery code', 15000);
+      await sleep(500);
     });
     await see('recovery code', async () => {
-      const code = await p.ev('(() => { const e = document.querySelector("[data-recovery]"); const r = e.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { shown: r.top >= 0 && r.bottom <= innerHeight, hit: !!hit && e.contains(hit) || e === hit }; })()');
+      const code = await p.ev('(() => { const e = document.querySelector("[data-recovery]"); const r = e.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { shown: r.top >= 0 && r.bottom <= innerHeight, hit: !!hit && (e.contains(hit) || e === hit) }; })()');
       if (!code.shown || !code.hit) throw new Error(`the recovery code is not on the screen ${JSON.stringify(code)}`);
     });
-    await p.click('[data-recovery-done]');
-    await sleep(350);
+    await see('what are we making', async () => { await p.click('[data-setup-saved]'); await p.until('document.querySelectorAll("[data-setup-flow] [data-type]").length === 4', 'the four kinds', 8000); await sleep(300); });
+    await see('which one', async () => { await p.click('[data-setup-flow] [data-type=game]'); await p.until('document.querySelectorAll("[data-setup-flow] [data-idea]").length >= 2', 'the ideas', 12000); await sleep(350); });
+    await see('ready', async () => { await p.click('[data-setup-flow] [data-idea]'); await p.click('[data-setup-flow] [data-next]'); await p.until('!!document.querySelector("[data-setup-flow] [data-go]")', 'ready', 8000); await sleep(350); });
+    await see('back through it', async () => { await p.click('[data-setup-back]'); await p.until('!!document.querySelector("[data-setup-flow] [data-next]")', 'which one again', 5000); await sleep(200); await p.click('[data-setup-back]'); await p.until('!!document.querySelector("[data-setup-flow] [data-setup-out]")', 'what again', 5000); await sleep(200); });
+    await see('out to the manager', async () => { await p.click('[data-setup-out]'); await p.until('!document.querySelector("[data-setup-flow]")', 'setup to close', 8000); await settled(p); await sleep(400); });
+    p.close();
+  })();
+
+  // ---- a fresh floor with a name: the options in the chat ----
+  await (async () => {
+    const fresh = await claim(t, `Fresh ${tag}`);
+    const p = await newPage(); const see = screen(p, `${tag} new boss`, opts);
+    await p.goto(`${base}?q=low`);
+    await cookie(p, fresh);
+    await p.goto(`${base}/floor/${fresh.slug}?q=low`);
+    await onFloor(p);
+    await p.until('document.querySelectorAll("[data-launcher] .launch-type").length === 4', 'the launcher', 15000);
+    await sleep(600);
     if (phoneLayout) await step(`${tag} new boss: the options are on the screen without hunting`, async () => {
-      await p.until('document.querySelectorAll("[data-launcher] .launch-type").length === 4', 'the launcher', 8000);
       const opt = await p.ev(`(() => { const out = []; const list = document.querySelector('.chat-list').getBoundingClientRect(); for (const el of document.querySelectorAll('.launch-type')) { const r = el.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const hit = document.elementFromPoint(x, y); if (r.top < list.top - 1 || r.bottom > list.bottom + 1 || !hit || !(el === hit || el.contains(hit))) out.push(el.textContent.slice(0, 18) + ' ' + Math.round(r.top) + '-' + Math.round(r.bottom) + ' list ' + Math.round(list.top) + '-' + Math.round(list.bottom)); } return out; })()`);
       if (opt.length) throw new Error(opt.join('; '));
     });
