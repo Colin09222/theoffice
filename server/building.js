@@ -69,6 +69,8 @@ export function installBuilding(ext) {
     }
     return out;
   }
+  // Launch parties (server/life.js) are picked from the same checked lines.
+  ext.tickerItems = tickerItems;
   GET('/api/building/ticker', async ({ res, url }) => {
     const limit = num(url.searchParams.get('limit'), 40, 1, MAX_TICKER);
     const since = num(url.searchParams.get('since'), 0, 0, Number.MAX_SAFE_INTEGER);

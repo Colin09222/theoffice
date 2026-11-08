@@ -150,3 +150,25 @@ body.flying .ticker { opacity: 0; transition: opacity .2s; }
   .topbar-right { right: 340px; top: 8px; }
   .open-pill, .open-pill:hover, .open-pill:active { left: max(14px, env(safe-area-inset-left)); transform: none; bottom: max(10px, env(safe-area-inset-bottom)); }
 }
+
+/* ---- launch parties ---- */
+.confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 60; }
+.confetti i { position: absolute; top: -16px; width: 9px; height: 14px; border-radius: 2px; opacity: .95; animation: confetti-fall 3s cubic-bezier(.25, .6, .45, 1) both; }
+.confetti i:nth-child(3n) { width: 7px; height: 7px; border-radius: 50%; }
+.confetti i:nth-child(4n) { width: 12px; height: 5px; }
+@keyframes confetti-fall { 0% { transform: translate3d(0, 0, 0) rotate(0); } 100% { transform: translate3d(var(--dx, 0), 106vh, 0) rotate(var(--spin, 360deg)); opacity: .7; } }
+/* The LED headline: amber dots on black, lit over the whole strip while the party lasts. */
+.ticker-led { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 16px; background: #0d0a07 radial-gradient(circle, rgba(255, 181, 46, .16) 1px, transparent 1.6px) 0 0 / 4px 4px; color: #ffb52e; font: 700 19px/1 var(--cond); letter-spacing: .08em; text-transform: uppercase; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 0 6px rgba(255, 181, 46, .85), 0 0 14px rgba(255, 120, 30, .5); animation: led-blink 1.1s steps(2, jump-none) 3, led-in .35s ease-out; }
+.ticker-led[hidden] { display: none; }
+.ticker-led::before, .ticker-led::after { content: '★'; color: #6dffa0; text-shadow: 0 0 8px #6dffa0; }
+@keyframes led-blink { 50% { color: #fffdf4; } }
+@keyframes led-in { from { transform: translateY(100%); } }
+.dir-row.party { position: relative; background: color-mix(in srgb, var(--brand, #ffb52e) 30%, #2f2a1c); color: var(--sun); box-shadow: inset 0 0 0 2px var(--sun); }
+.dir-balloons { position: absolute; right: 10px; top: -14px; display: flex; gap: 3px; pointer-events: none; }
+.dir-balloons i { position: relative; width: 15px; height: 19px; border-radius: 50% 50% 46% 46% / 56% 56% 44% 44%; background: var(--tomato, #e4572e); box-shadow: inset -3px -3px 0 rgba(0, 0, 0, .18), inset 3px 3px 0 rgba(255, 255, 255, .25); animation: balloon-bob 1.6s ease-in-out infinite alternate; }
+.dir-balloons i:nth-child(2) { background: var(--sun, #ffb52e); animation-delay: -.5s; top: -5px; }
+.dir-balloons i:nth-child(3) { background: #4ea5d9; animation-delay: -1s; }
+.dir-balloons i::after { content: ''; position: absolute; left: 50%; top: 100%; width: 1px; height: 16px; background: rgba(255, 253, 244, .6); }
+@keyframes balloon-bob { to { transform: translateY(-5px) rotate(4deg); } }
+@media (prefers-reduced-motion: reduce) { .ticker-led, .dir-balloons i { animation: none; } }
+@media (max-width: 760px) { .ticker-led { font-size: 15px; letter-spacing: .04em; } }

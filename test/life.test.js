@@ -1,4 +1,4 @@
-// Building life: hidden floors stay out of the lobby but open by their own link.
+// Building life: hidden floors stay out of the lobby but open by their own link, launch parties, and the leaderboard.
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { boot, claim, Client, waitDone } from './helpers.js';
-import { openDb, run, get } from '../server/db.js';
+import { openDb, run, get, all } from '../server/db.js';
+import { pickParties, PARTY } from '../server/life.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -43,6 +44,44 @@ describe('hidden floors', () => {
     assert.equal((await shown.get(`/api/floors/${shown.slug}`)).data.floor.hidden, undefined);
   });
 
+  test('a launch party is the open floor\'s launch, never the hidden floor\'s, and only while it is news', async () => {
+    const { party } = (await visitor.get('/api/building/party')).data;
+    assert.ok(party, 'a fresh launch is a party');
+    assert.equal(party.floor.slug, shown.slug);
+    assert.deepEqual(Object.keys(party).sort(), ['floor', 'id', 'text', 'ts', 'url']);
+    assert.match(party.text, /^launched "/);
+    assert.ok(party.url.startsWith('/theoffice/f/'), 'a plain public url');
+    run(t.db, 'UPDATE projects SET private=1 WHERE floor_id=(SELECT id FROM floors WHERE slug=?)', shown.slug);
+    const gone = (await visitor.get('/api/building/party')).data.party;
+    assert.ok(!gone || gone.floor.slug !== shown.slug, 'a project made private is no party');
+    run(t.db, 'UPDATE projects SET private=0 WHERE floor_id=(SELECT id FROM floors WHERE slug=?)', shown.slug);
+  });
+
+  test('the leaderboard ranks public projects from their visitor stats, and leaves out private ones and hidden floors', async () => {
+    const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', shown.slug).id;
+    const projects = all(t.db, 'SELECT slug, kind FROM projects WHERE floor_id=? AND published_at IS NOT NULL', fid);
+    assert.ok(projects.length >= 1);
+    const today = new Date().toISOString().slice(0, 10);
+    for (const [i, p] of projects.entries()) run(t.db, 'INSERT INTO app_visits (floor_id,project,day,path,views,uniques) VALUES (?,?,?,?,?,?)', fid, p.slug, today, '/', 10 + i, 3 + i);
+    const sid = get(t.db, 'SELECT id FROM floors WHERE slug=?', secret.slug).id;
+    for (const p of all(t.db, 'SELECT slug FROM projects WHERE floor_id=?', sid)) run(t.db, 'INSERT INTO app_visits (floor_id,project,day,path,views,uniques) VALUES (?,?,?,?,?,?)', sid, p.slug, today, '/', 999, 999);
+    const r = await visitor.get('/api/building/leaderboard');
+    assert.equal(r.status, 200);
+    const b = r.data;
+    const text = JSON.stringify(b);
+    assert.ok(!text.includes(secret.slug) && !text.includes('Back Room'), 'nothing from the hidden floor');
+    assert.ok(b.newest.length >= 1 && b.newest.every((c) => c.floor.slug === shown.slug));
+    for (const c of [...b.games, ...b.sites]) assert.equal(typeof c.count, 'number');
+    for (const list of [b.games, b.sites]) for (let i = 1; i < list.length; i++) assert.ok(list[i - 1].count >= list[i].count, 'ranked');
+    const site = projects.find((p) => p.kind === 'site' || p.kind === 'app');
+    if (site) assert.ok(b.sites.some((c) => c.slug === site.slug), 'the visited site is on the board');
+    assert.ok(!/\$|usd|cost|budget/i.test(text), 'no money on the board');
+    run(t.db, 'UPDATE projects SET private=1 WHERE floor_id=? AND slug=?', fid, b.newest[0].slug);
+    const after = (await visitor.get('/api/building/leaderboard')).data;
+    assert.ok(![...after.games, ...after.sites, ...after.newest].some((c) => c.slug === b.newest[0].slug), 'made private, gone at once');
+    run(t.db, 'UPDATE projects SET private=0 WHERE floor_id=? AND slug=?', fid, b.newest[0].slug);
+  });
+
   test('the admin CLI hides and shows a floor by number', () => {
     const dir = mkdtempSync(join(tmpdir(), 'office-life-'));
     try {
@@ -60,4 +99,17 @@ describe('hidden floors', () => {
       db.close();
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
+});
+
+test('parties are rare: one at a time in the building, one per floor, one per project', () => {
+  const at = (id, ts, floor, url = `/f/${floor}/${id}/`) => ({ id, ts, floor: { slug: floor }, url });
+  const m = 60_000;
+  const picked = pickParties([
+    at(1, 0, 'a'), at(2, 10_000, 'b'),            // b is too soon after a
+    at(3, 2 * m, 'b'), at(4, 3 * m, 'a'),         // a again within ten minutes: no
+    at(5, 12 * m, 'a', '/f/a/1/'),                // a's first project again within six hours: no
+    at(6, 13 * m, 'a'),
+  ]).map((p) => p.id);
+  assert.deepEqual(picked, [1, 3, 6]);
+  assert.ok(PARTY.GAP_MS >= 60_000 && PARTY.FLOOR_MS >= 10 * m);
 });

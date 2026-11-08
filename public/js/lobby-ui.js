@@ -4,13 +4,14 @@ import { h, api, session, isPhone, toast, clear, put } from './dom.js';
 import { LobbyView } from './lobby-scene.js';
 import { icon } from './icons.js';
 import { muteButton, sfx } from './sfx.js';
+import { confetti, fanfare, mayParty } from './party.js';
 
 // The claim wizard and its character builder are only fetched when someone opens them.
 const claimModule = () => import('./claim.js');
 const openClaim = () => claimModule().then((m) => m.openClaim());
 const openLogin = () => claimModule().then((m) => m.openLogin());
 
-let view = null, poll = null, keepFloors = [], tip = null, tickerPoll = null;
+let view = null, poll = null, keepFloors = [], tip = null, tickerPoll = null, partyPoll = null, partying = null, tickerLed = null;
 
 // ---- the building, live: a ticker of public happenings across every floor ----
 function tickerItem(it, fresh) {
@@ -22,9 +23,11 @@ function tickerItem(it, fresh) {
 }
 function buildTicker() {
   const rail = h('div.ticker-rail');
+  // The LED headline takes over the strip for a launch party.
+  tickerLed = h('a.ticker-led', { target: '_blank', rel: 'noopener noreferrer', 'data-party': 'headline', hidden: true });
   const strip = h('section.ticker', { 'aria-label': 'The building, live', 'data-ticker': 'empty' },
     h('span.ticker-label', {}, 'Live'),
-    h('div.ticker-track', {}, rail));
+    h('div.ticker-track', {}, rail), tickerLed);
   let items = []; let latest = 0;
   const paint = (freshIds) => {
     clear(rail);
@@ -64,11 +67,13 @@ function wallCard(pr, onFloor) {
 }
 
 function directoryRow(card, onEnter, onHover) {
-  return h('button.dir-row', { type: 'button', 'data-floor': card.number, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => onHover(card.number) },
+  const party = partying?.floor === card.number;
+  return h(`button.dir-row${party ? '.party' : ''}`, { type: 'button', 'data-floor': card.number, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => onHover(card.number) },
     h('span.dir-num', {}, String(card.number)),
     h('span.dir-mark', { 'aria-hidden': 'true' }),
     h('span.dir-text', {}, h('b', {}, card.name || 'Moving in'), card.filler ? h('span.demo-tag', { title: 'A fictional demo company. Nothing here is real.' }, 'demo') : null, h('small', {}, card.status === 'suspended' ? 'Closed by the building manager' : card.tagline || (card.name ? 'A tiny company' : 'Boxes still in the corridor'))),
-    card.busy ? h('span.dir-busy', { title: `${card.busy} at work` }, h('i'), String(card.busy)) : null);
+    card.busy ? h('span.dir-busy', { title: `${card.busy} at work` }, h('i'), String(card.busy)) : null,
+    party ? h('span.dir-balloons', { 'aria-hidden': 'true', 'data-party': 'balloons' }, h('i'), h('i'), h('i')) : null);
 }
 
 export async function showLobby(root) {
@@ -189,6 +194,30 @@ export async function showLobby(root) {
     tip = h('div.floor-tip', { hidden: true }),
   );
 
+  // ---- launch parties ----
+  // The building picks them and keeps them rare. This tab also takes one a minute at most, and never the same one twice.
+  const celebrate = (p) => {
+    partying = { floor: p.floor.number };
+    confetti({ brand: p.floor.colors?.primary });
+    fanfare();
+    if (document.activeElement !== search) renderList();
+    if (tickerLed) {
+      tickerLed.textContent = `Launch party · Floor ${p.floor.number} · ${p.floor.name || 'New company'} ${p.text}`;
+      tickerLed.href = p.url; tickerLed.hidden = false;
+    }
+    setTimeout(() => {
+      partying = null;
+      if (tickerLed) tickerLed.hidden = true;
+      if (poll && document.activeElement !== search) renderList();
+    }, 14000);
+  };
+  const checkParty = async () => {
+    const { party } = await api('/building/party');
+    if (party && poll && mayParty(party.id)) celebrate(party);
+  };
+  setTimeout(() => checkParty().catch(() => { /* retried next time */ }), 1200);
+  partyPoll = setInterval(() => checkParty().catch(() => { /* retried next time */ }), 10000);
+
   poll = setInterval(async () => {
     try {
       const fresh = await api('/floors');
@@ -211,4 +240,5 @@ function showTip(n, x, y) {
 export function hideLobby() {
   clearInterval(poll); poll = null; tip = null;
   clearInterval(tickerPoll); tickerPoll = null;
+  clearInterval(partyPoll); partyPoll = null; partying = null; tickerLed = null;
 }
