@@ -107,7 +107,7 @@ The building lives at `https://fakebusiness.io`: the root sends you to `/theoffi
 - **Launched apps stay on `*.middistance.com`,** and company email stays `@middistance.com`. Apps run other people's code, so they must never share a registrable domain with the main site (`server/index.js` warns if they do).
 - **The old address, `iscolinfree.com`, still answers.** `/theoffice` and everything under it is a 301 to the same path on the new domain, and `/`, `village.` and `island.` go to `/theoffice/`, with these exceptions, which Caddy still sends on to the Office through the gate:
   - `/theoffice/api/mail/inbound` and `/theoffice/api/pay/webhook`, because Resend and Stripe POST to them and neither follows a redirect. Their webhook URLs stay on the old domain.
-  - `/theoffice/about` and `/theoffice/privacy`, because the Stripe and Google forms name those URLs, plus `/theoffice/css/page.css`, the stylesheet those two pages load (their CSP is `style-src 'self'`, so a redirected stylesheet wouldn't load).
+  - `/theoffice/about`, `/theoffice/privacy` and `/theoffice/terms`, because the Stripe and Google forms name those URLs, plus `/theoffice/css/page.css`, the stylesheet those three pages load (their CSP is `style-src 'self'`, so a redirected stylesheet wouldn't load).
 - The old address stays on the staff's and Office Cloud's "keep away" list (`FORMER_HOME` in `server/config.js`), so nobody's code can reach the owner's other sites there.
 - A boss's login is a cookie that belongs to one address, so everyone signs in once more on the new domain, with their floor and recovery code.
 
