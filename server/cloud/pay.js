@@ -376,7 +376,7 @@ export function installPay(ext) {
       const account = typeof ev.account === 'string' ? accountByStripe(ev.account) : null;
       if (!account) return reply(200, { received: true, ignored: 'account' });
       const done = await handle(ev, account);
-      if (done) notifyAccount(account);
+      if (done && ev.type === 'account.updated') notifyAccount(account);  // the only event that changes what a boss's open page shows; a sale can wait for the next look
       return reply(200, { received: true, duplicate: !done });
     } catch (e) {
       if (e instanceof CloudError) return reply(e.status, { error: e.code });
@@ -565,7 +565,7 @@ export function installPay(ext) {
   const pay = {
     ready, mode, webhook, cloudRoute, guard, assertCanDelete, propose, stateLine,
     has: (floorId, project, ownerKey, product) => payHas(db, floorId, project, ownerKey, product),
-    start() { sweepTimer = setInterval(() => { try { run(db, 'DELETE FROM pay_events WHERE created_at<?', now() - EVENT_DAYS * 86400e3); } catch { /* next time */ } }, 3600000); sweepTimer.unref?.(); },
+    start() { sweepTimer = setInterval(() => { try { run(db, 'DELETE FROM pay_events WHERE created_at<?', now() - EVENT_DAYS * 86400e3); run(db, "DELETE FROM pay_orders WHERE status='open' AND session_id='' AND created_at<?", now() - 3 * 86400e3); } catch { /* next time */ } }, 3600000); sweepTimer.unref?.(); },
     stop() { clearInterval(sweepTimer); hookRates.close?.(); },
   };
   engine.pay = pay;

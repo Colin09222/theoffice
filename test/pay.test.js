@@ -615,13 +615,18 @@ describe('with Stripe connected (mock)', () => {
       assert.equal(r.status, 500, r.text);
       assert.equal(get(t.db, 'SELECT COUNT(*) n FROM pay_events WHERE id=?', JSON.parse(payload).id).n, 0, 'not marked done, so Stripe\'s retry still counts');
     });
-    test('a platform deauthorization is recorded and stops sales', async () => {
+    test('a platform deauthorization is recorded and stops sales, and reconnecting makes a fresh account', async () => {
       const row = get(t.db, 'SELECT disconnected_at FROM pay_accounts WHERE floor_id=?', floor.id);
       assert.equal(row.disconnected_at, null);
       await mock.deauthorize(acct);
       assert.ok(get(t.db, 'SELECT disconnected_at FROM pay_accounts WHERE floor_id=?', floor.id).disconnected_at);
       assert.equal((await pay(t, shop, 'status')).json.ready, false);
-      run(t.db, 'UPDATE pay_accounts SET disconnected_at=NULL WHERE floor_id=?', floor.id);
+      const fresh = await boss.post(`/api/floors/${boss.slug}/pay/connect`, {});
+      assert.equal(fresh.status, 200, JSON.stringify(fresh.data));
+      const now2 = get(t.db, 'SELECT * FROM pay_accounts WHERE floor_id=?', floor.id);
+      assert.notEqual(now2.account, acct); assert.equal(now2.disconnected_at, null);
+      // Back to the original for the rest of the suite.
+      run(t.db, 'UPDATE pay_accounts SET account=?, disconnected_at=NULL, disabled_reason=\'\', charges_enabled=1 WHERE floor_id=?', acct, floor.id);
     });
   });
 

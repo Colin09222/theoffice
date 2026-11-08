@@ -1,6 +1,7 @@
 // Payments in real Chrome against a mock Stripe: a boss connects through the hosted pages, approves a product with one tap, a visitor signs up on the App starter,
 // buys on the mock's Checkout page and the paid feature unlocks, on a desktop and on a phone. Then a refund shuts it again, and a floor with no key says "being set up".
 // Uses OS-assigned ports and its own Chrome profile. Mock AI, mock Stripe, no real money.
+import { mkdirSync } from 'node:fs';
 import { launch, sleep } from './cdp.mjs';
 import { get } from '../../server/db.js';
 import { writeFile, publishSnapshot } from '../../server/workspace.js';
@@ -10,6 +11,7 @@ import { starterFiles } from '../../server/makers.js';
 import { startMockStripe } from '../../server/cloud/pay-mock.js';
 
 const OUT = process.env.PAY_SHOTS || '/tmp/payshots';
+mkdirSync(OUT, { recursive: true });
 let failures = 0;
 const check = (name, ok, detail = '') => { if (!ok) failures++; console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${String(detail).slice(0, 200)})` : ''}`); };
 

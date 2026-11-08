@@ -35,8 +35,9 @@ export function renderPayRequests(page, list) {
     list.append(h('article.card.request.pay-approve', { 'data-pay-approve': p.key },
       h('div.row.spread', {}, h('b', {}, p.name), h('span.price', {}, priceOf(p))),
       p.description ? h('p', {}, p.description) : null,
-      h('small', {}, `${p.agentName || 'The team'} proposed this for ${p.project}${p.replaces ? '. It replaces the current price; people already subscribed keep theirs.' : '.'}`),
+      h('small', {}, `${p.agentName || 'The team'} proposed this for ${p.project}${p.replaces ? '. It replaces the current price; people already subscribed keep theirs.' : '.'}${page.state.pay.testMode ? ' Test mode.' : ''}`),
       p.why ? h('p.fineprint', {}, p.why) : null,
+      !page.state.pay.connected ? h('p.fineprint', {}, 'Connect Stripe on the Payments tab first, then approve this.') : null,
       p.unlocks?.length ? h('p.fineprint', {}, `Only buyers can use: ${p.unlocks.join(', ')}`) : null,
       h('div.row', {}, h('button.btn.primary', { type: 'button', 'data-pay-approve-yes': p.key, onclick: answer('approve') }, 'Approve'), h('button.btn.ghost', { type: 'button', onclick: answer('decline') }, 'No thanks'))));
   }

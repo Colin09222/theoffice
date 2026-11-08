@@ -1,4 +1,4 @@
-// Office Cloud: accounts, a database, saves, leaderboards, multiplayer rooms, uploads, AI and web fetching for a published project, with no server code.
+// Office Cloud: accounts, a database, saves, leaderboards, multiplayer rooms, uploads, payments, AI and web fetching for a published project, with no server code.
 //   <script src="/_office/office.js"></script>   then   const office = Office.connect();
 // The project is whichever site the page is on: data never crosses to another project. On a local preview with no Office server
 // behind it, everything except accounts and uploads keeps working on this device only, and office.mode says 'local'.
