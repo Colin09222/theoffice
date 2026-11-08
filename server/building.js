@@ -28,7 +28,7 @@ export function installBuilding(ext) {
   function scan() {
     const rows = all(db, `SELECT e.id, e.floor_id, e.type, e.project, e.data, e.created_at, f.number, f.slug, f.name, f.colors, f.default_private, f.filler
       FROM events e JOIN floors f ON f.id = e.floor_id
-      WHERE e.type IN ('feed', 'project') AND f.status = 'active' ORDER BY e.id DESC LIMIT ?`, TICKER_SCAN);
+      WHERE e.type IN ('feed', 'project') AND f.status = 'active' AND f.hidden = 0 ORDER BY e.id DESC LIMIT ?`, TICKER_SCAN);
     const out = [];
     for (const r of rows) {
       let data; try { data = JSON.parse(r.data); } catch { continue; }
@@ -56,12 +56,12 @@ export function installBuilding(ext) {
     const t = now();
     if (t - cache.at > TICKER_TTL_MS || t < cache.at) cache = { at: t, items: scan() };
     // Re-checked on every reply: a floor suspended or a project made private since the scan drops out at once.
-    const floors = new Map(all(db, 'SELECT id, status, default_private, filler FROM floors').map((f) => [f.id, f]));
+    const floors = new Map(all(db, 'SELECT id, status, default_private, filler, hidden FROM floors').map((f) => [f.id, f]));
     const priv = new Set(all(db, 'SELECT floor_id, slug FROM projects WHERE private=1').map((p) => key(p.floor_id, p.slug)));
     const out = [];
     for (const it of cache.items) {
       const f = floors.get(it._floorId);
-      if (!f || f.status !== 'active') continue;
+      if (!f || f.status !== 'active' || f.hidden) continue;
       if (it._project && priv.has(key(it._floorId, it._project))) continue;
       if (!it._project && f.default_private && it.kind === 'feed' && it._agent !== null) continue;
       const { _floorId, _project, _agent, ...pub } = it;
@@ -107,7 +107,7 @@ export function installBuilding(ext) {
   }
   const wallRows = (limit) => all(db, `SELECT p.slug, p.title, p.description, p.kind, p.published_at, p.floor_id, f.id fid, f.number, f.slug fslug, f.name fname, f.colors
     FROM projects p JOIN floors f ON f.id = p.floor_id
-    WHERE p.published_at IS NOT NULL AND p.private = 0 AND f.status = 'active' AND f.filler = 0 ORDER BY p.published_at DESC, p.slug LIMIT ?`, limit);
+    WHERE p.published_at IS NOT NULL AND p.private = 0 AND f.status = 'active' AND f.filler = 0 AND f.hidden = 0 ORDER BY p.published_at DESC, p.slug LIMIT ?`, limit);
   GET('/api/building/launched', async ({ res, url }) => {
     const limit = num(url.searchParams.get('limit'), 60, 1, MAX_WALL);
     const projects = wallRows(limit).map((r) => {

@@ -147,6 +147,8 @@ Object.assign(ADDED.tasks, { lane: "TEXT NOT NULL DEFAULT ''" });
 // The building's limits: which provider each ledger row was paid to, which providers have stopped a floor, and a decision from the CLI that the floor hasn't heard yet.
 Object.assign(ADDED.ledger, { provider: "TEXT NOT NULL DEFAULT ''" });
 Object.assign(ADDED.floors, { budget_out: "TEXT NOT NULL DEFAULT ''" });
+// life: a floor the building manager has hidden stays out of every lobby listing but still opens by its own link.
+Object.assign(ADDED.floors, { hidden: 'INTEGER NOT NULL DEFAULT 0' });
 Object.assign(ADDED.purchases, { notify: 'INTEGER NOT NULL DEFAULT 0' });
 // A long task's early steps get dropped from its transcript. The links it saw go here, because publishing a doc checks that its sources were really opened.
 Object.assign(ADDED.tasks, { seen_links: "TEXT NOT NULL DEFAULT ''" });

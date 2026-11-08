@@ -26,6 +26,7 @@ import { DomainRefused } from './domains.js';
 import { installOrders } from './orders.js';
 import { installFiller } from './filler.js';
 import { installBuilding } from './building.js';
+import { installLife } from './life.js';
 import { installHelp } from './help.js';
 import { installPurchases } from './purchases.js';
 import { budgetReport } from './budget.js';
@@ -234,8 +235,10 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     json(res, 200, { floor, csrf: s?.csrf || null, admin: !!a, adminCsrf: a?.csrf || null, aiMode: cfg.aiMode });
   });
   GET('/api/floors', async ({ res }) => {
-    const floors = all(db, "SELECT * FROM floors WHERE status!='killed' ORDER BY number DESC").map(floorCard);
-    const taken = new Set(floors.map((f) => f.number));
+    const rows = all(db, "SELECT * FROM floors WHERE status!='killed' ORDER BY number DESC");
+    // A hidden floor is left out of the directory and the lift, but its number is still taken.
+    const floors = rows.filter((f) => !f.hidden).map(floorCard);
+    const taken = new Set(rows.map((f) => f.number));
     const reserved = new Set(all(db, 'SELECT floor_number n FROM codes WHERE claimed_at IS NULL AND floor_number IS NOT NULL').map((c) => c.n));
     let vacant = null;
     for (let n = 1; n <= cfg.towerFloors; n++) if (!taken.has(n) && !reserved.has(n)) { vacant = n; break; }
@@ -673,7 +676,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext)].filter(Boolean);
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installLife(ext)].filter(Boolean);
   // Their timers run with the engine's: started by whoever starts the engine, stopped on close.
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
