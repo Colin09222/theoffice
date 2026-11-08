@@ -301,6 +301,7 @@ class Stage {
       this.time += dt; this.frame++;
       this.adapt(Math.min(gap / 1000, 0.1), now);
       this.renderOnce(dt);
+      this.drawn = (this.drawn || 0) + 1;  // frames really drawn, as against ticks of the loop
     };
     requestAnimationFrame(tick);
   }

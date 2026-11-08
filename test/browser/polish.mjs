@@ -40,11 +40,11 @@ const work = async (list) => { for (const n of list) await owners[n].post(`/api/
 const b = await launch({ noAngle: true });
 /** Frame times and draw calls over `ms`, while `during` runs. */
 const sample = (p, ms) => p.ev(`new Promise((res) => {
-  const st = window.__stage, r = st.renderer, ts = [], calls = [], tris = [], long = []; let last = performance.now(); const end = last + ${ms};
+  const st = window.__stage, r = st.renderer, ts = [], calls = [], tris = [], long = []; let last = performance.now(); const end = last + ${ms}; const d0 = st.drawn || 0;
   const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) long.push(Math.round(e.duration)); }); try { po.observe({ type: 'longtask' }); } catch {}
-  const f = (now) => { ts.push(now - last); last = now; calls.push(r.info.render.calls); tris.push(r.info.render.triangles); if (now < end) requestAnimationFrame(f); else done(); };
+  const f = (now) => { st.wake?.(); ts.push(now - last); last = now; calls.push(r.info.render.calls); tris.push(r.info.render.triangles); if (now < end) requestAnimationFrame(f); else done(); };
   const q = (a, x) => { const s = [...a].sort((m, n) => m - n); return s[Math.min(s.length - 1, Math.floor(s.length * x))]; };
-  const done = () => { po.disconnect(); res({ long: long.slice(0, 12), frames: ts.length, p50: +q(ts, 0.5).toFixed(1), p95: +q(ts, 0.95).toFixed(1), max: +Math.max(...ts).toFixed(1), fps: +(1000 * ts.length / ${ms}).toFixed(1), calls: Math.max(...calls), callsP50: q(calls, 0.5), tris: Math.max(...tris), geos: r.info.memory.geometries, tex: r.info.memory.textures, heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, tier: st.tier, dpr: st.dpr, full: window.__tower ? [...window.__tower.full.keys()].length : null }); };
+  const done = () => { po.disconnect(); res({ long: long.slice(0, 12), frames: ts.length, p50: +q(ts, 0.5).toFixed(1), p95: +q(ts, 0.95).toFixed(1), max: +Math.max(...ts).toFixed(1), fps: +(1000 * ts.length / ${ms}).toFixed(1), drawnFps: +(1000 * ((st.drawn || 0) - d0) / ${ms}).toFixed(1), calls: Math.max(...calls), callsP50: q(calls, 0.5), tris: Math.max(...tris), geos: r.info.memory.geometries, tex: r.info.memory.textures, heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, tier: st.tier, dpr: st.dpr, full: window.__tower ? [...window.__tower.full.keys()].length : null }); };
   requestAnimationFrame(f);
 })`);
 const wheel = async (p, dy, n = 1, gap = 40) => { for (let i = 0; i < n; i++) { await p.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 400, y: 420, deltaX: 0, deltaY: dy }); await sleep(gap); } };
@@ -75,7 +75,7 @@ const pinch = async (p, cx, cy, from, to, n = 12) => {
 };
 const whereIs = (p, n) => p.ev(`(() => { const T = window.__tower; const s = T.byNumber.get(${n}); const v = new (T.camera.position.constructor)(0, ${'T.rideY(s.k) + 1.6'} + T.offsetOf(s.k), 0).project(T.camera); return [Math.round((v.x * 0.5 + 0.5) * innerWidth), Math.round((-v.y * 0.5 + 0.5) * innerHeight)]; })()`);
 /** A full-detail frame: the floor page's room, its furniture in, everyone in their own model, and a frame drawn since. */
-const fullDetail = 'window.__office?.view && window.__stage.view === window.__office.view && window.__office.view.loading?.settled && [...window.__office.view.actors.values()].every((a) => a.char.isModel)';
+const fullDetail = 'window.__office?.view && window.__stage.view === window.__office.view && window.__office.view.loading?.settled && window.__office.view.baked && [...window.__office.view.actors.values()].every((a) => a.char.isModel)';
 
 async function profile(kind) {
   const phone = kind === 'phone';
@@ -219,7 +219,7 @@ async function profile(kind) {
       // Timed in the page, frame by frame: from the press to the first frame on which the new floor is there in full detail.
       await p.ev(`(() => { performance.clearMarks(); window.__t0 = performance.now(); window.__t1 = 0; window.__doors = 0; window.__fr = []; const w = () => { if (document.querySelector("#fade")?.classList.contains("in") || document.querySelector("#boot:not(.gone)")) window.__doors++;
         const v = window.__office?.view; window.__fr.push(Math.round(performance.now() - window.__t0) + (v ? (window.__office.state.floor.number + (v.loading?.settled ? 's' : 'l') + [...v.actors.values()].filter((a) => !a.char.isModel).length + (window.__stage.view === v ? 'v' : '')) : '-'));
-        if (window.__office?.state?.floor?.number === ${n} && (${fullDetail})) { window.__t1 = performance.now(); return; } requestAnimationFrame(w); }; requestAnimationFrame(w); })()`);
+        if (window.__office?.state?.floor?.number === ${n} && (${fullDetail})) { if (window.__d0 === undefined) window.__d0 = window.__stage.drawn; else if (window.__stage.drawn > window.__d0) { window.__t1 = performance.now(); delete window.__d0; return; } } requestAnimationFrame(w); }; delete window.__d0; requestAnimationFrame(w); })()`);
       if (phone) { const at = await p.ev(`(() => { const q = document.querySelector('[data-scrub=${dir}]').getBoundingClientRect(); return [q.left + q.width / 2, q.top + q.height / 2]; })()`); await tapAt(p, at[0], at[1], true); } else await click(p, `[data-scrub=${dir}]`);
       await p.until('window.__t1 > 0', `floor ${n}`, 20000);
       times.push(await p.ev('({ ms: Math.round(window.__t1 - window.__t0), doors: window.__doors, fr: window.__fr.slice(-3).join(" ") + " marks " + performance.getEntriesByType("mark").map((x) => x.name.replace("office:", "") + "@" + Math.round(x.startTime - window.__t0)).join(" ") })'));
@@ -227,9 +227,16 @@ async function profile(kind) {
     }
     r.lift = times;
     const warm = times.slice(1).map((x) => x.ms);
+    // And pressed the moment a floor opens, before anything has been built ahead: the slow case, reported as it is.
+    await p.goto(`${base}/floor/${owners[8].slug}`);
+    await p.until(`(${fullDetail}) && !!document.querySelector('[data-scrub=up]:not([disabled])')`, 'floor 8', 30000);
+    await p.ev(`(() => { window.__t0 = performance.now(); window.__t1 = 0; const w = () => { if (window.__office?.state?.floor?.number === 10 && (${fullDetail})) { if (window.__d0 === undefined) window.__d0 = window.__stage.drawn; else if (window.__stage.drawn > window.__d0) { window.__t1 = performance.now(); return; } } requestAnimationFrame(w); }; delete window.__d0; requestAnimationFrame(w); })()`);
+    if (phone) { const at = await p.ev(`(() => { const q = document.querySelector('[data-scrub=up]').getBoundingClientRect(); return [q.left + q.width / 2, q.top + q.height / 2]; })()`); await tapAt(p, at[0], at[1], true); } else await click(p, '[data-scrub=up]');
+    await p.until('window.__t1 > 0', 'floor 10, straight away', 20000);
+    r.liftAtOnce = Math.round(await p.ev('window.__t1 - window.__t0'));
     if (times.some((x) => x.doors)) throw new Error(`the doors closed: ${JSON.stringify(times)}`);
     if (Math.max(...warm) > 300) throw new Error(`warm switches ${warm.join(', ')} ms; ${times.map((x) => x.fr).join(' | ')}`);
-    return `first ${times[0].ms} ms, then ${warm.join(', ')} ms, no doors; building ahead while idle: long tasks ${JSON.stringify(ahead)} ms`;
+    return `first ${times[0].ms} ms, then ${warm.join(', ')} ms, no doors; pressed the moment a floor opens, nothing built ahead yet: ${r.liftAtOnce} ms; building ahead while idle: long tasks ${JSON.stringify(ahead)} ms`;
   });
   if (!phone) await step(`${kind}: the floor page turns all the way round too, its far walls up from behind`, async () => {
     await p.until(fullDetail, 'floor page', 20000);
@@ -249,18 +256,43 @@ async function profile(kind) {
     return `drag turned from ${y0.toFixed(2)}; from behind (${turned.toFixed(2)} rad) the far walls stand, gone again from the front`;
   });
   await step(`${kind}: a direct link to a floor draws its first 3D frame fast, with no spinner`, async () => {
-    await p.send('Network.enable'); await p.send('Network.clearBrowserCache'); await p.send('Network.setCacheDisabled', { cacheDisabled: true });
-    await p.goto('about:blank');
-    await p.send('Page.addScriptToEvaluateOnNewDocument', { source: 'window.__ff = 0; const w = () => { if (window.__stage?.view && window.__office?.view === window.__stage.view && window.__stage.frame > 0 && !document.querySelector("#boot:not(.gone)")) { window.__ff = performance.now(); return; } requestAnimationFrame(w); }; requestAnimationFrame(w);' });
-    await p.goto(`${base}/floor/${owners[14].slug}`);
-    await p.until('window.__ff > 0', 'first frame', 20000);
-    const ff = Math.round(await p.ev('window.__ff'));
-    await p.until(fullDetail, 'full detail', 30000);
-    const full = Math.round(await p.ev('performance.now()'));
+    const WATCH = 'window.__ff = 0; (() => { let d0; const w = () => { const s = window.__stage; if (s?.view && window.__office?.view === s.view && !document.querySelector("#boot:not(.gone)")) { if (d0 === undefined) d0 = s.drawn || 0; else if ((s.drawn || 0) > d0) { window.__ff = performance.now(); return; } } requestAnimationFrame(w); }; requestAnimationFrame(w); })();';
+    await p.send('Network.enable'); await p.send('Page.enable');
+    const added = await p.send('Page.addScriptToEvaluateOnNewDocument', { source: WATCH });
+    const load = async (label) => {
+      await p.send('Network.clearBrowserCache'); await p.send('Network.setCacheDisabled', { cacheDisabled: true });
+      await p.goto('about:blank');
+      await p.goto(`${base}/floor/${owners[14].slug}`);
+      await p.until('window.__ff > 0', `first frame, ${label}`, 40000);
+      const ff = Math.round(await p.ev('window.__ff'));
+      await p.until(fullDetail, `full detail, ${label}`, 40000);
+      return { firstFrame: ff, fullDetailBy: Math.round(await p.ev('performance.now()')) };
+    };
+    const local = await load('no line');
+    // The same over a 4G-like line: 9 Mbit/s down, 60 ms each way.
+    await p.send('Network.emulateNetworkConditions', { offline: false, latency: 60, downloadThroughput: 9e6 / 8, uploadThroughput: 3e6 / 8 });
+    const line = await load('4G');
+    await p.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
     await p.send('Network.setCacheDisabled', { cacheDisabled: false });
-    r.cold = { firstFrame: ff, fullDetailBy: full };
-    if (ff > 2500) throw new Error(`first 3D frame at ${ff} ms`);
-    return `first 3D frame ${ff} ms after navigation (no cache), full detail by ${full} ms`;
+    await p.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: added.result.identifier });
+    r.cold = { local, line };
+    if (line.firstFrame > 2500) throw new Error(`over a 4G-like line the first 3D frame came at ${line.firstFrame} ms (localhost ${local.firstFrame} ms)`);
+    return `no cache, localhost: first 3D frame ${local.firstFrame} ms, full detail ${local.fullDetailBy} ms; over a 4G-like line: first frame ${line.firstFrame} ms, full detail ${line.fullDetailBy} ms`;
+  });
+  await step(`${kind}: left alone, the stage draws every other frame; a touch brings it back`, async () => {
+    await p.goto(`${base}/floor/${owners[12].slug}`);
+    await p.until(fullDetail, 'floor', 30000);
+    await sleep(8500);
+    const measure = () => p.ev(`new Promise((res) => { const s = window.__stage; const d0 = s.drawn, t0 = performance.now(); let n = 0; const f = () => { n++; if (performance.now() - t0 < 1500) requestAnimationFrame(f); else res({ idle: s.idle, ticks: Math.round(n / 1.5), drawn: Math.round((s.drawn - d0) / 1.5) }); }; requestAnimationFrame(f); })`);
+    const idle = await measure();
+    await p.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+    await p.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+    await sleep(100);
+    const awake = await measure();
+    r.idle = { idle, awake };
+    if (!idle.idle || idle.drawn > idle.ticks * 0.7) throw new Error(`not throttled: ${JSON.stringify(idle)}`);
+    if (awake.idle || awake.drawn < awake.ticks * 0.85) throw new Error(`not back to full: ${JSON.stringify(awake)}`);
+    return `idle ${idle.drawn} drawn of ${idle.ticks} ticks a second; after a touch ${awake.drawn} of ${awake.ticks}`;
   });
   await step(`${kind}: no console errors`, async () => {
     const errs = p.errors.filter((e) => !/favicon|ERR_ABORTED|net::ERR/.test(e) && !/Evaluating a string as JavaScript violates/.test(e));
