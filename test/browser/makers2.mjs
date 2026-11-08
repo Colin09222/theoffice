@@ -27,6 +27,8 @@ try {
     await step(`${label}: lobby to launcher`, async () => {
       await p.goto(`${base}/?q=low`);
       await p.until('!!document.querySelector(".open-pill")', 'the Open an office button', 20000);
+      const legal = await p.ev('[...document.querySelectorAll(".dir-legal a")].map((x) => x.getAttribute("href"))');
+      check(`${label}: the lobby links About and Privacy`, legal.some((x) => x.endsWith('/about')) && legal.some((x) => x.endsWith('/privacy')), legal.join(','));
       // A wrong code is refused exactly as before, and leaves the dialog open.
       // The loading veil over the lobby lifts first.
       await p.until('(() => { const r = document.querySelector(".open-pill")?.getBoundingClientRect(); if (!r) return false; const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!t && !!t.closest(".open-pill"); })()', 'the pill on top', 20000);
