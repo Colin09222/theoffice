@@ -19,7 +19,8 @@ done
 install -d -m 0755 $R $R/app $R/bin $R/etc $R/firewall
 install -d -m 0700 $R/state $R/secrets $R/secrets/apps $R/volumes $R/logs
 install -d -m 0711 $R/mnt
-install -d -m 0750 -o root -g $OFFICE_GID $R/shared
+install -d -m 0750 $R/shared
+chown root:$OFFICE_GID $R/shared # no such group on the host; uutils install rejects a numeric -g
 
 # Code, world-readable so the edge's throwaway user can load it; nothing secret in it.
 rm -rf $R/app.new && mkdir -p $R/app.new
@@ -42,7 +43,8 @@ for t in api edge; do
 done
 chmod 0600 $R/secrets/*.token
 # Phase 2's copy of the API token, readable by the Office container's group only.
-install -m 0440 -o root -g $OFFICE_GID $R/secrets/api.token $R/shared/api.token
+install -m 0440 $R/secrets/api.token $R/shared/api.token
+chown root:$OFFICE_GID $R/shared/api.token
 
 [ -f $R/etc/runner.json ] || printf '{\n  "MAX_APPS": 4,\n  "MAX_BROWSER_APPS": 2,\n  "IDLE_MINUTES": 15\n}\n' > $R/etc/runner.json
 chmod 0644 $R/etc/runner.json
