@@ -3,6 +3,7 @@ import { get, all, run, tx } from './db.js';
 import { Limiter, pause } from './limiter.js';
 import { ProviderError, scrub } from './llm.js';
 import { createBudget, providerForRole, providerOf, scrubOldSpend } from './budget.js';
+import { routeFor } from './config.js';
 import { createTools, toolDefs, toolsForRole, publicUrl, wrapUntrusted, mentionsPrivate, NOT_SEEN_AS_LINK } from './tools.js';
 import { createDomainBroker } from './domains.js';
 import { createIos } from './ios.js';
@@ -10,7 +11,7 @@ import { createMedia, createMockMedia } from './media.js';
 import { createSearch, createMockSearch } from './search.js';
 import { appLabel, appOrigin } from './apps.js';
 import { formCount } from './launch.js';
-import { managerPrompt, staffPrompt } from './prompts.js';
+import { managerPrompt, staffPrompt, ON_OUR_OWN } from './prompts.js';
 import { slugify, WorkspaceError, listFiles, readFile, attachmentsOf } from './workspace.js';
 import { describeFiles, toolMessage, withFiles, fileTokens } from './attachments.js';
 import { seededLook } from '../public/js/looks.js';
@@ -243,7 +244,8 @@ export class Engine {
   // ---- one LLM call: budget check, concurrency slot, retries, ledger ----
   async callLLM(ctx, { messages, tools, onToken, onToolCall, onReset, meta }) {
     const { floorId, agent, signal } = ctx;
-    const role = this.models.all[agent.role] || this.models.all.researcher;
+    // A job the team picked for itself in a work mode runs on the autonomous model. Anything the boss asked for runs on the role's own.
+    const role = routeFor(this.models, agent.role, { autonomous: !!ctx.autonomous });
     const provider = providerForRole(role);
     const paid = { ...ctx, provider };
     const pricing = { prompt: role.pricing?.prompt || 0, completion: role.pricing?.completion || 0, cacheRead: role.pricing?.cacheRead };
@@ -336,6 +338,7 @@ export class Engine {
       ...(notLive.length ? [`Finished but not live: ${notLive.map((u) => `${u.slug} (${u.never ? 'never published' : 'changed since it was published'})`).join(' | ')}`] : []),
       ...(this.domains.enabled ? [`Domains: ${domainLines.length ? domainLines.join(' | ') : 'none'}. Limit: ${this.cfg.domainsPerFloorDay} a day, and only the boss's click buys one.`] : []),
       ...(this.help && this.cfg.helpEnabled !== false ? [this.help.stateLine(floor.id)] : []),
+      ...(this.modes ? [this.modes.stateLine(floor.id)] : []),
     ].join('\n');
     // 'office' notices (outage, stop) are for the boss only. If they reached the model it would lose the thread.
     // Reports stay out too: they quote what was found on pages, and the manager has the facts in the state message.
@@ -357,6 +360,7 @@ export class Engine {
     const toReview = tasks.filter((t) => t.status === 'review');
     return { messages: out, meta: {
       kind: 'manager', setup: !floor.name, floorId: floor.id, floorSlug: floor.slug, step: 0, lastBoss: bossMsgs[bossMsgs.length - 1]?.text || '', bossFiles: out.filter((m) => m.role === 'user' && m.files).flatMap((m) => m.files), allBoss: bossMsgs.map((m) => m.text).join(' '),
+      autopilot: last?.role === 'note' && last.text.startsWith('Work mode:') && this.modes ? this.modes.brief(floor.id) : null,
       isFreshBoss: last?.role === 'boss', answered: last?.role === 'note' && /answered/.test(last.text), guidance: last?.role === 'help' ? last.text : '', helpDeadEnd: last?.role === 'note' && /buddehbot/.test(last.text),
       toReview, reviewsWaiting: counts.review, openCount: counts.n - counts.review, published,
       slugFor: (s) => slugify(String(s).replace(/\[[a-z]+\]/g, '').replace(ACT_WORDS, ' '), 'launch').slice(0, 30).replace(/-+$/, '') || 'launch',
@@ -377,7 +381,11 @@ export class Engine {
     const newestBoss = get(this.db, "SELECT MAX(id) n FROM messages WHERE floor_id=? AND role='boss'", floorId).n ?? 0;
     ctx.bossTurn = !!meta.isFreshBoss || newestBoss > (this.bossRead.get(floorId) ?? Infinity);
     this.bossRead.set(floorId, newestBoss);
-    const call = { floorId, agent: mgr, signal, project: '' };
+    // A job the team picked for itself in a work mode. A turn that reads something new from the boss is the boss's, whatever else is going on.
+    ctx.autonomous = !ctx.bossTurn && !!this.modes?.running(floorId);
+    meta.autonomous = ctx.autonomous;
+    if (ctx.autonomous) meta.modeList = this.modes.brief(floorId).nextUp;
+    const call = { floorId, agent: mgr, signal, project: '', autonomous: ctx.autonomous };
     const maxSteps = this.cfg.maxManagerSteps;
     const opening = messages.length;
     try {
@@ -459,18 +467,19 @@ export class Engine {
     const defs = toolDefs(names, this.cfg, agent.role);
     const ctx = this.toolCtx(floor, agent, task, names);
     ctx.signal = signal;
+    ctx.autonomous = !!task.auto;
     let messages = task.transcript ? JSON.parse(task.transcript) : null;
     if (!messages) {
       messages = [
         { role: 'system', content: staffPrompt(floor, agent, roleCfg, { ...task, live: this.isLive(floor.id, task.project) }, this.cfg, this.people.personBlock(agent, task)) },
-        { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${this.handoffFor(floor, task)}${describeFiles(this.taskFiles(task))}`, ...(this.taskFiles(task).length ? { files: this.taskFiles(task).map((f) => f.path) } : {}) },
+        { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${task.auto ? `\n\n${ON_OUR_OWN}` : ''}${this.handoffFor(floor, task)}${describeFiles(this.taskFiles(task))}`, ...(this.taskFiles(task).length ? { files: this.taskFiles(task).map((f) => f.path) } : {}) },
       ];
     }
     // A task that started on a computer has no system prompt of its own here. It never runs without the safety rules.
     if (messages[0]?.role !== 'system') messages.unshift({ role: 'system', content: staffPrompt(floor, agent, roleCfg, task, this.cfg, this.people.personBlock(agent, task)) });
     this.setAgent(agent.id, { state: 'thinking', activity: task.title, project: task.project, task_id: task.id });
     this.feed(floorId, agent, `started "${task.title}"`, task.project);
-    const call = { floorId, agent, signal, project: task.project, taskId: task.id };
+    const call = { floorId, agent, signal, project: task.project, taskId: task.id, autonomous: !!task.auto };
     const allBoss = all(this.db, "SELECT text FROM messages WHERE floor_id=? AND role='boss' ORDER BY id DESC LIMIT 12", floorId).map((m) => m.text).join(' ');
     const answers = () => all(this.db, 'SELECT answer FROM questions WHERE task_id=? AND answer IS NOT NULL', task.id).map((q) => q.answer);
     const maxSteps = this.cfg.maxStaffSteps;
@@ -668,7 +677,7 @@ export class Engine {
     let ids = []; try { ids = JSON.parse(task.files || '[]'); } catch { /* none */ }
     return attachmentsOf(this.db, task.floor_id, ids);
   }
-  assignTask(floor, mgr, { to, title, brief, plan, project: wanted, private: priv, dependsOn, afterPrevious, lane = '', files = [] }) {
+  assignTask(floor, mgr, { to, title, brief, plan, project: wanted, private: priv, dependsOn, afterPrevious, lane = '', files = [], auto = false }) {
     const q = to.toLowerCase();
     const staff = all(this.db, "SELECT * FROM agents WHERE floor_id=? AND role!='manager'", floor.id);
     const target = staff.find((s) => s.role === q || s.name.toLowerCase() === q || s.title.toLowerCase() === q);
@@ -684,7 +693,7 @@ export class Engine {
       if (prev) deps.push(prev.id);
     }
     const t = this.now();
-    const r = run(this.db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,depends_on,created_at,updated_at,lane,files) VALUES (?,?,?,?,?,?,?,?,?,?,?)', floor.id, plan, title, brief, target.id, project, JSON.stringify([...new Set(deps)]), t, t, lane, JSON.stringify(files.map((f) => f.id)));
+    const r = run(this.db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,depends_on,created_at,updated_at,lane,files,auto) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', floor.id, plan, title, brief, target.id, project, JSON.stringify([...new Set(deps)]), t, t, lane, JSON.stringify(files.map((f) => f.id)), auto ? 1 : 0);
     const id = Number(r.lastInsertRowid);
     this.emitTask(id);
     this.feed(floor.id, mgr, `gave ${target.name} a task: "${title}"`, project);

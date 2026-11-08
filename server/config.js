@@ -110,6 +110,12 @@ export function loadConfig(env = process.env, overrides = {}) {
     ordersRunTimeoutMin: num(env.ORDERS_RUN_TIMEOUT_MIN, 180),
     ordersTickMs: num(env.ORDERS_TICK_MS, 30000),
     ordersEstimateUsd: num(env.ORDERS_ESTIMATE_USD, 0.6),
+    // Work modes: in Set hours or Nonstop the team picks its own next job whenever the floor is quiet, this many minutes after the last one finished.
+    // There is no money cap per floor: the building's own limits stop it, and three failed jobs in a row pause it. See docs/WORK-MODES.md.
+    autopilotGapMin: Math.max(0, num(env.AUTOPILOT_GAP_MIN, 5)),
+    autopilotMaxFails: Math.max(1, num(env.AUTOPILOT_MAX_FAILS, 3)),
+    autopilotRunTimeoutMin: num(env.AUTOPILOT_RUN_TIMEOUT_MIN, 180),
+    modesTickMs: num(env.MODES_TICK_MS, 5000),
     // Filler companies (floors-plus): scripted floors that look busy and never call a model. Off unless asked for.
     fillerCompanies: env.FILLER_COMPANIES === '1',
     fillerTickMs: num(env.FILLER_TICK_MS, 9000),
@@ -131,5 +137,32 @@ export function loadConfig(env = process.env, overrides = {}) {
 
 export function loadModels(path = resolve(ROOT, 'config/models.json')) {
   const m = JSON.parse(readFileSync(path, 'utf8'));
-  return { roles: m.roles, hireable: m.hireable, all: { ...m.roles, ...m.hireable }, tools: m.tools || {} };
+  const prices = Object.fromEntries(Object.entries(m.prices || {}).filter(([k]) => !k.startsWith('_')));
+  // A price written on the role itself wins; otherwise it is whatever its model costs.
+  const priced = (x) => (x && !x.pricing && prices[x.model] ? { ...x, pricing: prices[x.model] } : x);
+  const each = (group) => Object.fromEntries(Object.entries(group || {}).map(([k, r]) => [k, priced(r)]));
+  const roles = each(m.roles), hireable = each(m.hireable);
+  return { roles, hireable, all: { ...roles, ...hireable }, tools: each(m.tools), prices, autonomous: m.autonomous || null };
+}
+
+/**
+ * The model one call runs on. A job the boss asked for runs on the role's own model; a job the team picked for itself in a work mode
+ * runs on the autonomous model, computer sessions included. Returns { provider, model, effort, maxTokens, pricing }, or null for a role
+ * that has no computer when one is asked for.
+ */
+export function routeFor(models, roleKey, { autonomous = false, computer = false } = {}) {
+  const role = models.all[roleKey] || models.all.researcher;
+  const price = (model, own) => own || models.prices?.[model] || { prompt: 0, completion: 0 };
+  let r;
+  if (computer) {
+    if (!role.computer) return null;
+    const over = role.computer === true ? {} : role.computer;
+    const model = over.model || role.model;
+    // Managed Agents runs Claude only, so a role on another provider names its Claude model under computer.
+    r = { provider: 'anthropic', model, effort: over.effort ?? role.effort, maxTokens: role.maxTokens, pricing: price(model, over.pricing || (model === role.model ? role.pricing : null)) };
+  } else r = { provider: role.provider === 'anthropic' ? 'anthropic' : (role.provider || 'openrouter'), model: role.model, effort: role.effort, maxTokens: role.maxTokens, pricing: price(role.model, role.pricing) };
+  const auto = models.autonomous;
+  if (!autonomous || !auto?.model) return r;
+  if (!computer && (auto.keepOwnModel || []).includes(roleKey)) return r;
+  return { ...r, provider: auto.provider || 'anthropic', model: auto.model, effort: auto.effort ?? r.effort, pricing: price(auto.model, null) };
 }

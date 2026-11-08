@@ -36,6 +36,50 @@ export function toAnthropic(messages, tools) {
   };
 }
 
+/**
+ * What a Claude model accepts, where the models differ. Opus 5.5 and Sonnet 5.5 both refuse thinking {type: 'disabled'} and forced tool_choice
+ * ('any' or 'tool') with a 400, and take the server-side fallback only as fallbacks: 'default' under the server-side-fallback-2026-07-01 beta
+ * (the array form and its 2026-06-01 header are a 400 on Sonnet 5.5). Sonnet 5.5 has its own thinking-off setting, between_tools, at effort high
+ * or below. Haiku has no server-side fallback.
+ */
+export function modelShape(model) {
+  const m = String(model || '');
+  if (/^claude-sonnet-5-5\b/.test(m)) return { fallbacks: 'default', thinkingOff: 'between_tools', forcedToolChoice: false };
+  if (/^claude-opus-5-5\b/.test(m)) return { fallbacks: 'default', thinkingOff: null, forcedToolChoice: false };
+  if (/^claude-haiku/.test(m)) return { fallbacks: null, thinkingOff: 'disabled', forcedToolChoice: true };
+  if (/^claude-(opus|sonnet|fable)/.test(m)) return { fallbacks: 'default', thinkingOff: 'disabled', forcedToolChoice: true };
+  return { fallbacks: null, thinkingOff: 'disabled', forcedToolChoice: true };
+}
+const AT_MOST_HIGH = new Set(['low', 'medium', 'high']);
+export const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+
+/**
+ * The Messages API body for one call, shaped for its model. thinking 'off' asks for the least thinking the model allows; on Opus 5.5 that is
+ * adaptive thinking, since effort is its only control. A forced tool_choice becomes 'auto' where the model refuses it: say which tool in the prompt.
+ * Only volatile things belong after the cached prefix, which runs tools, then system, then messages, and each model keeps a cache of its own.
+ */
+export function buildRequest({ model, effort, maxTokens, system, messages, tools = [], toolChoice, thinking = 'adaptive', fallbacks = true, cache = true, stream = true }) {
+  const shape = modelShape(model);
+  const body = { model, max_tokens: maxTokens };
+  if (stream) body.stream = true;
+  if (thinking === 'off' && shape.thinkingOff === 'between_tools' && (!effort || AT_MOST_HIGH.has(effort))) body.thinking = { type: 'between_tools' };
+  else if (thinking === 'off' && shape.thinkingOff === 'disabled' && (!effort || AT_MOST_HIGH.has(effort))) body.thinking = { type: 'disabled' };
+  else body.thinking = { type: 'adaptive' };
+  if (cache) body.cache_control = { type: 'ephemeral' };
+  if (effort) body.output_config = { effort };
+  if (fallbacks && shape.fallbacks) { body.betas = [FALLBACK_BETA]; body.fallbacks = shape.fallbacks; }
+  if (system) body.system = system;
+  body.messages = messages;
+  if (tools.length) {
+    body.tools = tools;
+    if (toolChoice) {
+      const forced = toolChoice.type === 'any' || toolChoice.type === 'tool';
+      body.tool_choice = forced && !shape.forcedToolChoice ? { type: 'auto', ...(toolChoice.disable_parallel_tool_use ? { disable_parallel_tool_use: true } : {}) } : toolChoice;
+    }
+  }
+  return body;
+}
+
 export function costOf(usage, pricing) {
   const input = usage.input_tokens || 0, write = usage.cache_creation_input_tokens || 0, read = usage.cache_read_input_tokens || 0, output = usage.output_tokens || 0;
   const p = pricing?.prompt || 0;
@@ -60,14 +104,8 @@ export function createAnthropicClient(cfg) {
       bump();
       let streamed = 0;
       const converted = toAnthropic(messages, tools);
-      const fallback = /opus|sonnet/.test(model) ? { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' } : {};
       try {
-        const stream = client.beta.messages.stream({
-          model, max_tokens: maxTokens, stream: true, thinking: { type: 'adaptive' }, cache_control: { type: 'ephemeral' },
-          ...(effort ? { output_config: { effort } } : {}), ...fallback,
-          ...(converted.system ? { system: converted.system } : {}), messages: converted.messages,
-          ...(converted.tools.length ? { tools: converted.tools } : {}),
-        }, { signal: ctl.signal });
+        const stream = client.beta.messages.stream(buildRequest({ model, effort, maxTokens, system: converted.system, messages: converted.messages, tools: converted.tools }), { signal: ctl.signal });
         for await (const ev of stream) {
           bump();
           if (ev.type === 'content_block_start' && ev.content_block.type === 'tool_use') onToolCall?.(ev.content_block.name);

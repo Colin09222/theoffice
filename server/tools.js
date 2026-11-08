@@ -10,6 +10,7 @@ import { runCheck, saveCheck, gateProblem, launchFacts, composeReport, chatRepor
 import { formatReport } from './launch-check.js';
 import { LANES } from './prompts.js';
 import { OrderError } from './orders.js';
+import { ModeError } from './modes.js';
 import { HelpError, HELP_LIMITS, flatText } from './help.js';
 import { LAYOUTS, TONES, VIBES } from '../public/js/looks.js';
 
@@ -87,6 +88,18 @@ const DEFS = {
     instruction: S('What to do each time, written as the boss would say it'), every: { type: 'string', enum: ['day', 'week'] }, at: S('Time of day as HH:MM, 24-hour'),
     weekday: { type: 'integer', description: 'For weekly orders: 0 Sunday to 6 Saturday' }, tz: S('Optional IANA time zone such as Europe/London; UTC if left out'),
   }, ['instruction', 'every', 'at']),
+  // Work modes. Whether the team works on its own is the boss's call; the goal and the next-up list are the manager's to keep.
+  set_work_mode: fn('set_work_mode', 'Set when the team works on its own, when the boss asks for it ("work nonstop", "work 9 to 5 on weekdays", "only when I ask"). ask: only when the boss asks, the default. hours: on the given days between start and end, in the boss\'s time zone. nonstop: around the clock. In hours and nonstop you pick the next most useful job toward the company\'s goal whenever the floor is quiet.', {
+    mode: { type: 'string', enum: ['ask', 'hours', 'nonstop'] },
+    days: { type: 'array', items: { type: 'string' }, description: 'For hours: the days, such as ["mon","tue","wed","thu","fri"]' },
+    start: S('For hours: opening time as HH:MM, 24-hour'), end: S('For hours: closing time as HH:MM, 24-hour'),
+    tz: S('Optional IANA time zone such as Europe/London; the boss\'s own if left out'),
+  }, ['mode']),
+  update_backlog: fn('update_backlog', 'Keep the company\'s goal and the next-up list the team works from on its own, most useful first, and after a job say in a line or two what it did. The boss sees them in the Work tab.', {
+    goal: S('The company\'s goal, in one short sentence'),
+    next_up: { type: 'array', items: { type: 'string' }, description: 'The next pieces of work, most useful first, at most 8' },
+    summary: S('A line or two for the boss on what the job you just finished did'),
+  }, []),
   list_standing_orders: fn('list_standing_orders', 'List this floor\'s standing orders with their ids, schedules and next run.', {}, []),
   cancel_standing_order: fn('cancel_standing_order', 'Delete a standing order the boss no longer wants.', { id: { type: 'integer', description: 'Order id from list_standing_orders' } }),
   ask_buddehbot: fn('ask_buddehbot', 'Ask buddehbot, the building owner\'s assistant, for guidance when you or your staff are truly blocked and the boss can\'t settle it. Don\'t wait for the answer: carry on with anything else you can do. Your own words only: no pasted pages, files or private details.', { question: S(`What you need to know, up to ${HELP_LIMITS.question} characters`), what_was_tried: S(`What you already tried, up to ${HELP_LIMITS.tried} characters`) }),
@@ -100,7 +113,7 @@ export const MANAGER_TOOLS = ['write_file', 'read_file', 'list_files', 'view_fil
 
 // Beyond the common set, by job. A tool nobody needs is a tool a hijacked agent can't use. Approving a purchase is not on this list for anyone: it isn't a tool at all.
 const ROLE_EXTRAS = {
-  manager: ['web_search', 'check_domain', 'request_domain', 'launch_check', 'launch_report', 'ios_start', 'ios_request', 'set_standing_order', 'list_standing_orders', 'cancel_standing_order', 'ask_buddehbot', 'set_company', 'update_staff', 'let_go_staff', 'make_logo'],
+  manager: ['web_search', 'check_domain', 'request_domain', 'launch_check', 'launch_report', 'ios_start', 'ios_request', 'set_standing_order', 'list_standing_orders', 'cancel_standing_order', 'set_work_mode', 'update_backlog', 'ask_buddehbot', 'set_company', 'update_staff', 'let_go_staff', 'make_logo'],
   builder: ['generate_image', 'review_design', 'launch_check'], designer: ['generate_image', 'review_design'], illustrator: ['generate_image', 'review_design'],
   tester: ['review_design', 'launch_check'], marketer: ['check_domain'],
 };
@@ -499,7 +512,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     ios_start(c, a) { return engine.ios.start(c, projectFor(c, a), str(a, 'app_name', 40)); },
     ios_request(c, a) { return engine.ios.request(c, projectFor(c, a), a.kind === 'submit' ? 'submit' : 'build', str(a, 'build_id', 80, false)); },
     assign_task(c, a) {
-      const t = engine.assignTask(c.floor, c.agent, { to: str(a, 'to', 60), title: str(a, 'title', 160), brief: str(a, 'brief', 6000), plan: str(a, 'plan', 120, false), project: slugify(str(a, 'project', 60, false), ''), private: a.private === true, dependsOn: Array.isArray(a.depends_on) ? a.depends_on : [], afterPrevious: a.after_previous === true, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files) });
+      const t = engine.assignTask(c.floor, c.agent, { to: str(a, 'to', 60), title: str(a, 'title', 160), brief: str(a, 'brief', 6000), plan: str(a, 'plan', 120, false), project: slugify(str(a, 'project', 60, false), ''), private: a.private === true, dependsOn: Array.isArray(a.depends_on) ? a.depends_on : [], afterPrevious: a.after_previous === true, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files) , auto: !!c.autonomous });
       c.assigned.push(t.agentId);
       return `Task #${t.id} assigned to ${t.assignee}.`;
     },
@@ -542,6 +555,19 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (!Number.isInteger(id) || id <= 0) throw new WorkspaceError('id must be a standing order id from list_standing_orders');
       try { engine.orders.remove(c.floor, id); } catch (e) { if (e instanceof OrderError) throw new WorkspaceError(e.message); throw e; }
       return `Standing order #${id} cancelled.`;
+    },
+    // Work modes. Only the boss's own words in this conversation change when the team works; a page or a report can't.
+    set_work_mode(c, a) {
+      if (!engine.modes) throw new WorkspaceError('work modes are not available');
+      if (!c.bossTurn) throw new WorkspaceError('the work mode only changes when the boss asks you to in this conversation. Nothing was changed.');
+      let v;
+      try { v = engine.modes.set(c.floor, { mode: a.mode, days: a.days, start: str(a, 'start', 8, false) || undefined, end: str(a, 'end', 8, false) || undefined, tz: str(a, 'tz', 64, false) || undefined }, { by: 'manager' }); } catch (e) { if (e instanceof ModeError) throw new WorkspaceError(e.message); throw e; }
+      return `Work mode set: ${v.text}. The sign by the door says "${v.label}"${v.mode === 'ask' ? '' : ', and the team now picks its own next job whenever the floor is quiet'}. The boss can change it under Customise, Hours.`;
+    },
+    update_backlog(c, a) {
+      if (!engine.modes) throw new WorkspaceError('work modes are not available');
+      const v = engine.modes.updatePlan(c.floor, { goal: typeof a.goal === 'string' ? a.goal : undefined, nextUp: Array.isArray(a.next_up) ? a.next_up.filter((x) => typeof x === 'string') : undefined, summary: typeof a.summary === 'string' ? a.summary : undefined });
+      return `Saved. Goal: ${v.goal || 'none yet'}. Next up: ${v.nextUp.length ? v.nextUp.map((x, i) => `${i + 1}. ${x}`).join(' ') : 'nothing listed'}.`;
     },
     // The one way a floor can reach the owner's assistant. Everything it stores is untrusted, and it gets fenced every time it is listed.
     ask_buddehbot(c, a) {

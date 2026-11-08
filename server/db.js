@@ -155,6 +155,8 @@ Object.assign(ADDED.tasks, { seen_links: "TEXT NOT NULL DEFAULT ''" });
 Object.assign(ADDED.messages ||= {}, { files: "TEXT NOT NULL DEFAULT ''" });
 Object.assign(ADDED.tasks, { files: "TEXT NOT NULL DEFAULT '[]'" });
 ADDED.agents = { character: "TEXT NOT NULL DEFAULT ''", memory: "TEXT NOT NULL DEFAULT '[]'", office: "TEXT NOT NULL DEFAULT ''" };
+// Work modes: a task the team set itself while working on its own runs on the autonomous models. See server/modes.js.
+Object.assign(ADDED.tasks, { auto: 'INTEGER NOT NULL DEFAULT 0' });
 
 export function openDb(dataDir) {
   let path = ':memory:';

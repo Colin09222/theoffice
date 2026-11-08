@@ -1,42 +1,58 @@
 {
-  "_comment": "Per-role provider and model. provider 'anthropic' uses the Claude API; anything else goes to OpenRouter. pricing is USD per million tokens. OpenRouter models are checked by scripts/validate-models.mjs.",
+  "_comment": "Who runs on which model, in one place. provider 'anthropic' uses the Claude API; anything else goes to OpenRouter. A role names its model and effort; what a model costs is under prices, so changing a model changes the price with it. OpenRouter models are checked by scripts/validate-models.mjs.",
+  "prices": {
+    "_comment": "USD per million tokens. cacheRead is what a prompt-cache hit costs; a cache write is charged at 1.25 times the input price.",
+    "claude-opus-5-5": {
+      "prompt": 4,
+      "completion": 20,
+      "cacheRead": 0.2
+    },
+    "claude-sonnet-5-5": {
+      "prompt": 2,
+      "completion": 10,
+      "cacheRead": 0.2
+    },
+    "claude-haiku-5-5": {
+      "prompt": 0.1,
+      "completion": 0.5,
+      "cacheRead": 0.01
+    },
+    "google/gemini-3.1-pro-preview": {
+      "prompt": 2,
+      "completion": 12
+    }
+  },
+  "autonomous": {
+    "_comment": "Jobs the team picks for itself in a work mode (Set hours or Nonstop). Every Claude role runs on this, computer sessions included. keepOwnModel: roles whose own call stays on their own model, like the Tester's review on another lab's model; their computer still moves.",
+    "provider": "anthropic",
+    "model": "claude-sonnet-5-5",
+    "effort": "high",
+    "keepOwnModel": [
+      "tester"
+    ]
+  },
   "roles": {
     "manager": {
       "title": "Office Manager",
       "provider": "anthropic",
-      "model": "claude-opus-5-5",
-      "effort": "medium",
-      "maxTokens": 16000,
-      "pricing": {
-        "prompt": 4,
-        "completion": 20,
-        "cacheRead": 0.2
-      }
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
+      "maxTokens": 16000
     },
     "researcher": {
       "title": "Researcher",
       "provider": "anthropic",
-      "model": "claude-opus-5-5",
-      "effort": "medium",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
       "maxTokens": 12000,
-      "pricing": {
-        "prompt": 4,
-        "completion": 20,
-        "cacheRead": 0.2
-      },
       "brief": "You dig up facts. Use web_search and fetch_url, keep notes in the workspace and always record your sources with URLs. Say plainly when you could not confirm something."
     },
     "writer": {
       "title": "Writer",
       "provider": "anthropic",
-      "model": "claude-opus-5-5",
-      "effort": "medium",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
       "maxTokens": 16000,
-      "pricing": {
-        "prompt": 4,
-        "completion": 20,
-        "cacheRead": 0.2
-      },
       "brief": "You write clear, lively documents in markdown: briefs, plans, copy, posts."
     },
     "builder": {
@@ -45,11 +61,6 @@
       "model": "claude-opus-5-5",
       "effort": "xhigh",
       "maxTokens": 32000,
-      "pricing": {
-        "prompt": 4,
-        "completion": 20,
-        "cacheRead": 0.2
-      },
       "brief": "You build working sites, games, simulations and apps, then publish them. Plain HTML, CSS and JavaScript unless the job calls for more.",
       "computer": {
         "effort": "medium"
@@ -62,11 +73,6 @@
       "model": "claude-opus-5-5",
       "effort": "medium",
       "maxTokens": 16000,
-      "pricing": {
-        "prompt": 4,
-        "completion": 20,
-        "cacheRead": 0.2
-      },
       "brief": "You decide how things look: palettes, type, layout and CSS. Use generate_image for real pictures such as hero images, logos, favicons and social previews, and inline SVG for simple shapes. Get a review_design opinion on a screenshot when one exists."
     }
   },
@@ -74,46 +80,27 @@
     "analyst": {
       "title": "Analyst",
       "provider": "anthropic",
-      "model": "claude-opus-5-5",
-      "effort": "medium",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
       "maxTokens": 12000,
-      "pricing": {
-        "prompt": 4,
-        "completion": 20,
-        "cacheRead": 0.2
-      },
       "brief": "You crunch numbers and write crisp comparisons and estimates."
     },
     "marketer": {
       "title": "Marketer",
       "provider": "anthropic",
-      "model": "claude-opus-5-5",
-      "effort": "medium",
+      "model": "claude-sonnet-5-5",
+      "effort": "high",
       "maxTokens": 12000,
-      "pricing": {
-        "prompt": 4,
-        "completion": 20,
-        "cacheRead": 0.2
-      },
       "brief": "You find the angle, the audience and the words that sell an idea."
     },
     "tester": {
       "title": "Tester",
       "model": "google/gemini-3.1-pro-preview",
       "maxTokens": 8000,
-      "pricing": {
-        "prompt": 2,
-        "completion": 12
-      },
       "brief": "You read what the team made, look for mistakes and write up fixes.",
       "computer": {
-        "model": "claude-opus-5-5",
-        "effort": "low",
-        "pricing": {
-          "prompt": 4,
-          "completion": 20,
-          "cacheRead": 0.2
-        }
+        "model": "claude-sonnet-5-5",
+        "effort": "high"
       },
       "computerBrief": "You are the Tester. You run what the team made in a real browser, try to break it, run the launch checklist, and fix or report what is wrong."
     },
@@ -123,11 +110,6 @@
       "model": "claude-opus-5-5",
       "effort": "high",
       "maxTokens": 16000,
-      "pricing": {
-        "prompt": 4,
-        "completion": 20,
-        "cacheRead": 0.2
-      },
       "brief": "You make pictures: generate_image for real artwork, inline SVG for logos and icons."
     }
   },
@@ -135,12 +117,7 @@
     "talk": {
       "provider": "anthropic",
       "model": "claude-haiku-5-5",
-      "effort": "low",
-      "pricing": {
-        "prompt": 0.1,
-        "completion": 0.5,
-        "cacheRead": 0.01
-      }
+      "effort": "low"
     },
     "image": {
       "model": "google/gemini-nano-banana-2.1",
@@ -155,12 +132,7 @@
       "model": "claude-sonnet-5-5",
       "effort": "low",
       "maxTokens": 8000,
-      "maxUses": 3,
-      "pricing": {
-        "prompt": 2,
-        "completion": 10,
-        "cacheRead": 0.2
-      }
+      "maxUses": 3
     }
   }
 }

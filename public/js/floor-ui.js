@@ -12,6 +12,15 @@ import { portrait } from './portrait.js';
 import { muteButton, sfx } from './sfx.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
+/** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
+function opensWhen(ms) {
+  const d = new Date(ms), now = new Date();
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return `at ${time}`;
+  const tomorrow = new Date(now); tomorrow.setDate(now.getDate() + 1);
+  return d.toDateString() === tomorrow.toDateString() ? `tomorrow at ${time}` : `${d.toLocaleDateString([], { weekday: 'long' })} at ${time}`;
+}
+
 const isPhone = () => window.innerWidth <= 760;
 const TALK_KIND = { assign: 'Assignment', plan: 'The plan', handoff: 'Handoff', findings: 'Findings', review: 'Review', question: 'Question', answer: 'Answer', ask: 'Asking', meeting: 'Meeting', banter: 'Small talk' };
 const NAME_INK = ['#b3261e', '#0b6e69', '#1d5fb8', '#8a5200', '#8a2f6b', '#2c7a31', '#a33f00', '#22577a'];
@@ -56,6 +65,7 @@ class FloorPage {
     } else this.pinsEl.hidden = true;  // no room to float over
     this.renderAll();
     this.layout();
+    this.learnZone();
     this.onResize = () => this.layout();
     window.addEventListener('resize', this.onResize);
     this.catchUpBanner();
@@ -132,7 +142,7 @@ class FloorPage {
       h('header.floor-top', {},
         h('div.plaque-top', {}, h('button.btn.chrome.back', { type: 'button', 'aria-label': 'Back to the lobby', onclick: () => window.officeGo('/') }, icon('elevator'), h('span', {}, 'Lobby')), muteButton()),
         h('div.floor-title', {}, h('span.floor-num', {}, `Floor ${s.floor.number}`), this.logoEl, this.titleEl, this.tagEl),
-        h('div.floor-meta', {}, this.statusEl),
+        h('div.floor-meta', {}, this.statusEl, this.hoursEl = h('div.hours-sign', { 'data-hours': '' }, h('b'), h('small'))),
         this.cardEl),
       this.controlsEl,
       this.pillEl,
@@ -184,6 +194,14 @@ class FloorPage {
   renderAll() {
     this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody(); renderCard(this);
   }
+  /** The boss's own time zone, for set hours, until they pick one under Customise. */
+  learnZone() {
+    const w = this.state.workPlan; let tz = '';
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { /* an old browser keeps UTC */ }
+    if (this.owner && w && !w.tzSet && tz && tz !== w.tz) api(`/floors/${this.slug}/work-mode/zone`, { method: 'POST', body: { tz } }).catch(() => {});
+  }
+  /** Outside set hours everyone goes home, unless the boss has called them back in for something. */
+  get closedNow() { return !!this.state.floor.workMode?.closed && !this.state.agents.some((a) => a.state !== 'idle'); }
   renderHeader() {
     const s = this.state; const f = s.floor;
     this.titleEl.textContent = f.name || 'Moving in'; this.tagEl.textContent = f.filler ? `${f.tagline} · A fictional demo company` : f.tagline || (f.setup ? 'Your manager is sorting out the sign' : '');
@@ -194,7 +212,13 @@ class FloorPage {
     if (f.paused) { label = 'Paused'; cls = 'warn'; }
     if (f.globalPause) { label = 'Building paused'; cls = 'warn'; }
     if (f.status === 'suspended') { label = 'Closed'; cls = 'bad'; }
+    else if (label === 'Open' && this.closedNow) { label = 'Closed'; cls = 'warn'; }
     this.statusEl.className = `status-pill ${cls}`; this.statusEl.textContent = label;
+    // The sign with the hours: Open 9–5, Open 24/7 or On call.
+    const w = f.workMode || { label: 'On call', mode: 'ask' };
+    this.hoursEl.dataset.mode = w.mode; this.hoursEl.classList.toggle('closed', this.closedNow);
+    this.hoursEl.firstChild.textContent = w.label; this.hoursEl.lastChild.textContent = w.days || (w.mode === 'nonstop' ? 'Every day' : 'When the boss calls');
+    this.view?.setClosed?.(this.closedNow);
   }
   renderControls() {
     clear(this.controlsEl);
@@ -325,6 +349,7 @@ class FloorPage {
     else if (f.paused) text = f.pauseReason || 'This floor is paused.';
     else if (f.budgetStopped) text = 'Everyone has gone home for today. Work picks up again tomorrow.';
     else if (f.outOfBudget) text = 'Work has stopped for now. The building manager knows.';
+    else if (this.closedNow) text = `Closed for now: everyone has gone home.${f.workMode.opensAt ? ` Back ${opensWhen(f.workMode.opensAt)}.` : ''}${this.owner ? ' You can still call your manager.' : ''}`;
     else if (this.catchUp) text = this.catchUp;
     this.bannerEl.textContent = text; this.bannerEl.hidden = !text;
   }
@@ -472,6 +497,24 @@ class FloorPage {
     if (!items.length) list.append(h('li.empty', {}, this.owner ? 'Nothing in the log yet. Call your manager and give them something to do.' : 'Nothing in the log yet. Nobody has started anything.'));
     this.feedList = list;
     this.bodyEl.append(list);
+    // The boss's plan sits above the log (CSS order), so the log stays the first thing here and keeps its scroll on a reload.
+    const plan = this.owner ? this.planCard() : null;
+    if (plan) this.bodyEl.append(plan);
+  }
+  // ---- work modes: the plan the team works from on its own ----
+  planCard() {
+    const w = this.state.workPlan;
+    if (!w) return null;
+    const restart = async () => {
+      try { await api(`/floors/${this.slug}/work-mode`, { method: 'POST', body: { mode: w.mode, days: w.dayList, start: w.start, end: w.end, tz: w.tz } }); toast('Back to work'); await this.reload(); } catch (e) { toast(e.message, 'bad'); }
+    };
+    const head = w.mode === 'ask' ? 'On call: the team works when you ask.' : w.paused ? `Paused: ${w.pausedReason}.` : `${w.label}${w.days ? `, ${w.days}` : ''}: the team picks its own next job whenever the floor is quiet.`;
+    return h('section.work-plan', { 'data-plan': w.mode },
+      h('div.plan-head', {}, h('b', {}, 'Working on our own'), h('button.link', { type: 'button', 'data-plan-hours': '', onclick: () => this.openCustomise('hours') }, 'Hours')),
+      h('p.plan-mode', {}, head, w.paused ? h('button.btn.ghost', { type: 'button', 'data-plan-restart': '', onclick: restart }, 'Start again') : null),
+      h('p.plan-goal', {}, h('span', {}, 'Goal'), w.goal || (w.mode === 'ask' ? 'None yet. Set one under Hours, or let your manager write one.' : 'Your manager writes one with the first job.')),
+      w.nextUp.length ? h('div.plan-next', {}, h('span', {}, 'Next up'), h('ol', {}, ...w.nextUp.map((x) => h('li', {}, x)))) : null,
+      w.lastJob?.summary ? h('p.plan-last', {}, h('span', {}, 'Last job'), w.lastJob.summary) : null);
   }
   feedEl(f) { return h('li', { 'data-feed': f.id || '' }, h('b', {}, f.name), ` ${f.text}`, h('time', {}, timeAgo(f.ts))); }
 
@@ -776,7 +819,7 @@ class FloorPage {
       const a = this.state.agents.find((x) => x.id === d.id);
       if (a) { a.state = d.state; a.activity = d.activity; a.taskId = d.taskId; }
       this.view?.agentEvent(d);
-      this.renderStaff(); this.renderHeader(); this.cardSoon();
+      this.renderStaff(); this.renderHeader(); this.renderBanner(); this.cardSoon();
     });
     on('feed', (d) => {
       const item = { id: d._id, name: d.name, text: d.text, ts: d.ts };
@@ -820,6 +863,9 @@ class FloorPage {
       if (d.role === 'report') { if (this.tab !== 'chat') toast('A report from your manager is in the chat'); if (this.owner) this.refreshOrders(); }
     });
     on('orders', () => { if (this.owner) this.refreshOrders(); });
+    // Work modes: the sign, the hours and the plan.
+    on('work_mode', () => this.reload());
+    on('work_plan', () => { if (this.owner) this.reload(); });
     on('help_state', (d) => {
       this.state.helpWaiting = d.waiting;
       // A small touch: the manager picks up the phone. The boss's page reloads for the words, and a visitor only ever has the count.

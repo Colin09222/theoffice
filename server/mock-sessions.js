@@ -106,7 +106,7 @@ export function createMockSessions(cfg, { onTurn = defaultTurn, usage = { input_
   return {
     calls, sessions,
     async createEnvironment(def) { calls.environments.push(def); return { id: id('env') }; },
-    async createAgent(def) { const aid = id('agent'); agentRoles.set(aid, def.name.replace('theoffice-', '')); calls.agents.push(def); return { id: aid, version: 1 }; },
+    async createAgent(def) { const aid = id('agent'); agentRoles.set(aid, def.name.replace('theoffice-', '').replace(/-auto$/, '')); calls.agents.push(def); return { id: aid, version: 1 }; },
     async updateAgent(aid, def) { calls.agentUpdates.push({ id: aid, def }); return { id: aid, version: calls.agentUpdates.length + 1 }; },
     async upload(buffer, name) { const fid = id('file'); files.set(fid, buffer); calls.uploads.push({ id: fid, name, buffer }); return fid; },
     async deleteFile(fid) { files.delete(fid); calls.deleted.push(fid); },

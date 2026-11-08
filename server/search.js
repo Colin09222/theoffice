@@ -2,7 +2,7 @@
 // and the agent gets back plain findings rather than raw pages. Costs no new credential.
 import Anthropic from '@anthropic-ai/sdk';
 import { ProviderError, scrub } from './llm.js';
-import { costOf } from './anthropic.js';
+import { costOf, buildRequest } from './anthropic.js';
 
 const MAX_RESUMES = 4, USD_PER_SEARCH = 0.01;
 
@@ -26,7 +26,7 @@ export function createSearch({ cfg, tool, client }) {
       let prompt = 0, completion = 0, cost = 0, searches = 0;
       try {
         for (let turn = 0; ; turn++) {
-          const stream = sdk.beta.messages.stream({ model: tool.model, max_tokens: tool.maxTokens || 8000, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default', thinking: { type: 'adaptive' }, output_config: { effort: tool.effort || 'low' }, tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: tool.maxUses || 3 }], messages }, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000) });
+          const stream = sdk.beta.messages.stream(buildRequest({ model: tool.model, maxTokens: tool.maxTokens || 8000, effort: tool.effort || 'low', tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: tool.maxUses || 3 }], messages, cache: false, stream: false }), { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(180000)]) : AbortSignal.timeout(180000) });
           const msg = await stream.finalMessage();
           const u = costOf(msg.usage, tool.pricing);
           const n = msg.usage?.server_tool_use?.web_search_requests || 0;

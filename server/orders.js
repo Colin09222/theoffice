@@ -42,7 +42,7 @@ export function validTz(tz) {
   try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } catch { return null; }
 }
 const fmtCache = new Map();
-function tzOffset(tz, utcMs) {
+export function tzOffset(tz, utcMs) {
   if (tz === 'UTC') return 0;
   let f = fmtCache.get(tz);
   if (!f) { f = new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' }); fmtCache.set(tz, f); }
@@ -50,7 +50,7 @@ function tzOffset(tz, utcMs) {
   return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - Math.floor(utcMs / 1000) * 1000;
 }
 // The instant at which a wall clock in tz reads the given date and time.
-function wallToUtc(tz, y, m, d, hh, mm) {
+export function wallToUtc(tz, y, m, d, hh, mm) {
   const guess = Date.UTC(y, m, d, hh, mm);
   const once = guess - tzOffset(tz, guess);
   return guess - tzOffset(tz, once);  // a second pass settles a guess that landed across a clock change

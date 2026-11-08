@@ -99,11 +99,12 @@ describe('what good work means, per job', () => {
     assert.doesNotMatch(writer, /Office\.submitScore/); assert.match(builder, /Office\.submitScore/);
     assert.match(writer, /choose sensibly and say what you assumed/);
   });
-  test('routine turns run at lower effort on the same model, and only the search summary moves to a cheaper one', () => {
+  test('code, games and pictures stay on Opus; planning, words and the Tester\'s computer run on Sonnet; search stays on Sonnet at low effort', () => {
     const m = loadModels();
-    assert.equal(m.all.manager.model, 'claude-opus-5-5'); assert.equal(m.all.manager.effort, 'medium');
-    assert.equal(m.all.builder.computer.effort, 'medium'); assert.equal(m.all.tester.computer.effort, 'low');
-    assert.equal(m.tools.search.model, 'claude-sonnet-5-5');
+    assert.equal(m.all.manager.model, 'claude-sonnet-5-5'); assert.equal(m.all.manager.effort, 'high');
+    assert.equal(m.all.builder.model, 'claude-opus-5-5'); assert.equal(m.all.builder.computer.effort, 'medium');
+    assert.equal(m.all.tester.computer.model, 'claude-sonnet-5-5'); assert.equal(m.all.tester.computer.effort, 'high');
+    assert.equal(m.tools.search.model, 'claude-sonnet-5-5'); assert.equal(m.tools.search.effort, 'low');
   });
 });
 

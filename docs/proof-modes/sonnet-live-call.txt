@@ -1,0 +1,3 @@
+shape {"model":"claude-sonnet-5-5","effort":"high","thinking":{"type":"adaptive"},"betas":["server-side-fallback-2026-07-01"],"fallbacks":"default","tool_choice":null,"tools":["save_note"]}
+answer {"finish":"tool_use","text":"","toolCalls":[{"name":"save_note","args":"{\"note\":\"ok\"}"}],"blocks":["tool_use"],"tokensIn":401,"tokensOut":48}
+ACCEPTED: Sonnet 5.5 took the shape and called the tool
