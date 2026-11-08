@@ -35,18 +35,18 @@ function opensWhen(ms) {
 
 const isPhone = () => window.innerWidth <= 760;
 const isCompact = () => isPhone() || window.innerHeight <= 520;  // a phone on its side: its panel stays beside the room, but the row of tabs still has to fit
-// The phone sheet's three sizes. A conversation opens tall; everything else opens at half, sharing the screen with the room.
+// The phone sheet’s three sizes. A conversation opens tall; everything else opens at half, sharing the screen with the room.
 const HALF = 0.58;  // the same number as public/css/mobile.css: the room is told before the sheet has finished moving
 const CHAT_TABS = new Set(['chat', 'talk']);
-const PHONE_ROW = 4;  // the tabs that always show in the phone's row; the rest fold under More
+const PHONE_ROW = 4;  // the tabs that always show in the phone’s row; the rest fold under More
 const cssPx = (name) => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
 /**
- * Keeps a conversation on its newest line while the reader is there. Scrolled up, the list stays put and a small pill says there's more,
+ * Keeps a conversation on its newest line while the reader is there. Scrolled up, the list stays put and a small pill says there’s more,
  * and anything that resizes the list (the keyboard, the sheet) keeps the reader where they were. `rest` puts the list at its resting place.
  */
 function followList(list, body, rest) {
   const near = () => list.scrollHeight - list.scrollTop - list.clientHeight < 72;
-  let ownTop = null;  // where the list last came to rest by itself: a scroll landing there is ours, anywhere else the reader's
+  let ownTop = null;  // where the list last came to rest by itself: a scroll landing there is ours, anywhere else the reader’s
   const pill = h('button.new-pill', { type: 'button', hidden: true, 'data-new-pill': '', onclick: () => { f.pinned = true; f.settle(); } }, icon('caret-down'), 'New messages');
   body.append(pill);
   const place = () => { if (!pill.hidden) pill.style.bottom = `${body.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom + 10}px`; };
@@ -57,11 +57,11 @@ function followList(list, body, rest) {
     stop() { ro.disconnect(); window.removeEventListener('office:kb', onKb); pill.remove(); },
   };
   list.addEventListener('scroll', () => { if (Math.abs(list.scrollTop - ownTop) <= 2) return; f.pinned = near(); if (f.pinned) pill.hidden = true; }, { passive: true });
-  // Whenever the list changes size at the bottom, it stays at the bottom. And someone who has just started typing wants to see what they're answering.
+  // Whenever the list changes size at the bottom, it stays at the bottom. And someone who has just started typing wants to see what they’re answering.
   const typing = () => document.body.classList.contains('kb-open') && document.activeElement?.closest?.('.chat-input');
   const ro = new ResizeObserver(() => { if (f.pinned || typing()) f.settle(); else place(); });
   ro.observe(list);
-  // The keyboard moving is the moment that matters most: settle once the page has laid out around it, rather than leaving it to the observer's timing.
+  // The keyboard moving is the moment that matters most: settle once the page has laid out around it, rather than leaving it to the observer’s timing.
   const onKb = () => requestAnimationFrame(() => requestAnimationFrame(() => { if (f.pinned || typing()) f.settle(); }));
   window.addEventListener('office:kb', onKb);
   return f;
@@ -179,7 +179,7 @@ class FloorPage {
     this.stepBtn = h('button.sheet-step', { type: 'button', 'data-sheet-step': '', 'aria-label': 'Make this panel bigger', onclick: () => this.stepSheet() }, icon('caret-up'));
     this.bindGrip();
     this.sheetBar = h('div.sheet-bar', {}, this.grip, this.stepBtn);
-    this.headEl = h('div.sheet-head');  // phones: the sheet's own title row, under the handle
+    this.headEl = h('div.sheet-head');  // phones: the sheet’s own title row, under the handle
     this.peekEl = h('div.sheet-rest');  // phones: what shows when the sheet is resting
     const panel = h('aside.floor-panel', {}, this.sheetBar, this.headEl, this.peekEl, h('button.panel-close', { type: 'button', 'aria-label': 'Close this panel', onclick: () => this.setPanel(false) }, icon('x')), this.staffEl, this.tabsEl, this.bannerEl, this.bodyEl);
     this.panel = panel;
@@ -243,9 +243,9 @@ class FloorPage {
   }
   /** A panel is open or it isn't; on a phone closed means just the tabs showing at the bottom. Either way the room is told what's left for it. */
   setPanel(open) { this.panelOpen = open; if (isPhone()) this.sheet = open ? this.openSize() : 'peek'; this.layout(); }
-  /** The size the phone's sheet opens at for the tab on show: tall for a conversation, unless the boss has chosen otherwise. */
+  /** The size the phone’s sheet opens at for the tab on show: tall for a conversation, unless the boss has chosen otherwise. */
   openSize() { return CHAT_TABS.has(this.tab) ? (this.chatSheet || 'full') : (this.sheet === 'full' ? 'full' : 'half'); }
-  /** The phone's sheet: 'peek' is the handle and the tabs, 'half' shares the screen with the room, 'full' is the whole visible height. */
+  /** The phone’s sheet: ’peek’ is the handle and the tabs, ’half’ shares the screen with the room, ’full’ is the whole visible height. */
   setSheet(size, { hand = false } = {}) {
     if (!isPhone()) { this.setPanel(size !== 'peek'); return; }
     this.sheet = size; this.panelOpen = size !== 'peek';
@@ -270,7 +270,7 @@ class FloorPage {
     if (phone) { if (!this.panelOpen) this.sheet = 'peek'; else if (!this.sheet || this.sheet === 'peek') this.sheet = this.openSize(); }
     document.body.dataset.sheet = phone ? this.sheet : this.panelOpen ? 'half' : 'peek';
     if (phone) {
-      // Peek is as tall as what it's showing, so the sheet's other measurements wait on it.
+      // Peek is as tall as what it’s showing, so the sheet’s other measurements wait on it.
       this.peekH = Math.round(this.sheetBar.offsetHeight + this.peekEl.offsetHeight + this.tabsEl.offsetHeight + cssPx('--sa-b'));
       document.documentElement.style.setProperty('--peek', `${this.peekH}px`);
     }
@@ -280,7 +280,7 @@ class FloorPage {
     const w = window.innerWidth, h = window.innerHeight;
     if (!this.view) return;
     if (phone) {
-      // Not measured: mid-slide the panel is still its old height. Behind a full sheet the room keeps the half-sheet framing, so it doesn't jump when the sheet comes down.
+      // Not measured: mid-slide the panel is still its old height. Behind a full sheet the room keeps the half-sheet framing, so it doesn’t jump when the sheet comes down.
       const sheet = this.sheet === 'peek' ? this.peekH : h * HALF;
       this.view.setInsets({ left: 0, right: 0, top: businessActive(this) ? 112 : 58, bottom: sheet + 44 });
     } else {
@@ -289,12 +289,12 @@ class FloorPage {
       this.view.setInsets({ left: Math.min(w * 0.3, card.right + 6), right: Math.min(w * 0.42, taken + 6), top: businessActive(this) ? 92 : 20, bottom: 56 });
     }
   }
-  /** The sheet's resting heights, in pixels, within what's visible right now (the keyboard takes its share). */
+  /** The sheet’s resting heights, in pixels, within what’s visible right now (the keyboard takes its share). */
   sheetSizes() {
     const room = this.panel.offsetParent.clientHeight - cssPx('--kb') - cssPx('--vvt') - cssPx('--sa-t');
     return { peek: this.peekH, half: room * HALF, full: room };
   }
-  /** Drag the sheet's handle on a phone: it follows the finger and settles on the nearest size, or the next one with a flick. A plain tap is handled by the click. */
+  /** Drag the sheet’s handle on a phone: it follows the finger and settles on the nearest size, or the next one with a flick. A plain tap is handled by the click. */
   bindGrip() {
     let d = null;
     const g = this.grip;
@@ -313,9 +313,9 @@ class FloorPage {
       const was = d; d = null;
       if (!was.moved) return;
       const now = this.panel.getBoundingClientRect().height, sizes = this.sheetSizes();
-      // How fast the finger was going at the end: only the last moments count, and a finger that stopped before lifting isn't a flick.
+      // How fast the finger was going at the end: only the last moments count, and a finger that stopped before lifting isn’t a flick.
       const trail = was.trail, whole = e.timeStamp - trail[0][0];
-      // A quick swipe is its whole length; a long drag is judged on its last moments, so slowing to a stop before lifting isn't a flick.
+      // A quick swipe is its whole length; a long drag is judged on its last moments, so slowing to a stop before lifting isn’t a flick.
       const recent = whole < 300 ? trail : trail.filter(([t]) => e.timeStamp - t < 110), first = recent[0], last = recent.at(-1);
       const v = first && last !== first ? (first[1] - last[1]) / Math.max(16, last[0] - first[0]) : 0;
       const order = ['peek', 'half', 'full'].sort((a, b) => sizes[a] - sizes[b]);
@@ -478,7 +478,7 @@ class FloorPage {
   renderTabs() {
     clear(this.tabsEl);
     const tabs = this.tabsFor();
-    // A phone's row never cuts a label off: the first few tabs, then More, which opens right there to show the rest.
+    // A phone’s row never cuts a label off: the first few tabs, then More, which opens right there to show the rest.
     const folded = isCompact() && tabs.length > PHONE_ROW + 1 ? tabs.slice(PHONE_ROW) : [];
     const shown = folded.length ? tabs.slice(0, PHONE_ROW) : tabs;
     const tabEl = ([id, label], over) => {
@@ -497,7 +497,7 @@ class FloorPage {
         h('button.tab.overflow.action', { type: 'button', 'data-more-action': 'lobby', onclick: () => window.officeGo('/') }, icon('elevator'), 'Lobby')));
     }
   }
-  /** The phone's More: the folded tabs open in place, under the row. */
+  /** The phone’s More: the folded tabs open in place, under the row. */
   setMore(open) {
     if (open && isPhone() && this.sheet === 'peek') this.setSheet('half');
     this.moreOpen = !!open && !!this.moreBtn;
@@ -536,14 +536,14 @@ class FloorPage {
     if (this.tab === 'pay') renderPay(this);
     if (this.tab === 'numbers') renderNumbers(this);
   }
-  /** The sheet's title row on a phone: the manager on the phone, or the name of the tab. The size button sits at its right. */
+  /** The sheet’s title row on a phone: the manager on the phone, or the name of the tab. The size button sits at its right. */
   renderHead() {
     clear(this.headEl);
     if (!isPhone() || this.tab === 'chat') return;  // the chat brings its own, the intercom
     const label = (this.tabsFor().find(([id]) => id === this.tab)?.[1] || '').replace(/\s*\d+$/, '');
     this.headEl.append(h('div.sheet-title', {}, h('b', {}, label || 'Your floor'), this.tab === 'talk' ? h('small', {}, 'The team\'s group chat') : null));
   }
-  /** One plain sentence for what's going on here, and how far along when a job is running. */
+  /** One plain sentence for what’s going on here, and how far along when a job is running. */
   statusLine() {
     const s = this.state; const job = s.makers?.job; const steps = job?.steps || [];
     const counted = steps.filter((x) => x.state !== 'skipped');
@@ -562,7 +562,7 @@ class FloorPage {
     const l = this.talkLines().at(-1);
     return l ? { who: l.fromName || 'Someone', person: this.person(l.from, l.fromName), text: l.text } : null;
   }
-  /** What a resting sheet shows: what's happening, the last word, and a clear way back to any options waiting. */
+  /** What a resting sheet shows: what’s happening, the last word, and a clear way back to any options waiting. */
   renderPeek() {
     if (!this.peekEl) return;
     if (!isPhone()) { clear(this.peekEl); return; }
@@ -777,7 +777,7 @@ class FloorPage {
     const plan = this.owner ? this.planCard() : null;
     if (plan) this.bodyEl.append(plan);
   }
-  /** On a phone the Work tab leads with the people: what's happening, a bar when a job is running, one row each, and Launch waiting at the end. */
+  /** On a phone the Work tab leads with the people: what’s happening, a bar when a job is running, one row each, and Launch waiting at the end. */
   teamBlock() {
     const status = this.statusLine(), job = this.state.makers?.job;
     return h('section.team-now', { 'data-team-now': '' },
