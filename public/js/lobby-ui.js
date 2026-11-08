@@ -12,7 +12,9 @@ const claimModule = () => import('./claim.js');
 const openClaim = () => claimModule().then((m) => m.openClaim());
 const openLogin = () => claimModule().then((m) => m.openLogin());
 
-let view = null, stack = null, poll = null, keepFloors = [], tip = null, tickerPoll = null, partyPoll = null, partying = null, tickerLed = null;
+let view = null, stack = null, tower = null, poll = null, keepFloors = [], tip = null, tickerPoll = null, partyPoll = null, partying = null, tickerLed = null;
+// The 3D building, fetched the first time Building is chosen (a phone starts there). It brings the floor scene with it.
+const towerModule = () => import('./tower-scene.js');
 
 // ---- the building, live: a ticker of public happenings across every floor ----
 function tickerItem(it, fresh) {
@@ -86,6 +88,8 @@ export async function showLobby(root) {
 
   const enterFloor = async (card) => {
     sfx('press', { rate: 0.75 });
+    // In the 3D building the camera flies into the floor, and the floor page carries on from there.
+    if (tower && stage.ok && document.body.dataset.lobby === 'building') { tower.flyInto(card.number); return; }
     if (view && stage.ok && document.body.dataset.lobby !== 'building') {
       view.rideTo(card.number);
       document.body.classList.add('flying');
@@ -106,7 +110,7 @@ export async function showLobby(root) {
       },
     });
     view.setFloors(data.floors);
-    stage.setView(view);
+    if (lobbyMode() !== 'building') stage.setView(view);  // Building puts the 3D building up itself, once it has loaded
     window.__lobbyDebug = view;  // read by the browser e2e tests
   }
 
@@ -118,7 +122,7 @@ export async function showLobby(root) {
     const shown = keepFloors.filter((f) => !q || `${f.name} ${f.tagline}`.toLowerCase().includes(q));
     count.textContent = `${keepFloors.length} ${keepFloors.length === 1 ? 'company' : 'companies'}`;
     clear(list);
-    for (const c of shown) list.append(directoryRow(c, enterFloor, (n) => { view?.setHover(n); view?.rideTo(n); }));
+    for (const c of shown) list.append(directoryRow(c, enterFloor, (n) => { view?.setHover(n); view?.rideTo(n); if (document.body.dataset.lobby === 'building') tower?.rideToFloor(n); }));
     if (q && !shown.length) list.append(h('p.dir-empty', {}, 'Nobody by that name in the building.'));
     if (!q) {
       if (!keepFloors.length) list.append(h('p.dir-empty', {}, 'The building is brand new, and every floor is empty. Someone has to go first.'));
@@ -234,22 +238,47 @@ export async function showLobby(root) {
   );
 
   // ---- Building | Outside ----
-  // Building is the whole tower as a stack of strips, cheap on a phone; Outside is the 3D tower. Directory, Top and Launched work in both.
+  // Building is the tower cut away, every floor's office in 3D, ridden up and down; Outside is the tower from the street. Without WebGL,
+  // Building falls back to a stack of strips. Directory, Top and Launched work in all of them.
   stack?.destroy();
   stack = buildStack({ onEnter: (card) => { sfx('press', { rate: 0.75 }); window.officeGo(`/floor/${card.slug}`); } });
   stack.update(data);
   const modeBtn = (m, label) => h('button.mode-btn', { type: 'button', 'data-mode': m, 'aria-pressed': 'false', onclick: () => setMode(m, true) }, label);
   const modes = h('div.lobby-mode', { role: 'group', 'aria-label': 'How to see the building' }, modeBtn('building', 'Building'), modeBtn('outside', 'Outside'));
+  const showTower = async () => {
+    if (!tower) {
+      const { TowerView, takeHandoff } = await towerModule();
+      if (document.body.dataset.page !== 'lobby' || tower) return;
+      tower = new TowerView({
+        labels: document.getElementById('labels'),
+        onEnter: (card) => window.officeGo(`/floor/${card.slug}`),
+        onEmpty: (n) => toast(`Floor ${n} is to let. Got a code?`),
+      });
+      window.__tower = tower;  // read by the browser e2e tests
+      tower.setFloors(data);
+      await tower.loadStaff();
+      if (!tower || tower.dead) return;
+      // Back from a floor page: the camera flies out of that very room. Otherwise the ride starts where it was left, or at the newest floor.
+      const back = takeHandoff('out');
+      if (!(back && tower.flyOutOf(back))) tower.restoreSpot();
+    }
+    if (document.body.dataset.lobby === 'building' && stage.view !== tower) stage.setView(tower);
+  };
   const setMode = (m, chosen) => {
     if (m === 'outside' && !stage.ok) m = 'building';
     document.body.dataset.lobby = m;
     for (const b of modes.children) b.setAttribute('aria-pressed', String(b.dataset.mode === m));
     if (chosen) setLobbyMode(m);
-    stage.paused = m === 'building';
-    if (m === 'building') stack.show(); else stack.hide();
+    if (!stage.ok) { stage.paused = m === 'building'; if (m === 'building') stack.show(); else stack.hide(); return; }
+    stack.hide(); stage.paused = false;
+    if (m === 'building') { document.body.dataset.tower = '3d'; return showTower().catch((e) => { console.error(e); toast('The building could not be drawn here.'); }); }
+    delete document.body.dataset.tower; if (view && stage.view !== view) stage.setView(view);
+    return null;
   };
   root.append(stack.el, modes);
-  setMode(lobbyMode(), false);
+  // The page is ready once the building is up, so the curtain lifts on it rather than on an empty sky (the router waits for this).
+  await setMode(lobbyMode(), false);
+  if (document.body.dataset.page !== 'lobby') return;  // gone already, while the building was being put up
 
   // ---- launch parties ----
   // The building picks them and keeps them rare. This tab also takes one a minute at most, and never the same one twice.
@@ -279,6 +308,7 @@ export async function showLobby(root) {
     try {
       const fresh = await api('/floors');
       keepFloors = fresh.floors; view?.setFloors(fresh.floors); stack?.update(fresh);
+      if (tower && !tower.dead) { tower.setFloors(fresh); tower.loadStaff(); }
       if (document.activeElement !== search) renderList();
       if (wallOn) loadWall();
       if (boardOn) loadBoard();
@@ -298,6 +328,7 @@ function showTip(n, x, y) {
 export function hideLobby() {
   clearInterval(poll); poll = null; tip = null;
   stack?.destroy(); stack = null; stage.paused = false; delete document.body.dataset.lobby;
+  tower?.destroy(); tower = null; window.__tower = null; delete document.body.dataset.tower;
   clearInterval(tickerPoll); tickerPoll = null;
   clearInterval(partyPoll); partyPoll = null; partying = null; tickerLed = null;
 }

@@ -193,6 +193,8 @@ class Stage {
     this.paused = false;
     this.view?.leave?.();
     this.view = view;
+    // A held frame starts to fade with the new view's first picture, whatever that first picture costs to compile.
+    if (this.freeze?.on && this.freeze.holding) { this.freeze.holding = false; this.freeze.start = 0; }
     this.renderer.shadowMap.enabled = false;
     this.graceUntil = performance.now() + 2000;  // the first frames of a new view compile shaders, which says nothing about the device
     this.applyPost();
@@ -225,6 +227,9 @@ class Stage {
   /** One frame of the current view, on demand as well as from the loop. */
   renderOnce(dt = 0) {
     this.renderer.info.reset();
+    const fz = this.freeze?.on ? this.freeze : null;
+    // Holding a frame while the next view gets ready: nothing is drawn, so the canvas keeps showing it. Not for ever, though.
+    if (fz?.holding) { if (performance.now() < fz.until) return; fz.holding = false; fz.start = 0; }
     if (!this.view?.scene) return;
     this.view.update?.(dt);
     // The sun's shadow map is big, so it redraws every other frame, or every third on a phone. Nobody can tell. A view where nothing that casts moves draws it once.
@@ -232,6 +237,47 @@ class Stage {
     if (r.shadowMap.enabled && !r.shadowMap.autoUpdate && !this.view.staticShadows) r.shadowMap.needsUpdate = r.shadowMap.needsUpdate || this.frame % (this.lowEnd ? 3 : 2) === 0;
     if (this.post && this.post.level && this.view.post !== false) this.post.render(dt, this.time);
     else r.render(this.view.scene, this.view.camera);
+    if (fz) this.drawFrozen(fz);
+    const after = this.afterRender;
+    if (after) { this.afterRender = null; after(); }
+  }
+  /**
+   * Keeps the frame just drawn and lays it over the next ones, fading out from the moment the next view draws its first picture, so a
+   * change of view under a still camera shows no seam. Call it straight after a frame is drawn (see afterRender): only then can the
+   * canvas be read. Until the next view is set the loop draws nothing, which leaves that frame on screen.
+   */
+  freezeFrame(ms = 420) {
+    const r = this.renderer; if (!r || !this.ok || this.lost) return;
+    const size = r.getDrawingBufferSize(new THREE.Vector2());
+    let fz = this.freeze;
+    if (!fz || fz.w !== size.x || fz.h !== size.y) {
+      fz?.tex.dispose();
+      const tex = new THREE.FramebufferTexture(size.x, size.y);
+      const mat = fz?.mat || new THREE.ShaderMaterial({
+        uniforms: { tFrame: { value: null }, uOpacity: { value: 1 } }, transparent: true, depthTest: false, depthWrite: false, toneMapped: false,
+        vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+        fragmentShader: 'varying vec2 vUv; uniform sampler2D tFrame; uniform float uOpacity; void main(){ gl_FragColor = vec4(texture2D(tFrame, vUv).rgb, uOpacity); }',
+      });
+      mat.uniforms.tFrame.value = tex;
+      const scene = fz?.scene || new THREE.Scene();
+      if (!fz) { const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat); quad.frustumCulled = false; scene.add(quad); }
+      fz = this.freeze = { tex, mat, scene, cam: fz?.cam || new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), w: size.x, h: size.y };
+    }
+    r.setRenderTarget(null);
+    r.copyFramebufferToTexture(fz.tex);
+    Object.assign(fz, { on: true, holding: true, until: performance.now() + 3000, ms, start: 0 });
+  }
+  drawFrozen(fz) {
+    const now = performance.now();
+    if (!fz.start) fz.start = now;
+    const a = 1 - (now - fz.start) / fz.ms;
+    if (a <= 0) { fz.on = false; return; }
+    const r = this.renderer;
+    fz.mat.uniforms.uOpacity.value = a * a * (3 - 2 * a);
+    r.setRenderTarget(null);
+    const auto = r.autoClear; r.autoClear = false;
+    r.render(fz.scene, fz.cam);
+    r.autoClear = auto;
   }
   loop() {
     if (this.running || !this.ok || this.lost) return;
