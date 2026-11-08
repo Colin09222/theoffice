@@ -93,7 +93,7 @@ export function composeReport({ when, facts, outcome, why, tasks, published, hel
   const said = summary ? ` ${/[.!?]$/.test(summary) ? summary : `${summary}.`}` : '';
   let did;
   if (outcome === 'stopped') {
-    did = `I stopped today's run early: ${why === 'tokens' ? 'it reached the most work one run is allowed' : why === 'timeout' ? 'it ran too long' : 'work stopped for now across the building'}. Anything finished is saved, and nothing went live without the Tester's pass.`;
+    did = `I stopped today's run early: ${why === 'tokens' ? 'it reached the most work one run is allowed' : why === 'timeout' ? 'it ran too long' : why === 'paused' ? 'something went wrong and the floor paused itself' : 'work stopped for now across the building'}. Anything finished is saved, and nothing went live without the Tester's pass.`;
   } else if (outcome === 'nothing') did = `Nothing was worth changing today, so the team did nothing.${said}`;
   else if (outcome === 'shipped') did = `Live now: ${live}.${said}`;
   else if (outcome === 'held') did = `The team built it, but the Tester didn't pass it, so it did not go live and the live version is unchanged${held ? `: ${held}` : ''}.${said}`;
@@ -316,6 +316,8 @@ export function installDaily(ext) {
     if (budgetOut) { halt(r, floor, 'budget'); return; }
     if (tokensSince(floor.id, r.started_at) >= tokenCap()) { halt(r, floor, 'tokens'); return; }
     if (now() - r.started_at >= timeoutMs()) { halt(r, floor, 'timeout'); return; }
+    // Something broke and the floor paused itself. Pausing by hand is the boss's own business: the run just waits, and the time limit still applies.
+    if (floor.paused && floor.pause_reason !== 'Paused by the boss') { halt(r, floor, 'paused'); return; }
     if (!seenRunning.has(r.id)) { seenRunning.add(r.id); return; }
     if (engine.modes.busy(floor.id)) return;
     finish(r, floor);
@@ -336,8 +338,8 @@ export function installDaily(ext) {
     if (runningRun(row.floor_id)) return;
     // Goal first: nothing starts on its own until the boss has given or picked one. The manager asks once, as soon as the floor is quiet.
     const goal = engine.modes.brief(row.floor_id).goal;
-    if (!goal) { if (row.enabled && !row.goal_asked && !engine.modes.blocker(floor)) askForGoal(floor); return; }
-    if (engine.modes.blocker(floor)) return;
+    if (!goal) { if ((row.enabled || forced) && !row.goal_asked && !engine.modes.blocker(floor)) askForGoal(floor); return; }
+    if (engine.modes.running(floor.id) || engine.modes.blocker(floor)) return;
     if (!forced && get(db, 'SELECT COUNT(DISTINCT floor_id) n FROM daily_runs WHERE building_day=?', utcDay(t)).n >= maxFloors()) return;
     await startRun(floor, row, { forced });
   }

@@ -160,7 +160,7 @@ describe('the guards', () => {
     } finally { await t.close(); }
   });
   test('it stops cleanly when the building\'s budget runs out, and doesn\'t start when it already has', async () => {
-    const t = await setup({ mockDelayMs: 150 });
+    const t = await setup({ mockDelayMs: 150, globalDailyUsd: 5 });
     try {
       const c = await company(t, 'Thrifty Co');
       await turnOn(c, '11:00');
@@ -171,10 +171,11 @@ describe('the guards', () => {
       const done = await settled(t, c);
       assert.equal(done.why, 'budget'); assert.equal(done.status, 'stopped');
       assert.doesNotMatch(done.report, /budget/i, 'no budget talk on a floor');
-      // Still out tomorrow: the money rows carry over in a global cap, so nothing starts.
+      // On a day the building has already reached its cap, nothing starts at all.
       const other = await company(t, 'Later Co');
       await turnOn(other, '11:00');
       dueNext(t, other);
+      run(t.db, 'INSERT INTO ledger (floor_id,agent_id,model,prompt_tokens,completion_tokens,cost_usd,kind,day,created_at) VALUES (?,?,?,?,?,?,?,?,?)', f.id, 0, 'x', 0, 0, 9999, 'llm', new Date(t.clock.t).toISOString().slice(0, 10), t.clock.t);
       await quiet();
       assert.equal(runs(t, other).length, 0);
     } finally { await t.close(); }
