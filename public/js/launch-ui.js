@@ -48,6 +48,8 @@ export function launchFlow(page) {
         if (type === 'business') await api(`/floors/${page.slug}/business/start`, { method: 'POST', body: { wish: `${name.value.trim()}: ${pitch.value.trim()}`.slice(0, 300) } });
         else await api(`/floors/${page.slug}/makers/start`, { method: 'POST', body: { type, idea: card.id, starter: card.starter, name: name.value.trim(), pitch: pitch.value.trim(), goal: goal.value.trim(), plan: plan.value.split('\n').map((s) => s.trim()).filter(Boolean) } });
         page.view?.bossTalks?.(); toast('The team is on it');
+        // The maker card lives in the chat, which is where the boss just was, even once the floor has a name.
+        page.tab = 'chat'; page.panelOpen = true;
         await page.reload?.();
       } catch (e) { toast(e.message, 'bad'); go.disabled = false; go.replaceChildren(icon('rocket-launch'), 'Go'); }
     } }, icon('rocket-launch'), 'Go');

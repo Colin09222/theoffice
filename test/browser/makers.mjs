@@ -13,7 +13,7 @@ import { writeFile, publishSnapshot } from '../../server/workspace.js';
 import { appLabel } from '../../server/apps.js';
 import { starterFiles } from '../../server/makers.js';
 import { INIT_SCRIPT, playGame, useApp, walkSite, combine } from '../../server/playtest.js';
-import { boot, claim, until } from '../helpers.js';
+import { boot, claim, hostFetch } from '../helpers.js';
 
 const SECONDS = Number(process.env.MAKERS_SECONDS || 60);
 const SHOTS = process.env.MAKERS_SHOTS || '/tmp/makers-shots'; mkdirSync(SHOTS, { recursive: true });
@@ -69,7 +69,10 @@ try {
       check(`${label}: name, goal and plan are filled in and editable`, filled);
       await p.ev('document.querySelector(".launch-review input[name=name]").value = "Moth Patrol"');
       await p.click('[data-go]'); taps++;
-      await p.until('!!document.querySelector("[data-maker]") && /Team is building/.test(document.querySelector("[data-maker]").textContent)', '"Team is building"', 15000);
+      try { await p.until('!!document.querySelector("[data-maker]") && /Team is building/.test(document.querySelector("[data-maker]").textContent)', '"Team is building"', 15000); } catch (e) {
+        await p.shot(join(SHOTS, `fail-${label}.jpg`));
+        throw new Error(`${e.message}: ${await p.ev('JSON.stringify({ tab: window.__office?.tab, panel: window.__office?.panelOpen, maker: !!document.querySelector("[data-maker]"), launcher: !!document.querySelector("[data-launcher]"), stage: window.__office?.state?.makers?.job?.stage, msgs: (window.__office?.state?.messages || []).length })')} ${p.errors.slice(0, 3).join(' | ')}`);
+      }
       check(`${label}: "Team is building" after ${taps} taps`, taps === 3);
       const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
       check(`${label}: the name the boss typed is the job's name`, get(t.db, 'SELECT title FROM maker_jobs WHERE floor_id=?', fid)?.title === 'Moth Patrol');
@@ -77,7 +80,7 @@ try {
       await p.click('[data-launch]');
       const url = await p.until('document.querySelector("[data-share-url]")?.href || null', 'a share link', 15000);
       check(`${label}: Launch gives a share link on the project's own origin`, /^http:\/\/.+\.apps\.localhost:\d+\/$/.test(url), url);
-      const live = await fetch(url); check(`${label}: the shared link opens the game`, live.status === 200 && /kit\.css/.test(await live.text()));
+      const live = await hostFetch(PORT, '/', { headers: { host: new URL(url).host } }); check(`${label}: the shared link opens the game`, live.status === 200 && /kit\.css/.test(await live.text()));
       if (label === 'desktop') await p.shot(join(SHOTS, 'launched-desktop.jpg'));
     });
     p.close();

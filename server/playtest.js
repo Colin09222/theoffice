@@ -47,6 +47,8 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
   if (!(await until(d, `${STATE}?.scene === 'play'`, 3000))) notes.push('Enter and the Play button did not start the game.');
   scenes.add((await d.eval(STATE))?.scene);
   await wait(400);
+  // Input is only fair to judge while playing; a game that paused itself on start is noted and resumed.
+  if ((await d.eval(STATE))?.scene === 'pause') { notes.push('It paused itself straight after starting.'); await d.eval('window.officeGame.resume()'); await wait(200); }
   // Each device on its own: the player has to move.
   const input = {};
   let s0 = await d.eval(STATE); await hold(d, 'ArrowRight', 500); let s1 = await d.eval(STATE);
@@ -132,6 +134,9 @@ export async function useApp(d, { url, user = `pt${Date.now().toString(36)}`, pa
   await d.goto(`${url}#/`); await until(d, 'document.readyState === "complete"', 8000);
   shots.push(await d.shot('landing'));
   rules.mobile = d.phone ? !!(await d.eval(noSideScroll)) : null;
+  // Accounts need the Office server; a local preview on a computer can only check the pages.
+  const mode = await d.eval('(async () => { const o = window.Office && window.Office.connect && window.Office.connect(); if (!o) return "none"; await (o.ready || Promise.resolve()); return o.mode; })()');
+  if (mode !== 'live') { for (const k of ['signup', 'create', 'persist', 'relogin']) rules[k] = null; notes.push(`Office Cloud is '${mode}' here, so sign-up, saving and sign-in are checked once it is published.`); const errors = await errorsOf(d); rules.loads = !errors.length; return { rules, notes, shots, errors }; }
   await d.goto(`${url}#/signup`);
   if (!(await until(d, visible('[data-office="auth-form"]'), 5000))) { notes.push('No sign-up form with data-office="auth-form".'); return { rules, notes, shots, errors: await errorsOf(d) }; }
   await d.eval(fill('[data-office="username"]', user)); await d.eval(fill('[data-office="password"]', password)); await d.eval(fill('[data-office="name"]', 'Play Tester'));

@@ -27,17 +27,18 @@ export const cloud = {
 const KEYS = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', Space: 'action', KeyJ: 'action', KeyZ: 'action', ShiftLeft: 'alt', ShiftRight: 'alt', KeyK: 'alt', KeyX: 'alt', Escape: 'pause', KeyP: 'pause', Enter: 'confirm', KeyM: 'mute' };
 const ACTIONS = ['left', 'right', 'up', 'down', 'action', 'alt', 'pause', 'confirm', 'mute'];
 export const input = {
-  held: Object.fromEntries(ACTIONS.map((a) => [a, false])), was: {}, stick: { x: 0, y: 0 }, pad: { x: 0, y: 0 }, device: 'keyboard', events: 0,
+  held: Object.fromEntries(ACTIONS.map((a) => [a, false])), was: {}, hit: {}, stick: { x: 0, y: 0 }, pad: { x: 0, y: 0 }, device: 'keyboard', events: 0,
   down(a) { return this.held[a]; },
-  pressed(a) { return this.held[a] && !this.was[a]; },
+  // A tap that starts and ends between two frames still counts once.
+  pressed(a) { return !!this.hit[a] || (this.held[a] && !this.was[a]); },
   axis() {
     const kx = (this.held.right ? 1 : 0) - (this.held.left ? 1 : 0), ky = (this.held.down ? 1 : 0) - (this.held.up ? 1 : 0);
     let x = kx || this.stick.x || this.pad.x, y = ky || this.stick.y || this.pad.y;
     const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
     return { x, y };
   },
-  set(a, on, device) { if (this.held[a] !== on) this.events++; this.held[a] = on; if (device) this.device = device; },
-  endFrame() { this.was = { ...this.held }; },
+  set(a, on, device) { if (this.held[a] !== on) this.events++; if (on && !this.held[a]) this.hit[a] = true; this.held[a] = on; if (device) this.device = device; },
+  endFrame() { this.was = { ...this.held }; this.hit = {}; },
 };
 addEventListener('keydown', (e) => { const a = KEYS[e.code]; if (!a) return; if (a !== 'confirm' || state.scene === 'play') e.preventDefault(); audio.unlock(); input.set(a, true, 'keyboard'); });
 addEventListener('keyup', (e) => { const a = KEYS[e.code]; if (a) input.set(a, false, 'keyboard'); });
