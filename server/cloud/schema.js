@@ -39,6 +39,17 @@ CREATE INDEX IF NOT EXISTS cloud_files_owner ON cloud_files(floor_id, project, o
 CREATE TABLE IF NOT EXISTS cloud_file_chunks (
   floor_id INTEGER NOT NULL, project TEXT NOT NULL, id TEXT NOT NULL, n INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY (floor_id, project, id, n)
 );
+CREATE TABLE IF NOT EXISTS cloud_powers (
+  floor_id INTEGER NOT NULL, project TEXT NOT NULL, ai_off INTEGER NOT NULL DEFAULT 0, fetch_off INTEGER NOT NULL DEFAULT 0,
+  ai_paused INTEGER NOT NULL DEFAULT 0, fetch_paused INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (floor_id, project)
+);
+CREATE TABLE IF NOT EXISTS cloud_power_days (
+  floor_id INTEGER NOT NULL, project TEXT NOT NULL, day TEXT NOT NULL, ai_fast INTEGER NOT NULL DEFAULT 0, ai_smart INTEGER NOT NULL DEFAULT 0,
+  ai_calls INTEGER NOT NULL DEFAULT 0, fetches INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (floor_id, project, day)
+);
+CREATE INDEX IF NOT EXISTS cloud_power_days_day ON cloud_power_days(day);
 `;
 // Child rows first, so a wipe never leaves orphans if it stops part way.
 export const CLOUD_TABLES = ['cloud_docs', 'cloud_saves', 'cloud_scores', 'cloud_file_chunks', 'cloud_files', 'cloud_sessions', 'cloud_users', 'cloud_usage'];
+// Switches and today's AI and web counts. Clearing a project's data leaves these alone, or clearing it would hand back the day's allowance and lift a pause. They only go with the floor.
+export const CLOUD_POWER_TABLES = ['cloud_powers', 'cloud_power_days'];

@@ -1,6 +1,6 @@
 # Office Cloud: the backend every published project has
 
-Accounts, a database, saves, leaderboards, multiplayer rooms and uploads, with no server code, no keys and nothing to set up.
+Accounts, a database, saves, leaderboards, multiplayer rooms, uploads, AI and reading web pages, with no server code, no keys and nothing to set up.
 It works on the published site (its own address, and any domain bought for it). Each project's data is its own: no other site can read it.
 
 ```html
@@ -90,6 +90,36 @@ await office.files.list(); await office.files.remove(f.id);
 ```
 Images (PNG, JPEG, GIF, WebP, AVIF), sound (MP3, OGG, WAV, M4A) and video (MP4, WebM). The type is read from the file itself; anything else is refused.
 Keep the url (or the id) in a document to show it to other people. Up to 100 files and 25 MB per person, 50 MB a project.
+
+## AI
+```js
+const reply = await office.ai.chat({ prompt: 'Write a short welcome for a pizza shop.' });          // the text of the reply
+const next = await office.ai.chat({
+  system: 'You are the friendly help desk of this site. Answer in two sentences.',
+  messages: [{ role: 'user', content: 'Hi' }, { role: 'assistant', content: 'Hello!' }, { role: 'user', content: question }],
+  maxTokens: 300,        // the most it may write, up to 1,000 (600 if you leave it out)
+  model: 'smart',        // 'fast' is the default and is right for nearly everything; 'smart' has a far smaller daily allowance
+});
+await office.ai.chat({ prompt: '...', details: true });          // {text, truncated, refused, model, tokens, left: {fast, smart}}
+```
+- It runs on the server. **Never put an API key in client code, and don't try to call an AI provider from the page:** you don't need a key, and anything in a page can be read by anyone.
+- A prompt or a conversation can be up to 32,000 characters, and `system` up to 8,000. A conversation is up to 40 messages and ends with the user. `truncated` means it stopped at `maxTokens`.
+- Each site has a daily token allowance and each visitor a rate limit, so a popular site can run out. **Always catch errors and show `err.message` in the page** (`ai_limit`, `ai_resting`, `ai_off`, `rate_limited`, `ai_unavailable`). It reads well as it is: no blank screens, no raw errors.
+- What the model writes comes from the model, and a visitor can steer it. Show it with `textContent`, and never let it decide anything that matters.
+
+## Web pages: fetch and scrape
+```js
+const page = await office.scrape('https://example.com/news');   // {url, status, type, title, description, meta, text, links: [{url, text}], truncated, cached}
+list.textContent = page.title + '\n' + page.text.slice(0, 500);
+const r = await office.fetch('https://example.com/data.json');  // {url, status, type, text, truncated, cached}
+if (r.status === 200) render(r.json());                         // json() parses r.text
+```
+- Use `office.scrape` for the words and links of a page and `office.fetch` for raw JSON, XML or HTML. A browser can't fetch other sites itself, so use these.
+- Only public `http` and `https` pages, and only HTML, JSON, XML and plain text. No file downloads, no pictures, and no script on the page runs. Nothing is sent but the address: no cookies, no headers of yours.
+- Each site's `robots.txt` is obeyed, so a site can say no (`robots_denied`). The same page is remembered for a few minutes, so don't fetch it in a loop.
+- A site has a daily allowance of pages, and each address and each site can only be visited so often. **Always catch errors and show `err.message`** (`fetch_limit`, `fetch_off`, `robots_denied`, `host_busy`, `fetch_blocked`, `fetch_failed`, `fetch_timeout`, `fetch_type`).
+- Scraped words are written by a stranger: show them with `textContent`, never `innerHTML`. To summarise one with the AI, keep it short: `office.ai.chat({ prompt: 'Summarise: ' + page.text.slice(0, 20000) })`.
+- Neither AI nor fetching works in a local preview (`err.code` is `local`): they work on the published site.
 
 ## Also
 - `office.shared.get(key, fallback)`, `office.shared.set(key, value)`, `office.shared.incr(key, by)`: values every visitor shares, such as a counter. Anyone can change them.

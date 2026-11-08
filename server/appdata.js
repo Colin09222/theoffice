@@ -2,7 +2,7 @@
 // and it is only ever reached from a project's own origin, keyed by that project. Everything here is untrusted input from the open web.
 import { createHash } from 'node:crypto';
 import { get, all, run, tx } from './db.js';
-import { CLOUD_TABLES } from './cloud/schema.js';
+import { CLOUD_TABLES, CLOUD_POWER_TABLES } from './cloud/schema.js';
 
 export const DATA_LIMITS = {
   valueBytes: 16 * 1024, bodyBytes: 32 * 1024, projectBytes: 5 * 1024 * 1024, floorBytes: 25 * 1024 * 1024, projectKeys: 5000,
@@ -190,5 +190,5 @@ export function clearProjectData(db, floorId, project) {
 export function deleteFloorData(db, floorId) {
   run(db, 'DELETE FROM app_kv WHERE floor_id=?', floorId);
   run(db, 'DELETE FROM app_scores WHERE floor_id=?', floorId);
-  for (const t of ['app_forms', 'app_visits', 'app_visit_refs', ...CLOUD_TABLES]) run(db, `DELETE FROM ${t} WHERE floor_id=?`, floorId);
+  for (const t of ['app_forms', 'app_visits', 'app_visit_refs', ...CLOUD_TABLES, ...CLOUD_POWER_TABLES]) run(db, `DELETE FROM ${t} WHERE floor_id=?`, floorId);
 }

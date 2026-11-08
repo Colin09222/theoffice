@@ -59,3 +59,40 @@ test('backend usage, export and wipe from the command line', () => {
     after.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('cloud ai and cloud fetch: status, pause and resume from the command line', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'office-powers-'));
+  try {
+    const db = openDb(dir);
+    const at = Date.now();
+    run(db, "INSERT INTO floors (slug,number,name,colors,boss,decor,recovery_hash,created_at) VALUES ('acme',3,'Acme','{}','{}','{}','x',?)", at);
+    run(db, "INSERT INTO floors (slug,number,name,colors,boss,decor,recovery_hash,created_at) VALUES ('bravo',5,'Bravo','{}','{}','{}','x',?)", at);
+    const f = get(db, "SELECT id FROM floors WHERE slug='acme'").id, g = get(db, "SELECT id FROM floors WHERE slug='bravo'").id;
+    for (const id of [f, g]) run(db, "INSERT INTO projects (floor_id,slug,title,published_at,created_at) VALUES (?,'space-game','Space',?,?)", id, at, at);
+    run(db, "INSERT INTO app_labels (label,floor_id,project,created_at) VALUES ('space-game--acme',?,'space-game',?)", f, at);
+    run(db, "INSERT INTO ledger (floor_id,day,agent_id,model,prompt_tokens,completion_tokens,cost_usd,created_at,kind,provider) VALUES (?,?,NULL,'claude-haiku-5-5',10,10,0.5,?,'app_ai','anthropic')", f, new Date().toISOString().slice(0, 10), at);
+    db.close();
+
+    const first = cli(dir, 'cloud', 'ai', 'status');
+    assert.equal(first.code, 0, first.out);
+    assert.match(first.out, /AI for published apps: on/);
+    assert.match(first.out, /25% of the building's daily ceiling/, 'a share of the ceiling, not an amount');
+    assert.doesNotMatch(first.out, /\$\d|\busd\b/i);
+
+    assert.equal(cli(dir, 'cloud', 'ai', 'pause', 'space-game').code, 1, 'two floors have one called that');
+    assert.match(cli(dir, 'cloud', 'ai', 'pause', 'nothing-here', '--floor', '3').out, /No project called nothing-here/);
+    assert.match(cli(dir, 'cloud', 'ai', 'pause', 'space-game', '--floor', '3').out, /AI paused for floor 3 space-game/);
+    const paused = JSON.parse(cli(dir, 'cloud', 'ai', 'status', 'space-game--acme', '--json').out);
+    assert.equal(paused.projects[0].paused, true); assert.equal(paused.projects[0].fastLeft, 150000);
+    assert.match(cli(dir, 'cloud', 'ai', 'status').out, /floor 3 space-game: PAUSED/);
+    assert.match(cli(dir, 'cloud', 'ai', 'resume', 'space-game--acme').out, /AI back on for floor 3 space-game/);
+    assert.equal(JSON.parse(cli(dir, 'cloud', 'ai', 'status', 'space-game--acme', '--json').out).projects[0].paused, false);
+
+    assert.match(cli(dir, 'cloud', 'fetch', 'pause', 'space-game', '--floor', '5').out, /Web fetching paused for floor 5 space-game/);
+    assert.match(cli(dir, 'cloud', 'fetch', 'status').out, /floor 5 space-game: PAUSED, 0 pages today, 500 left/);
+    assert.match(cli(dir, 'cloud', 'fetch', 'pause', '--all').out, /paused for the whole building/);
+    assert.equal(JSON.parse(cli(dir, 'cloud', 'fetch', 'status', '--json').out).buildingPaused, true);
+    assert.match(cli(dir, 'cloud', 'fetch', 'resume', '--all').out, /back on for the whole building/);
+    assert.equal(cli(dir, 'cloud', 'nonsense', 'status').code, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

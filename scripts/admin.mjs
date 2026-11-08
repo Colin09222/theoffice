@@ -5,6 +5,8 @@ import { openDb, all, get, run } from '../server/db.js';
 import { issueCode, createSession, sha256 } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
 import { createStore } from '../server/cloud/store.js';
+import { createPowers } from '../server/cloud/powers.js';
+import { lookupLabel } from '../server/apps.js';
 import { slugPattern } from '../server/workspace.js';
 import { writeFileSync } from 'node:fs';
 import { helpListing, helpListingText, answerHelp, declineHelp, HelpError, HELP_LIMITS, newFence } from '../server/help.js';
@@ -32,6 +34,9 @@ const usage = () => {
     '  node scripts/admin.mjs backend usage [--json]   every project\'s Office Cloud backend: accounts, documents, saves, scores, files and storage. Counts only',
     '  node scripts/admin.mjs backend export --floor N --project SLUG [--files] [--out FILE]   everything one project keeps, as JSON. Accounts leave without their passwords',
     '  node scripts/admin.mjs backend wipe --floor N --project SLUG --yes   delete everything one project keeps: accounts, documents, saves, scores and files',
+    '  node scripts/admin.mjs cloud ai status [PROJECT] [--floor N] [--json]   published apps\' AI: what is on, requests today and what is left. PROJECT is a subdomain label, or a slug with --floor',
+    '  node scripts/admin.mjs cloud ai pause|resume PROJECT|--all [--floor N]   stop or restart AI for one project, or for the whole building',
+    '  node scripts/admin.mjs cloud fetch status|pause|resume ...   the same, for fetching and scraping web pages',
     '  node scripts/admin.mjs filler list            list filler (demo) companies and removed ones',
     '  node scripts/admin.mjs filler seed            seed the filler companies, bringing back any that were removed',
     '  node scripts/admin.mjs filler remove --floor N  remove the filler company on floor N (stays removed)',
@@ -114,6 +119,47 @@ if (cmd === 'code') {
     const f = floorRow(); const p = projectArg();
     if (!rest.includes('--yes')) die(`This deletes every account, document, save, score and file of ${p} on floor ${f.number}. Add --yes to do it.`);
     console.log(`Wiped ${p} on floor ${f.number}: ${store.wipeProject(f.id, p)} rows removed. Anyone in one of its rooms right now stays until they leave; their accounts are gone.`);
+  } else usage();
+} else if (cmd === 'cloud' && (rest[0] === 'ai' || rest[0] === 'fetch')) {
+  // AI and web fetching for published apps. Works on the database file alone: a running server sees a pause on its next call. Counts only.
+  const [kind, sub] = rest;
+  const name = kind === 'ai' ? 'AI' : 'Web fetching';
+  const powers = createPowers(db, cfg);
+  const given = rest[2] && !rest[2].startsWith('--') ? rest[2] : null;
+  const floorRowOf = (id) => get(db, 'SELECT number, name FROM floors WHERE id=?', id);
+  /** A project by the label it publishes under, or by slug (with --floor when two floors share one). */
+  const findProject = () => {
+    const entry = lookupLabel(db, given);
+    if (entry) return { floorId: entry.floor_id, project: entry.project };
+    if (!slugPattern.test(given)) die('Give the project\'s subdomain label or its slug.');
+    let rows = all(db, 'SELECT floor_id, slug FROM projects WHERE slug=?', given);
+    if (rest.includes('--floor')) { const n = floorArg(); rows = rows.filter((r) => floorRowOf(r.floor_id)?.number === n); }
+    if (!rows.length) die(`No project called ${given}.`);
+    if (rows.length > 1) die(`More than one floor has a project called ${given}: floors ${rows.map((r) => floorRowOf(r.floor_id)?.number).join(', ')}. Add --floor N.`);
+    return { floorId: rows[0].floor_id, project: rows[0].slug };
+  };
+  const nameOf = (p) => `floor ${floorRowOf(p.floorId)?.number ?? '(closed)'} ${p.project}`;
+  if (sub === 'status') {
+    const report = powers.status(kind);
+    if (given) { const p = findProject(); report.projects = [{ ...p, ...powers.view(p.floorId, p.project)[kind] }]; }
+    if (kind === 'ai') {
+      const used = get(db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE day=? AND kind='app_ai'", powers.today()).n;
+      report.ceilingUsedPercent = powers.AI.buildingDayUsd > 0 ? Math.round(used / powers.AI.buildingDayUsd * 1000) / 10 : 100;
+    }
+    if (rest.includes('--json')) console.log(JSON.stringify(report, null, 2));
+    else {
+      console.log(`${name} for published apps: ${report.on && !report.buildingPaused ? 'on' : report.buildingPaused ? 'paused for the whole building' : 'switched off in the settings'}${kind === 'ai' ? `. All app AI today: ${report.ceilingUsedPercent}% of the building's daily ceiling` : ''}`);
+      if (!report.projects.length) console.log('No project has used it today or has a switch set.');
+      for (const x of report.projects) console.log(`${nameOf(x)}: ${x.paused ? 'PAUSED' : x.on ? 'on' : 'off (by its boss)'}, ${kind === 'ai' ? `${x.callsToday} requests today, ${x.fastLeft} fast and ${x.smartLeft} smart tokens left` : `${x.fetchedToday} pages today, ${x.left} left`}`);
+    }
+  } else if (sub === 'pause' || sub === 'resume') {
+    const on = sub === 'pause';
+    if (rest.includes('--all')) { powers.setBuildingPaused(kind, on); console.log(`${name} ${on ? 'paused' : 'back on'} for the whole building.`); } else {
+      if (!given) die('Name a project, or use --all for the whole building.');
+      const p = findProject();
+      powers.setPaused(p.floorId, p.project, kind, on);
+      console.log(`${name} ${on ? 'paused' : 'back on'} for ${nameOf(p)}.`);
+    }
   } else usage();
 } else if (cmd === 'filler') {
   // These work on the database file alone. A running server notices a removal on its next tick.

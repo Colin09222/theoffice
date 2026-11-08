@@ -75,7 +75,7 @@ function validDecor(input, base = DEFAULT_DECOR) {
 }
 const validColors = (i, base = DEFAULT_COLORS) => ({ primary: hex(i?.primary, base.primary), accent: hex(i?.accent, base.accent) });
 
-export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm, fetcher, httpFetch, sessions, namecheap, media, search }) {
+export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm, fetcher, httpFetch, sessions, namecheap, media, search, cloudNet }) {
   const bus = new Bus();
   const sessionClient = !cfg.computerEnabled ? null : sessions || (cfg.aiMode === 'mock' ? createMockSessions(cfg) : createManagedClient(cfg));
   const client = llm || (cfg.aiMode === 'mock' ? createMockClient(cfg) : createRouter({ anthropic: createAnthropicClient(cfg), openrouter: createOpenRouterClient(cfg) }));
@@ -716,7 +716,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
   // Office Cloud: the backend each published project gets on its own origin. See docs/OFFICE-CLOUD.md.
-  const cloud = installCloud({ ...ext, ipOf, secret });
+  const cloud = installCloud({ ...ext, ipOf, secret, llm: client, cloudNet });
   extensions.push(cloud);
 
   // ---- published sites ----

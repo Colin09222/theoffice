@@ -1,4 +1,4 @@
-// Office Cloud: accounts, a database, saves, leaderboards, multiplayer rooms and uploads for a published project, with no server code.
+// Office Cloud: accounts, a database, saves, leaderboards, multiplayer rooms, uploads, AI and web fetching for a published project, with no server code.
 //   <script src="/_office/office.js"></script>   then   const office = Office.connect();
 // The project is whichever site the page is on: data never crosses to another project. On a local preview with no Office server
 // behind it, everything except accounts and uploads keeps working on this device only, and office.mode says 'local'.
@@ -337,6 +337,25 @@
       list: function () { return either(function () { return request('GET', 'rooms').then(function (r) { return r.rooms; }); }, function () { return []; }); },
     };
 
+    // ---- AI and the web, answered by the server: a page never holds a key, and only ever says fast or smart ----
+    function published(e) { if (e && e.code === 'local') throw OfficeError('local', 'This works once the site is published.'); throw e; }
+    var ai = {
+      /** A prompt, or {prompt or messages: [{role, content}], system, maxTokens, model: 'fast' | 'smart'}. Resolves to the reply's text; with details: true to {text, truncated, refused, model, tokens, left}. */
+      chat: function (o) {
+        if (typeof o === 'string') o = { prompt: o };
+        o = o || {};
+        return request('POST', 'ai/chat', { prompt: o.prompt, messages: o.messages, system: o.system, maxTokens: o.maxTokens, model: o.model }, { timeout: 70000 })
+          .then(function (r) { return o.details ? r : r.text; }).catch(published);
+      },
+    };
+    /** A public web page, through the server: {url, status, type, text, truncated, cached, json()}. HTML, JSON, XML and plain text only. */
+    function fetchPage(url) {
+      return request('POST', 'fetch', { url: String(url) }, { timeout: 30000 })
+        .then(function (r) { r.json = function () { return JSON.parse(r.text); }; return r; }).catch(published);
+    }
+    /** A public web page, read for you: {url, status, type, title, description, meta, text, links: [{url, text}], truncated, cached}. No script on the page is run. */
+    function scrapePage(url) { return request('POST', 'scrape', { url: String(url) }, { timeout: 30000 }).catch(published); }
+
     // ---- forms the boss reads (the same store the older client uses) ----
     var forms = {
       submit: function (form, fields) {
@@ -365,7 +384,7 @@
       },
     };
 
-    self.auth = auth; self.db = { collection: collection }; self.saves = saves; self.leaderboard = leaderboard; self.rooms = rooms; self.files = files; self.forms = forms; self.shared = shared;
+    self.auth = auth; self.db = { collection: collection }; self.saves = saves; self.leaderboard = leaderboard; self.rooms = rooms; self.files = files; self.forms = forms; self.shared = shared; self.ai = ai; self.fetch = fetchPage; self.scrape = scrapePage;
     /** Settles once the stored login has been checked with the server (or there is none). */
     self.ready = pinged.then(function (there) { return there ? auth.refresh() : user; }).then(function () { return self; }, function () { return self; });
     return self;

@@ -1,6 +1,6 @@
 // Office Cloud: the backend every published project gets, with no server code of its own. See docs/OFFICE-CLOUD.md.
 // It answers on the project's own origin under /_office/cloud/, so the page's own CSP (connect-src 'self') already allows it,
-// and the project is whichever one the Host names. Nothing here reads The Office's cookies, and nothing a visitor sends reaches a model.
+// and the project is whichever one the Host names. Nothing here reads The Office's cookies. A visitor's words reach a model only through office.ai, which has no tools and sees nothing of the building.
 import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -12,6 +12,9 @@ import { createStore, CloudError, PLAYER, guestKey, userKey } from './store.js';
 import { slugPattern } from '../workspace.js';
 import { Rooms, roomNameOk } from './rooms.js';
 import { upgradeKey, handshake } from './ws.js';
+import { createPowers } from './powers.js';
+import { createAppAi } from './ai.js';
+import { createWebFetcher } from './web.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 /** The browser library. Served on every project origin at /_office/office.js, and at /theoffice/sdk/office.js for reference. */
@@ -25,6 +28,8 @@ export const CLOUD_RATES = {
   score: [30, 60000], upload: [30, 3600000], uploadProject: [300, 3600000], join: [60, 60000],
   // Queries read through a whole collection, so they get their own, smaller allowance.
   query: [120, 60000], queryProject: [1200, 60000],
+  // AI and the web, per visitor's address and per project. Small on purpose, because every one of these leaves the building.
+  aiVisitor: [12, 60000], aiVisitorDay: [200, 86400000], aiProject: [240, 60000], webVisitor: [30, 60000], webVisitorDay: [600, 86400000], webProject: [240, 60000],
 };
 const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const BODY = { json: 96 * 1024, small: 8 * 1024 };
@@ -52,10 +57,19 @@ export function installCloud(ext) {
   const hashing = gate(2, 64);
   const uploading = gate(4, 8);
   const inFlight = new Map();
-  const limit = (bucket, key) => {
+  const limit = (bucket, key, message = 'Too many requests. Slow down a little.') => {
     const [n, w] = RATES[bucket];
-    if (!rates.allow(`${bucket}:${key}`, n, w)) throw new CloudError(429, 'rate_limited', 'Too many requests. Slow down a little.');
+    if (!rates.allow(`${bucket}:${key}`, n, w)) throw new CloudError(429, 'rate_limited', message);
   };
+  /** At most `max` of these at once from one address, so a few slow ones can't hold every slot. */
+  async function atOnce(key, max, fn, message = 'Wait for your other requests to finish.') {
+    if ((inFlight.get(key) || 0) >= max) throw new CloudError(429, 'rate_limited', message);
+    inFlight.set(key, (inFlight.get(key) || 0) + 1);
+    try { return await fn(); } finally { const n = inFlight.get(key) - 1; if (n > 0) inFlight.set(key, n); else inFlight.delete(key); }
+  }
+  const powers = createPowers(db, cfg, now);
+  const ai = createAppAi({ db, models: ext.models, engine, llm: ext.llm, log, powers, gate: gate(8, 16) });
+  const web = createWebFetcher({ db, cfg, powers, gate: gate(8, 24), net: ext.cloudNet, now, log });
   const counts = new Map();
   const count = (pk) => { if (counts.size < 5000 || counts.has(pk)) counts.set(pk, (counts.get(pk) || 0) + 1); };
   function flush() {
@@ -263,6 +277,18 @@ export function installCloud(ext) {
         const r = rooms.list(pk, Infinity).find((x) => x.name === b);
         return reply(200, { name: b, players: r ? r.players : 0, max: rooms.L.members });
       }
+      if (a === 'ai' && b === 'chat' && !c && m === 'POST') {
+        const tooFast = 'You\'re asking very quickly. Give it a minute and try again.';
+        limit('aiVisitor', `${pk}:${ip}`, tooFast); limit('aiVisitorDay', `${pk}:${ip}`, 'You\'ve used your AI requests here for today. Come back tomorrow.'); limit('aiProject', pk, tooFast);
+        const body = await readBody(req, BODY.json);
+        // Two at once from one address and four from one project, so one busy site can't hold every place in the building.
+        return reply(200, await atOnce(`ai:${ip}`, 2, () => atOnce(`aiP:${pk}`, 4, () => ai.chat({ F, p, pk, body }), 'The AI is busy on this site right now. Try again in a moment.')));
+      }
+      if ((a === 'fetch' || a === 'scrape') && !b && m === 'POST') {
+        limit('webVisitor', `${pk}:${ip}`); limit('webVisitorDay', `${pk}:${ip}`); limit('webProject', pk);
+        const body = await readBody(req, BODY.small);
+        return reply(200, await atOnce(`web:${ip}`, 3, () => atOnce(`webP:${pk}`, 6, () => web[a]({ F, p, pk, url: body.url }), 'This site is reading a lot of pages right now. Try again in a moment.')));
+      }
       throw new CloudError(404, 'not_found', 'No such thing here.');
     } catch (e) {
       if (e instanceof CloudError || e instanceof HttpError) return reply(e.status, { error: e.code, message: e.message }, e.status === 429 ? { 'retry-after': '30' } : {});
@@ -358,14 +384,24 @@ export function installCloud(ext) {
   GET('/api/floors/:slug/cloud', async ({ req, res, p }) => {
     const f = requireOwner(req, p.slug);
     flush();
-    json(res, 200, { projects: projectsOf(f).map((x) => ({ slug: x.slug, title: x.title, usage: store.summary(f.id, x.slug), live: rooms.live(`${f.id}:${x.slug}`) })) });
+    json(res, 200, { projects: projectsOf(f).map((x) => ({ slug: x.slug, title: x.title, usage: store.summary(f.id, x.slug), live: rooms.live(`${f.id}:${x.slug}`), powers: powers.view(f.id, x.slug) })) });
+  });
+  // The boss's own on/off for a project's AI and web fetching. A pause set by the building manager stays in force whatever this says.
+  POST('/api/floors/:slug/cloud/:project/powers', async ({ req, res, p, ip }) => {
+    const f = requireOwner(req, p.slug);
+    ext.limit('mutate', ip);
+    const b = await ext.readJson(req, 256);
+    if (typeof b.ai !== 'boolean' && typeof b.fetch !== 'boolean') throw new HttpError(400, 'bad_switch');
+    if (!projectsOf(f).some((x) => x.slug === p.project)) throw new HttpError(404, 'not_found');
+    for (const kind of ['ai', 'fetch']) if (typeof b[kind] === 'boolean') powers.setOff(f.id, p.project, kind, !b[kind]);
+    json(res, 200, { powers: powers.view(f.id, p.project) });
   });
   GET('/api/admin/cloud', async ({ req, res }) => {
     requireAdmin(req);
     flush();
     const rows = store.projects().map((x) => {
       const fl = get(db, 'SELECT number, slug FROM floors WHERE id=?', x.floor_id);
-      return { floorId: x.floor_id, floor: fl?.slug || '(closed)', number: fl?.number ?? null, project: x.project, usage: store.summary(x.floor_id, x.project), live: rooms.live(`${x.floor_id}:${x.project}`) };
+      return { floorId: x.floor_id, floor: fl?.slug || '(closed)', number: fl?.number ?? null, project: x.project, usage: store.summary(x.floor_id, x.project), live: rooms.live(`${x.floor_id}:${x.project}`), powers: powers.view(x.floor_id, x.project) };
     });
     json(res, 200, { projects: rows, live: { players: rooms.conns.size, rooms: rooms.rooms.size } });
   });
@@ -380,10 +416,10 @@ export function installCloud(ext) {
 
   let flushTimer = null, sweepTimer = null;
   return {
-    store, rooms, serve, upgrade,
+    store, rooms, powers, serve, upgrade,
     start() {
       flushTimer = setInterval(flush, 60000); flushTimer.unref?.();
-      sweepTimer = setInterval(() => { try { store.sweep(); } catch { /* next time */ } }, 3600000); sweepTimer.unref?.();
+      sweepTimer = setInterval(() => { try { store.sweep(); powers.sweep(); } catch { /* next time */ } }, 3600000); sweepTimer.unref?.();
     },
     stop() { clearInterval(flushTimer); clearInterval(sweepTimer); flush(); rooms.close(); rates.close(); },
     flush,
