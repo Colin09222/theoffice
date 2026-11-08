@@ -209,7 +209,11 @@ async function profile(kind) {
   await step(`${kind}: the lift goes floor to floor with no doors, warm under 300 ms`, async () => {
     await p.goto(`${base}/floor/${owners[12].slug}`);
     await p.until(fullDetail, 'floor 12', 30000);
-    await sleep(phone ? 3500 : 2000);  // the neighbours are fetched while the floor is looked at
+    // The neighbours are fetched while the floor is looked at, and built ahead in a quiet spell: what that costs the main thread.
+    await p.ev('window.__lt = []; window.__po = new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }); try { window.__po.observe({ type: "longtask" }); } catch {}');
+    await sleep(phone ? 4500 : 3000);
+    const ahead = await p.ev('(() => { window.__po.disconnect(); return window.__lt; })()');
+    r.buildAhead = ahead;
     const times = [];
     for (const [dir, n] of [['up', 14], ['down', 12], ['up', 14], ['down', 12]]) {
       // Timed in the page, frame by frame: from the press to the first frame on which the new floor is there in full detail.
@@ -225,7 +229,7 @@ async function profile(kind) {
     const warm = times.slice(1).map((x) => x.ms);
     if (times.some((x) => x.doors)) throw new Error(`the doors closed: ${JSON.stringify(times)}`);
     if (Math.max(...warm) > 300) throw new Error(`warm switches ${warm.join(', ')} ms; ${times.map((x) => x.fr).join(' | ')}`);
-    return `first ${times[0].ms} ms, then ${warm.join(', ')} ms, no doors`;
+    return `first ${times[0].ms} ms, then ${warm.join(', ')} ms, no doors; building ahead while idle: long tasks ${JSON.stringify(ahead)} ms`;
   });
   if (!phone) await step(`${kind}: the floor page turns all the way round too, its far walls up from behind`, async () => {
     await p.until(fullDetail, 'floor page', 20000);

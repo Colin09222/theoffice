@@ -660,8 +660,8 @@ export class Actor {
  * and lights, with no input of its own; promote() turns it into a floor page's view without rebuilding anything, people mid-stride and all.
  */
 export class OfficeView {
-  constructor({ state, labels, onSelect, onSmallTalk, keep = null, host = null }) {
-    this.labels = labels; this.onSelect = onSelect; this.host = host;
+  constructor({ state, labels, onSelect, onSmallTalk, keep = null, host = null, pace = null }) {
+    this.labels = labels; this.onSelect = onSelect; this.host = host; this.pace = pace;
     this.colors = state.floor.colors; this.decor = state.floor.decor; this.logoUrl = state.floor.logoUrl || null; this.companyName = state.floor.name;
     this.plan = planFor(this.decor.layout);
     this.staffCount = state.agents.filter((a) => a.role !== 'manager').length;
@@ -702,7 +702,7 @@ export class OfficeView {
    * In the tower a floor is put together a step at a time, each step when the tower gives it a turn: one a frame, and none while the
    * building is being ridden, so building rooms never lands in the middle of a swipe. On a floor page there is no waiting.
    */
-  turn() { return this.host?.turn ? this.host.turn() : null; }
+  turn() { return this.host?.turn ? this.host.turn() : this.pace ? this.pace() : null; }  // a room built ahead for the lift paces itself too
   bakeSoon() {
     if (!this.host) { this.bakeFloor(); return; }
     if (this.bakeQueued) return;

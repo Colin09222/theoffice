@@ -176,7 +176,8 @@ class FloorPage {
       if (this.dead || !stage.ok || isParked(f.slug)) continue;
       const state = await peekAhead(f.slug);
       if (!state || this.dead) continue;
-      const v = new OfficeView({ state, labels: document.createElement('div') });
+      // Its bake, furniture and people come a step at a time in the gaps between frames, like a floor in the tower.
+      const v = new OfficeView({ state, labels: document.createElement('div'), pace: () => new Promise((r) => (window.requestIdleCallback || setTimeout)(() => r(), { timeout: 400 })) });
       park(f.slug, v, isPhone() ? 2 : 3);
       // Its shaders compiled and its baked floor on the GPU now, so its first frame on screen has nothing left to do.
       const r = stage.renderer;
@@ -192,7 +193,7 @@ class FloorPage {
     const h = takeHandoff('in', this.slug);
     // Flown in from the building, or back by the lift to a floor left a moment ago (see floorcache.js).
     const v = h?.view || unpark(this.slug); if (!v || v.dead) return null;
-    if (!h) { v.bind(); v.labels = this.labels; }
+    if (!h) { v.bind(); v.labels = this.labels; v.pace = null; }
     const f = this.viewState().floor;
     if (JSON.stringify([v.decor, v.colors, v.companyName]) !== JSON.stringify([f.decor, f.colors, f.name])) { v.destroy(); return null; }
     v.tasks = this.state.tasks;
