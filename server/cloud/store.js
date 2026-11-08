@@ -330,8 +330,9 @@ export function createStore(db, limits = {}, now = Date.now) {
       .map((r) => ({ key: r.key, size: r.size, version: r.version, updatedAt: r.updated_at })),
     get(f, p, who, key) {
       const r = saveRow(f, p, needWho(who).key, need(KEY, key, 'bad_key', 'A key is 1 to 64 letters, digits or _ . : -'));
-      if (!r) throw new CloudError(404, 'not_found', 'Nothing saved under that key.');
-      return { key, value: JSON.parse(r.value), version: r.version, updatedAt: r.updated_at };
+      // Nothing saved yet is a normal answer, not an error: a 404 would put a red line in every new player's console.
+      if (!r) return { key, value: null, version: 0, found: false };
+      return { key, value: JSON.parse(r.value), version: r.version, updatedAt: r.updated_at, found: true };
     },
     put(f, p, who, key, value, ifVersion) {
       needWho(who); need(KEY, key, 'bad_key', 'A key is 1 to 64 letters, digits or _ . : -');

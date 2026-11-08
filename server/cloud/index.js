@@ -349,10 +349,12 @@ export function installCloud(ext) {
   const projectsOf = (f) => all(db, 'SELECT slug, title FROM projects WHERE floor_id=? AND published_at IS NOT NULL ORDER BY slug', f.id);
   GET('/api/floors/:slug/cloud', async ({ req, res, p }) => {
     const f = requireOwner(req, p.slug);
+    flush();
     json(res, 200, { projects: projectsOf(f).map((x) => ({ slug: x.slug, title: x.title, usage: store.summary(f.id, x.slug), live: rooms.live(`${f.id}:${x.slug}`) })) });
   });
   GET('/api/admin/cloud', async ({ req, res }) => {
     requireAdmin(req);
+    flush();
     const rows = store.projects().map((x) => {
       const fl = get(db, 'SELECT number, slug FROM floors WHERE id=?', x.floor_id);
       return { floorId: x.floor_id, floor: fl?.slug || '(closed)', number: fl?.number ?? null, project: x.project, usage: store.summary(x.floor_id, x.project), live: rooms.live(`${x.floor_id}:${x.project}`) };

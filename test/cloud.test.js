@@ -117,7 +117,7 @@ describe('Office Cloud', () => {
       for (const host of [hostB, hostA2]) {
         assert.deepEqual((await cloud(t, host, 'GET', 'db/posts')).json.docs, [], host);
         assert.equal((await cloud(t, host, 'GET', `db/posts/${doc.json.id}`)).status, 404, host);
-        assert.equal((await cloud(t, host, 'GET', 'saves/slot1')).status, 404, host);
+        assert.equal((await cloud(t, host, 'GET', 'saves/slot1')).json.found, false, host);
         assert.deepEqual((await cloud(t, host, 'GET', 'boards/high')).json.entries, [], host);
         assert.equal((await cloud(t, host, 'GET', `files/${file.json.id}`)).status, 404, host);
         assert.equal((await cloud(t, host, 'DELETE', `db/posts/${doc.json.id}`)).status, 404, host);
@@ -288,7 +288,7 @@ describe('Office Cloud', () => {
       const v = (await cloud(t, hostA2, 'GET', 'saves/slot', { session: acct })).json.version;
       assert.equal((await cloud(t, hostA2, 'PUT', 'saves/slot', { session: acct, body: { value: 1, ifVersion: v - 1 } })).status, 409);
       assert.equal((await cloud(t, hostA2, 'DELETE', 'saves/slot', { session: acct })).status, 200);
-      assert.equal((await cloud(t, hostA2, 'GET', 'saves/slot', { session: acct })).status, 404);
+      assert.deepEqual((await cloud(t, hostA2, 'GET', 'saves/slot', { session: acct })).json, { key: 'slot', value: null, version: 0, found: false });
       assert.equal((await cloud(t, hostA2, 'GET', 'saves/slot', { player: 'short' })).status, 401, 'a malformed token is no identity');
       assert.equal((await cloud(t, hostA2, 'PUT', 'saves/bad%20key', { body: { value: 1 } })).status, 400);
       assert.equal((await cloud(t, hostA2, 'PUT', 'saves/big', { body: { value: 'x'.repeat(70 * 1024) } })).status, 413);

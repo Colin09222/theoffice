@@ -188,11 +188,11 @@
         var mine = parse(store.get(mirror(key)), undefined);
         var have = mine === undefined ? fallback : mine;
         return either(function () {
-          return request('GET', 'saves/' + enc(key)).then(function (r) { store.set(mirror(key), JSON.stringify(r.value)); return r.value; }, function (e) {
-            if (e.status === 404) { if (mine !== undefined) saves.set(key, mine).catch(function () { return null; }); return have; }
-            if (e.code === 'offline') return have;
-            throw e;
-          });
+          return request('GET', 'saves/' + enc(key)).then(function (r) {
+            // Nothing on the server yet: a copy made on this device while offline goes up now.
+            if (r.found === false) { if (mine !== undefined) saves.set(key, mine).catch(function () { return null; }); return have; }
+            store.set(mirror(key), JSON.stringify(r.value)); return r.value;
+          }, function (e) { if (e.code === 'offline') return have; throw e; });
         }, function () { return have; });
       },
       /** Save any JSON up to 64 KB. Resolves true once the server has it, or false if it is only on this device for now. */

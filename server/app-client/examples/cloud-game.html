@@ -5,11 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Star Catch: an Office Cloud example</title>
 <meta name="description" content="Catch falling stars, keep your best score, climb the board and see who else is playing.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2712%27 fill=%27%23ffcf4a%27/%3E%3C/svg%3E">
 <!-- Office Cloud: saves, accounts, a leaderboard and a multiplayer room, with no server code. See ../../OFFICE-CLOUD.md -->
 <script src="_office/office.js"></script>
 <style>
   :root { --ink: #f4f1ff; --sky: #14122b; --gold: #ffcf4a; --mint: #6ff2c5; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 30% 0%, #2b2361, var(--sky) 60%); color: var(--ink); font: 16px/1.45 system-ui, sans-serif; display: grid; place-items: center; }
   main { width: min(960px, 100%); padding: 16px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 280px; }
   @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
@@ -52,7 +54,7 @@
         <p id="msg" class="msg" role="alert"></p>
       </form>
       <button id="logout" class="quiet" type="button" hidden>Log out</button>
-      <label class="small">Name on the board as a guest <input id="name" maxlength="24" value="Guest"></label>
+      <label id="guest" class="small">Name on the board as a guest <input id="name" maxlength="24" value="Guest"></label>
     </section>
     <section><h2>Top catchers</h2><ol id="board"></ol><p id="rank" class="small"></p></section>
     <section><h2>In the sky now</h2><ul id="players"></ul></section>
@@ -81,7 +83,7 @@
   }
 
   // ---- accounts ----
-  function showUser(u) { $('who').textContent = u ? `Logged in as ${u.name}` : 'Playing as a guest'; $('auth').hidden = !!u; $('logout').hidden = !u; }
+  function showUser(u) { $('who').textContent = u ? `Logged in as ${u.name}` : 'Playing as a guest'; $('auth').hidden = !!u; $('guest').hidden = !!u; $('logout').hidden = !u; }
   office.auth.onChange((u) => { showUser(u); loadSave(); showBoard(); });
   $('auth').addEventListener('submit', async (e) => {
     e.preventDefault();
