@@ -45,4 +45,7 @@
   #labels .char-bubble.speech > span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   #labels .char-bubble.task-pill { max-width: 132px; }
   #labels .char-bubble .pill-done { font-size: 11.5px; padding: 0 3px; }
+  /* What someone is doing is a quiet white note; the speech bubbles are what should catch the eye. */
+  #labels .char-bubble.task-pill { background: rgba(255, 255, 255, .92); border: 1px solid rgba(28, 23, 18, .32); box-shadow: none; font-weight: 600; font-size: 12px; }
+  #labels .char-bubble.task-pill::after { display: none; }
 }
