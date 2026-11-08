@@ -658,6 +658,7 @@ describe('admin', () => {
       assert.match(out, /floor 3 shop: on, 1 conversation, 1 waiting/);
       assert.ok(!out.includes('private words'));
       assert.match(cli('pause', 'shop', '--floor', '3'), /paused for floor 3 shop/);
+      assert.match(cli('pause', '--floor', '3', 'shop'), /paused for floor 3 shop/, 'the flag can come first');
       out = cli('status', 'shop', '--floor', '3', '--json');
       const j = JSON.parse(out);
       assert.equal(j.projects[0].on, false);

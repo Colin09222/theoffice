@@ -237,7 +237,9 @@ export function chatStatusOf(db, cfg, F, p) {
 export const chatBuildingPaused = buildingPaused;
 /** scripts/admin.mjs chat status|pause|resume. Counts only, never what anyone said. Returns false for a bad command, so the caller can print its usage. */
 export function chatAdminCommand(db, cfg, rest, { die, floorArg, lookupLabel, print = console.log }) {
-  const [sub] = rest, given = rest[1] && !rest[1].startsWith('--') ? rest[1] : null;
+  const [sub] = rest;
+  // The project is the first word that isn't a flag or a flag's value, wherever the flags go.
+  const given = rest.slice(1).find((a, i, list) => !a.startsWith('--') && list[i - 1] !== '--floor') ?? null;
   const numberOf = (id) => get(db, 'SELECT number FROM floors WHERE id=?', id)?.number ?? '(closed)';
   const findProject = () => {
     const entry = lookupLabel(db, given);
@@ -383,12 +385,13 @@ export function createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, eng
     const conv = conversation(F, p, body.conversation, true);
     if (get(db, "SELECT COUNT(*) n FROM chat_messages WHERE conversation_id=? AND role='visitor'", conv.id).n >= L.perConversation) return reply(200, say(conv, `${LOTS_ALREADY}${OFFER}`, { limited: true, offer: true }));
     addMessage(conv, 'visitor', text);
-    if (GREETING.test(text)) return reply(200, say(conv, HELLO(f.name || pr.title)));
-    if (looksLikeInjection(text)) return reply(200, say(conv, OFF_TOPIC(f.name || pr.title)));
+    const company = oneLine(f.name || pr.title, 80);
+    if (GREETING.test(text)) return reply(200, say(conv, HELLO(company)));
+    if (looksLikeInjection(text)) return reply(200, say(conv, OFF_TOPIC(company)));
     if (asksForPerson(text)) return reply(200, handOff(f, pr, conv, text, 'asked for a person'));
-    const known = companyKnowledge({ company: f.name || pr.title, tagline: f.tagline, title: pr.title, description: pr.description, faq: faqFrom(settingsOf(db, F, p)), pages: pagesFor(F, p, pr.published_at) }, text);
+    const known = companyKnowledge({ company, tagline: f.tagline, title: pr.title, description: pr.description, faq: faqFrom(settingsOf(db, F, p)), pages: pagesFor(F, p, pr.published_at) }, text);
     const fence = `KNOW-${randomBytes(4).toString('hex')}`;
-    const system = `${chatRules(f.name || pr.title, fence)}\n\n${fence}\n${known}\n${fence}`;
+    const system = `${chatRules(company, fence)}\n\n${fence}\n${known}\n${fence}`;
     let r;
     try {
       r = await atOnce(`chat:${ip}`, 1, () => atOnce(`chatP:${pk}`, 4, () => ai.chat({ F, p, pk, body: { model: 'fast', maxTokens: L.answerTokens, system, messages: historyOf(conv) } })));
@@ -444,7 +447,7 @@ export function createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, eng
   async function handle(x) {
     const { reply, req, m, b, c, f, pr } = x;
     if (c !== undefined) throw new CloudError(404, 'not_found', 'No such thing here.');
-    if (b === 'config' && m === 'GET') return reply(200, on(f, pr) ? { on: true, company: f.name || pr.title, notice: CHAT_NOTICE, greeting: HELLO(f.name || pr.title), label: 'AI assistant' } : { on: false });
+    if (b === 'config' && m === 'GET') return reply(200, on(f, pr) ? { on: true, company: oneLine(f.name || pr.title, 80), notice: CHAT_NOTICE, greeting: HELLO(oneLine(f.name || pr.title, 80)), label: 'AI assistant' } : { on: false });
     if (m !== 'POST' || !['message', 'handoff', 'email', 'updates'].includes(b)) throw new CloudError(404, 'not_found', 'No such thing here.');
     if (!on(f, pr)) return reply(403, { error: 'chat_off', on: false, message: 'The assistant isn\'t available here right now.' });
     const body = await readBody(req, WIDGET_BODY);
@@ -482,11 +485,11 @@ export function createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, eng
   async function bossReply(f, id, text) {
     const c = get(db, 'SELECT * FROM chat_conversations WHERE id=? AND floor_id=?', id, f.id);
     if (!c) return null;
-    const words_ = cleanText(text, L.replyChars + 1).trim();
-    if (!words_ || words_.length > L.replyChars) throw new CloudError(400, 'bad_reply', `A reply is 1 to ${L.replyChars} characters.`);
+    const said = cleanText(text, L.replyChars + 1).trim();
+    if (!said || said.length > L.replyChars) throw new CloudError(400, 'bad_reply', `A reply is 1 to ${L.replyChars} characters.`);
     const t = now();
     tx(db, () => {
-      run(db, "INSERT INTO chat_messages (conversation_id,floor_id,project,role,text,created_at) VALUES (?,?,?,'boss',?,?)", c.id, c.floor_id, c.project, words_, t);
+      run(db, "INSERT INTO chat_messages (conversation_id,floor_id,project,role,text,created_at) VALUES (?,?,?,'boss',?,?)", c.id, c.floor_id, c.project, said, t);
       run(db, "UPDATE chat_questions SET status='answered', answered_at=? WHERE conversation_id=? AND status='waiting'", t, c.id);
       run(db, "UPDATE chat_conversations SET status='answered', unread=0, last_at=? WHERE id=?", t, c.id);
     });
@@ -494,7 +497,7 @@ export function createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, eng
     let emailed = false, note = '';
     if (c.email && engine.mail?.ready?.()) {
       try {
-        const r = await engine.mail.send(f, { to: [c.email], subject: `A reply from ${f.name || 'the team'}`, text: words_, by: 'boss' });
+        const r = await engine.mail.send(f, { to: [c.email], subject: `A reply from ${f.name || 'the team'}`, text: said, by: 'boss' });
         emailed = r.status === 'sent' || r.status === 'delivered' || r.status === 'queued';
         if (!emailed) note = r.note || 'The email didn\'t go out.';
       } catch (e) { note = e?.name === 'MailError' ? e.message : 'The email didn\'t go out.'; }

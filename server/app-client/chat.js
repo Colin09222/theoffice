@@ -86,6 +86,8 @@
       document.head.appendChild(script);
     });
   }
-  function later() { if (window.requestIdleCallback) requestIdleCallback(start, { timeout: 1200 }); else setTimeout(start, 300); }
-  if (document.readyState === 'complete') later(); else addEventListener('load', later, { once: true });
+  var begun = false;
+  function later() { if (begun) return; begun = true; if (window.requestIdleCallback) requestIdleCallback(start, { timeout: 1200 }); else setTimeout(start, 300); }
+  // After the page has finished, or a few seconds on for a page that never quite does.
+  if (document.readyState === 'complete') later(); else { addEventListener('load', later, { once: true }); setTimeout(later, 6000); }
 })();
