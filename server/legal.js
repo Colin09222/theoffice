@@ -286,7 +286,6 @@ export function installLegal(ext) {
     // The building's boss-only notice: never shown to visitors, never read back to a model, and not the manager's launch report.
     engine.addMessage(floorId, 'budget', a?.id ?? null, text);
   }
-  const say = (floorId, text, project) => { const a = lawyerOf(floorId); const f = get(db, 'SELECT * FROM floors WHERE id=?', floorId); if (a && f) try { engine.talk(floorId, a, engine.bossOf(f), text, { kind: 'handoff', project }); } catch { /* talk is a nicety */ } };
   const ping = (floorId) => engine.emit(floorId, 'legal', {}, { ownerOnly: true, persist: false });
 
   /** Drafts or redrafts one project's pages when what's true of it has changed. Returns the doc row. */
@@ -316,19 +315,16 @@ export function installLegal(ext) {
     const title = pr.title || slug;
     if (status === 'regulated') {
       tell(floorId, `**${title} needs a real lawyer before launch, boss.** It looks like ${regulated.map((r) => r.label.toLowerCase()).join(' and ')}, which comes with rules I can't responsibly guess at. I haven't drafted Terms for it as if it were routine. ${HONESTY_LINE}`);
-      say(floorId, `${title} needs a real lawyer before launch. I'm not drafting that one.`, slug);
     } else if (status === 'needs_facts') {
       if (!facts.askedAt) {
         run(db, 'INSERT INTO legal_floor (floor_id,asked_at,updated_at) VALUES (?,?,?) ON CONFLICT(floor_id) DO UPDATE SET asked_at=excluded.asked_at, updated_at=excluded.updated_at', floorId, now(), now());
         tell(floorId, `I've started the Terms and Privacy Policy for **${title}**, boss. Three things I can't know and won't make up: your **legal or trading name**, your **country or state**, and a **contact address** for customers. Fill them in on the card under Requests and the drafts are ready for your tap. ${HONESTY_LINE}`);
-        say(floorId, 'Three quick facts for the small print, boss. They are under Requests.', slug);
       }
     } else {
       const again = old && old.live_version;
       tell(floorId, again
         ? `**${title} changed, so I've updated its legal pages** (${changeWords(parse(old.features, {}), features) || 'details'}). The approved version stays up until you approve this one under Requests. ${HONESTY_LINE}`
         : `**The legal pages for ${title} are drafted** and waiting for your tap under Requests: ${Object.values(pages).map((p) => p.title).join(', ')}. ${HONESTY_LINE}`);
-      say(floorId, `Drafts for ${title} are ready for the boss to look at.`, slug);
     }
     if (flags.length && (!old || old.flags !== JSON.stringify(flags))) tellFlags(floorId, title, flags);
     engine.feed(floorId, lawyerOf(floorId), status === 'regulated' ? `flagged ${title} for a real lawyer` : `drafted the legal pages for ${title}`, slug);
