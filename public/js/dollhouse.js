@@ -32,8 +32,8 @@ export function plan(w, k, staffCount) {
   const plantX = doorX - doorW / 2 - s(17);
   const tableW = Math.round(Math.max(s(92), Math.min(s(160), w * 0.25)));
   const tableX = Math.round(plantX - s(20) - tableW / 2);
-  const deskW = s(50), gap = s(13);
-  const left = s(12), right = tableX - tableW / 2 - s(30);
+  const deskW = s(48), gap = s(11);
+  const left = s(12), right = tableX - tableW / 2 - s(24);
   const fit = Math.max(1, Math.floor((right - left + gap) / (deskW + gap)));
   const n = Math.min(fit, Math.max(2, staffCount - 1));  // the manager's place is at the head of the table
   const desks = Array.from({ length: n }, (_, i) => ({ x: left + deskW / 2 + i * (deskW + gap), w: deskW }));
@@ -128,7 +128,9 @@ export class Room {
   home() {
     const free = [...(this.desks || []), ...(this.seats || [])];
     for (const p of this.people) {
-      if (p.manager || this.moving) { p.home = this.moving ? pick(this.spots) : this.head; continue; }
+      // Moving in, there's nowhere to sit yet: they stand about among the boxes.
+      if (this.moving) { p.home = { sx: rnd(this.p.s(24), this.p.w - this.p.s(60)), y: this.p.lane, sit: false, kind: 'lane' }; continue; }
+      if (p.manager) { p.home = this.head; continue; }
       p.home = free.shift() || { sx: rnd(this.p.s(30), this.p.w - this.p.s(60)), y: this.p.lane, sit: false, kind: 'lane' };
     }
   }
