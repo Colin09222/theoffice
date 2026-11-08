@@ -1,7 +1,7 @@
 // The lobby overlay: the sign out front, the felt directory board with its lift panel, the To Let board, and the news strip.
 import { stage } from './stage.js';
 import { h, api, session, isPhone, toast, clear, put, timeAgo, BASE } from './dom.js';
-import { buildStack, lobbyMode, setLobbyMode } from './stack.js';
+import { buildStack } from './stack.js';
 import { LobbyView } from './lobby-scene.js';
 import { icon } from './icons.js';
 import { muteButton, sfx } from './sfx.js';
@@ -12,9 +12,7 @@ const claimModule = () => import('./claim.js');
 const openClaim = () => claimModule().then((m) => m.openClaim());
 const openLogin = () => claimModule().then((m) => m.openLogin());
 
-let view = null, stack = null, tower = null, poll = null, keepFloors = [], tip = null, tickerPoll = null, partyPoll = null, partying = null, tickerLed = null;
-// The 3D building, fetched the first time Building is chosen (a phone starts there). It brings the floor scene with it.
-const towerModule = () => import('./tower-scene.js');
+let view = null, stack = null, poll = null, keepFloors = [], toLetFloors = new Set(), tip = null, tickerPoll = null, partyPoll = null, partying = null, tickerLed = null;
 
 // ---- the building, live: a ticker of public happenings across every floor ----
 function tickerItem(it, fresh) {
@@ -83,17 +81,15 @@ function directoryRow(card, onEnter, onHover) {
 
 export async function showLobby(root) {
   document.body.dataset.page = 'lobby';
-  const data = await api('/floors').catch(() => ({ floors: [], towerFloors: 40, vacant: 1 }));
-  keepFloors = data.floors;
+  const data = await api('/floors').catch(() => ({ floors: [], towerFloors: 10, vacant: 1, toLet: [] }));
+  keepFloors = data.floors; toLetFloors = new Set(data.toLet);
 
   const enterFloor = async (card) => {
     sfx('press', { rate: 0.75 });
-    // In the 3D building the camera flies into the floor, and the floor page carries on from there.
-    if (tower && stage.ok && document.body.dataset.lobby === 'building') { tower.flyInto(card.number); return; }
-    if (view && stage.ok && document.body.dataset.lobby !== 'building') {
-      view.rideTo(card.number);
+    // A short swoop to the floor's glass, then its page. A lift panel button on the floor itself goes straight there.
+    if (view && stage.ok && document.body.dataset.lobby === 'outside') {
       document.body.classList.add('flying');
-      await Promise.race([view.flyTo(card.number), new Promise((r) => setTimeout(r, 1400))]);
+      await Promise.race([view.flyTo(card.number), new Promise((r) => setTimeout(r, 650))]);
       document.body.classList.remove('flying');
     }
     window.officeGo(`/floor/${card.slug}`);
@@ -106,11 +102,13 @@ export async function showLobby(root) {
       onPick: (n) => {
         if (n < 1) return;
         const card = keepFloors.find((f) => f.number === n);
-        if (card) enterFloor(card); else { toast(`Floor ${n} is to let. Got a code?`); }
+        if (card) enterFloor(card);
+        else if (toLetFloors.has(n)) openClaim();
+        else toast(`Floor ${n} is reserved.`);
       },
     });
-    view.setFloors(data.floors);
-    if (lobbyMode() !== 'building') stage.setView(view);  // Building puts the 3D building up itself, once it has loaded
+    view.setFloors(data.floors, data.toLet);
+    stage.setView(view);
     window.__lobbyDebug = view;  // read by the browser e2e tests
   }
 
@@ -122,7 +120,7 @@ export async function showLobby(root) {
     const shown = keepFloors.filter((f) => !q || `${f.name} ${f.tagline}`.toLowerCase().includes(q));
     count.textContent = `${keepFloors.length} ${keepFloors.length === 1 ? 'company' : 'companies'}`;
     clear(list);
-    for (const c of shown) list.append(directoryRow(c, enterFloor, (n) => { view?.setHover(n); view?.rideTo(n); if (document.body.dataset.lobby === 'building') tower?.rideToFloor(n); }));
+    for (const c of shown) list.append(directoryRow(c, enterFloor, (n) => view?.setHover(n)));
     if (q && !shown.length) list.append(h('p.dir-empty', {}, 'Nobody by that name in the building.'));
     if (!q) {
       if (!keepFloors.length) list.append(h('p.dir-empty', {}, 'The building is brand new, and every floor is empty. Someone has to go first.'));
@@ -134,9 +132,10 @@ export async function showLobby(root) {
     const grid = h('div.lift', { role: 'group', 'aria-label': 'Lift buttons' });
     for (let n = data.towerFloors; n >= 1; n--) {
       const card = keepFloors.find((f) => f.number === n);
-      grid.append(h(`button.lift-btn${card ? '.lit' : ''}`, { type: 'button', 'data-lift': n, css: card ? { '--brand': card.colors.primary } : {}, 'aria-label': card ? `Floor ${n}, ${card.name || 'moving in'}` : `Floor ${n}, empty`, onpointerenter: () => { view?.setHover(n); view?.rideTo(n); }, onclick: () => { if (card) enterFloor(card); else openClaim(); } }, String(n)));
+      const free = toLetFloors.has(n);  // not a company, and not one a code is holding
+      grid.append(h(`button.lift-btn${card ? '.lit' : ''}`, { type: 'button', 'data-lift': n, disabled: !card && !free, css: card ? { '--brand': card.colors.primary } : {}, 'aria-label': card ? `Floor ${n}, ${card.name || 'moving in'}` : free ? `Floor ${n}, to let` : `Floor ${n}, reserved`, title: card ? undefined : free ? 'To let' : 'Reserved', onpointerenter: () => view?.setHover(n), onclick: () => { if (card) enterFloor(card); else if (free) openClaim(); } }, String(n)));
     }
-    const vacant = data.towerFloors - keepFloors.length;
+    const vacant = toLetFloors.size;
     return h('section.lift-wrap', {}, h('h3', {}, 'The lift', h('small', {}, `${vacant} ${vacant === 1 ? 'floor' : 'floors'} to let`)), grid);
   };
   renderList();
@@ -227,59 +226,26 @@ export async function showLobby(root) {
     h('header.topbar', {}, h('div.topbar-right', {}, account, muteButton())),
     h('section.hero', {},
       h('h1', {}, 'The Office', h('span', {}, 'Clock in. Someone else does the work.')),
-      h('p', {}, 'Each floor belongs to one friend, with an office manager and a small staff of AI agents who plan, research, write and build while you watch. Spin the building, go up in the lift, and drop in on anyone.')),
+      h('p', {}, 'Each floor belongs to one friend, with an office manager and a small staff of AI agents who plan, research, write and build while you watch. Spin the building, take the lift, and drop in on anyone.')),
     panel,
     h('button.open-pill', { type: 'button', onclick: () => openClaim() },
       h('span.pill-status', {}, data.vacant ? 'To let' : 'Full up', h('small', {}, data.vacant ? `Floor ${data.vacant} is empty` : 'Building full')),
       h('span.pill-go', {}, 'Open an office'), h('span.pill-arrow', {}, icon('key'))),
-    h('p.hints', {}, isPhone() ? 'Drag to look around. Tap a lit floor.' : 'Drag to spin. Wheel goes up and down. Any lit floor is open.'),
+    h('p.hints', {}, isPhone() ? 'Drag to look around. Tap a lit floor.' : 'Drag to spin. Any lit floor is open.'),
     buildTicker(),
     data.globalPause ? h('p.banner', {}, 'The building manager has paused all work for now.') : null,
     tip = h('div.floor-tip', { hidden: true }),
   );
 
-  // ---- Building | Outside ----
-  // Building is the tower cut away, every floor's office in 3D, ridden up and down; Outside is the tower from the street. Without WebGL,
-  // Building falls back to a stack of strips. Directory, Top and Launched work in all of them.
-  stack?.destroy();
-  stack = buildStack({ onEnter: (card) => { sfx('press', { rate: 0.75 }); window.officeGo(`/floor/${card.slug}`); } });
-  stack.update(data);
-  const modeBtn = (m, label) => h('button.mode-btn', { type: 'button', 'data-mode': m, 'aria-pressed': 'false', onclick: () => setMode(m, true) }, label);
-  const modes = h('div.lobby-mode', { role: 'group', 'aria-label': 'How to see the building' }, modeBtn('building', 'Building'), modeBtn('outside', 'Outside'));
-  const showTower = async () => {
-    if (!tower) {
-      const { TowerView, takeHandoff } = await towerModule();
-      if (document.body.dataset.page !== 'lobby' || tower) return;
-      tower = new TowerView({
-        labels: document.getElementById('labels'),
-        onEnter: (card) => window.officeGo(`/floor/${card.slug}`),
-        onEmpty: (n) => toast(`Floor ${n} is to let. Got a code?`),
-      });
-      window.__tower = tower;  // read by the browser e2e tests
-      tower.setFloors(data);
-      await tower.loadStaff();
-      if (!tower || tower.dead) return;
-      // Back from a floor page: the camera flies out of that very room. Otherwise the ride starts where it was left, or at the newest floor.
-      const back = takeHandoff('out');
-      if (!(back && tower.flyOutOf(back))) tower.restoreSpot();
-    }
-    if (document.body.dataset.lobby === 'building' && stage.view !== tower) stage.setView(tower);
-  };
-  const setMode = (m, chosen) => {
-    if (m === 'outside' && !stage.ok) m = 'building';
-    document.body.dataset.lobby = m;
-    for (const b of modes.children) b.setAttribute('aria-pressed', String(b.dataset.mode === m));
-    if (chosen) setLobbyMode(m);
-    if (!stage.ok) { stage.paused = m === 'building'; if (m === 'building') stack.show(); else stack.hide(); return; }
-    stack.hide(); stage.paused = false;
-    if (m === 'building') { document.body.dataset.tower = '3d'; return showTower().catch((e) => { console.error(e); toast('The building could not be drawn here.'); }); }
-    delete document.body.dataset.tower; if (view && stage.view !== view) stage.setView(view);
-    return null;
-  };
-  root.append(stack.el, modes);
-  // The page is ready once the building is up, so the curtain lifts on it rather than on an empty sky (the router waits for this).
-  await setMode(lobbyMode(), false);
-  if (document.body.dataset.page !== 'lobby') return;  // gone already, while the building was being put up
+  // ---- no WebGL: the strips ----
+  // Everyone else has the tower outside. The strips are only the fallback for a browser that can't draw it, and it comes with no switch.
+  if (!stage.ok) {
+    stack?.destroy();
+    stack = buildStack({ onEnter: (card) => { sfx('press', { rate: 0.75 }); window.officeGo(`/floor/${card.slug}`); } });
+    stack.update(data);
+    root.append(stack.el);
+    document.body.dataset.lobby = 'building'; stage.paused = true; stack.show();
+  } else document.body.dataset.lobby = 'outside';
 
   // ---- launch parties ----
   // The building picks them and keeps them rare. This tab also takes one a minute at most, and never the same one twice.
@@ -309,8 +275,7 @@ export async function showLobby(root) {
     if (document.hidden) return;  // a tab nobody is looking at asks for nothing
     try {
       const fresh = await api('/floors');
-      keepFloors = fresh.floors; view?.setFloors(fresh.floors); stack?.update(fresh);
-      if (tower && !tower.dead) { tower.setFloors(fresh); tower.loadStaff(); }
+      keepFloors = fresh.floors; toLetFloors = new Set(fresh.toLet); view?.setFloors(fresh.floors, fresh.toLet); stack?.update(fresh);
       if (document.activeElement !== search) renderList();
       if (wallOn) loadWall();
       if (boardOn) loadBoard();
@@ -323,14 +288,13 @@ function showTip(n, x, y) {
   if (n < 1) { tip.hidden = true; return; }
   const c = keepFloors.find((f) => f.number === n);
   tip.hidden = false;
-  tip.textContent = c ? `${n} · ${c.name || 'Moving in'}` : `${n} · To let`;
+  tip.textContent = c ? `${n} · ${c.name || 'Moving in'}` : toLetFloors.has(n) ? `${n} · To let` : `${n} · Reserved`;
   tip.style.transform = `translate(${x + 16}px, ${y - 12}px)`;
 }
 
 export function hideLobby() {
   clearInterval(poll); poll = null; tip = null;
   stack?.destroy(); stack = null; stage.paused = false; delete document.body.dataset.lobby;
-  tower?.destroy(); tower = null; window.__tower = null; delete document.body.dataset.tower;
   clearInterval(tickerPoll); tickerPoll = null;
   clearInterval(partyPoll); partyPoll = null; partying = null; tickerLed = null;
 }

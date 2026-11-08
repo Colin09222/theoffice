@@ -1,20 +1,11 @@
 // The building as a stacked cutaway: every floor at once, roof to ground, as plain strips you slide through. No WebGL in here: a strip
 // is a few DOM nodes in its company's colours, its staff as badge faces, and a status line from the public floor list. Only the strips
 // on screen animate, and the 3D scene behind sleeps while this is up.
-import { h, api, clear, isPhone } from './dom.js';
-import { stage } from './stage.js';
+import { h, api, clear } from './dom.js';
 import { portrait } from './portrait.js';
 
-const MODE_KEY = 'office:lobby-mode', SPOT_KEY = 'office:stack-y';
+const SPOT_KEY = 'office:stack-y';
 const MAX_FACES = 6;
-
-/** Building (the stack) or Outside (the 3D tower). Phones and machines without WebGL start in the Building; a choice is remembered. */
-export function lobbyMode() {
-  let m = null; try { m = localStorage.getItem(MODE_KEY); } catch { /* private mode */ }
-  if (m === 'building' || m === 'outside') return stage.ok ? m : 'building';
-  return isPhone() || !stage.ok ? 'building' : 'outside';
-}
-export function setLobbyMode(m) { try { localStorage.setItem(MODE_KEY, m); } catch { /* private mode */ } }
 
 /** One line on how the floor is doing, from what the directory already knows. */
 export function statusLine(c) {

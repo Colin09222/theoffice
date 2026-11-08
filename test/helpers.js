@@ -18,7 +18,8 @@ export async function until(fn, { timeout = 15000, every = 15, what = 'condition
 export async function boot(overrides = {}, deps = {}) {
   const logs = [];
   const db = openDb(':memory:');
-  const cfg = loadConfig({ AI_MODE: 'mock', ADMIN_PASSWORD: 'correct horse battery', MOCK_DELAY_MS: '2', RETRY_BASE_MS: '1' }, { rateScale: 1000, ...overrides });
+  // A tall building for most tests, so a test can claim as many floors as it likes without having to say so. The real default is proved in tower10.test.js.
+  const cfg = loadConfig({ AI_MODE: 'mock', ADMIN_PASSWORD: 'correct horse battery', MOCK_DELAY_MS: '2', RETRY_BASE_MS: '1' }, { rateScale: 1000, towerFloors: 40, ...overrides });
   const log = (level, msg, extra) => logs.push(JSON.stringify({ level, msg, ...extra }));
   const app = createApp({ db, cfg, models: loadModels(), log, ...deps });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));

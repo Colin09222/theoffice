@@ -32,13 +32,7 @@ export function installBuilding(ext) {
       let look = null; try { look = JSON.parse(r.look); } catch { /* a drawn face in the defaults */ }
       (floors[r.number] ||= []).push({ name: r.name, role: r.role, look, busy: r.state !== 'idle' });
     }
-    // The 3D tower draws every floor's room from afar: its layout and finishes, and the boss at their desk. Both are on the floor's own page too.
-    const rooms = {};
-    for (const f of all(db, "SELECT number, decor, boss FROM floors WHERE status = 'active' AND hidden = 0")) {
-      let decor = null, boss = null; try { decor = JSON.parse(f.decor); boss = JSON.parse(f.boss); } catch { /* drawn with the defaults */ }
-      rooms[f.number] = { decor, boss: boss ? { name: boss.name, look: boss.look } : null };
-    }
-    json(res, 200, { floors, rooms, ts: now() });
+    json(res, 200, { floors, ts: now() });
   });
 
   // ---- the ticker ----

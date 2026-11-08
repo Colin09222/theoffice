@@ -44,21 +44,20 @@ async function run(label, opts, t, adminCode) {
     await p.until('document.querySelector(".dir-empty") !== null', 'empty state');
     await p.type('.dir-search input', '');
     await p.ev('(() => { const i = document.querySelector(".dir-search input"); i.value = ""; i.dispatchEvent(new Event("input")); })()');
-    await p.until('document.querySelectorAll(".lift-btn").length === 40', 'lift buttons');
+    await p.until('document.querySelectorAll(".lift-btn").length === 10', 'lift buttons');
     if (phone) { await shot('02-directory'); await p.click('.sheet-grip'); await sleep(450); }
   });
-  await step(tag('dragging turns and scrolling rides the tower'), async () => {
-    // A phone starts in the Building (the tower cut away, see tower.mjs); this is the tower from the street, so go Outside first.
-    if (phone) { await p.click('.mode-btn[data-mode="outside"]'); await p.until('document.body.dataset.lobby === "outside" && window.__stage.view === window.__lobbyDebug', 'outside'); await sleep(600); }
+  await step(tag('dragging turns the tower, and scrolling leaves it where it is'), async () => {
+    const before = await p.ev('window.__lobbyDebug?.camera.position.y');
     if (phone) await p.drag(70, 420, 310, 480, true);
     else {
       await p.drag(150, 700, 60, 690, false);
       await p.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 150, y: 700, deltaX: 0, deltaY: -200 });
     }
     await sleep(700);
-    const moved = await p.ev('(() => { const c = window.__lobbyDebug; return c ? { t: Math.abs(c.targetTheta - c.startTheta), r: c.targetRide } : null; })()');
+    const moved = await p.ev('(() => { const c = window.__lobbyDebug; return c ? { t: Math.abs(c.targetTheta - c.startTheta), y: c.camera.position.y } : null; })()');
     if (!moved || moved.t < 0.1) throw new Error('drag did not turn the tower');
-    if (Math.abs(moved.r - 26) < 1) throw new Error('scroll did not ride');
+    if (Math.abs(moved.y - before) > 0.05) throw new Error(`scrolling moved the camera from ${before} to ${moved.y}`);
   });
   await step(tag('a bad code is refused kindly'), async () => {
     await p.click('.open-pill');
@@ -574,7 +573,7 @@ async function runAdmin(t) {
 }
 
 // FILLER_COMPANIES=1 runs the same suite with the demo companies seeded, so their floors can't break the lobby or the counts.
-const t = await boot({ mockDelayMs: Number(process.env.E2E_DELAY || 260), rateScale: 50, fillerCompanies: process.env.FILLER_COMPANIES === '1', fillerTickMs: 1500, ordersTickMs: 1200 });
+const t = await boot({ mockDelayMs: Number(process.env.E2E_DELAY || 260), rateScale: 50, fillerCompanies: process.env.FILLER_COMPANIES === '1', fillerTickMs: 1500, ordersTickMs: 1200, towerFloors: 10 });
 await claim(t, 'Hat Museum', { body: { tagline: 'A history of hats', colors: { primary: '#2f7ec7', accent: '#a9c4ff' } } });
 const seed = await claim(t, 'Soup Finder', { body: { tagline: 'Every soup, ranked', colors: { primary: '#c8455a', accent: '#f4c95d' } } });
 await seed.post(`/api/floors/${seed.slug}/chat`, { text: 'go build soup finder [buy]' });
