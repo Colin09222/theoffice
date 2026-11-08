@@ -17,7 +17,7 @@ Only floors 1 to `TOWER_FLOORS` are the building: the lobby, the lift, the count
 | Floors | |
 | --- | --- |
 | 1 and 2 | the two demo companies, Pigeon Logistics and Mildly Haunted Candles. `server/filler.js` only ever seeds demos on the bottom two floors |
-| 3 | held for LabStackr by its one-time code |
+| 3 | LabStackr |
 | 4 to 10 | to let |
 | 101 to 106 | the six hidden test companies |
 
