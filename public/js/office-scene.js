@@ -447,6 +447,8 @@ export class Actor {
     this.view.root.remove(old.group); old.dispose();
     this.char = next; this.group = next.group; this.view.root.add(next.group);
     if (this.seated) this.sitDown();
+    // A coarse copy that lands after the floor was flown into: the full person is on the way.
+    if (next.far && !this.view.host) loadModelCharacter(this.info.look, { accent: this.view.colors.accent }).then((mc) => this.swapChar(mc)).catch(() => {});
   }
   destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); }
   sitDown() {
@@ -1297,7 +1299,7 @@ export class OfficeView {
         if (tone[r.kind]) { x.fillStyle = tone[r.kind]; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); }
         const empty = r.kind === 'staff' && this.offices.get(r.id)?.info.role === 'vacant';
         // A company's colour on the way through: a long runner down the middle of each corridor.
-        if (r.kind === 'corridor' && r.label === 'Corridor') { const mw = (x1 - x0) > (z1 - z0), inset = 0.42; x.fillStyle = this.tint(0.34); x.fillRect(px(x0 + (mw ? 0 : inset)), pz(z0 + (mw ? inset : 0)), px(x1) - px(x0) - (mw ? 0 : inset * 2) * ppu, pz(z1) - pz(z0) - (mw ? inset * 2 : 0) * ppu); }
+        if (r.kind === 'corridor') { const mw = (x1 - x0) > (z1 - z0), inset = 0.42; x.fillStyle = this.tint(0.34); x.fillRect(px(x0 + (mw ? 0 : inset)), pz(z0 + (mw ? inset : 0)), px(x1) - px(x0) - (mw ? 0 : inset * 2) * ppu, pz(z1) - pz(z0) - (mw ? inset * 2 : 0) * ppu); }
         // Nobody works there yet: the light is off, so the eye goes to the rooms with people in them.
         if (empty) { x.fillStyle = 'rgba(30,24,20,.42)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); continue; }
         if (r.desk) { const s = seatOf(r.desk).at; const g = x.createRadialGradient(px(s[0]), pz(s[1]), 0, px(s[0]), pz(s[1]), 3.1 * ppu); g.addColorStop(0, 'rgba(255,212,150,.44)'); g.addColorStop(0.55, 'rgba(255,212,150,.16)'); g.addColorStop(1, 'rgba(255,212,150,0)'); x.fillStyle = g; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); }
@@ -1580,7 +1582,8 @@ export class OfficeView {
     const T = this.kit; const g = new THREE.Group(); g.userData.fromKit = true;
     const tints = (c) => ({ carpet: c, carpetBlue: c });
     for (const o of this.offices.values()) {
-      if (o.own) this.deskInto(g, o.room.desk[0], o.room.desk[1], this.colors.accent, o.room.desk[2]);
+      const empty = o.info.role === 'vacant', first = g.children.length;
+      if (o.own) this.deskInto(g, o.room.desk[0], o.room.desk[1], empty ? '#7d7c78' : this.colors.accent, o.room.desk[2]);
       for (const sh of o.shared || []) this.deskInto(g, sh.desk[0], sh.desk[1], this.colors.accent, sh.desk[2]);
       for (const t of o.theme.things) {
         if (!t.m || !T[t.m]) continue;
@@ -1590,6 +1593,8 @@ export class OfficeView {
         if (ON_TABLE.has(t.m) && T.sideTableDrawers) { const tb = place(T.sideTableDrawers, { x: at.x, z: at.z, ry: at.ry, scale: FS }); g.add(tb); y = T.sideTableDrawers.userData.size.y * FS; }
         g.add(place(T[t.m], { x: at.x, y, z: at.z, ry: at.ry, scale: FS * (t.s ?? 1), tint: t.rug ? tints(mix(o.theme.wall, '#f4efe6', 0.45)) : t.m.startsWith('chair') || t.m.startsWith('lounge') ? tints(o.theme.wall) : null }));
       }
+      // The room's lights are off too: its furniture bakes in dimmer than the rooms people are in.
+      if (empty) for (let i = first; i < g.children.length; i++) g.children[i].traverse((m) => { if (m.isMesh) m.userData.shade = [0, 3, 0.62, 0.62]; });
     }
     if (this.host || this.pace) { await this.turn(); if (this.dead || token < this.furnishedToken) return; }
     mergeColored(g, ROOM_MAT);

@@ -94,11 +94,11 @@ function buildModelHair(head, look) {
   if (look.hair === 'long') { head.add(part(G.box, c, 0, -0.36, -0.28, 0.66, 0.66, 0.12)); for (const s of [-1, 1]) head.add(part(G.box, c, s * 0.36, -0.36, -0.08, 0.1, 0.6, 0.34)); }
 }
 /** Everything worn apart from a hat. `head` and `chest` are groups already sized for the character they sit on, facing +z. */
-function buildExtras(head, chest, look, accent) {
+function buildExtras(head, chest, look, accent, slim = false) {
   const e = look.wear;
   if (!e || e === 'none') return;
   const hair = look.hair === 'none' ? '#4a2f1d' : look.hairColor;
-  if (e === 'beard') { head.add(part(G.box, hair, 0, -0.26, 0.28, 0.5, 0.26, 0.14)); head.add(part(G.box, hair, 0, -0.34, 0.3, 0.3, 0.16, 0.12)); }
+  if (e === 'beard') { if (slim) { head.add(part(G.box, hair, 0, -0.27, 0.18, 0.44, 0.17, 0.18)); head.add(part(G.box, hair, 0, -0.37, 0.2, 0.24, 0.1, 0.13)); } else { head.add(part(G.box, hair, 0, -0.26, 0.28, 0.5, 0.26, 0.14)); head.add(part(G.box, hair, 0, -0.34, 0.3, 0.3, 0.16, 0.12)); } }
   if (e === 'moustache') for (const s of [-1, 1]) { const m = part(G.box, hair, s * 0.08, -0.1, 0.36, 0.17, 0.05, 0.06); m.rotation.z = s * -0.25; head.add(m); }
   if (e === 'scarf') { chest.add(part(G.cyl, accent, 0, 0.3, 0.03, 0.34, 0.15, 0.34)); chest.add(part(G.box, darker(accent, 0.85), 0.14, 0.02, 0.32, 0.17, 0.42, 0.06)); }
   if (e === 'bowtie') for (const s of [-1, 1]) { const b = part(G.cone, accent, s * 0.1, 0.25, 0.33, 0.1, 0.2, 0.05); b.rotation.z = s * Math.PI / 2; chest.add(b); }
@@ -487,7 +487,7 @@ export class ModelCharacter {
     buildGlasses(hat, look);
     buildFaceWear(hat, look, 0.0, 0.0);
     const chest = inModelAxes(B.chest, CHEST_C, 0.4);
-    buildExtras(hat, chest, look, accent);
+    buildExtras(hat, chest, look, accent, true);
     if (hat.children.length) { mergeColored(hat, CHAR_MAT); B.head.add(hat); this.hat = hat; }
     if (chest.children.length) { mergeColored(chest, CHAR_MAT); B.chest.add(chest); this.chestWear = chest; }
     // Props, in room units and held in the right hand; a paper carried against the chest.
@@ -519,7 +519,7 @@ export class ModelCharacter {
   seatedY(seatTop) { return seatTop + (SEAT_CLEAR - HIP_Y) * this.scale; }
   setAnim(name) { this.anim = name; }
   /** How this person moves (see manner in offices.js): their pace sets the walk's speed, and the rest shapes how they stand about. */
-  setManner(m) { this.manner = m; if (m && this.actions.walk) this.actions.walk.setEffectiveTimeScale(1.05 * (m.pace / 2.6)); }
+  setManner(m) { this.manner = m; if (m && this.actions.walk) this.actions.walk.setEffectiveTimeScale(1.45 * (m.pace / 2.6)); }
   /** Turns a bone about an axis given in the model's own space. */
   spin(bone, axis, angle) {
     if (!bone || Math.abs(angle) < 1e-4) return;
@@ -728,8 +728,8 @@ export function createPreview(canvas, look, accent) {
     const size = `${canvas.clientWidth}x${canvas.clientHeight}`;
     if (size !== shown && canvas.clientWidth && canvas.clientHeight) { shown = size; renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); cam.aspect = canvas.clientWidth / canvas.clientHeight; cam.updateProjectionMatrix(); }
     const dt = Math.min((now - last) / 1000, 0.1); last = now;
-    // People walk with their backs to the room's camera, so here they turn round to face you.
-    ch.group.rotation.y = Math.PI + Math.sin(now / 1400) * 0.55;
+    // The preview's camera is out in front of them, so everyone faces it, swaying a little from side to side.
+    ch.group.rotation.y = Math.sin(now / 1400) * 0.55;
     ch.update(dt);
     renderer.render(scene, cam);
   };
