@@ -369,6 +369,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (isPrivate(c, slug) && !isPrivate(c, c.project)) throw new WorkspaceError('that project is private, and this task can\'t change it');
       // These go up on the launched wall in the lobby.
       if (!isPrivate(c, slug)) outbound(c, `${a.title ?? ''} ${a.description ?? ''}`, 'title or description');
+      const held = engine.daily?.publishHold(c.floor.id, slug, `${a.title ?? ''} ${a.description ?? ''}`);
+      if (held) throw new WorkspaceError(held);
       const kind = ['site', 'app', 'game', 'simulation', 'doc', 'research'].includes(a.kind) ? a.kind : 'site';
       const directory = a.directory === undefined || a.directory === null || a.directory === '' ? '' : String(a.directory);
       if (directory && !/^[A-Za-z0-9_-][A-Za-z0-9._-]*(\/[A-Za-z0-9_-][A-Za-z0-9._-]*){0,2}$/.test(directory)) throw new WorkspaceError('directory must be a simple relative folder such as dist');
@@ -611,6 +613,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (!engine.modes) throw new WorkspaceError('work modes are not available');
       // A goal comes from the boss's own words, here or in their answer to your question. Past that, it moves on only once it's reached.
       const v = engine.modes.updatePlan(c.floor, { goal: typeof a.goal === 'string' ? a.goal : undefined, nextUp: Array.isArray(a.next_up) ? a.next_up.filter((x) => typeof x === 'string') : undefined, summary: typeof a.summary === 'string' ? a.summary : undefined, goalReached: a.goal_reached === true, bossSaid: !!(c.bossTurn || c.bossAnswered) });
+      engine.daily?.saveSummary(c.floor.id, a.summary);
       return `${v.refused ? `${v.refused} ` : ''}Saved. Goal: ${v.goal || 'none yet'}. Next up: ${v.nextUp.length ? v.nextUp.map((x, i) => `${i + 1}. ${x}`).join(' ') : 'nothing listed'}.`;
     },
     // The one way a floor can reach the owner's assistant. Everything it stores is untrusted, and it gets fenced every time it is listed.

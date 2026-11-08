@@ -16,6 +16,7 @@ import { journeyBar, chipsRow, startButton, renderBusiness, businessActive, busi
 import { handOver, takeHandoff } from './handoff.js';
 import { aheadState, isParked, lift, park, peekAhead, unpark } from './floorcache.js';
 import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } from './mail-ui.js';
+import { renderNumbers } from './numbers-ui.js';
 import { launchFlow, makerCard } from './launch-ui.js';
 import { recoveryBox } from './dom.js';
 import * as THREE from '../vendor/three/three.module.min.js';
@@ -390,6 +391,7 @@ class FloorPage {
       tabs.push(mailTab(this));  // email: the boss's own Inbox (mail-ui.js)
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
       tabs.push(['orders', 'Orders']);  // floors-plus: standing orders, after every existing tab
+      tabs.push(['numbers', 'Numbers']);  // the company dashboard: boss-only (numbers-ui.js)
     }
     if (isPhone()) tabs.push(['about', 'About']);  // on a phone the company card lives in the sheet
     return tabs;
@@ -423,6 +425,7 @@ class FloorPage {
     if (this.tab === 'orders') this.renderOrders();
     if (this.tab === 'business') renderBusiness(this);
     if (this.tab === 'inbox') renderInbox(this);
+    if (this.tab === 'numbers') renderNumbers(this);
   }
   renderBanner() {
     const f = this.state.floor;

@@ -198,6 +198,24 @@ function managerStep(meta, messages = []) {
     const last = [...messages].reverse().find((m) => m.role === 'tool')?.content || '';
     return { content: /^Saved/.test(last) ? `Great: our goal is now **${goal}**. The team starts on it now.` : 'That did not work, boss.' };
   }
+  // The daily run: [nothing] in the goal means nothing is worth doing. Otherwise one improvement, built and tested; [flunk] or [major] in the goal makes the Tester say no.
+  if (meta.daily?.planning && !meta.isFreshBoss && !meta.toReview.length) {
+    const goal = meta.modeGoal || '';
+    if (/\[nothing\]/.test(goal)) {
+      if (meta.step === 0) return { toolCalls: [call('update_backlog', { summary: 'Everything looks fine, and nothing is worth doing today.', next_up: ['Look again tomorrow'] })] };
+      return { content: 'Nothing worth doing today, boss.' };
+    }
+    const slug = meta.published[0]?.slug || 'daily-work';
+    if (meta.step === 0) return { toolCalls: [call('assign_task', { to: 'builder', title: 'Make the home page clearer', brief: `[Daily] build ${slug}. ${goal}`, plan: 'One improvement', project: slug }, 0), call('assign_task', { to: 'tester', title: 'Check the clearer home page', brief: `[Daily] test ${slug}. ${goal}`, plan: 'One improvement', project: slug, after_previous: true }, 1)] };
+    return { content: 'Today the team makes the home page clearer.' };
+  }
+  if (meta.daily && meta.toReview.length && !meta.isFreshBoss) {
+    if (meta.step === 0) return { toolCalls: meta.toReview.map((t, i) => call('review_task', { task_id: t.id, verdict: 'approve', notes: 'Looks good.' }, i)) };
+    const slug = meta.toReview[0].project;
+    if (meta.step === 1 && slug && !meta.openCount) return { toolCalls: [call('publish_project', { project: slug, title: 'Clearer home page', description: 'The home page, made clearer.', kind: 'site' })] };
+    if (meta.step <= 2) return { toolCalls: [call('update_backlog', { summary: 'Made the home page clearer.', next_up: ['Add a sign-up form'] })] };
+    return { content: 'That is today\'s run done, boss.' };
+  }
   // A quiet floor in a work mode: the next job off the list.
   if (meta.autopilot && !meta.isFreshBoss && !meta.toReview.length) {
     const a = meta.autopilot;
@@ -297,8 +315,25 @@ function makerStep(meta) {
   return { content: `Finished "${meta.task.title}".` };
 }
 
+// The daily run's staff: the Builder writes a real page, and the Tester's verdict comes from the goal's flags.
+function dailyStep(meta) {
+  const m = /^\[Daily\] (build|test) ([a-z0-9-]+)\.(.*)/s.exec(meta.task.brief || '');
+  if (!m) return null;
+  const dir = `projects/${meta.task.project}`, goal = m[3];
+  const list = [];
+  if (m[1] === 'build') list.push(call('write_file', { path: `${dir}/index.html`, content: SITE(m[2], 'A page the team made clearer today.') }));
+  else {
+    const flunk = /\[flunk\]/.test(goal), major = /\[major\]/.test(goal);
+    list.push(call('write_file', { path: `${dir}/TEST-REPORT.md`, content: `# Test report\n\nChecked it.\n\n\`\`\`office-verdict\n${JSON.stringify({ verdict: flunk ? 'fail' : 'pass', rules: {}, bugs: flunk ? [{ severity: 'blocker', text: 'The page is blank on a phone.' }] : major ? [{ severity: 'major', text: 'The sign-up button does nothing.' }] : [], regressions: [], summary: flunk ? 'Broken.' : 'Works.' })}\n\`\`\`\n` }));
+  }
+  if (meta.step < list.length) return { toolCalls: [list[meta.step]] };
+  return { content: `Finished "${meta.task.title}".` };
+}
+
 function staffStep(meta) {
   const { role, task, step, floorSlug } = meta;
+  const daily = dailyStep(meta);
+  if (daily) return daily;
   const maker = makerStep(meta);
   if (maker) return maker;
   const biz = businessStaff(meta);

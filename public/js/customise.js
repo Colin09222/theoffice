@@ -4,6 +4,7 @@ import { h, api, clear, modal, toast, refreshMe } from './dom.js';
 import { characterBuilder, swatches, chips } from './builder.js';
 import { FLOOR_STYLES, PETS, LAYOUTS, WALL_MATS, ART_STYLES, VIBES, TONES, PERSONALITIES, WORK_KINDS, OUTFIT_COLOR, DEFAULT_DECOR } from './looks.js';
 import { PLANS, planBlocks, deskRect, ROOM_W, ROOM_D } from './layouts.js';
+import { dailyFields } from './numbers-ui.js';
 
 const LIMITS = { about: 300, rules: 600, avoid: 300, notes: 200, focus: 120, title: 32, name: 24 };
 const TABS = [['vibe', 'Vibe'], ['company', 'Company'], ['hours', 'Hours'], ['boss', 'You'], ['staff', 'Staff'], ['decor', 'Office']];
@@ -53,6 +54,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
   let ownTz = 'UTC'; try { ownTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { /* UTC */ }
   const work = { mode: wp.mode, days: [...wp.dayList], start: wp.start, end: wp.end, tz: wp.tzSet ? wp.tz : (wp.tz !== 'UTC' ? wp.tz : ownTz), goal: wp.goal || '' };
   const workBefore = JSON.stringify(work);
+  const daily = dailyFields(s.daily, ownTz);  // the daily run: opt-in, under Hours
   const withoutStaff = () => JSON.stringify({ ...draft, staff: null, work });
   const before = withoutStaff();
   const changedStaff = () => draft.staff.filter((a) => JSON.stringify(a) !== JSON.stringify(page.state.agents.map(staffDraft).find((x) => x.id === a.id)));
@@ -73,6 +75,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
       try {
         // The hours have their own route: they start or stop the team working on its own, and the chat gets a line about it.
         if (JSON.stringify(work) !== workBefore) await api(`/floors/${page.slug}/work-mode`, { method: 'POST', body: work });
+        if (daily.changed()) await api(`/floors/${page.slug}/daily`, { method: 'POST', body: daily.value() });
         await api(`/floors/${page.slug}/customise`, { method: 'POST', body: { name: draft.name, tagline: draft.tagline, colors: draft.colors, decor: draft.decor, publicChat: draft.publicChat, defaultPrivate: draft.defaultPrivate, boss: draft.boss, identity: draft.identity, staff } });
         saved = true; toast('Saved'); close();
       } catch (x) { toast(x.message, 'bad'); }
@@ -155,7 +158,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
         h('p.lede', {}, 'When does the team work? On call is how it has always been. With set hours or nonstop, your manager picks the next most useful job toward the goal whenever the floor is quiet, and posts a line in the chat after each one.'),
         plate, modes, when,
         field('The goal', area(work.goal, 300, 2, (v) => { work.goal = v; }, { name: 'hours-goal', placeholder: 'Get the game to 1,000 plays.' }), 'Something you can tell has been reached. It shows under Work, above the next-up list. Leave it empty and your manager will ask you for one in the chat, or suggest a few to pick from: nothing starts on its own until there is a goal. Once it is reached, they say so, suggest the next one and keep going.'),
-        h('small.field-hint', {}, 'The team makes most calls itself. Anything that costs money still waits for your Buy click, and while a question waits for you they get on with something else. Outside set hours everyone goes home, but you can still call your manager.')));
+        h('small.field-hint', {}, 'The team makes most calls itself. Anything that costs money still waits for your Buy click, and while a question waits for you they get on with something else. Outside set hours everyone goes home, but you can still call your manager.'), daily.el));
     };
 
     const tabBoss = () => {

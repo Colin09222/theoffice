@@ -433,7 +433,7 @@ export function installModes(ext) {
   });
 
   engine.modes = {
-    set, updatePlan, learnZone, stateLine, tick, busy, publicView, ownerView,
+    set, updatePlan, learnZone, stateLine, tick, busy, blocker, publicView, ownerView,
     running: (floorId) => !!runningRun(floorId),
     needsGoal: (floorId) => wantsGoal(rowOf(floorId)),
     // Staff go home outside set hours, unless the boss has brought them back in for something.
