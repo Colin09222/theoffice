@@ -384,7 +384,42 @@
       },
     };
 
-    self.auth = auth; self.db = { collection: collection }; self.saves = saves; self.leaderboard = leaderboard; self.rooms = rooms; self.files = files; self.forms = forms; self.shared = shared; self.ai = ai; self.fetch = fetchPage; self.scrape = scrapePage;
+    // ---- payments: Stripe-hosted checkout, tied to this site's accounts ----
+    var payNotReady = { ok: false, ready: false, code: 'not_ready', message: 'Payments are being set up. Check back soon.' };
+    var payLocal = { ok: false, ready: false, code: 'local', message: 'Payments work once this site is published.' };
+    var payFailed = function (e) { return { ok: false, ready: true, code: (e && e.code) || 'failed', message: (e && e.message) || 'That did not work. Try again in a moment.' }; };
+    // Always a page on this site: the server refuses anything else, and these are the only kinds it builds a Stripe URL back to.
+    var herePath = function () { return location.pathname + location.search; };
+    var pay = {
+      /** {ready, testMode, message, products: [{key, name, description, amountCents, currency, interval}]}. Never throws. */
+      status: function () {
+        if (self.mode === 'local') return Promise.resolve({ ready: false, testMode: false, message: payLocal.message, products: [] });
+        return request('GET', 'pay/status').catch(function () { return { ready: false, testMode: false, message: payNotReady.message, products: [] }; });
+      },
+      /** Sends the visitor to Stripe's own checkout page for this product. Resolves to {ok: true, url} just before leaving (or stays when {redirect: false}); {ok: false, message} when it can't. */
+      checkout: function (o) {
+        o = o || {};
+        var redirect = o.redirect !== false;
+        if (self.mode === 'local') return Promise.resolve(payLocal);
+        return request('POST', 'pay/checkout', { product: o.product, returnPath: o.returnPath || herePath() }, { timeout: 25000 })
+          .then(function (r) { if (r.ok && r.url && redirect) location.assign(r.url); return r; }, payFailed);
+      },
+      /** True when this signed-in person has paid for this product and it hasn't lapsed or been refunded. Decided on the server each time. */
+      has: function (product) {
+        if (self.mode === 'local') return Promise.resolve(false);
+        return request('GET', 'pay/has?product=' + enc(product)).then(function (r) { return !!r.has; }, function () { return false; });
+      },
+      /** Sends a subscriber to Stripe's own page to cancel or update. Resolves like checkout. */
+      manage: function (o) {
+        o = o || {};
+        var redirect = o.redirect !== false;
+        if (self.mode === 'local') return Promise.resolve(payLocal);
+        return request('POST', 'pay/manage', { returnPath: o.returnPath || herePath() }, { timeout: 25000 })
+          .then(function (r) { if (r.ok && r.url && redirect) location.assign(r.url); return r; }, payFailed);
+      },
+    };
+
+    self.auth = auth; self.db = { collection: collection }; self.saves = saves; self.leaderboard = leaderboard; self.rooms = rooms; self.files = files; self.forms = forms; self.shared = shared; self.pay = pay; self.ai = ai; self.fetch = fetchPage; self.scrape = scrapePage;
     /** Settles once the stored login has been checked with the server (or there is none). */
     self.ready = pinged.then(function (there) { return there ? auth.refresh() : user; }).then(function () { return self; }, function () { return self; });
     return self;
