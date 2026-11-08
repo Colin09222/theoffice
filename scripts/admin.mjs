@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Building-manager CLI. The plaintext code goes to this terminal only; the database stores its hash and nothing logs it.
 import { loadConfig, loadModels } from '../server/config.js';
-import { openDb, all, get } from '../server/db.js';
+import { openDb, all, get, run } from '../server/db.js';
 import { issueCode } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
 import { helpListing, helpListingText, answerHelp, declineHelp, HelpError, HELP_LIMITS, newFence } from '../server/help.js';
@@ -15,6 +15,7 @@ const usage = () => {
   console.log(['Usage:',
     '  node scripts/admin.mjs code [--floor N]       issue a one-time office code',
     '  node scripts/admin.mjs floors                 list floors',
+    '  node scripts/admin.mjs floors hide|show --floor N   hide floor N from the lobby, directory and lift, or show it again. It still opens by its own link',
     '  node scripts/admin.mjs filler list            list filler (demo) companies and removed ones',
     '  node scripts/admin.mjs filler seed            seed the filler companies, bringing back any that were removed',
     '  node scripts/admin.mjs filler remove --floor N  remove the filler company on floor N (stays removed)',
@@ -43,11 +44,18 @@ if (cmd === 'code') {
     if (get(db, 'SELECT 1 x FROM floors WHERE number=?', floor)) { console.error(`Floor ${floor} is already taken.`); process.exit(1); }
   }
   console.log(issueCode(db, floor));
+} else if (cmd === 'floors' && (rest[0] === 'hide' || rest[0] === 'show')) {
+  // Works on the database file alone. A running server leaves a hidden floor out of its next lobby reply.
+  const n = floorArg();
+  const f = get(db, "SELECT id FROM floors WHERE number=? AND status!='killed'", n);
+  if (!f) die(`Floor ${n} has no company on it.`);
+  run(db, 'UPDATE floors SET hidden=? WHERE id=?', rest[0] === 'hide' ? 1 : 0, f.id);
+  console.log(rest[0] === 'hide' ? `Floor ${n} is hidden from the lobby. Its own link still works.` : `Floor ${n} is back in the lobby.`);
 } else if (cmd === 'floors') {
   // A name is whatever the floor's boss typed, and a slug is made from it, so both are fenced like every other listing here.
   const fence = newFence();
   console.log(`${fence.notice}\n`);
-  for (const f of all(db, 'SELECT number,slug,name,status,filler FROM floors ORDER BY number')) console.log(`${String(f.number).padStart(3)}  ${f.status.padEnd(10)} ${fence.wrap('floor', `${f.slug}: ${f.name}`)}${f.filler ? '  [filler]' : ''}`);
+  for (const f of all(db, 'SELECT number,slug,name,status,filler,hidden FROM floors ORDER BY number')) console.log(`${String(f.number).padStart(3)}  ${f.status.padEnd(10)} ${fence.wrap('floor', `${f.slug}: ${f.name}`)}${f.filler ? '  [filler]' : ''}${f.hidden ? '  [hidden]' : ''}`);
 } else if (cmd === 'filler') {
   // These work on the database file alone. A running server notices a removal on its next tick.
   const sub = rest[0];

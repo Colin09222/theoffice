@@ -10,6 +10,7 @@ import { icon } from './icons.js';
 import { attachTray, attachmentEl, ACCEPT } from './attach.js';
 import { portrait } from './portrait.js';
 import { muteButton, sfx } from './sfx.js';
+import { confetti, fanfare, mayParty } from './party.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -897,7 +898,7 @@ class FloorPage {
     on('handoff', (d) => { if (fresh(d)) this.view?.handoff(d.from, d.to); });
     on('project', (d) => {
       this.reload();
-      if (fresh(d)) { this.view?.cheer(); toast(`Published: ${d.slug}`); }
+      if (fresh(d)) { this.view?.cheer(); toast(`Published: ${d.slug}`); this.launchParty(d.slug); }
     });
     this.es.onerror = () => { /* EventSource reconnects by itself, sending Last-Event-ID */ };
   }
@@ -910,6 +911,15 @@ class FloorPage {
     this.scrollChat();
   }
   /** Resolves once the state on the page is newer than this call, even if a reload was already under way. */
+  // A real launch, not just a change to a project, gets a short party: confetti, the fanfare and a second round of cheering.
+  async launchParty(slug) {
+    await this.reloadSettled().catch(() => {});
+    const p = this.state?.projects?.find((x) => x.slug === slug);
+    if (this.dead || !p?.publishedAt || Date.now() - p.publishedAt > 120000 || !mayParty()) return;
+    confetti({ brand: this.state.floor?.colors?.primary });
+    fanfare();
+    setTimeout(() => { if (!this.dead) this.view?.cheer(); }, 2100);
+  }
   async reloadSettled() {
     while (this.reloading) await new Promise((r) => setTimeout(r, 30));
     await this.reload();
