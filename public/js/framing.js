@@ -38,7 +38,9 @@ export function frameCrew(spots, { yaw, pitch, visW, visH, tall, top = 90, pad =
     chosen = best.length ? best : pts.slice(0, 1);
   }
   const us = chosen.map((p) => p.u), ss = chosen.map((p) => p.s);
-  const u = (Math.min(...us) + Math.max(...us)) / 2;
+  // Centred on where most of them are, as far as that keeps the one at each end of the group in the picture.
+  const mean = us.reduce((n, v) => n + v, 0) / us.length, slack = Math.max(0, (visW - 2 * pad) / ppu - (Math.max(...us) - Math.min(...us))) / 2, mid = (Math.min(...us) + Math.max(...us)) / 2;
+  const u = Math.max(mid - slack, Math.min(mid + slack, mean));
   // The group sits a little low in the frame, because their words go above them.
   const s = (Math.min(...ss) - head + Math.max(...ss)) / 2 - (top - pad) / 2 / ppu;
   return { ppu, u, s, framed: chosen.length, of: pts.length };

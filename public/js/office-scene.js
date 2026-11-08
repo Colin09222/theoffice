@@ -789,6 +789,7 @@ export class OfficeView {
       out('#a8825c', 1.25, 0.07, 1.25, x, 0.72, z, { geo: cyl }); out('#3d3b44', 0.09, 0.72, 0.09, x, 0, z, { geo: cyl });
       for (const a of [0.4, 2.5, 4.6]) { const sx = x + Math.cos(a) * 1.3, sz = z + Math.sin(a) * 1.3; out(mix(primary, '#ffffff', 0.32), 0.62, 0.1, 0.62, sx, 0.44, sz); out('#3d3b44', 0.07, 0.44, 0.07, sx, 0, sz, { cast: false }); }
     }
+    if (!this.host) this.dressTerrace(out, plate);
     this.floorMat = toonMaterial();
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), this.floorMat);
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.userData.keep = true; room.add(floor);
@@ -968,6 +969,20 @@ export class OfficeView {
     if (this.host || this.pace) Promise.resolve(this.turn()).then(merge); else merge();
     this.loading = { settled: false };
     this.loadModels().catch((e) => { console.warn('furniture models unavailable, keeping the stand-ins', e); }).finally(() => { this.loading.settled = true; });
+  }
+  /** A roof terrace worth looking at from a floor page: tables under striped parasols, and a string of warm bulbs along the rail. Plain pieces, baked with the rest. */
+  dressTerrace(out, plate) {
+    const { primary, accent } = this.colors, edge = plate / 2 - 1.05, pale = '#fff2d8';
+    for (const [x, z] of [[-6.5, edge], [5.5, edge], [12.5, edge], [-12, -edge], [-3, -edge], [6, -edge], [12, -edge]]) {
+      out('#3d3b44', 0.08, 2.7, 0.08, x, 0, z, { geo: cyl });
+      for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; out(i % 2 ? accent : pale, 1.15, 0.5, 0.52, x + Math.cos(a + Math.PI / 8) * 0.88, 2.34, z + Math.sin(a + Math.PI / 8) * 0.88, { geo: cone, ry: -a - Math.PI / 8 + Math.PI / 2, cast: false }); }
+      out(mix(primary, pale, 0.45), 1.1, 0.1, 1.1, x, 0.74, z, { geo: cyl });
+      for (const k of [-1, 1]) { out(pale, 0.62, 0.32, 0.62, x + k * 1.45, 0, z, { geo: cyl }); out(mix(accent, pale, 0.3), 0.66, 0.08, 0.66, x + k * 1.45, 0.32, z, { geo: cyl }); }
+    }
+    // Festoon lights: warm bulbs along the back rail, the one run of light you see from indoors.
+    const bulb = new THREE.MeshBasicMaterial({ color: '#ffd98a', toneMapped: false });
+    for (let x = -plate / 2 + 1.2; x < plate / 2; x += 1.15) { const b = new THREE.Mesh(sph, bulb); b.scale.setScalar(0.3); b.position.set(x, 2.5 + Math.sin(x * 0.9) * 0.12, -plate / 2 + 0.4); b.userData.keep = true; this.terrace.add(b); }
+    out('#4a4750', plate - 1, 0.03, 0.03, 0, 2.62, -plate / 2 + 0.4, { cast: false });
   }
   /**
    * The walls that make the rooms. Every pane on a floor goes into one mesh, so ten glass rooms cost one draw call, and the frames bake
@@ -1927,13 +1942,13 @@ export class OfficeView {
     const tan = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2);
     const tall = CHAR_SCALE * 0.6 * 2.35;
     // How many pixels tall someone should be: a sixth of a tall phone's width, and a comfortable share of anything wider.
-    const bean = tallPhone ? Math.max(56, Math.min(78, w * 0.17)) : Math.max(60, Math.min(112, Math.min(visW * 0.12, visH * 0.17)));
+    const bean = tallPhone ? Math.max(56, Math.min(78, w * 0.17)) : Math.max(58, Math.min(100, Math.min(visW * 0.085, visH * 0.135)));
     Object.assign(this, { yaw, fitKey: null });
     const fit = this.fitDistance();
     let zoom = 2.2, frame = null;
     for (let i = 0; i < 3; i++) {
       const pitch = this.tiltAt(zoom), upright = Math.cos(pitch);
-      frame = frameCrew(spots, { yaw, pitch, visW, visH, tall, top: tallPhone ? 104 : 84, pad: tallPhone ? 48 : 40, ppuMax: bean / (tall * upright), ppuMin: bean * 0.86 / (tall * upright) });
+      frame = frameCrew(spots, { yaw, pitch, visW, visH, tall, top: tallPhone ? 104 : 84, pad: tallPhone ? 44 : 40, ppuMax: bean / (tall * upright), ppuMin: bean * 0.82 / (tall * upright) });
       zoom = Math.min(ZOOM_MAX, Math.max(1, (fit * frame.ppu * 2 * tan) / h));
     }
     return { yaw, zoom, pan: aimAt(frame.u, frame.s, yaw, this.tiltAt(zoom), 0.8).map((v, i) => (i ? v - 0.3 : v)), framed: frame.framed, of: frame.of };
