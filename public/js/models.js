@@ -1,4 +1,4 @@
-// The furniture and the people are Kenney's CC0 kits (see /models/NOTICE.txt), self-hosted under public/models and loaded
+// The furniture is Kenney's CC0 kit and the people Quaternius's (see /models/NOTICE.txt), self-hosted under public/models and loaded
 // lazily: a floor asks for the pieces it needs, each file is fetched once and gzipped in transit, and every placement is a
 // clone of the cached template. Anything that fails to load simply never appears, and the procedural stand-in stays.
 import * as THREE from '../vendor/three/three.module.min.js';
@@ -72,41 +72,26 @@ export function place(tpl, { x = 0, y = 0, z = 0, ry = 0, scale = 1, tint = null
 
 // ---------- people ----------
 
-/** The colour atlas Kenney's characters share: 8 columns by 4 rows of flat cells, each with a lighter and a darker band. */
-export const ATLAS = { cols: 8, rows: 4 };
-/** Mean sRGB colour of every atlas cell, read once from the texture, so a tint can replace a cell's colour and keep its shading. */
-function cellMeans(image) {
-  const c = document.createElement('canvas'); c.width = 512; c.height = 512;
-  // A canvas in software, because reading back a GPU one waits for everything the GPU has queued: on a slow device that froze the page for seconds while the first people loaded.
-  const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(image, 0, 0, 512, 512);
-  const d = x.getImageData(0, 0, 512, 512).data;
-  const means = [];
-  const cw = 512 / ATLAS.cols, ch = 512 / ATLAS.rows;
-  for (let r = 0; r < ATLAS.rows; r++) for (let col = 0; col < ATLAS.cols; col++) {
-    let sr = 0, sg = 0, sb = 0, n = 0;
-    for (let py = r * ch + 8; py < (r + 1) * ch - 8; py += 4) for (let px = col * cw + 4; px < (col + 1) * cw - 4; px += 4) {
-      const i = (py * 512 + px) * 4; sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; n++;
-    }
-    means[r * ATLAS.cols + col] = new THREE.Color(sr / n / 255, sg / n / 255, sb / n / 255).convertSRGBToLinear();
+const peopleCache = new Map();
+/**
+ * One person's template: a skinned mesh with the role of each vertex (skin, hair, top...) in `_slot`, plus the rig, its palette and its
+ * bones' bind pose. Variants: male-a .. male-f, female-a .. female-f. Packed by scripts/pack-people.mjs; see /models/NOTICE.txt.
+ */
+export async function person(variant) {
+  if (!peopleCache.has(variant)) {
+    peopleCache.set(variant, fetchGLTF(`people/${variant}.glb`).then((gltf) => {
+      let mesh = null;
+      gltf.scene.traverse((o) => { if (o.isSkinnedMesh) mesh = o; });
+      const slots = new Uint8Array(mesh.geometry.attributes._slot.count);
+      for (let i = 0, a = mesh.geometry.attributes._slot.array; i < slots.length; i++) slots[i] = a[i * 4];
+      return { scene: gltf.scene, mesh, slots, extras: gltf.parser.json.extras, variant };
+    }).catch((e) => { peopleCache.delete(variant); throw e; }));
   }
-  return means;
+  return peopleCache.get(variant);
 }
-
-const charCache = new Map();
-/** A character template: the loaded scene (never shown itself), its clips, and the atlas means. Variants: character-male-a .. character-female-f. */
-export async function character(variant) {
-  if (!charCache.has(variant)) {
-    charCache.set(variant, fetchGLTF(`characters/${variant}.glb`).then((gltf) => {
-      let map = null;
-      gltf.scene.traverse((o) => { if (o.isMesh && o.material?.map) map = o.material.map; });
-      const means = map?.image ? cellMeans(map.image) : null;
-      return { scene: gltf.scene, animations: gltf.animations, means, map };
-    }).catch((e) => { charCache.delete(variant); throw e; }));
-  }
-  return charCache.get(variant);
-}
-/** The glasses from the same kit. */
-export const accessory = (name) => fetchGLTF(`characters/${name}.glb`).then((g) => g.scene);
+let clips = null;
+/** The walk, the idle and the gestures, one file for everyone on the shared rig. */
+export const personClips = () => (clips ||= fetchGLTF('people/clips.glb').then((g) => g.animations).catch((e) => { clips = null; throw e; }));
 
 /** True once the addons have loaded and a template is cached, so callers can place synchronously. */
 export const cachedFurniture = (name) => furnitureCache.get(name);
