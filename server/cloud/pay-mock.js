@@ -74,6 +74,15 @@ export async function startMockStripe({ apiKey = 'sk_test_mock_key', connectedSe
     } catch { entry.status = -1; }
   }
 
+  /** The answer is shaped like Accounts v2, the account itself is the v1 record the rest of the mock (and the app) reads. */
+  function makeV2Account(p) {
+    if (!p.identity?.country) return err(400, 'invalid_request_error', 'The field identity.country is required before setting configuration.merchant.', { code: 'identity_country_required' });
+    if (p.dashboard !== 'full' || p.defaults?.responsibilities?.fees_collector !== 'stripe' || p.defaults?.responsibilities?.losses_collector !== 'stripe') return invalid('A full Stripe Dashboard account must pay its own Stripe fees and leave losses with Stripe.');
+    if (p.configuration?.merchant?.capabilities?.card_payments?.requested !== true) return invalid('Request the card_payments capability.');
+    const made = makeAccount({ country: String(p.identity.country).toUpperCase(), metadata: p.metadata, controller: { fees: { payer: 'account' }, losses: { payments: 'stripe' }, requirement_collection: 'stripe', stripe_dashboard: { type: 'full' } } });
+    if (made.status !== 200) return made;
+    return { status: 200, body: { id: made.body.id, object: 'v2.core.account', applied_configurations: ['merchant'], dashboard: 'full', display_name: p.display_name ?? null, livemode: false } };
+  }
   function makeAccount(p) {
     const c = p.controller || {};
     const dash = c.stripe_dashboard?.type ?? 'full';
@@ -244,7 +253,8 @@ export async function startMockStripe({ apiKey = 'sk_test_mock_key', connectedSe
     // Every hosted-page object is the connected account's, so they all need the header. A forgotten one is a bug the mock must catch.
     const needsAccount = (re) => { if (!acct) throw Object.assign(new Error('x'), { res: err(400, 'invalid_request_error', `Mock: ${re} only exists on a connected account, and no Stripe-Account header was sent.`) }); };
     let m;
-    if (path === '/v1/accounts' && method === 'POST') return makeAccount(p);
+    if (path === '/v1/accounts' && method === 'POST') return invalid('Stripe no longer recommends Accounts v1 for new Connect integrations. Create connected accounts with POST /v2/core/accounts instead.');
+    if (path === '/v2/core/accounts' && method === 'POST') return makeV2Account(p);
     if ((m = /^\/v1\/accounts\/(acct_[A-Za-z0-9]+)$/.exec(path)) && method === 'GET') { const x = state.accounts.get(m[1]); return x ? { status: 200, body: x } : notFound('account', m[1]); }
     if (path === '/v1/account_links' && method === 'POST') {
       const x = state.accounts.get(p.account);
@@ -354,7 +364,7 @@ export async function startMockStripe({ apiKey = 'sk_test_mock_key', connectedSe
       const reply = (status, body) => { res.writeHead(status, { 'content-type': 'application/json', 'request-id': `req_${rid(14)}`, 'stripe-version': req.headers['stripe-version'] || version }); res.end(JSON.stringify(body)); };
       if (auth !== `Bearer ${apiKey}`) return reply(401, { error: { type: 'invalid_request_error', message: `Invalid API Key provided: ${auth.slice(7, 15)}********`, code: 'api_key_invalid' } });
       if (state.failNext.length) { const f = state.failNext.shift(); return reply(f.status || 500, { error: { type: 'api_error', message: f.message || 'Mock failure.', code: f.code } }); }
-      const p = req.method === 'POST' ? parseForm(raw) : {};
+      const p = req.method === 'POST' ? (path.startsWith('/v2/') ? JSON.parse(raw || '{}') : parseForm(raw)) : {};
       if (idem) {
         const prior = state.idem.get(`${acct}:${idem}`);
         if (prior) {

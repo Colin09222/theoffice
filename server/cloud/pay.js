@@ -98,16 +98,18 @@ export function installPay(ext) {
     // Once a boss has cut the link from their side, that account can't be used again: a fresh one, and the old record goes.
     if (a?.disabled_reason === 'deauthorized') { generation = `-after-${a.account}`; run(db, 'DELETE FROM pay_accounts WHERE floor_id=? AND livemode=?', f.id, LIVE); a = null; }
     if (!a) {
+      // Accounts v2, the only way Stripe still makes a new account on this platform. The boss still has their own full Stripe account and Stripe still collects fees and losses from them.
+      // v2 wants the country before the merchant part can be added, and the boss can't change it on Stripe's form, so it comes from STRIPE_ACCOUNT_COUNTRY (docs/PAYMENTS.md).
       const params = {
-        controller: { fees: { payer: 'account' }, losses: { payments: 'stripe' }, requirement_collection: 'stripe', stripe_dashboard: { type: 'full' } },
-        business_profile: { name: clean(f.name, 80), ...(/^https:/.test(cfg.publicOrigin || '') ? { url: `${cfg.publicOrigin}/theoffice/floor/${f.slug}` } : {}), product_description: clean(f.tagline, 200) || undefined },
+        display_name: clean(f.name, 80) || undefined, dashboard: 'full', identity: { country: cfg.stripeCountry },
+        configuration: { merchant: { capabilities: { card_payments: { requested: true } } } },
+        defaults: { responsibilities: { fees_collector: 'stripe', losses_collector: 'stripe' } },
         metadata: { office_floor: String(f.id) },
       };
       const created = await stripe.createAccount(params, `office-account-${f.id}-${mode}${generation}`);
-      tx(db, () => {
-        run(db, 'INSERT OR IGNORE INTO pay_accounts (floor_id,livemode,account,created_at,updated_at) VALUES (?,?,?,?,?)', f.id, LIVE, created.id, now(), now());
-        applyAccount(created.id, created);
-      });
+      run(db, 'INSERT OR IGNORE INTO pay_accounts (floor_id,livemode,account,created_at,updated_at) VALUES (?,?,?,?,?)', f.id, LIVE, created.id, now(), now());
+      // Everything else here reads v1 accounts; a failure now is picked up by the panel's next refresh.
+      try { applyAccount(created.id, await stripe.getAccount(created.id)); } catch (e) { log('warn', 'pay_status_refresh', { err: hideKeys(e?.message) }); }
       a = accountRow(f.id);
     } else if (a.disconnected_at) { run(db, 'UPDATE pay_accounts SET disconnected_at=NULL, updated_at=? WHERE floor_id=? AND livemode=?', now(), f.id, LIVE); }
     const back = `${cfg.publicOrigin || `${req.socket.encrypted ? 'https' : 'http'}://${req.headers.host}`}/theoffice/floor/${f.slug}`;

@@ -2,7 +2,7 @@
 import { STRIPE_API, keyMode } from './pay-provider.js';
 
 export function paySettings(env = process.env) {
-  return { stripeSecretKey: env.STRIPE_SECRET_KEY || '', stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || '', stripeApiBase: (env.STRIPE_API_BASE || STRIPE_API).replace(/\/+$/, '') };
+  return { stripeSecretKey: env.STRIPE_SECRET_KEY || '', stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET || '', stripeApiBase: (env.STRIPE_API_BASE || STRIPE_API).replace(/\/+$/, ''), stripeCountry: /^[A-Za-z]{2}$/.test(env.STRIPE_ACCOUNT_COUNTRY || '') ? env.STRIPE_ACCOUNT_COUNTRY.toLowerCase() : 'us' };
 }
 /** Both settings are needed: without the webhook secret a lapsed subscription would never lose access, so payments stay off. */
 export const payReady = (cfg) => !!keyMode(cfg.stripeSecretKey) && !!cfg.stripeWebhookSecret;
