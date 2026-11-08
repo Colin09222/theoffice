@@ -1842,8 +1842,10 @@ export class OfficeView {
     this.camera.setViewOffset(w, h, (i.right - i.left) / 2, (i.bottom - i.top) / 2, w, h);
     this.camera.updateProjectionMatrix();
   }
-  placeCamera(dist, px = 0, pz = 0) {
-    const y = Math.sin(this.pitch) * dist, r = Math.cos(this.pitch) * dist;
+  /** Zoomed well in, the camera comes down toward eye level, so faces show rather than the tops of heads. The usual views keep their angle. */
+  tilt() { const t = Math.min(1, Math.max(0, (this.zoom - 1.6) / (ZOOM_MAX - 1.6))); return this.pitch - (this.pitch - 0.6) * t * t * (3 - 2 * t); }
+  placeCamera(dist, px = 0, pz = 0, pitch = this.pitch) {
+    const y = Math.sin(pitch) * dist, r = Math.cos(pitch) * dist;
     this.camera.position.set(px + Math.sin(this.yaw) * r, y, pz + Math.cos(this.yaw) * r);
     this.camera.lookAt(px, 0.8, pz + 0.3);
   }
@@ -1900,7 +1902,7 @@ export class OfficeView {
       // Fit the room to the free area at any aspect ratio, and let the intro pull back from close up.
       const dist = (this.fitDistance() / this.zoom) * (1.5 - 0.5 * e);
       this.camDist = dist;
-      this.placeCamera(dist, this.pan.x, this.pan.y);
+      this.placeCamera(dist, this.pan.x, this.pan.y, this.tilt());
       this.sun.position.set(SUN_DIR.x + drift * 0.05, SUN_DIR.y, SUN_DIR.z + Math.cos(this.time * 0.05) * 0.04).multiplyScalar(SUN_FAR);
       this.sun.intensity = 2.5 + drift * 0.25;
     }
