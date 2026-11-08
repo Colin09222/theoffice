@@ -408,7 +408,7 @@ async function run(label, opts, t, adminCode) {
     await n.click('[data-lane=business]');
     await n.until('[...document.querySelectorAll(".msg.boss")].some((m) => /small business/.test(m.textContent))', 'the tap became the boss\'s message');
     await n.until('document.querySelector(".lanes") === null', 'the buttons went');
-    await n.until('[...document.querySelectorAll(".msg.manager")].some((m) => /What is the idea, and who is it for/.test(m.textContent) && /Nobody here can send email/.test(m.textContent))', 'the manager asks and says what nobody here can do');
+    await n.until('[...document.querySelectorAll(".msg.manager")].some((m) => /What is the idea, and who is it for/.test(m.textContent) && /Nobody here can post, run ads or spend money, and email to anyone new waits for your OK/.test(m.textContent))', 'the manager asks and says what nobody here can do');
     await n.until('window.__office.state.agents.every((a) => a.state === "idle")', 'manager idle');
     if (await n.ev('window.__office.state.tasks.length !== 0')) throw new Error('a tap should start no work');
     await sleep(300);
