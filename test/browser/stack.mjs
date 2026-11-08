@@ -83,6 +83,7 @@ try {
     await p.until('document.body.dataset.lobby === "outside" && document.querySelector(".stack").hidden && document.querySelectorAll(".dir-row").length === 3', 'outside');
   });
 
+  await p.ev('localStorage.removeItem("office:lobby-mode")');  // one browser profile: the desktop's choice would carry over to the phone
   const m = await b.newPage({ mobile: true, width: 390, height: 844 });
   await step('a phone starts in the Building', async () => {
     await m.goto(`${base}/?q=low`);
