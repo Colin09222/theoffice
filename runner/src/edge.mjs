@@ -221,6 +221,11 @@ export function createEdge({ cfg, control, now = Date.now }) {
   });
 
   async function flushActivity() {
+    // Forget what nobody uses any more, so made-up api--<label> hosts can't grow these maps.
+    const t = now();
+    for (const [k, v] of conns) if (v === 0) conns.delete(k);
+    for (const [k, v] of routes) if (v.until < t) routes.delete(k);
+    for (const [k, v] of known) if (v < t) known.delete(k);
     if (traffic.size === 0) return;
     const labels = Object.fromEntries(traffic);
     traffic.clear();

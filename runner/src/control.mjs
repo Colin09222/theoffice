@@ -481,7 +481,7 @@ export function createControl({ cfg, docker, sys, tokens, now = Date.now, probe 
     if (parts[0] === 'internal') {
       if (!tokenMatches(tok, tokens.edge)) throw new HttpError(401, 'unauthorized', 'Bad token.');
       if (m === 'POST' && parts[1] === 'wake' && parts.length === 3) {
-        rt(parts[2]).lastTraffic = now();
+        if (state.apps[parts[2]]) rt(parts[2]).lastTraffic = now();
         return sendJson(res, 200, await wake(parts[2], 'request'));
       }
       if (m === 'GET' && parts[1] === 'known' && parts.length === 3) {
