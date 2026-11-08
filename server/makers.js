@@ -273,12 +273,13 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     engine.upsertProject(floor, project, { title });
     for (const f of starterFiles(starter)) writeFile(db, floor.id, `projects/${project}/${f.path}`, f.data.replaceAll('{{TITLE}}', title).replaceAll('{{PITCH}}', pitch.replace(/"/g, '&quot;')), null, cfg.quotaBytes);
     const jobView = { ...j, ...stateOf(j) };
-    engine.bossMessage(floor, `Let's make ${title}: ${pitch}\nGoal: ${goal}\n(Started from the launcher. The team runs the passes on its own; I'll hear when it's ready to launch.)`);
-    // bossMessage wakes the manager for a reply. The plan is already made, so the manager only says hello to it.
+    // The boss's pick goes in the chat as their words, and the plan is already made, so no model call is needed to start.
+    engine.addMessage(floor.id, 'boss', null, `Let's make ${title}: ${pitch}\nGoal: ${goal}`);
     const doc = queue(floor, j, 'doc', 0, docBrief(jobView), role);
     const b = queue(floor, j, 'build', 0, buildBrief(jobView, 0, {}, config), 'builder', [doc]);
     queue(floor, j, 'test', 0, testBrief(jobView, 0, { computer: computerOn('tester') }, config), 'tester', [b]);
     engine.feed?.(floor.id, null, `The team started making ${title}`, project);
+    say(floor, `On it. **${title}**: ${plan.map((p, i) => `${i + 1}. ${p}`).join(' ')}\nThe Tester plays every version in a real browser, and you get a **Launch** button once one passes.`);
     return view(floor);
   }
 
