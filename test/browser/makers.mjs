@@ -38,7 +38,7 @@ function driver(p, { phone, w, h, prefix }) {
   return {
     phone, size: { w, h },
     goto: (u) => p.goto(u),
-    eval: (x) => p.ev(x),
+    evaluate: (x) => p.ev(x),
     key: (code, down) => p.send('Input.dispatchKeyEvent', { type: down ? 'keyDown' : 'keyUp', code, key: KEY[code] || code, windowsVirtualKeyCode: VK[code] || 0, ...(down && code === 'Enter' ? { text: '\r' } : {}) }),
     drag: (x1, y1, x2, y2) => p.drag(x1, y1, x2, y2, true),
     shot: async (name) => { const f = join(SHOTS, `${prefix}-${name}.jpg`); await p.shot(f); return f; },

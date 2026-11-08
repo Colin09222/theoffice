@@ -41,7 +41,7 @@ try {
     const d = {
       phone, size: phone ? { w: 390, h: 844 } : { w: 1280, h: 800 },
       goto: (u) => page.goto(u, { waitUntil: 'load' }),
-      eval: (x) => page.evaluate(x),
+      evaluate: (x) => page.evaluate(x),
       key: (code, down) => (down ? page.keyboard.down(code) : page.keyboard.up(code)),
       drag: async (x1, y1, x2, y2, ms = 300) => {
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x1, y: y1 }] });
