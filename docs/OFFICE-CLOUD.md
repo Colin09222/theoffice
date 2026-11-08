@@ -48,6 +48,8 @@ which sit on the older `/_data/v1` store). The same file is at `/theoffice/sdk/o
 
 Request counts are kept in memory and written once a minute. Memory stays small: rooms cap out near 35 MB of state, at most 4 uploads
 (20 MB) and 2 password hashes (32 MB) are in flight, and query responses stop at 512 KB.
+Measured: 300 live players in 19 full rooms, each setting 1 KB of state and sending ten 1 KB messages, added about 3 MB of heap
+(and 50 MB of RSS, test clients' sockets included); everything was released when they left.
 
 ## The boss and the admin
 - The boss's project card has a **Backend** button: accounts, documents, saves, scores, uploads, who's playing now, requests today, storage used.
