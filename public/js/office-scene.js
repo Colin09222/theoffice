@@ -704,7 +704,7 @@ export class OfficeView {
    */
   turn() { return this.host?.turn ? this.host.turn() : this.pace ? this.pace() : null; }  // a room built ahead for the lift paces itself too
   bakeSoon() {
-    if (!this.host) { this.bakeFloor(); return; }
+    if (!this.host && !this.pace) { this.bakeFloor(); return; }
     if (this.bakeQueued) return;
     this.bakeQueued = true;
     Promise.resolve(this.turn()).then(() => { this.bakeQueued = false; if (!this.dead) this.bakeFloor(); });
