@@ -6,6 +6,7 @@ import { get, all, run } from '../server/db.js';
 import { createMockSessions, defaultTurn } from '../server/mock-sessions.js';
 import { packTgz } from '../server/tarball.js';
 import { boot, claim, until, sleep, floorState, sse, Client } from './helpers.js';
+import { writeFile, writeBinaryFile } from '../server/workspace.js';
 
 const open = [];
 async function start(script = {}, overrides = {}) {
@@ -548,7 +549,7 @@ describe('control and recovery', () => {
     assert.equal(row.status, 'review');
     assert.match(seen.pub, /report back/);
     const def = h.sessions.calls.agents.find((a) => a.name === 'theoffice-tester');
-    assert.equal(def.model.id, 'claude-sonnet-5-5'); assert.equal(def.model.effort, 'high');
+    assert.equal(def.model.id, 'claude-opus-5-5'); assert.equal(def.model.effort, 'high');
     assert.ok(!def.tools.some((x) => x.name === 'publish_project'));
   });
 });
@@ -770,7 +771,7 @@ describe('a computer on a job the team picked for itself', () => {
     const { id } = await go(h, 'Build the boss\'s thing', { project: 'boss' });
     await h.settle(id);
     const boss = h.sessions.calls.agents.find((a) => a.name === 'theoffice-builder');
-    assert.equal(boss.model.id, 'claude-opus-5-5'); assert.equal(boss.model.effort, 'medium');
+    assert.equal(boss.model.id, 'claude-opus-5-5'); assert.equal(boss.model.effort, 'high');
     const brief = JSON.parse(get(h.t.db, 'SELECT transcript FROM tasks WHERE id=?', auto.id).transcript || '[]')[0]?.content || '';
     assert.match(brief, /picked this job itself/, 'the job says it is the team\'s own, after the brief');
   });
@@ -800,5 +801,60 @@ describe('a server from a computer', () => {
       assert.ok(get(h.t.db, 'SELECT 1 x FROM files WHERE floor_id=? AND path=?', h.floor.id, 'projects/game/server/server.js'), 'the saved code came back for the build');
       assert.equal(get(h.t.db, "SELECT COUNT(*) n FROM published_files WHERE floor_id=? AND project='game'", h.floor.id).n, 0, 'nothing went live');
     } finally { await fake.close?.(); }
+  });
+});
+
+describe('a floor only ever opens its own site (item 1)', () => {
+  test('own published host is allowed; the main app, the apps apex and other floors are not', async () => {
+    const h = await start({}, { appsBaseDomain: 'apps.test', appsScheme: 'https' });
+    h.t.app.engine.cfg.publicOrigin = 'https://main.test';   // claim is done; pretend the main app lives here
+    await h.settle((await go(h)).id);                 // Builder builds and publishes 'game'
+    const C = h.t.app.engine.computer;
+    const hosts = C.ownFloorHosts(h.floor, { project: 'game' });
+    assert.ok(hosts.some((x) => x.endsWith('.apps.test')), `own app-origin present: ${hosts}`);
+    assert.ok(!hosts.includes('main.test'), 'never the main app host');
+    assert.ok(!hosts.includes('apps.test'), 'never the bare apps apex');
+    assert.ok(!hosts.some((x) => /(^|\.)localhost$|^127\.|^169\.254|^10\.|\.internal$/.test(x)), 'nothing internal');
+    const other = C.ownFloorHosts({ ...h.floor, id: h.floor.id + 9999, slug: 'elsewhere-co' }, { project: 'game' });
+    assert.ok(other.length && other.every((x) => !hosts.includes(x)), 'another floor gets its own, disjoint hosts');
+  });
+  test('the session environment is deny-by-default: package hosts plus this floor only', async () => {
+    const h = await start({}, { appsBaseDomain: 'apps.test', appsScheme: 'https' });
+    h.t.app.engine.cfg.publicOrigin = 'https://main.test';
+    await h.settle((await go(h)).id);
+    const def = h.sessions.calls.environments.at(-1);
+    const net = def.config.networking;
+    assert.equal(net.type, 'limited');
+    assert.equal(net.allow_package_managers, false);
+    assert.equal(net.allow_mcp_servers, false);
+    assert.ok(net.allowed_hosts.includes('registry.npmjs.org'), 'npm still works');
+    assert.ok(net.allowed_hosts.some((x) => x.endsWith('.apps.test')), 'its own site is reachable');
+    assert.ok(!net.allowed_hosts.includes('main.test'), 'the main app is not reachable');
+  });
+});
+
+describe('big files reach the computer intact (item 2)', () => {
+  test('pull_shared_file delivers a 300 KB JSON and a binary file byte-for-byte', async () => {
+    const seen = {};
+    const h = await start({ async onTurn(api) {
+      await api.step();
+      seen.json = await api.custom('pull_shared_file', { path: 'projects/data/big.json' });
+      seen.bin = await api.custom('pull_shared_file', { path: 'projects/data/blob.bin' });
+      await api.message('Pulled both files.');
+    } });
+    const bigJson = JSON.stringify({ rows: Array.from({ length: 5000 }, (_, i) => ({ i, name: `r${i}`, taxIncluded: i % 2 === 0, pad: 'x'.repeat(10) })) });
+    assert.ok(Buffer.byteLength(bigJson) > 300 * 1024, 'the JSON really is over 300 KB');
+    const binary = Buffer.from(Array.from({ length: 6000 }, (_, i) => (i * 37 + 11) % 256));
+    writeFile(h.t.db, h.floor.id, 'projects/data/big.json', bigJson, null, 100 * 1024 * 1024);
+    writeBinaryFile(h.t.db, h.floor.id, 'projects/data/blob.bin', binary, null, 100 * 1024 * 1024);
+    h.t.app.engine.hireStaff(h.floor, 'tester', 'Tess');
+    await h.settle((await go(h, 'Check the data', { project: 'data', to: 'tester' })).id);
+    const mounts = h.sessions.calls.mounts || [];
+    const got = (part) => mounts.find((m) => m.path.includes(part))?.data;
+    assert.ok(got('big.json'), 'the JSON was put on the computer');
+    assert.ok(Buffer.from(got('big.json')).equals(Buffer.from(bigJson)), 'the JSON arrived byte-for-byte');
+    assert.ok(got('blob.bin'), 'the binary was put on the computer');
+    assert.ok(Buffer.from(got('blob.bin')).equals(binary), 'the binary arrived byte-for-byte');
+    assert.match(seen.json, /byte-for-byte/);
   });
 });

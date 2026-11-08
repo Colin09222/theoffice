@@ -22,9 +22,9 @@ describe('routing', () => {
     assert.equal(tester.model, 'google/gemini-3.1-pro-preview'); assert.equal(tester.provider, 'openrouter');
   });
 
-  test('computers: the Builder keeps Opus at medium for the boss, the Tester\'s computer moves to Sonnet', () => {
-    assert.deepEqual(pick(computerRole(m, 'builder')), { model: OPUS, effort: 'medium' });
-    assert.deepEqual(pick(computerRole(m, 'tester')), { model: SONNET, effort: 'high' });
+  test('computers: the Builder runs Opus at high for the boss, and the Tester\'s computer is Opus at high too', () => {
+    assert.deepEqual(pick(computerRole(m, 'builder')), { model: OPUS, effort: 'high' });
+    assert.deepEqual(pick(computerRole(m, 'tester')), { model: OPUS, effort: 'high' });
     assert.equal(computerRole(m, 'writer'), null);
   });
 
@@ -50,7 +50,7 @@ describe('routing', () => {
     assert.deepEqual(m.all.manager.pricing, m.prices[SONNET]);
     assert.deepEqual(m.all.builder.pricing, m.prices[OPUS]);
     assert.deepEqual(m.tools.search.pricing, m.prices[SONNET]);
-    assert.deepEqual(computerRole(m, 'tester').pricing, m.prices[SONNET], 'the Tester\'s computer is not charged at Gemini\'s price');
+    assert.deepEqual(computerRole(m, 'tester').pricing, m.prices[OPUS], 'the Tester\'s computer runs on Opus, charged at Opus\'s price, not Gemini\'s');
     const u = costOf({ input_tokens: 1e6, cache_read_input_tokens: 1e6, output_tokens: 1e6 }, m.prices[SONNET]);
     assert.ok(Math.abs(u.cost - (2 + 0.2 + 10)) < 1e-9, `cost ${u.cost}`);
   });

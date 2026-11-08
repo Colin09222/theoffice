@@ -11,8 +11,9 @@ import { ProviderError, scrub } from './llm.js';
 import { MIN_ROOM_USD } from './budget.js';
 import { costOf } from './anthropic.js';
 import { packTgz, unpackTgz, TarError } from './tarball.js';
-import { applySync, baselineOf, projectFiles, publishSnapshot, WorkspaceError } from './workspace.js';
-import { COMPUTER_TOOL_DEFS, computerToolName, toolsForRole } from './tools.js';
+import { applySync, baselineOf, projectFiles, publishSnapshot, WorkspaceError, readFile, MAX_SYNC_FILE_BYTES } from './workspace.js';
+import { appLabel } from './apps.js';
+import { COMPUTER_TOOL_DEFS, computerToolName, toolsForRole, wrapUntrusted } from './tools.js';
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { IOS_HOSTS } from './ios.js';
 import { computerPrompt, computerBriefing, ON_OUR_OWN } from './prompts.js';
@@ -119,15 +120,45 @@ export class Computer {
   // ---- control-plane objects: created once, kept by id, updated only when their definition changes ----
   setting(key) { const v = get(this.engine.db, 'SELECT value FROM settings WHERE key=?', key)?.value; return v ? JSON.parse(v) : null; }
   saveSetting(key, value) { run(this.engine.db, 'INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', key, JSON.stringify(value)); }
-  async environmentId(hosts = PACKAGE_HOSTS, key = 'ma_environment') {
-    // Deny by default: named package registries and nothing else. allow_package_managers would also open GitHub, which is a way out for a hijacked agent. Checked on a real session: npm, pip, Vite and Playwright all work on this list.
-    const def = { name: key === 'ma_environment' ? 'theoffice-computer' : 'theoffice-ios', config: { type: 'cloud', networking: { type: 'limited', allow_package_managers: false, allow_mcp_servers: false, allowed_hosts: hosts } } };
+  async environmentId(hosts = PACKAGE_HOSTS, name = 'theoffice-computer') {
+    // Deny by default: named package registries, plus whatever own-floor hosts the caller added, and nothing else. allow_package_managers would also open GitHub, which is a way out for a hijacked agent. Checked on a real session: npm, pip, Vite and Playwright all work on this list.
+    // The cache is keyed BY the hash of this host set: a floor with its own site gets its own environment, a floor never reuses another's, and floors that share a host set (package-only testers) share one. This is how environments stay scoped per floor without leaking. Dedup keeps insertion order (package hosts first) so the hash is stable.
+    const allowed = [...new Set(hosts)];
+    const def = { name, config: { type: 'cloud', networking: { type: 'limited', allow_package_managers: false, allow_mcp_servers: false, allowed_hosts: allowed } } };
     const h = hash(def);
+    const key = `ma_env_${h}`;
     const have = this.setting(key);
-    if (have?.hash === h) return have.id;
-    const env = await this.client.createEnvironment({ ...def, name: `${def.name}-${h}` });
+    if (have?.id) return have.id;
+    const env = await this.client.createEnvironment({ ...def, name: `${name}-${h}` });
     this.saveSetting(key, { id: env.id, hash: h });
     return env.id;
+  }
+  /**
+   * The public hosts this one floor's own published work lives on: its project app-origins and any custom domain it has bought and taken live.
+   * Only this floor's rows are read, and only "<label>.<apps base>" or a bought domain is ever returned, so the set can never contain the main app's
+   * host, another floor's host, or an internal address. A session gets these added to the package registries so its Tester and Builder can open the real site.
+   */
+  ownFloorHosts(floor, task) {
+    const e = this.engine;
+    if (!e.cfg.appsBaseDomain) return [];
+    const base = String(e.cfg.appsBaseDomain).split(':')[0].toLowerCase();
+    const mainHost = (() => { try { return new URL(e.cfg.publicOrigin).hostname.toLowerCase(); } catch { return ''; } })();
+    const hosts = new Set();
+    // A live custom domain for this floor (apex and its www), exact strings from this floor's own orders.
+    for (const r of all(e.db, "SELECT domain FROM domain_orders WHERE floor_id=? AND status='live'", floor.id)) {
+      const d = String(r.domain || '').toLowerCase().replace(/^\.+|\.+$/g, '');
+      if (d && d !== mainHost) { hosts.add(d); hosts.add(`www.${d}`); }
+    }
+    // Every published project's own app-origin on this floor, plus the project this task is for (its label is allocated now, so it is reachable the moment it goes live in this same session).
+    const slugs = new Set(all(e.db, 'SELECT slug FROM projects WHERE floor_id=? AND published_at IS NOT NULL', floor.id).map((p) => p.slug));
+    if (task?.project) slugs.add(task.project);
+    for (const slug of slugs) {
+      const host = `${appLabel(e.db, floor, slug)}.${base}`.toLowerCase();
+      // Never the main app's own host, whatever a label works out to.
+      if (host !== mainHost) hosts.add(host);
+    }
+    // Sorted so this floor always produces the same ordering, and so its environment is reused rather than re-created each session.
+    return [...hosts].sort();
   }
   /**
    * One agent per role and model. A role's autonomous variant (Sonnet, say) is a separate agent from the one the boss's jobs use, so switching
@@ -233,7 +264,7 @@ export class Computer {
       }
       task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       if (!task.transcript) {
-        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, person: e.people.personBlock(agent, task), live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }), uploads: e.taskFiles(task) }, e.cfg) + (task.auto ? `\n\n${ON_OUR_OWN}` : '') }]), task.id);
+        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, person: e.people.personBlock(agent, task), live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }), uploads: e.taskFiles(task), bossAsk: this.bossAsk(floor.id, agent.role) }, e.cfg) + (task.auto ? `\n\n${ON_OUR_OWN}` : '') }]), task.id);
         task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       }
       st = this.newState(floor, agent, task, signal);
@@ -257,6 +288,13 @@ export class Computer {
       if (st?.holdId && !(st.id && signal.reason?.why === 'shutdown')) e.budget.release(st.holdId);
       release?.();
     }
+  }
+  /** The boss's own recent words, for a Tester to check the work against. Wrapped as data; it is the boss's, but may still carry something they pasted. Testers only, to keep every other prompt the same for the cache. */
+  bossAsk(floorId, role) {
+    if (role !== 'tester') return '';
+    const rows = all(this.engine.db, "SELECT text FROM messages WHERE floor_id=? AND role='boss' ORDER BY id DESC LIMIT 20", floorId).map((m) => m.text).reverse();
+    const joined = rows.join('\n').trim();
+    return joined ? wrapUntrusted('boss request', joined.slice(-4000)) : '';
   }
   pushMessage(taskId, content) {
     const t = get(this.engine.db, 'SELECT transcript FROM tasks WHERE id=?', taskId);
@@ -347,7 +385,11 @@ export class Computer {
     }
     const agentRef = await this.agentRef(agent.role, { autonomous: !!task.auto });
     const vaulted = !!task.vault && !!e.cfg.iosEnabled && !!e.cfg.iosVaultId;
-    const environment = vaulted ? await this.environmentId(IOS_HOSTS, 'ma_environment_ios') : await this.environmentId();
+    // The floor's own published hosts, so the Tester and Builder can open the real site, added to the package registries (or the iOS host set). Scoped to this floor alone.
+    const ownHosts = this.ownFloorHosts(floor, task);
+    const environment = vaulted
+      ? await this.environmentId([...IOS_HOSTS, ...ownHosts], 'theoffice-ios')
+      : await this.environmentId([...PACKAGE_HOSTS, ...ownHosts], 'theoffice-computer');
     let upload, baseline;
     const free = await this.fileWork.acquire(floor.id, signal);
     try {
@@ -607,9 +649,36 @@ export class Computer {
     const e = this.engine;
     const name = computerToolName(ev.name);
     if (name === 'publish_project') { try { return this.declarePublish(st, ev.input || {}); } catch (err) { if (err instanceof WorkspaceError) return `Error: ${err.message}`; throw err; } }
+    if (name === 'pull_shared_file') return this.pullShared(st, ev.input || {});
     if (name === 'deploy_server') { const problem = await this.bringBackSaved(st); if (problem) return `Error: ${problem}`; }
     const out = await e.tools.exec(st.ctx, name, JSON.stringify(ev.input ?? {}));
     return out && typeof out === 'object' ? out.text : out;
+  }
+  /**
+   * Put any one shared-drive file onto the computer in full, byte-for-byte, so nobody ever retypes a file or works from the shortened chat copy.
+   * Text or binary, up to the sync limit. Uses the same mount the picture tools use, so it lands under /mnt/session/uploads for the agent to copy in.
+   */
+  async pullShared(st, a) {
+    const e = this.engine;
+    const path = String(a?.path ?? '').trim();
+    if (!path) return 'Error: path is required (a shared-drive path such as projects/other/engine.js).';
+    let f;
+    try { f = readFile(e.db, st.floor.id, path); } catch (err) { if (err instanceof WorkspaceError) return `Error: ${err.message}`; throw err; }
+    if (!f) return 'Error: no such file on the shared drive.';
+    // A public task can't pull another project's private file, exactly as read_shared_file refuses it.
+    const slug = String(f.path).match(/^projects\/([^/]+)\//)?.[1];
+    if (slug && slug !== st.project) {
+      const priv = get(e.db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', st.floor.id, slug)?.private;
+      const mine = st.project ? get(e.db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', st.floor.id, st.project)?.private : 0;
+      if (priv && !mine) return 'Error: that project is private, and this task can\'t read it.';
+    }
+    const bytes = typeof f.content === 'string' ? Buffer.from(f.content, 'utf8') : Buffer.from(f.content);
+    if (bytes.length > MAX_SYNC_FILE_BYTES) return `Error: that file is over ${MAX_SYNC_FILE_BYTES / 1048576} MB, too big to pull in one piece.`;
+    const name = (f.path.split('/').pop() || 'file').replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 80) || 'file';
+    let at;
+    try { at = await st.ctx.mountFile(bytes, name); } catch (err) { e.log('warn', 'could not mount a shared file', { err: scrub(err?.message, e.cfg) }); return 'Error: could not put that file on your computer; try again.'; }
+    e.feed(st.floor.id, st.agent, `pulled ${f.path} onto the computer in full`, st.project);
+    return `The whole file (${bytes.length} bytes) is on your computer at ${at}, byte-for-byte. Copy it where you need it, for example: cp ${at} /workspace/project/${name}. This is the complete file, not the shortened copy read_shared_file returns.`;
   }
   // deploy_server reads the floor's drive, and a computer's files only get there when saved, so the newest save comes back first. Nothing is published.
   async bringBackSaved(st) {
