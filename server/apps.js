@@ -8,8 +8,10 @@ const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const trim = (s) => s.replace(/-+$/, '');
 
 // Two-letter-then-hyphens labels are reserved in DNS: browsers treat xn-- as an encoded name, and certificate authorities refuse the rest.
-// api--* names belong to the runner's edge.
-const usable = (l) => l.length <= 63 && LABEL.test(l) && l.slice(2, 4) !== '--' && !l.startsWith('api--');
+// api--* names belong to the runner's edge: Caddy sends them to a project's server, never to its site.
+export const RESERVED_PREFIXES = ['api--'];
+const reservedPrefix = (l) => RESERVED_PREFIXES.some((x) => l.startsWith(x));
+const usable = (l) => l.length <= 63 && LABEL.test(l) && l.slice(2, 4) !== '--' && !reservedPrefix(l);
 
 // The short address a launched project gets when it's free: just the project's name. Never a name a service on the domain could need.
 export const RESERVED_LABELS = new Set(('www www1 www2 api api2 mail email smtp imap pop pop3 ftp sftp ssh webmail mx mx1 mx2 ns ns1 ns2 ns3 ns4 dns vpn cpanel whm root admin administrator app apps cdn static assets media img images files upload uploads download downloads status health monitor metrics '
@@ -25,7 +27,8 @@ function candidate(floor, project, salt = '') {
   const plain = `${project}--${floor.slug}`;
   if (!salt && usable(plain)) return plain;
   const tag = createHash('sha256').update(`${floor.id}:${project}:${salt}`).digest('hex').slice(0, 8);
-  return `${trim(project.slice(0, 22))}-x--${trim(floor.slug.slice(0, 22))}-${tag}`;
+  const made = `${trim(project.slice(0, 22))}-x--${trim(floor.slug.slice(0, 22))}-${tag}`;
+  return usable(made) ? made : `p-${made}`;
 }
 
 /** The label for a project, allocated the first time it is asked for. A project with a short address uses it; the long one keeps working. */
@@ -36,7 +39,7 @@ export function appLabel(db, floor, project) {
   if (have) return have.label;
   for (let i = 0; i < 6; i++) {
     const label = candidate(floor, project, i ? String(i) : '');
-    if (get(db, 'SELECT 1 x FROM app_labels WHERE label=?', label)) continue;
+    if (!usable(label) || get(db, 'SELECT 1 x FROM app_labels WHERE label=?', label)) continue;
     run(db, 'INSERT INTO app_labels (label,floor_id,project,created_at) VALUES (?,?,?,?)', label, floor.id, project, Date.now());
     return label;
   }

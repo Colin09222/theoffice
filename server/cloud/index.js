@@ -15,6 +15,7 @@ import { upgradeKey, handshake } from './ws.js';
 import { createPowers } from './powers.js';
 import { createAppAi } from './ai.js';
 import { createWebFetcher } from './web.js';
+import { bearerToken, findByToken, CLOUD_PATH } from '../servers.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 /** The browser library. Served on every project origin at /_office/office.js, and at /theoffice/sdk/office.js for reference. */
@@ -33,6 +34,7 @@ export const CLOUD_RATES = {
 };
 const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const BODY = { json: 96 * 1024, small: 8 * 1024 };
+const SERVER_WHO = { kind: 'server', key: 'srv:app', name: 'Server' };
 
 /** At most `max` jobs at once and `queue` waiting; past that, refuse rather than pile up. Password hashing is the costly thing guarded. */
 function gate(max, queue) {
@@ -133,17 +135,17 @@ export function installCloud(ext) {
 
   // ---- HTTP, on the project's own origin ----
   /** Called by serveApp once it has checked the floor, the project and any private pass. segs is the path after /_office/cloud/. */
-  async function serve(req, res, { f, pr, label, segs, rawUrl, HEAD }) {
-    const p = pr.slug, F = f.id, pk = `${F}:${p}`, ip = ipOf(req);
+  async function serve(req, res, { f, pr, label, segs, rawUrl, HEAD, server = false }) {
+    const p = pr.slug, F = f.id, pk = `${F}:${p}`, ip = server ? `srv:${pk}` : ipOf(req);
     const origin = req.headers.origin;
-    const allowed = origin !== undefined && originsOf(f, p, label).includes(origin);
+    const allowed = !server && origin !== undefined && originsOf(f, p, label).includes(origin);
     const H = { ...HEAD, 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow', vary: 'Origin', ...(allowed ? { 'access-control-allow-origin': origin } : {}) };
     const reply = (status, obj, extra = {}) => { if (res.headersSent) return; res.writeHead(status, { ...H, 'content-type': 'application/json; charset=utf-8', ...extra }); res.end(JSON.stringify(obj)); };
     try {
       // Only this project's own pages. A browser can't forge Origin or Sec-Fetch-Site, and a sibling project counts as another site here.
-      if (origin !== undefined && !allowed) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
+      if (!server && origin !== undefined && !allowed) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
       const site = req.headers['sec-fetch-site'];
-      if (site && site !== 'same-origin' && site !== 'none' && !allowed) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
+      if (!server && site && site !== 'same-origin' && site !== 'none' && !allowed) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
       limit('all', 'all'); limit('project', pk); limit('ip', ip);
       if (req.method === 'OPTIONS') {
         if (!allowed) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
@@ -151,17 +153,21 @@ export function installCloud(ext) {
         return res.end();
       }
       const read = req.method === 'GET' || req.method === 'HEAD';
-      if (!read && origin === undefined) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
+      if (!read && origin === undefined && !server) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
       if (!read) limit('write', `${pk}:${ip}`);
       count(pk);
       const url = new URL(rawUrl, 'http://x');
       const q = url.searchParams;
-      const who = () => identify(F, p, req.headers['x-office-session'], req.headers['x-office-player']);
+      // Server code acts as itself, or as a visitor when it passes on that visitor's own session.
+      const who = () => (server && !req.headers['x-office-session'] ? SERVER_WHO : identify(F, p, req.headers['x-office-session'], req.headers['x-office-player']));
       const [a, b, c, extra] = segs;
       const m = req.method;
       if (extra !== undefined || segs.some((s) => s.length > 100)) throw new CloudError(404, 'not_found', 'No such thing here.');
 
       if (a === undefined || a === '' || a === 'ping') return reply(200, { ok: true, version: 1 });
+      // Accounts are a visitor's business: server code can only ask who a session belongs to.
+      if (server && a === 'auth' && !(b === 'me' && m === 'GET' && !c)) throw new CloudError(404, 'not_found', 'No such thing here.');
+      if (a === 'server' && !b && m === 'GET') return reply(200, { url: engine.servers.originOf(F, p) });
 
       if (a === 'auth') {
         if (b === 'signup' && m === 'POST' && !c) {
@@ -295,6 +301,19 @@ export function installCloud(ext) {
       log('error', 'cloud', { err: String(e?.message).slice(0, 200) });
       return reply(500, { error: 'server_error', message: 'Something broke in the building.' });
     }
+  }
+
+  /** The door for a project's own server code: one bearer token, which is the project. No project is named in the address, so another project's data can't even be asked for. */
+  async function serveServer(req, res, url) {
+    const fail = (status, code, message) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(JSON.stringify({ error: code, message })); };
+    // A browser holding this token is a leak, not a client.
+    if (req.headers.origin !== undefined) return fail(403, 'bad_origin', 'This address is for server code.');
+    const token = bearerToken(req);
+    const row = token && findByToken(db, token);
+    if (!row) { limit('ip', ipOf(req)); return fail(401, 'bad_token', 'That token is not valid.'); }
+    let segs;
+    try { segs = url.pathname.slice(`/theoffice${CLOUD_PATH}/`.length).split('/').map((s) => decodeURIComponent(s)); } catch { return fail(404, 'not_found', 'No such thing here.'); }
+    return serve(req, res, { f: { id: row.floor_id }, pr: { slug: row.project }, label: '', segs, rawUrl: req.url, HEAD: { 'x-content-type-options': 'nosniff' }, server: true });
   }
 
   // A file goes out in its stored pieces, waiting for the reader between them. Its type was decided from its bytes at upload.

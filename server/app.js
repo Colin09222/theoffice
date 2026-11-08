@@ -36,6 +36,7 @@ import { installModes } from './modes.js';
 import { installBusiness } from './business.js';
 import { installMail } from './mail.js';
 import { installMakers } from './makers.js';
+import { installServers, CLOUD_PATH } from './servers.js';
 import { absoluteMeta } from './metaabs.js';
 
 const BASE = '/theoffice';
@@ -708,7 +709,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext)].filter(Boolean);
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext)].filter(Boolean);
   // Email: every company's own address. See docs/MAIL.md.
   const mail = installMail(ext);
   extensions.push(mail);
@@ -858,6 +859,9 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (!f || f.status !== 'active') return miss();
     const pr = get(db, 'SELECT * FROM projects WHERE floor_id=? AND slug=? AND published_at IS NOT NULL', f.id, entry.project);
     if (!pr) return miss();
+    // A project with a server: its pages may call that one address, and no other.
+    const serverOrigin = engine.servers.originOf(f.id, pr.slug);
+    if (serverOrigin) HEAD['content-security-policy'] = HEAD['content-security-policy'].replace("connect-src 'self'", `connect-src 'self' ${serverOrigin}`);
     const raw = rawUrl.split('?')[0];
     const rawSegs = raw.split('/').slice(1);
     let segs;
@@ -993,6 +997,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     const pathname = url.pathname;
     try {
       if (pathname === `${BASE}/api/apps/tls-check` && req.method === 'GET') return tlsCheck(req, res, url);
+      if (pathname === `${BASE}${CLOUD_PATH}` || pathname.startsWith(`${BASE}${CLOUD_PATH}/`)) return await cloud.serveServer(req, res, url);
       if (pathname === BASE) { limit('read', ip); return serveStatic(req, res, INDEX); }
       if (!pathname.startsWith(`${BASE}/`)) return send(res, 404, 'Not found', { 'content-type': 'text/plain; charset=utf-8' });
       const rest = pathname.slice(BASE.length);

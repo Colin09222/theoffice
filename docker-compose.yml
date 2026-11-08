@@ -15,6 +15,9 @@ services:
       - /tmp:size=16m,noexec,nosuid
     volumes:
       - ./data:/data
+      # office-runner, Phase 2. Directories, so a runner restart's new socket shows up here. Not there yet? Docker makes them empty and server slots stay off.
+      - /run/office-runner/api:/run/office-runner/api:ro
+      - /opt/office-runner/shared:/opt/office-runner/shared:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:

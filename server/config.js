@@ -44,6 +44,12 @@ export function loadConfig(env = process.env, overrides = {}) {
     webSearchKey: env.WEB_SEARCH_API_KEY || '',
     adminPassword: env.ADMIN_PASSWORD || '',
     publicOrigin,
+    runnerSocket: env.RUNNER_SOCKET ?? '/run/office-runner/api/runner.sock',
+    runnerTokenFile: env.RUNNER_TOKEN_FILE ?? '/opt/office-runner/shared/api.token',
+    runnerTickMs: num(env.RUNNER_TICK_MS, 5000),
+    runnerPollMs: num(env.RUNNER_POLL_MS, 1500),
+    runnerBuildWaitMs: num(env.RUNNER_BUILD_WAIT_MS, 90000),
+    runnerCheckTimeoutMs: num(env.RUNNER_CHECK_TIMEOUT_MS, 60000),
     trustProxy: env.TRUST_PROXY === '1',
     // Off unless set: what stops the money is the building's lifetime limit below. Each of these would stop a job long before that.
     floorDailyUsd: cap(env.FLOOR_DAILY_USD, Infinity),

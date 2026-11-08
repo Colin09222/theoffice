@@ -71,9 +71,12 @@ export const listFiles = (db, floorId, prefix = '') => all(db, 'SELECT path,size
 export const goesLive = (relPath) => !/^notes\//.test(relPath) && relPath !== 'TEST-REPORT.md';
 
 /** Snapshot projects/<slug>/ (or one directory inside it, such as a build's dist/) into the published set. Quota is re-checked and the swap is atomic. */
+const SERVER_MARKERS = new Set(['server/package.json', 'server/office.json', 'server/server.js', 'server/index.js', 'server/app.js']);
 export function publishSnapshot(db, floorId, slug, quotaBytes, directory = '') {
   const prefix = `projects/${slug}/${directory ? `${directory}/` : ''}`;
-  const rows = all(db, 'SELECT path,content,size FROM files WHERE floor_id=? ORDER BY path', floorId).filter((f) => f.path.startsWith(prefix) && goesLive(f.path.slice(prefix.length)));
+  let rows = all(db, 'SELECT path,content,size FROM files WHERE floor_id=? ORDER BY path', floorId).filter((f) => f.path.startsWith(prefix) && goesLive(f.path.slice(prefix.length)));
+  // A project's server code stays on the runner. Its source (and anything hard-coded in it) is never a page on the public site.
+  if (!directory && rows.some((r) => SERVER_MARKERS.has(r.path.slice(prefix.length)))) rows = rows.filter((r) => !r.path.slice(prefix.length).startsWith('server/'));
   return tx(db, () => {
     const old = get(db, 'SELECT COALESCE(SUM(size),0) n FROM published_files WHERE floor_id=? AND project=?', floorId, slug).n;
     const total = rows.reduce((n, r) => n + r.size, 0);

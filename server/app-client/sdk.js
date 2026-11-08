@@ -384,6 +384,23 @@
       },
     };
 
+    // ---- this project's own server, if the boss has given it one ----
+    var serverAddress = null;
+    var server = {
+      /** The address of this project's server, or null. It is fixed once allowed, so the page can keep it. */
+      url: function () {
+        if (!serverAddress) serverAddress = request('GET', 'server').then(function (r) { return r.url || null; }, function () { serverAddress = null; return null; });
+        return serverAddress;
+      },
+      /** A fetch to a path on that server. Rejects with code no_server when there isn't one. */
+      fetch: function (path, opts) {
+        return server.url().then(function (u) {
+          if (!u) throw new OfficeError('no_server', 'This project has no server running.');
+          return fetch(u + (String(path).charAt(0) === '/' ? '' : '/') + path, opts);
+        });
+      },
+    };
+    self.server = server;
     self.auth = auth; self.db = { collection: collection }; self.saves = saves; self.leaderboard = leaderboard; self.rooms = rooms; self.files = files; self.forms = forms; self.shared = shared; self.ai = ai; self.fetch = fetchPage; self.scrape = scrapePage;
     /** Settles once the stored login has been checked with the server (or there is none). */
     self.ready = pinged.then(function (there) { return there ? auth.refresh() : user; }).then(function () { return self; }, function () { return self; });

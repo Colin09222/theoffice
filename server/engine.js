@@ -7,6 +7,7 @@ import { routeFor } from './config.js';
 import { createTools, toolDefs, toolsForRole, publicUrl, wrapUntrusted, mentionsPrivate, NOT_SEEN_AS_LINK } from './tools.js';
 import { createDomainBroker } from './domains.js';
 import { createIos } from './ios.js';
+import { createServers } from './servers.js';
 import { createMedia, createMockMedia } from './media.js';
 import { loadBusinessConfig } from './business.js';
 import { createSearch, createMockSearch } from './search.js';
@@ -55,6 +56,7 @@ export class Engine {
     this.tools = createTools({ db, cfg, engine: this, fetcher, httpFetch });
     this.domains = createDomainBroker({ db, cfg, engine: this, client: namecheap });
     this.ios = createIos({ db, cfg, engine: this });
+    this.servers = createServers({ db, cfg, engine: this, httpFetch });
     this.people = createPeople(this);
     // Video ads (Business mode) use the image key and ledger; their model and pricing live in config/business.json.
     const brokers = { ...(models.tools || {}), video: models.tools?.video || loadBusinessConfig().video };
@@ -953,6 +955,7 @@ export class Engine {
   resetFloor(floorId) {
     this.cancelOpen(floorId);
     this.domains.dropRequests(floorId);
+    this.servers.dropFloor(floorId);
     deleteFloorData(this.db, floorId);
     tx(this.db, () => {
       for (const table of ['tasks', 'messages', 'events', 'files', 'projects', 'published_files', 'purchases', 'questions', 'ios_requests', 'help_requests', 'standing_orders', 'standing_runs']) run(this.db, `DELETE FROM ${table} WHERE floor_id=?`, floorId);
@@ -965,6 +968,7 @@ export class Engine {
   killFloor(floorId) {
     this.cancelOpen(floorId);
     this.domains.dropRequests(floorId);
+    this.servers.dropFloor(floorId);
     this.emit(floorId, 'reload', {}, { persist: false });
     deleteFloorData(this.db, floorId);
     tx(this.db, () => {
