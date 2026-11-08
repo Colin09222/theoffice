@@ -36,6 +36,8 @@ function fakeModel(handler) {
   return { calls, chat(a) { if (a.meta?.kind !== 'app_ai') return mock.chat(a); calls.push(a); return Promise.resolve().then(() => handler(a, calls.length)); } };
 }
 const reply = (content = 'hello there', prompt = 20, completion = 10, cost = 0.001) => ({ content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost, real: true } });
+// App AI holds, which have no agent. The staff on the same floor may have a call of their own running at the same moment.
+const appHolds = (t) => get(t.db, 'SELECT COUNT(*) n FROM budget_holds WHERE agent_id IS NULL').n;
 const ledger = (t, floorId) => all(t.db, "SELECT * FROM ledger WHERE floor_id=? AND kind='app_ai'", floorId);
 
 describe('office.ai', () => {
@@ -57,7 +59,7 @@ describe('office.ai', () => {
       assert.equal(rows.length, 1);
       assert.equal(rows[0].provider, 'anthropic'); assert.equal(rows[0].model, 'claude-haiku-5-5'); assert.equal(rows[0].prompt_tokens, 120); assert.equal(rows[0].completion_tokens, 30); assert.equal(rows[0].cost_usd, 0.002);
       assert.ok(s.t.app.engine.budget.spent('anthropic') - before >= 0.002 - 1e-9, 'counts toward the building\'s Anthropic budget');
-      assert.equal(get(s.t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0, 'the hold is released');
+      assert.equal(appHolds(s.t), 0, 'the hold is released');
       assert.equal(s.powers.counts(s.floor.id, 'app').ai_fast, 150);
     } finally { await s.t.close(); }
   });
@@ -277,7 +279,7 @@ describe('office.ai', () => {
       assert.equal(r.status, 503); assert.equal(r.json.error, 'ai_resting'); CLEAN(r.text);
       assert.equal(m.calls.length, 0);
       assert.equal(ledger(s.t, s.floor.id).length, 0);
-      assert.equal(get(s.t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0);
+      assert.equal(appHolds(s.t), 0);
     } finally { await s.t.close(); }
   });
 
@@ -320,7 +322,7 @@ describe('office.ai', () => {
       const r = await s.ai({ prompt: 'a' });
       assert.equal(r.status, 503); assert.equal(r.json.error, 'ai_unavailable'); CLEAN(r.text);
       assert.equal(ledger(s.t, s.floor.id).length, 0);
-      assert.equal(get(s.t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0);
+      assert.equal(appHolds(s.t), 0);
       assert.equal(s.powers.counts(s.floor.id, 'app').ai_calls, 0);
     } finally { await s.t.close(); }
   });
@@ -332,7 +334,7 @@ describe('office.ai', () => {
       assert.equal((await s.ai({ prompt: 'a' })).status, 503);
       const rows = ledger(s.t, s.floor.id);
       assert.equal(rows.length, 1); assert.equal(rows[0].completion_tokens, 100); assert.ok(rows[0].cost_usd > 0);
-      assert.equal(get(s.t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0);
+      assert.equal(appHolds(s.t), 0);
     } finally { await s.t.close(); }
   });
 
@@ -344,7 +346,7 @@ describe('office.ai', () => {
       assert.equal(r.status, 503); assert.equal(r.json.error, 'ai_unavailable'); CLEAN(r.text);
       const rows = ledger(s.t, s.floor.id);
       assert.equal(rows.length, 1); assert.ok(rows[0].cost_usd > 0);
-      assert.equal(get(s.t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0);
+      assert.equal(appHolds(s.t), 0);
     } finally { await s.t.close(); }
   });
 
