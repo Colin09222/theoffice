@@ -340,7 +340,9 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     const ok = status !== 'failed';
     if (ok) run(db, "UPDATE tasks SET status='done', updated_at=? WHERE id=? AND status='review'", now(), task.id);
     const st = stateOf(j);
-    const report = link.step === 'test' && ok ? parseReport(readFile(db, floor.id, `projects/${j.project}/TEST-REPORT.md`)?.content || result) : null;
+    // Only a report written during this test counts: an old one from the last pass must never pass a new version.
+    const file = link.step === 'test' && ok ? readFile(db, floor.id, `projects/${j.project}/TEST-REPORT.md`) : null;
+    const report = link.step === 'test' && ok ? parseReport(file && file.updated_at >= task.created_at ? file.content : result) : null;
     const d = decide({ ...st, type: j.type, pass: link.pass, depth: j.depth, tokens: tokensSince(floor.id, j.started_at) }, { step: link.step, ok: link.step === 'test' ? ok && !!report : ok, report }, config);
     save(j, { pass: link.pass, stage: link.step === 'doc' ? 'build' : link.step === 'build' && ok ? 'test' : j.stage }, { ...d.patch, lastReport: report ? { verdict: report.verdict, summary: report.summary, bugs: report.bugs.length, pass: link.pass } : st.lastReport || null });
     if (report && d.passing) snapshot(j);
@@ -403,7 +405,9 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
       },
     };
   }
-  return { start, afterTask, launch, decideAsk, view, ideaCards: (type, floor, seed) => ideaCards(type, { floor, seed, cfg: config }), surprise: (type, seed) => surprise(type, { seed, cfg: config }), fromWords: (type, text) => fromWords(type, text, config), jobOf };
+  /** True until the boss launches: until then a maker project goes live only through Launch, never by the manager's hand. After it, edits publish as usual. */
+  const holds = (floorId, slug) => !!get(db, "SELECT 1 x FROM maker_jobs WHERE floor_id=? AND project=? AND launched_at IS NULL AND stage!='stopped'", floorId, slug);
+  return { holds, start, afterTask, launch, decideAsk, view, ideaCards: (type, floor, seed) => ideaCards(type, { floor, seed, cfg: config }), surprise: (type, seed) => surprise(type, { seed, cfg: config }), fromWords: (type, text) => fromWords(type, text, config), jobOf };
 }
 
 export function installMakers(ext) {

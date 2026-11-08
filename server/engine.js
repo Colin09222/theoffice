@@ -543,6 +543,8 @@ export class Engine {
     for (const p of all(this.db, 'SELECT slug,published_at FROM projects WHERE floor_id=?', floorId)) {
       const t = get(this.db, "SELECT SUM(status IN ('todo','doing','blocked')) open, SUM(status IN ('done','review','failed')) finished FROM tasks WHERE floor_id=? AND project=?", floorId, p.slug);
       if (!t?.finished || t.open) continue;
+      // A maker job publishes only what its Tester passed, when the boss taps Launch (server/makers.js).
+      if (this.makers?.holds(floorId, p.slug)) continue;
       const prefix = `projects/${p.slug}/`;
       if (!p.published_at) {
         if (get(this.db, 'SELECT 1 x FROM files WHERE floor_id=? AND path IN (?,?,?,?)', floorId, `${prefix}index.html`, `${prefix}index.md`, `${prefix}dist/index.html`, `${prefix}build/index.html`)) out.push({ slug: p.slug, never: true });

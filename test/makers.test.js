@@ -147,6 +147,7 @@ describe('three taps to a team that is building, then Launch', () => {
     assert.equal(get(t.db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing','review')", fid()).n, 0);
     assert.ok(s.messages.some((m) => m.role === 'manager' && /passed the Tester/.test(m.text)));
     assert.equal(get(t.db, 'SELECT published_at p FROM projects WHERE floor_id=? AND slug=?', fid(), j.project).p, null, 'nothing is live before Launch');
+    assert.ok(!t.app.engine.unpublishedWork(fid()).some((p) => p.slug === j.project), 'the manager is not told to publish it behind the boss\'s back');
   });
 
   test('Launch publishes the tested version and gives a share link', async () => {
