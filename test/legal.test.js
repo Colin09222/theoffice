@@ -86,7 +86,7 @@ describe('on a floor', () => {
     const s = await floorState(c);
     const law = s.agents.find((a) => a.role === 'lawyer');
     assert.ok(law, 'there is a lawyer'); assert.equal(law.title, 'Lawyer'); assert.equal(law.name, 'Hollis');
-    assert.match(law.persona, /Dry, careful/);
+    assert.match(law.persona, /^Hollis is dry, careful/);
     assert.equal(s.legal.lawyer.name, 'Hollis'); assert.equal(s.legal.canHire, false);
   });
 

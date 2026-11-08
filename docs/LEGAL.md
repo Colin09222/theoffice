@@ -6,7 +6,7 @@ and says plainly when a business needs a real lawyer. Code: `server/legal.js`, `
 
 ## Who he is
 - In `config/models.json` under `hireable.lawyer`: Sonnet 5.5, medium effort. His brief carries the honesty rules for any task the manager gives him.
-- New companies get him by default (`engine.seedStaff` is wrapped in `legal.js`; filler floors don't).
+- New companies get him by default (`engine.seedStaff` is wrapped in `legal.js`). Filler floors don't, and nor does a floor whose staff limit would leave no room to hire after him; those can add him with the card.
 - A floor from before him gets an **Add Hollis** card under Requests: one tap, `POST /api/floors/:slug/legal/hire`. It uses the normal hire path, so nobody else's work or desk is touched. The Customise panel and the manager's `hire_staff` also work, and he's still Hollis.
 - He stays through a floor reset, like a founding role.
 - Tools (`LAWYER_TOOLS`): read and write files, fetch public pages (untrusted, wrapped like everyone else's), ask the boss, ask a colleague. **No** publishing, purchase requests, domains or email.

@@ -305,7 +305,7 @@ describe('staff: names, titles, hiring and letting go', () => {
     assert.doesNotMatch(JSON.stringify(s0.hiring), /\$|price|cost|model/i, 'nothing about money or models in the hiring list');
     for (const role of ['analyst', 'marketer', 'tester', 'illustrator']) assert.equal((await c.post(`/api/floors/${c.slug}/hire`, { role, name: `<i>${role}` })).status, 201);
     const s1 = await floorState(c);
-    assert.equal(s1.agents.length, 9);
+    assert.equal(s1.agents.length, 10);  // the founding five, the Lawyer every new company gets, and these four
     assert.doesNotMatch(s1.agents.map((x) => x.name).join(), /[<>]/);
     // Every role is taken and every desk is full. Dropping the cap proves the cap, not the list of jobs, refuses it.
     const small = await boot({ maxStaff: 4 });
