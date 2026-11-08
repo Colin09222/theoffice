@@ -17,6 +17,7 @@ import { createAppAi } from './ai.js';
 import { createWebFetcher } from './web.js';
 import { bearerToken, findByToken, CLOUD_PATH } from '../servers.js';
 import { createChat, CHAT_RATES, CHAT_JS, CHAT_PANEL_JS } from './chat.js';
+import { createAuthMail, AUTH_MAIL_RATES, RESET_HTML, RESET_JS, RESET_CSS } from './auth-mail.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 /** The browser library. Served on every project origin at /_office/office.js, and at /theoffice/sdk/office.js for reference. */
@@ -58,7 +59,7 @@ const scryptAsync = (pw, salt, o) => new Promise((res, rej) => scrypt(pw, salt, 
 export function installCloud(ext) {
   const { db, cfg, engine, log, now, GET, POST, json, requireOwner, requireAdmin, floorBySlug, HttpError, ipOf, secret, pay } = ext;
   const store = createStore(db, cfg.cloudLimits || {}, now);
-  const RATES = { ...CLOUD_RATES, ...CHAT_RATES, ...(cfg.cloudRates || {}) };
+  const RATES = { ...CLOUD_RATES, ...CHAT_RATES, ...AUTH_MAIL_RATES, ...(cfg.cloudRates || {}) };
   const rates = new A.RateLimiter(cfg.cloudRateScale ?? cfg.rateScale, now);
   const hashing = gate(2, 64);
   const uploading = gate(4, 8);
@@ -78,6 +79,8 @@ export function installCloud(ext) {
   const web = createWebFetcher({ db, cfg, powers, gate: gate(8, 24), net: ext.cloudNet, now, log });
   // Website chat: server/cloud/chat.js.
   const chat = createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, engine });
+  // Account email: welcome and password reset, through the company's own mail. server/cloud/auth-mail.js.
+  const authMail = createAuthMail({ db, cfg, engine, log, now, limit });
   const counts = new Map();
   const count = (pk) => { if (counts.size < 5000 || counts.has(pk)) counts.set(pk, (counts.get(pk) || 0) + 1); };
   function flush() {
@@ -186,7 +189,7 @@ export function installCloud(ext) {
           const hash = await hashPassword(body.password);
           const player = req.headers['x-office-player'];
           const user = store.users.create(F, p, fields, hash, player && PLAYER.test(String(player)) ? guestKey(String(player)) : null);
-          return reply(201, { user: store.publicUser(user, true), session: store.users.startSession(user) });
+          return reply(201, { user: store.publicUser(user, true), session: store.users.startSession(user), email: authMail.welcome(f, pr, user, allowed ? origin : appOrigin(cfg, label)) });
         }
         if (b === 'login' && m === 'POST' && !c) {
           limit('loginIp', ip);
@@ -210,6 +213,25 @@ export function installCloud(ext) {
           if (m === 'GET') return reply(200, { user: w?.kind === 'user' ? store.publicUser(w.user, true) : null });
           if (w?.kind !== 'user') throw new CloudError(401, 'signed_out', 'Log in first.');
           if (m === 'PATCH') { const body = await readBody(req, BODY.small); store.users.rename(w.user, body.name); return reply(200, { user: store.publicUser(store.users.bySession(F, p, req.headers['x-office-session']), true) }); }
+        }
+        if (b === 'forgot' && m === 'POST' && !c) {
+          const body = await readBody(req, BODY.small);
+          return reply(200, authMail.forgot(f, pr, { ip, email: body.email, origin: allowed ? origin : appOrigin(cfg, label) }));
+        }
+        if (b === 'reset' && m === 'POST' && !c) {
+          const body = await readBody(req, BODY.small);
+          return reply(200, await authMail.reset(f, pr, { ip, token: body.token, password: body.password, hashPassword, store }));
+        }
+        if (b === 'email' && !c) {
+          if (m === 'GET') return reply(200, { available: authMail.status(f, p).available });
+          if (m === 'POST') {
+            const w = who();
+            if (w?.kind !== 'user') throw new CloudError(401, 'signed_out', 'Log in first.');
+            limit('emailChange', `${pk}:uid:${w.uid}`);
+            const body = await readBody(req, BODY.small);
+            if (typeof body.password !== 'string' || !(await checkPassword(body.password, w.user.hash))) throw new CloudError(401, 'bad_login', 'That password is wrong.');
+            return reply(200, { user: store.publicUser(authMail.setEmail(w.user, body.email), true) });
+          }
         }
         if ((b === 'password' || b === 'delete') && m === 'POST' && !c) {
           const w = who();
@@ -452,10 +474,12 @@ export function installCloud(ext) {
 
   let flushTimer = null, sweepTimer = null;
   return {
-    store, rooms, powers, chat, serve, serveServer, upgrade,
+    store, rooms, powers, chat, serve, serveServer, upgrade, authMail,
+    /** The password reset page on a project's own origin: /_office/reset, with its script and style beside it. */
+    resetAsset: (name) => (name === 'reset' ? { type: 'text/html; charset=utf-8', body: RESET_HTML } : name === 'reset.js' ? { type: 'text/javascript; charset=utf-8', body: RESET_JS } : name === 'reset.css' ? { type: 'text/css; charset=utf-8', body: RESET_CSS } : null),
     start() {
       flushTimer = setInterval(flush, 60000); flushTimer.unref?.();
-      sweepTimer = setInterval(() => { try { store.sweep(); powers.sweep(); chat.sweep(); } catch { /* next time */ } }, 3600000); sweepTimer.unref?.();
+      sweepTimer = setInterval(() => { try { store.sweep(); powers.sweep(); chat.sweep(); authMail.sweep(); } catch { /* next time */ } }, 3600000); sweepTimer.unref?.();
     },
     stop() { clearInterval(flushTimer); clearInterval(sweepTimer); flush(); rooms.close(); rates.close(); },
     flush,

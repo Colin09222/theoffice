@@ -431,7 +431,8 @@ export function installMail(ext) {
     if (body.length > BODY_OUT_MAX) throw new MailError(`That email is too long: keep it under ${BODY_OUT_MAX} characters.`);
     if (replyOf && by !== 'boss' && replyOf.machine) throw new MailError(`That email came from a machine or a mailing list (${replyOf.machine}), so it never gets a reply from the staff.`, 409, 'loop_guard');
     let reason = '';
-    if (by !== 'boss') {
+    // 'app' is an account email a project's own visitor asked for (server/cloud/auth-mail.js): a fixed text to the address they typed.
+    if (by !== 'boss' && by !== 'app') {
       const strangers = everyone.filter((a) => !known(f, a, replyOf));
       if (mentionsPrivate(db, f.id, '', `${subj}\n${body}`)) reason = 'It mentions private work.';
       else if (strangers.length) reason = `${strangers.join(', ')} ${strangers.length > 1 ? 'are' : 'is'} new to the company.`;
@@ -465,8 +466,9 @@ export function installMail(ext) {
       return '';
     });
     if (why) { if (why !== 'gone') run(db, "UPDATE mail_messages SET status='failed', note=?, updated_at=? WHERE id=? AND status='queued'", why, now(), id); return get(db, 'SELECT * FROM mail_messages WHERE id=?', id); }
-    const body = `${m.text}${signature(f)}`;
-    const html = `<div style="font:15px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1f2430;white-space:pre-wrap">${esc(m.text)}</div><p style="font:12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#6b6f78;border-top:1px solid #ddd;padding-top:8px;margin-top:20px">${esc(f.name)}<br>Sent by the ${esc(f.name)} team, an AI-run company in <a href="${esc(set.mailPublicUrl)}">The Office</a>.</p>`;
+    const text = held.get(id) ?? m.text;
+    const body = `${text}${signature(f)}`;
+    const html = `<div style="font:15px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1f2430;white-space:pre-wrap">${esc(text)}</div><p style="font:12px/1.5 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#6b6f78;border-top:1px solid #ddd;padding-top:8px;margin-top:20px">${esc(f.name)}<br>Sent by the ${esc(f.name)} team, an AI-run company in <a href="${esc(set.mailPublicUrl)}">The Office</a>.</p>`;
     const message = { from: `${quoteName(f.name)} <${m.from_addr}>`, to: jsonList(m.to_addrs), subject: m.subject, text: body, html, tags: [{ name: 'floor', value: String(m.floor_id) }, { name: 'mail_id', value: String(m.id) }] };
     const cc = jsonList(m.cc_addrs); if (cc.length) message.cc = cc;
     const headers = {};
@@ -475,19 +477,24 @@ export function installMail(ext) {
     if (Object.keys(headers).length) message.headers = headers;
     try {
       const r = await provider.send(message, { idempotencyKey: `office-mail-${m.id}-${m.created_at}` });
+      held.delete(id);
       run(db, "UPDATE mail_messages SET status='sent', provider_id=?, sent_at=?, note='', updated_at=? WHERE id=?", oneLine(r?.id, 80), now(), now(), id);
     } catch (e) {
       // Not counted against the day if it never left. A retryable failure goes round again on the tick, a few times at most.
       tx(db, () => { bump(db, `out:${m.floor_id}`, d, -1); bump(db, 'out:all', d, -1); });
       const again = e instanceof MailProviderError && e.retryable && m.tries < 3;
+      if (!again) held.delete(id);
       run(db, 'UPDATE mail_messages SET status=?, note=?, updated_at=? WHERE id=?', again ? 'queued' : 'failed', again ? 'Trying again shortly.' : hide(e?.message || 'It could not be sent.').slice(0, 200), now(), id);
       log('warn', 'mail_send_failed', { err: hide(e?.message || e).slice(0, 160) });
     }
     return get(db, 'SELECT * FROM mail_messages WHERE id=?', id);
   }
+  // An app email's real text when the copy kept here leaves something out (a reset link). Held in memory only, until it has gone.
+  const held = new Map();
   async function sendMail(f, args) {
     const c = compose(f, args);
     const id = record(f, c, args);
+    if (args.secretText && !c.reason) held.set(id, cleanText(args.secretText, BODY_OUT_MAX).trim());
     if (c.reason) {
       engine.emit(f.id, 'mail', { waiting: true, id, unread: unreadOf(f.id) }, { persist: false, ownerOnly: true });
       return { id, status: 'awaiting_boss', reason: c.reason, to: c.toList };
