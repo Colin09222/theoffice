@@ -2,7 +2,7 @@
 // never runs on this server or the owner's Mac. This file boxes up the project, drives the session, shows its activity on the floor,
 // charges what it really costs, and brings the finished files back into the floor's workspace, where publishing already lives.
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { get, all, run } from './db.js';
 import { ROOT } from './config.js';
@@ -16,6 +16,7 @@ import { COMPUTER_TOOL_DEFS, computerToolName, toolsForRole } from './tools.js';
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { IOS_HOSTS } from './ios.js';
 import { computerPrompt, computerBriefing } from './prompts.js';
+import { SOUNDS } from '../public/js/sfx-data.js';
 
 const PACKAGE_HOSTS = ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org'];
 const OUTPUT_WAIT_MS = 30000;
@@ -60,6 +61,19 @@ process.exitCode = r.errors.length || r.claims.length ? 1 : 0;
 `;
 const CLIENT_JS = readFileSync(join(ROOT, 'server/app-client/office.js'));
 const THREE_JS = readFileSync(join(ROOT, 'public/vendor/three/three.module.min.js'));
+// Real sound and art for a game, so it has more than beeps and shapes: the CC0 Kenney packs the office itself uses (public/models/NOTICE.txt). Games only, to keep every other box small.
+export const GAME_ASSETS = (() => {
+  const out = Object.entries(SOUNDS).map(([name, b64]) => ({ path: `.office/assets/sounds/${name}.mp3`, data: Buffer.from(b64, 'base64') }));
+  const dir = join(ROOT, 'public/models/characters');
+  for (const n of readdirSync(dir)) if (n.endsWith('.glb')) out.push({ path: `.office/assets/models/${n}`, data: readFileSync(join(dir, n)) });
+  out.push({ path: '.office/assets/models/Textures/colormap.png', data: readFileSync(join(dir, 'Textures/colormap.png')) });
+  out.push({ path: '.office/assets/README.txt', data: Buffer.from(`CC0 sound and art for games, from Kenney (www.kenney.nl). Free to use in anything published. Credit "Sound and art: Kenney (kenney.nl), CC0" on the title or credits screen.
+sounds/  short mono mp3s: ${Object.keys(SOUNDS).join(', ')}. For example ding for a pickup, ring for a win, bad for a hit, stamp for a door, press for a button, tab for a step, send for a dash.
+models/  low-poly 3D people as .glb (${readdirSync(dir).filter((n) => n.startsWith('character-')).length} characters, plus glasses), sharing Textures/colormap.png. Load them in Three.js with GLTFLoader from the three package on npm (three/examples/jsm/loaders/GLTFLoader.js), keeping Textures/ beside them.
+Copy what you use into the project (such as sounds/ding.mp3) and load it with a relative path.
+`) });
+  return out;
+})();
 
 /** The model settings a role uses on a computer. Managed Agents runs Claude only, so a role on another provider names its Claude settings here. */
 export function computerRole(role) {
@@ -334,6 +348,7 @@ export class Computer {
         { path: '.office/client.js', data: CLIENT_JS },
         { path: '.office/launch-check.mjs', data: Buffer.from(LAUNCH_CHECK) },
         { path: '.office/three.module.min.js', data: THREE_JS },
+        ...(task.lane === 'game' ? GAME_ASSETS : []),
         ...files.map((f) => ({ path: `project/${f.path}`, data: f.data })),
         // The boss's files for this task, beside the project rather than in it: only what the agent copies in is saved back.
         ...e.taskFiles(task).map((a) => ({ path: a.path, data: Buffer.from(get(e.db, 'SELECT content FROM files WHERE floor_id=? AND path=?', floor.id, a.path)?.content ?? '') })),
