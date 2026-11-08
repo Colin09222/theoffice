@@ -153,6 +153,7 @@ describe('one company, several addresses', () => {
     const t = await start();
     const c = await claim(t, 'Teacups');
     const other = await claim(t, 'Saucers');
+    t.mail.ensureAddress(floorOf(t, c)); t.mail.ensureAddress(floorOf(t, other));
     live(t, c, 'teacups.com'); live(t, other, 'saucers.com');
     await settle(t);
     t.mock.verify('teacups.com'); t.mock.verify('saucers.com');
