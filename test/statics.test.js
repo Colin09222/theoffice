@@ -45,6 +45,10 @@ describe('stamping', () => {
   test('the page, the stylesheets and the models folder are stamped; the files on disk are not touched', () => {
     const page = statics.get('/index.html').body.toString('utf8');
     for (const m of page.matchAll(/(?:src|href)="(\/theoffice\/[^"]+)"/g)) assert.match(m[1], /\?v=[0-9a-f]{12}$/, m[1]);
+    const html = statics.get('/index.html').body.toString('utf8');
+    assert.equal((html.match(/rel="stylesheet"/g) || []).length, 1, 'one stylesheet on the wire');
+    assert.match(html, /\/theoffice\/css\/all\.css\?v=[0-9a-f]{12}/);
+    assert.match(statics.get('/css/all.css').body.toString('utf8'), /url\(\/theoffice\/assets\/fonts\/lilita-one-400\.woff2\?v=[0-9a-f]{12}\)/);
     const css = statics.get('/css/app.css').body.toString('utf8');
     assert.match(css, /url\(\/theoffice\/assets\/fonts\/lilita-one-400\.woff2\?v=[0-9a-f]{12}\)/);
     const models = statics.get('/js/models.js').body.toString('utf8');
