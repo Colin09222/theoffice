@@ -986,7 +986,13 @@ class FloorPage {
     on('handoff', (d) => { if (fresh(d)) this.view?.handoff(d.from, d.to); });
     on('project', (d) => {
       this.reload();
-      if (fresh(d)) { this.view?.cheer(); toast(`Published: ${d.slug}`); this.launchParty(d.slug); }
+      if (fresh(d)) {
+        this.view?.cheer();
+        // One publish can raise two project events; the boss gets one toast.
+        if (this.lastToast?.slug !== d.slug || Date.now() - this.lastToast.at > 15000) toast(`Published: ${d.slug}`);
+        this.lastToast = { slug: d.slug, at: Date.now() };
+        this.launchParty(d.slug);
+      }
     });
     this.es.onerror = () => { /* EventSource reconnects by itself, sending Last-Event-ID */ };
   }
@@ -1029,6 +1035,8 @@ class FloorPage {
       const typing = this.bodyEl.querySelector('textarea, input');
       const draft = typing?.value; const focused = document.activeElement === typing;
       this.state = next;
+      // The floor got its name and its slug followed: the address bar follows too. The old address keeps working.
+      if (next.floor.slug && next.floor.slug !== this.slug) { const was = this.slug; this.slug = next.floor.slug; if (location.pathname.includes(`/floor/${was}`)) history.replaceState(history.state, '', location.pathname.replace(`/floor/${was}`, `/floor/${this.slug}`) + location.search); }
       this.applyBrand();
       if (rebuild && stage.ok) this.rebuildScene();
       else { if (hired) this.view?.syncAgents(this.viewState()); for (const a of next.agents) this.view?.agentEvent(a); }

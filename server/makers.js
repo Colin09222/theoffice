@@ -10,6 +10,7 @@ import { get, all, run, tx } from './db.js';
 import { writeFile, readFile, slugify, slugPattern, floorBytes, goesLive, WorkspaceError } from './workspace.js';
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { checkLive } from './live-check.js';
+import { claimShortLabel } from './apps.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = JSON.parse(readFileSync(join(ROOT, 'config/makers.json'), 'utf8'));
@@ -338,7 +339,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     const role = DOC_ROLE[type];
     for (const r of [role, 'builder', 'tester']) ensure(floor, r);
     // A floor with no company yet gets one named after what it's making. The boss can rename it under Customise.
-    if (!floor.name && engine.company?.setCompany) { try { engine.company.setCompany(floor, { name: title, what_it_does: pitch.slice(0, 200) }); } catch { /* the name is a nicety */ } }
+    if (!floor.name && engine.company?.setCompany) { try { engine.company.setCompany(floor, { name: title, what_it_does: pitch.slice(0, 200) }); floor = get(db, 'SELECT * FROM floors WHERE id=?', floor.id); } catch { /* the name is a nicety */ } }
     const t = now();
     const id = Number(run(db, 'INSERT INTO maker_jobs (floor_id,project,type,title,pitch,goal,plan,starter,stage,pass,depth,state,started_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       floor.id, project, type, title, pitch, goal, JSON.stringify(plan), starter, 'doc', 0, depth, JSON.stringify({ fails: 0, best: {}, bugs: [], launchable: false, lastPassing: -1, mechanics: known?.mechanics || null, object: known?.object || null }), t, t).lastInsertRowid);
@@ -479,6 +480,8 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     const held = !!st.held && !j.launched_at;
     if (held && !(anyway && j.stage === 'asking')) throw new WorkspaceError(j.stage === 'asking' ? 'a serious bug is still open: choose Keep trying, or Launch anyway' : 'the team is fixing a serious bug first');
     const url = await publishTested(floor, j);
+    // The share link: neon-hive.middistance.com when the name is free, otherwise the long form. Old links keep working either way.
+    if (cfg.appsBaseDomain) { try { claimShortLabel(db, floor, j.project); } catch { /* the long form still works */ } }
     const flaws = held && !st.snapshotClean ? (st.snapshotFlaws || []) : [];
     save(j, { launched_at: j.launched_at || now(), ...(j.stage === 'asking' ? { stage: 'ready' } : {}) }, flaws.length ? { launchedWith: flaws.slice(0, 6) } : {});
     checkSoon(floor.id, j.id);

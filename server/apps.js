@@ -8,7 +8,18 @@ const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const trim = (s) => s.replace(/-+$/, '');
 
 // Two-letter-then-hyphens labels are reserved in DNS: browsers treat xn-- as an encoded name, and certificate authorities refuse the rest.
-const usable = (l) => l.length <= 63 && LABEL.test(l) && l.slice(2, 4) !== '--';
+// api--* names belong to the runner's edge.
+const usable = (l) => l.length <= 63 && LABEL.test(l) && l.slice(2, 4) !== '--' && !l.startsWith('api--');
+
+// The short address a launched project gets when it's free: just the project's name. Never a name a service on the domain could need.
+export const RESERVED_LABELS = new Set(('www www1 www2 api api2 mail email smtp imap pop pop3 ftp sftp ssh webmail mx mx1 mx2 ns ns1 ns2 ns3 ns4 dns vpn cpanel whm root admin administrator app apps cdn static assets media img images files upload uploads download downloads status health monitor metrics '
+  + 'blog docs doc help support contact about privacy terms legal security abuse postmaster hostmaster webmaster autoconfig autodiscover dkim dmarc spf test staging dev demo preview beta sandbox console dashboard '
+  + 'login signin signup account accounts auth oauth sso billing pay payment payments checkout shop store '
+  + 'office theoffice middistance iscolinfree localhost example').split(' '));
+export const shortLabelFor = (project) => {
+  const l = String(project);
+  return l.length >= 3 && l.length <= 58 && !l.includes('--') && usable(l) && !RESERVED_LABELS.has(l) ? l : null;
+};
 
 function candidate(floor, project, salt = '') {
   const plain = `${project}--${floor.slug}`;
@@ -17,8 +28,10 @@ function candidate(floor, project, salt = '') {
   return `${trim(project.slice(0, 22))}-x--${trim(floor.slug.slice(0, 22))}-${tag}`;
 }
 
-/** The label for a project, allocated the first time it is asked for. */
+/** The label for a project, allocated the first time it is asked for. A project with a short address uses it; the long one keeps working. */
 export function appLabel(db, floor, project) {
+  const short = get(db, 'SELECT label FROM app_short_labels WHERE floor_id=? AND project=?', floor.id, project);
+  if (short) return short.label;
   const have = get(db, 'SELECT label FROM app_labels WHERE floor_id=? AND project=?', floor.id, project);
   if (have) return have.label;
   for (let i = 0; i < 6; i++) {
@@ -43,8 +56,20 @@ export function appHostLabel(cfg, rawHost) {
   return LABEL.test(label) ? label : '';
 }
 
-export const lookupLabel = (db, label) => get(db, 'SELECT floor_id,project FROM app_labels WHERE label=?', label);
-export const allLabels = (db) => all(db, 'SELECT label FROM app_labels');
+/**
+ * The short address for a project being launched, or null if it can't have one and stays on the long form. Like every label it is allocated
+ * once and never reused: a service worker or saved data from one project must never meet another on the same origin.
+ */
+export function claimShortLabel(db, floor, project) {
+  const have = get(db, 'SELECT label FROM app_short_labels WHERE floor_id=? AND project=?', floor.id, project);
+  if (have) return have.label;
+  const label = shortLabelFor(project);
+  if (!label || get(db, 'SELECT 1 x FROM app_labels WHERE label=?', label) || get(db, 'SELECT 1 x FROM app_short_labels WHERE label=?', label)) return null;
+  return run(db, 'INSERT OR IGNORE INTO app_short_labels (label,floor_id,project,created_at) VALUES (?,?,?,?)', label, floor.id, project, Date.now()).changes ? label : null;
+}
+
+export const lookupLabel = (db, label) => get(db, 'SELECT floor_id,project FROM app_short_labels WHERE label=?', label) || get(db, 'SELECT floor_id,project FROM app_labels WHERE label=?', label);
+export const allLabels = (db) => [...all(db, 'SELECT label FROM app_labels'), ...all(db, 'SELECT label FROM app_short_labels')];
 
 /** Everything a published page may do. It stays inside its own origin: no fetch, form or embed can reach the main site through this page. */
 export function appCsp(cfg) {

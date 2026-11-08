@@ -139,7 +139,7 @@ function pickFloor(db, cfg) {
 }
 function freeSlug(db, base) {
   let slug = base;
-  for (let i = 0; get(db, 'SELECT 1 x FROM floors WHERE slug=?', slug); i++) slug = i === 0 ? `${base.slice(0, 35)}-demo` : `${base.slice(0, 33)}-demo-${i + 1}`;
+  for (let i = 0; get(db, 'SELECT 1 x FROM floors WHERE slug=?', slug) || get(db, 'SELECT 1 x FROM floor_old_slugs WHERE slug=?', slug); i++) slug = i === 0 ? `${base.slice(0, 35)}-demo` : `${base.slice(0, 33)}-demo-${i + 1}`;
   return slug;
 }
 /**

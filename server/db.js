@@ -84,6 +84,11 @@ CREATE TABLE IF NOT EXISTS app_labels (
   label TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, project TEXT NOT NULL, created_at INTEGER NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS app_labels_project ON app_labels(floor_id, project);
+CREATE TABLE IF NOT EXISTS app_short_labels (
+  label TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, project TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS app_short_labels_project ON app_short_labels(floor_id, project);
+CREATE TABLE IF NOT EXISTS floor_old_slugs (slug TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_kv (
   floor_id INTEGER NOT NULL, project TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
   size INTEGER NOT NULL, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project, scope, key)

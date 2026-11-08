@@ -136,9 +136,11 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // A published site on a sibling subdomain can plant a cookie for the parent domain. Two of ours at once means one is planted, so neither is believed.
   const sessionOf = (req) => (A.cookieCount(req.headers.cookie, A.COOKIE) > 1 ? null : A.loadSession(db, A.parseCookies(req.headers.cookie)[A.COOKIE], 'owner', now()));
   const adminOf = (req) => (A.cookieCount(req.headers.cookie, A.ADMIN_COOKIE) > 1 ? null : A.loadSession(db, A.parseCookies(req.headers.cookie)[A.ADMIN_COOKIE], 'admin', now()));
+  // A slug can be renamed once, from floor-N to the company's name. The old one keeps working forever.
+  const floorRow = (slug) => get(db, 'SELECT * FROM floors WHERE slug=?', slug) || get(db, 'SELECT f.* FROM floors f JOIN floor_old_slugs o ON o.floor_id=f.id WHERE o.slug=?', slug);
   const floorBySlug = (slug) => {
     if (typeof slug !== 'string' || !slugPattern.test(slug)) throw new HttpError(404, 'not_found');
-    const f = get(db, 'SELECT * FROM floors WHERE slug=?', slug);
+    const f = floorRow(slug);
     if (!f) throw new HttpError(404, 'not_found');
     return f;
   };
@@ -285,7 +287,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       if (!number) throw new HttpError(409, 'no_floors', 'The building is full, or that floor is taken.');
       const base = name ? given : `floor-${number}`;
       let slug = RESERVED.has(base) || !slugPattern.test(base) ? `${base}-co`.replace(/^-+/, '') : base;
-      for (let i = 2; get(db, 'SELECT 1 x FROM floors WHERE slug=?', slug); i++) slug = `${base.slice(0, 34)}-${i}`;
+      for (let i = 2; slugTaken(slug); i++) slug = `${base.slice(0, 34)}-${i}`;
       const r = run(db, 'INSERT INTO floors (slug,number,name,tagline,colors,boss,decor,recovery_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?)', slug, number, name, tagline, JSON.stringify(colors), JSON.stringify({ name: bossName, look }), JSON.stringify(decor), recoveryHash, now());
       const id = Number(r.lastInsertRowid);
       run(db, 'UPDATE codes SET claimed_at=?, floor_id=? WHERE hash=? AND claimed_at IS NULL', now(), id, hash);
@@ -306,7 +308,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     limit('login', ip);
     const b = await readJson(req, 2048);
     const slug = String(b.slug ?? '').trim().toLowerCase();
-    const f = slugPattern.test(slug) ? get(db, 'SELECT * FROM floors WHERE slug=?', slug) : null;
+    const f = slugPattern.test(slug) ? floorRow(slug) : null;
     const code = A.normalizeCode(b.recoveryCode);
     // scrypt runs whether or not the floor exists, so timing doesn't reveal which slugs are real.
     const ok = A.verifySecret(code, f ? f.recovery_hash : DUMMY_HASH) && !!f;
@@ -442,6 +444,22 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     engine.emit(f.id, 'reload', {}, { persist: false });
     json(res, 200, { ok: true });
   });
+  const slugTaken = (slug) => !!(get(db, 'SELECT 1 x FROM floors WHERE slug=?', slug) || get(db, 'SELECT 1 x FROM floor_old_slugs WHERE slug=?', slug));
+  // A floor opened with no name starts as floor-N. Once the company has a name, and while nothing has been published under the old slug, the slug
+  // follows the name. The old slug stays reserved and keeps working, so a page already open and any link to it carry on.
+  const adoptNameSlug = (f, name) => {
+    if (name.length < 2 || f.slug !== `floor-${f.number}`) return;
+    if (get(db, 'SELECT 1 x FROM projects WHERE floor_id=? AND published_at IS NOT NULL', f.id) || get(db, "SELECT 1 x FROM domain_orders WHERE floor_id=? AND status='live'", f.id)) return;
+    const base = slugify(name, 'floor').slice(0, 36).replace(/-+$/, '');
+    if (!base || /^floor-\d+$/.test(base)) return;
+    let slug = RESERVED.has(base) || !slugPattern.test(base) ? `${base}-co`.replace(/^-+/, '') : base;
+    if (!slugPattern.test(slug)) return;
+    for (let i = 2; slugTaken(slug); i++) slug = `${base.slice(0, 34)}-${i}`;
+    run(db, 'INSERT OR IGNORE INTO floor_old_slugs (slug,floor_id,created_at) VALUES (?,?,?)', f.slug, f.id, now());
+    run(db, 'UPDATE floors SET slug=? WHERE id=?', slug, f.id);
+    // Nothing was ever served on these: they only exist because an address was asked for, and they would keep the old slug in the long form.
+    run(db, 'DELETE FROM app_labels WHERE floor_id=?', f.id);
+  };
   const saveSettings = (f, b) => {
     const boss = JSON.parse(f.boss);
     if (b.boss) { boss.name = clean(b.boss.name, 30) || boss.name; boss.look = validLook(b.boss.look, boss.look); }
@@ -449,6 +467,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     run(db, 'UPDATE floors SET name=?, tagline=?, colors=?, boss=?, decor=?, public_chat=?, default_private=? WHERE id=?',
       name.length >= 2 ? name : f.name, hasTag ? clean(b.tagline, 120) : f.tagline, JSON.stringify(validColors(b.colors, JSON.parse(f.colors))), JSON.stringify(boss), JSON.stringify(validDecor(b.decor, JSON.parse(f.decor))),
       typeof b.publicChat === 'boolean' ? Number(b.publicChat) : f.public_chat, typeof b.defaultPrivate === 'boolean' ? Number(b.defaultPrivate) : f.default_private, f.id);
+    if (name.length >= 2 && !f.name) adoptNameSlug(f, name);
   };
   POST('/api/floors/:slug/staff/:id', async ({ req, res, p, ip }) => {
     const f = requireOwner(req, p.slug);
@@ -738,7 +757,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     try { segs = rawSegs.map((s) => decodeURIComponent(s)); } catch { return miss(); }
     const [fslug, pslug, ...rest] = segs;
     if (!slugPattern.test(fslug || '') || !slugPattern.test(pslug || '')) return miss();
-    const f = get(db, 'SELECT * FROM floors WHERE slug=?', fslug);
+    const f = floorRow(fslug);
     if (!f || f.status !== 'active') return miss();
     if (rest[0]?.startsWith('~w')) return serveWorking(req, res, f, pslug, rest, SITE, miss);
     const pr = get(db, 'SELECT * FROM projects WHERE floor_id=? AND slug=? AND published_at IS NOT NULL', f.id, pslug);
