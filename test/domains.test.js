@@ -8,6 +8,7 @@ import { createApp } from '../server/app.js';
 import { parseXml, createNamecheapClient, NamecheapError } from '../server/namecheap.js';
 import { cleanDomain, DomainRefused, domainsConfigured } from '../server/domains.js';
 import { toolsForRole, toolDefs } from '../server/tools.js';
+import { managerPrompt } from '../server/prompts.js';
 import { startNamecheapStub, CONTACT_SECRETS } from './stubs/namecheap.mjs';
 import { boot, claim, until, Client, adminClient, floorState, sse, hostFetch } from './helpers.js';
 
@@ -525,5 +526,33 @@ describe('prompt injection and other people', () => {
     h.t.app.engine.setGlobalPause(true);
     assert.equal((await h.buy(row.id)).status, 409);
     noCreate(h);
+  });
+});
+
+// The owner wants good .com names and no overpaying: names go past the boss in chat first, and only an agreed one gets a Buy button.
+describe('naming a domain with the boss', () => {
+  const env = { AI_MODE: 'live', APPS_BASE_DOMAIN: 'apps.example', NAMECHEAP_API_USER: 'u', NAMECHEAP_API_KEY: 'k', NAMECHEAP_CLIENT_IP: '203.0.113.7', DOMAIN_CONTACT_SOURCE: 'x.example', SERVER_IP: '198.51.100.9' };
+  const cfg = loadConfig(env);
+  const prompt = managerPrompt({ name: 'A', number: 1, tagline: '' }, { name: 'B' }, { manager: 'M' }, cfg);
+  const desc = (name) => toolDefs(toolsForRole('manager'), cfg, 'manager').find((d) => d.function.name === name).function.description;
+  test('the manager runs names past the boss before asking to buy one', () => {
+    assert.match(prompt, /run names past the boss before asking to buy/);
+    assert.match(prompt, /ask the boss for ideas, or use check_domain and offer 2-3 available names, each with the price/);
+    assert.match(prompt, /request_domain only for a name the boss picked or agreed to in this chat/);
+    assert.match(desc('request_domain'), /only once the boss has picked or agreed to this name in chat/);
+    assert.match(desc('request_domain'), /offer 2-3 available names from check_domain, each with its price/);
+  });
+  test('.com comes first: short, brandable, easy to say and spell, no hyphens or numbers', () => {
+    for (const text of [prompt, desc('check_domain')]) {
+      assert.match(text, /\.com/); assert.match(text, /short, brandable, easy to say and spell, no hyphens or numbers/); assert.match(text, /company or project/);
+      assert.match(text, /only (if|when) no good \.com is available within the limit, or the boss asks for one/);
+    }
+    assert.match(prompt, /tell them why/); assert.match(desc('request_domain'), /Prefer a \.com; for another ending, say why/);
+  });
+  test('the advice changes no limit: price, per floor, building-wide, and the bots still never see the limit as money', () => {
+    const d = loadConfig({ AI_MODE: 'live' });
+    assert.equal(d.domainMaxUsd, 25); assert.equal(d.domainsPerFloorDay, 2); assert.equal(d.domainsGlobalDay, 6);
+    assert.match(prompt, /2 a day, ordinary names only, within the building's price limit/);
+    for (const text of [prompt, desc('check_domain'), desc('request_domain')]) assert.doesNotMatch(text, /\$\s?\d|\d+\s?(usd|dollars)/i);
   });
 });
