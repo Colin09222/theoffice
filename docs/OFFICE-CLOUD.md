@@ -61,7 +61,7 @@ Measured: 300 live players in 19 full rooms, each setting 1 KB of state and send
 - **Only the project's own pages:** a POST needs an `Origin`, and it must be one of the project's own origins, as for all of Office Cloud. A client that lies about its `Origin` still only spends that project's daily allowance, at one visitor's rate.
 - **No tools:** a call is one exchange with a model that has no tools and sees nothing of the building. Thinking is off so a reply isn't eaten by reasoning.
 - **Money:** every call is held against the building's Anthropic budget while it runs and written to the ledger against its floor (`kind='app_ai'`, `provider='anthropic'`), like anything the staff spend. It stops cleanly when the building's budget is reached, when today's app AI reaches `buildingDayUsd`, or when `FLOOR_DAILY_USD` or `GLOBAL_DAILY_USD` are set and reached (app AI counts toward those).
-- **A call that dies** is released, and anything already written is charged at an estimate; a crash is settled at the hold on the next start, as for the staff.
+- **A call that dies** is released, and anything already written is charged at an estimate. One cut off by its 60-second limit is charged what it held, and a crash is settled at the hold on the next start, as for the staff.
 - `OFFICE_AI_ENABLED=0` turns it off for the building; see the admin commands below for the per-project pause.
 
 ## Web pages (`office.fetch`, `office.scrape`)
