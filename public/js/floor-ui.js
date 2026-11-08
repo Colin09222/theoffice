@@ -54,13 +54,16 @@ function followList(list, body, rest) {
     list, pinned: true,
     settle() { rest(); ownTop = list.scrollTop; pill.hidden = true; f.pinned = true; },
     added() { if (f.pinned) f.settle(); else { pill.hidden = false; place(); } },
-    stop() { ro.disconnect(); pill.remove(); },
+    stop() { ro.disconnect(); window.removeEventListener('office:kb', onKb); pill.remove(); },
   };
   list.addEventListener('scroll', () => { if (Math.abs(list.scrollTop - ownTop) <= 2) return; f.pinned = near(); if (f.pinned) pill.hidden = true; }, { passive: true });
   // Whenever the list changes size at the bottom, it stays at the bottom. And someone who has just started typing wants to see what they're answering.
   const typing = () => document.body.classList.contains('kb-open') && document.activeElement?.closest?.('.chat-input');
   const ro = new ResizeObserver(() => { if (f.pinned || typing()) f.settle(); else place(); });
   ro.observe(list);
+  // The keyboard moving is the moment that matters most: settle once the page has laid out around it, rather than leaving it to the observer's timing.
+  const onKb = () => requestAnimationFrame(() => requestAnimationFrame(() => { if (f.pinned || typing()) f.settle(); }));
+  window.addEventListener('office:kb', onKb);
   return f;
 }
 const TALK_KIND = { assign: 'Assignment', plan: 'The plan', handoff: 'Handoff', findings: 'Findings', review: 'Review', question: 'Question', answer: 'Answer', ask: 'Asking', meeting: 'Meeting', banter: 'Small talk' };
