@@ -23,6 +23,8 @@ export const CLOUD_RATES = {
   all: [30000, 60000], project: [3000, 60000], ip: [600, 60000], write: [240, 60000],
   signupIp: [10, 3600000], signupProject: [300, 3600000], loginIp: [30, 600000], loginAccount: [10, 900000], loginAccountAll: [100, 900000],
   score: [30, 60000], upload: [30, 3600000], uploadProject: [300, 3600000], join: [60, 60000],
+  // Queries read through a whole collection, so they get their own, smaller allowance.
+  query: [120, 60000], queryProject: [1200, 60000],
 };
 const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const BODY = { json: 96 * 1024, small: 8 * 1024 };
@@ -49,6 +51,7 @@ export function installCloud(ext) {
   const rates = new A.RateLimiter(cfg.cloudRateScale ?? cfg.rateScale, now);
   const hashing = gate(2, 64);
   const uploading = gate(4, 8);
+  const inFlight = new Map();
   const limit = (bucket, key) => {
     const [n, w] = RATES[bucket];
     if (!rates.allow(`${bucket}:${key}`, n, w)) throw new CloudError(429, 'rate_limited', 'Too many requests. Slow down a little.');
@@ -127,6 +130,7 @@ export function installCloud(ext) {
       if (origin !== undefined && !allowed) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
       const site = req.headers['sec-fetch-site'];
       if (site && site !== 'same-origin' && site !== 'none' && !allowed) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
+      limit('all', 'all'); limit('project', pk); limit('ip', ip);
       if (req.method === 'OPTIONS') {
         if (!allowed) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
         res.writeHead(204, { ...H, 'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE', 'access-control-allow-headers': 'content-type, x-office-session, x-office-player', 'access-control-max-age': '600' });
@@ -134,7 +138,6 @@ export function installCloud(ext) {
       }
       const read = req.method === 'GET' || req.method === 'HEAD';
       if (!read && origin === undefined) throw new CloudError(403, 'bad_origin', 'Only this project\'s own pages can use its data.');
-      limit('all', 'all'); limit('project', pk); limit('ip', ip);
       if (!read) limit('write', `${pk}:${ip}`);
       count(pk);
       const url = new URL(rawUrl, 'http://x');
@@ -202,6 +205,7 @@ export function installCloud(ext) {
         const w = who();
         if (!c) {
           if (m === 'GET') {
+            limit('query', `${pk}:${ip}`); limit('queryProject', pk);
             if (q.get('count') === '1') return reply(200, { count: store.docs.count(F, p, w, b) });
             let where;
             if (q.has('where')) { try { where = JSON.parse(q.get('where')); } catch { throw new CloudError(400, 'bad_where', 'where is JSON.'); } }
@@ -241,8 +245,12 @@ export function installCloud(ext) {
           if (!w) throw new CloudError(401, 'no_identity', 'This needs a player token or an account.');
           limit('upload', `${pk}:${ip}`); limit('uploadProject', pk);
           if (Number(req.headers['content-length'] || 0) > store.L.fileMax) throw new CloudError(413, 'too_large', `A file can be at most ${Math.floor(store.L.fileMax / 1048576)} MB.`);
-          const meta = await uploading(async () => store.files.put(F, p, w, { name: q.get('name'), body: await readRaw(req, store.L.fileMax) }));
-          return reply(201, meta);
+          // Two at a time from one address, so a few slow uploads can't hold every slot.
+          if ((inFlight.get(ip) || 0) >= 2) throw new CloudError(429, 'rate_limited', 'Wait for your other uploads to finish.');
+          inFlight.set(ip, (inFlight.get(ip) || 0) + 1);
+          try {
+            return reply(201, await uploading(async () => store.files.put(F, p, w, { name: q.get('name'), body: await readRaw(req, store.L.fileMax) })));
+          } finally { const n = inFlight.get(ip) - 1; if (n > 0) inFlight.set(ip, n); else inFlight.delete(ip); }
         }
         if (!b && m === 'GET') return reply(200, { files: store.files.list(F, p, who()) });
         if (b && !c && (m === 'GET' || m === 'HEAD')) return sendFile(req, res, F, p, b, H);

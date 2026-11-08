@@ -2,6 +2,7 @@
 // everything that could grow (people, rooms, messages, state, storage, requests) has a cap, and the caps hold.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { get } from '../server/db.js';
 import { serverSecret, signPreview } from '../server/auth.js';
 import { previewCookieName } from '../server/apps.js';
@@ -179,6 +180,23 @@ describe('caps: storage, people and messages', () => {
     assert.equal(over.status, 507); assert.match(over.json.message, /file space/);
   });
 
+  test('two uploads at once per address; a third is told to wait', async () => {
+    const h4 = publish(t, t.floorA, 'slow');
+    const slow = () => {
+      const body = png(2000);
+      const req = http.request({ host: '127.0.0.1', port: t.port, method: 'POST', path: '/_office/cloud/files', headers: { host: h4, origin: `https://${h4}`, 'sec-fetch-site': 'same-origin', 'x-office-player': P1, 'content-type': 'image/png', 'content-length': body.length } });
+      const done = new Promise((res) => req.on('response', (r) => { r.resume(); r.on('end', () => res(r.statusCode)); }));
+      req.write(body.subarray(0, 100));
+      return { finish: () => { req.end(body.subarray(100)); return done; } };
+    };
+    const one = slow(), two = slow();
+    await sleep(150);
+    const third = await cloud(t, h4, 'POST', 'files', { raw: png(200), type: 'image/png' });
+    assert.equal(third.status, 429); assert.match(third.json.message, /other uploads/);
+    assert.deepEqual([await one.finish(), await two.finish()], [201, 201]);
+    assert.equal((await cloud(t, h4, 'POST', 'files', { raw: png(200), type: 'image/png' })).status, 201, 'free again once they finish');
+  });
+
   test('rooms: people per room, rooms per project, connections per address, state keys and message rate', async () => {
     const r1 = await joinRoom(t, host, 'r1'); const r2 = await joinRoom(t, host, 'r1', { player: P2 });
     const r3 = await joinRoom(t, host, 'r1', { player: P3 });
@@ -236,8 +254,8 @@ describe('rate limits', () => {
       assert.equal((await wsConnect(t, r3, 'lobby')).refused, 429, 'rooms count too');
     } finally { await t.close(); }
   });
-  test('log-ins per account, sign-ups per address, scores per player and uploads per address', async () => {
-    const t = await setup({ cloudRateScale: 1, cloudRates: { loginAccount: [3, 900000], signupIp: [2, 3600000], score: [3, 60000], upload: [2, 3600000] } });
+  test('log-ins per account, sign-ups per address, scores per player, uploads per address and queries', async () => {
+    const t = await setup({ cloudRateScale: 1, cloudRates: { loginAccount: [3, 900000], signupIp: [2, 3600000], score: [3, 60000], upload: [2, 3600000], query: [3, 60000] } });
     try {
       const h = publish(t, t.floorA, 'limits');
       for (let i = 0; i < 2; i++) assert.equal((await cloud(t, h, 'POST', 'auth/signup', { body: { username: `user${i}`, password: 'correct horse' } })).status, 201);
@@ -249,6 +267,9 @@ describe('rate limits', () => {
       assert.equal((await cloud(t, h, 'POST', 'boards/b', { body: { score: 9 } })).status, 429);
       for (let i = 0; i < 2; i++) assert.equal((await cloud(t, h, 'POST', 'files', { raw: png(100), type: 'image/png' })).status, 201);
       assert.equal((await cloud(t, h, 'POST', 'files', { raw: png(100), type: 'image/png' })).status, 429);
+      for (let i = 0; i < 3; i++) assert.equal((await cloud(t, h, 'GET', 'db/things?sort=name')).status, 200);
+      assert.equal((await cloud(t, h, 'GET', 'db/things')).status, 429, 'queries have their own allowance');
+      assert.equal((await cloud(t, h, 'GET', 'ping')).status, 200, 'and running out of it stops nothing else');
     } finally { await t.close(); }
   });
 });

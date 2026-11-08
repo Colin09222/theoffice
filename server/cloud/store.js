@@ -7,7 +7,7 @@ import { CLOUD_TABLES as TABLES } from './schema.js';
 
 export const CLOUD_LIMITS = {
   dataBytes: 20 * 1024 * 1024, fileBytes: 50 * 1024 * 1024, totalBytes: 20 * 1024 * 1024 * 1024,
-  docBytes: 32 * 1024, collections: 50, docs: 50000, docsPerOwner: 2000, queryMax: 100, responseBytes: 512 * 1024, offsetMax: 10000, filters: 8,
+  docBytes: 32 * 1024, collections: 50, docs: 20000, docsPerOwner: 2000, queryMax: 100, responseBytes: 512 * 1024, offsetMax: 10000, filters: 8,
   saveBytes: 64 * 1024, savesPerOwner: 200, saveBytesPerOwner: 1024 * 1024,
   users: 50000, sessionsPerUser: 10, sessionDays: 30,
   boards: 50, boardEntries: 5000, scoreMax: 1e12,

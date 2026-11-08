@@ -39,12 +39,12 @@ which sit on the older `/_data/v1` store). The same file is at `/theoffice/sdk/o
 | | |
 |---|---|
 | Storage per project | 20 MB of data (documents, saves, scores, accounts), 50 MB of files; 20 GB for the whole building |
-| Documents | 32 KB each, 50 collections, 50,000 per project, 2,000 per person, 100 per page |
+| Documents | 32 KB each, 50 collections, 20,000 per project, 2,000 per person, 100 per page |
 | Saves | 64 KB each, 200 keys and 1 MB per person |
 | Leaderboards | 50 per project, 5,000 entries each (a full board keeps its best), scores within plus or minus a trillion |
 | Files | 5 MB each, 100 and 25 MB per person, 2,000 per project |
 | Rooms | 16 people, 50 rooms per project, 1,000 in all; 600 connections in all, 200 per project, 32 per address; messages 8 KB, 20 a second (burst 40) and 32 KB a second each; 100 state keys / 32 KB per room |
-| Requests | 30,000 a minute for the building, 3,000 per project, 600 per address, 240 writes per address per project; sign-ups 10 an hour per address; log-ins 10 per 15 minutes per account and address |
+| Requests | 30,000 a minute for the building, 3,000 per project, 600 per address, 240 writes per address per project; 120 queries a minute per address and 1,200 per project; 2 uploads at once per address; sign-ups 10 an hour per address; log-ins 10 per 15 minutes per account and address |
 
 Request counts are kept in memory and written once a minute. Memory stays small: rooms cap out near 35 MB of state, at most 4 uploads
 (20 MB) and 2 password hashes (32 MB) are in flight, and query responses stop at 512 KB.
