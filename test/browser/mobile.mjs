@@ -212,6 +212,21 @@ for (const size of SIZES) {
         if (r.right > r.width || r.listSw > r.listCw + 1) throw new Error(JSON.stringify(r));
         await audit(p, 'long message', opts);
       });
+      await step(`${tag} boss: quick-reply options sit right above the composer, wrapped, nothing clipped`, async () => {
+        await p.ev(`(() => { const o = window.__office; o.state.business = { ...(o.state.business || {}), active: true, chips: ['Yes, go ahead with the plan as you laid it out', 'What would it cost me in time?', 'Change the name first', 'Tell me more about the research'] }; o.renderBody(); return true; })()`);
+        await sleep(250);
+        const r = await p.ev(`(() => { const chips = [...document.querySelectorAll('.chat-chips .chip')]; const input = document.querySelector('.chat-input').getBoundingClientRect(); const out = chips.map((c) => { const b = c.getBoundingClientRect(); const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return { top: b.top, bottom: b.bottom, right: b.right, h: b.height, ok: !!hit && (c === hit || c.contains(hit)), clipped: c.scrollWidth > c.clientWidth + 1 || c.scrollHeight > c.clientHeight + 2 }; }); const list = document.querySelector('.chat-list').getBoundingClientRect(); return { chips: out, inputTop: input.top, listBottom: list.bottom, list: list.height, vh: innerHeight, vw: innerWidth }; })()`);
+        for (const c of r.chips) {
+          if (!c.ok) throw new Error(`a chip is covered: ${JSON.stringify(c)}`);
+          if (c.clipped) throw new Error(`a chip's text is cut: ${JSON.stringify(c)}`);
+          if (c.h < 43.5) throw new Error(`a chip is too small: ${JSON.stringify(c)}`);
+          if (c.bottom > r.inputTop + 1 || c.top < r.listBottom - 1) throw new Error(`a chip isn't between the messages and the composer: ${JSON.stringify(c)} ${JSON.stringify({ i: r.inputTop, l: r.listBottom })}`);
+          if (c.right > r.vw) throw new Error(`a chip runs off the screen: ${JSON.stringify(c)}`);
+        }
+        if (r.list < 180) throw new Error(`the chips left ${r.list}px for the conversation`);
+        await audit(p, 'chips', opts);
+        await p.ev('(() => { const o = window.__office; o.state.business = null; o.renderBody(); return true; })()');
+      });
       await step(`${tag} boss: scrolled up, a new message waits behind a pill and the list stays put`, async () => {
         await p.ev('(() => { const l = document.querySelector(".chat-list"); l.scrollTop = 0; l.dispatchEvent(new Event("scroll")); return true; })()');
         await sleep(100);
@@ -235,7 +250,8 @@ for (const size of SIZES) {
           if (Math.abs(r.composer - H) > 2) throw new Error(`composer ${r.composer} should sit at ${H}: ${JSON.stringify(r)}`);
           if (r.panelTop < top - 1) throw new Error(`the sheet's top is above the visible screen ${JSON.stringify(r)}`);
           if (r.list < 100) throw new Error(`only ${r.list}px of chat: ${JSON.stringify(r)}`);
-          await p.until(`(() => { const l = document.querySelector('.chat-list').getBoundingClientRect(); const msgs = [...document.querySelectorAll('.chat-list .msg:not([hidden])')]; const b = msgs.at(-1).getBoundingClientRect().bottom; return b <= l.bottom + 2 && b >= l.bottom - 140; })()`, "the newest message on screen with the keyboard up", 3000).catch(() => { throw new Error(`the newest message isn't visible: ${JSON.stringify(r)}`); });
+          const stuck = await p.ev(`({ pinned: window.__office.chatFollow.pinned, sh: document.querySelector('.chat-list').scrollHeight, st: document.querySelector('.chat-list').scrollTop, ch: document.querySelector('.chat-list').clientHeight })`);
+          await p.until(`(() => { const l = document.querySelector('.chat-list').getBoundingClientRect(); const msgs = [...document.querySelectorAll('.chat-list .msg:not([hidden])')]; const b = msgs.at(-1).getBoundingClientRect().bottom; return b <= l.bottom + 2 && b >= l.bottom - 140; })()`, "the newest message on screen with the keyboard up", 3000).catch(() => { throw new Error(`the newest message isn't visible: ${JSON.stringify(r)} ${JSON.stringify(stuck)}`); });
           await audit(p, 'keyboard', { ...opts, portrait: false });
           } finally { await noKeyboard(p); await p.ev('document.activeElement?.blur?.(); true'); }
           await sleep(300);
@@ -252,7 +268,7 @@ for (const size of SIZES) {
     }
     const tabs = await p.ev('[...document.querySelectorAll("[data-tab]")].map((x) => x.dataset.tab)');
     for (const tab of tabs) await see(`tab ${tab}`, async () => { await p.click(`[data-tab=${tab}]`); await sleep(260); if (phoneLayout) await settled(p); });
-    await see('a staff file', async () => { if (phoneLayout) { await p.click('[data-tab=work]'); await sleep(200); } await p.click('.staff-chip[data-agent]'); await p.until('!!document.querySelector(".modal [data-profile]")', 'the file', 5000); await sleep(200); });
+    await see('a staff file', async () => { if (phoneLayout) { await p.click('[data-tab=work]'); await sleep(200); await p.click('.staff-chip[data-agent]'); } else await p.ev('window.__office.openAgent(window.__office.state.agents[0]); true'); await p.until('!!document.querySelector(".modal [data-profile]")', 'the file', 5000); await sleep(200); });
     await see('staff editor', async () => { await p.click('[data-profile-edit]'); await p.until('!!document.querySelector(".modal .staff-pick")', 'the editor', 5000); await sleep(300); });
     await p.ev('document.querySelector(".modal .icon-btn")?.click(); true');
     await sleep(150);
@@ -273,6 +289,7 @@ for (const size of SIZES) {
   // ---- the same floor as a visitor ----
   await (async () => {
     const p = await newPage(); const see = screen(p, `${tag} visitor`, opts);
+    await p.send('Network.clearBrowserCookies');
     await p.goto(`${base}/floor/${c.slug}?q=low`);
     await onFloor(p);
     await sleep(1400);

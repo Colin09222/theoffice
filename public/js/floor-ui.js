@@ -33,6 +33,7 @@ function opensWhen(ms) {
 }
 
 const isPhone = () => window.innerWidth <= 760;
+const isCompact = () => isPhone() || window.innerHeight <= 520;  // a phone on its side: its panel stays beside the room, but the row of tabs still has to fit
 // The phone sheet's three sizes. A conversation opens tall; everything else opens at half, sharing the screen with the room.
 const HALF = 0.58;  // the same number as public/css/mobile.css: the room is told before the sheet has finished moving
 const CHAT_TABS = new Set(['chat', 'talk']);
@@ -472,7 +473,7 @@ class FloorPage {
     clear(this.tabsEl);
     const tabs = this.tabsFor();
     // A phone's row never cuts a label off: the first few tabs, then More, which opens right there to show the rest.
-    const folded = isPhone() && tabs.length > PHONE_ROW + 1 ? tabs.slice(PHONE_ROW) : [];
+    const folded = isCompact() && tabs.length > PHONE_ROW + 1 ? tabs.slice(PHONE_ROW) : [];
     const shown = folded.length ? tabs.slice(0, PHONE_ROW) : tabs;
     const tabEl = ([id, label], over) => {
       const m = (id === 'requests' || id === 'inbox') && label.match(/\d+/);
@@ -598,7 +599,7 @@ class FloorPage {
       h('div.intercom-grille', { 'aria-hidden': 'true' }));
     this.intercomEl.classList.toggle('on-air', !!this.streamBuf);
     // On a phone the recovery card sits in the conversation, so it scrolls with it rather than taking a fixed bite out of the page.
-    const inList = isPhone() && this.recoveryCard();
+    const inList = isCompact() && this.recoveryCard();
     if (isPhone()) this.headEl.append(this.intercomEl);
     this.bodyEl.append(...(!inList && this.recoveryCard() ? [this.recoveryEl] : []), ...(isPhone() ? [] : [this.intercomEl]), this.chatList);
     if (inList) this.chatList.prepend(this.recoveryEl);
