@@ -92,7 +92,8 @@ node scripts/admin.mjs runner release           lift the kill switch
 
 ## Tests
 - `test/servers.test.js` with `test/fake-runner.js`, the real API on a real socket using the runner's own rules (`runner/src/apps.mjs`): off state, the approval, slot limits and the full-building message, `api--` labels, secrets never echoed, build failures, tokens that can't reach another project, the limits and ledger, publishing, CSP, the admin commands.
-- `test/browser/server-panel.mjs`: the panel on desktop and phone in real Chrome.
+- `test/servers-runner.test.js`: the Office against the real control daemon (`runner/src/control.mjs`, Docker stubbed), so the two halves agree on the API.
+- `test/browser/server-panel.mjs` (`npm run e2e:servers`): the panel on desktop and phone in real Chrome.
 
 ## Deploy notes
 Merge this branch, `docker compose up -d --build`. The compose mounts make the socket and token appear inside the container; with the runner installed, slots switch on by themselves. Server code needs `PUBLIC_ORIGIN` set (it is, on `hz`) for `OFFICE_CLOUD_URL`. Caddy needs nothing from this phase; the runner's own install handled `api--*`.
