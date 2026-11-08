@@ -95,14 +95,16 @@ export function installPay(ext) {
   }
   async function connect(f, req) {
     if (!ready) throw new HttpError(503, 'not_ready', 'Payments are being set up.');
-    let a = accountRow(f.id);
+    let a = accountRow(f.id), generation = '';
+    // Once a boss has cut the link from their side, that account can't be used again: a fresh one, and the old record goes.
+    if (a?.disabled_reason === 'deauthorized') { generation = `-after-${a.account}`; run(db, 'DELETE FROM pay_accounts WHERE floor_id=? AND livemode=?', f.id, LIVE); a = null; }
     if (!a) {
       const params = {
         controller: { fees: { payer: 'account' }, losses: { payments: 'stripe' }, requirement_collection: 'stripe', stripe_dashboard: { type: 'full' } },
         business_profile: { name: clean(f.name, 80), ...(/^https:/.test(cfg.publicOrigin || '') ? { url: `${cfg.publicOrigin}/theoffice/floor/${f.slug}` } : {}), product_description: clean(f.tagline, 200) || undefined },
         metadata: { office_floor: String(f.id) },
       };
-      const created = await stripe.createAccount(params, `office-account-${f.id}-${mode}`);
+      const created = await stripe.createAccount(params, `office-account-${f.id}-${mode}${generation}`);
       tx(db, () => {
         run(db, 'INSERT OR IGNORE INTO pay_accounts (floor_id,livemode,account,created_at,updated_at) VALUES (?,?,?,?,?)', f.id, LIVE, created.id, now(), now());
         applyAccount(created.id, created);
@@ -307,8 +309,9 @@ export function installPay(ext) {
     let apply = () => {};
     switch (ev.type) {
       case 'account.updated': if (o.id === account) apply = () => applyAccount(account, o); break;
-      case 'account.application.deauthorized': apply = () => run(db, 'UPDATE pay_accounts SET disconnected_at=?, updated_at=? WHERE account=?', now(), now(), account); break;
+      case 'account.application.deauthorized': apply = () => run(db, "UPDATE pay_accounts SET disconnected_at=?, disabled_reason='deauthorized', updated_at=? WHERE account=?", now(), now(), account); break;
       case 'checkout.session.completed': case 'checkout.session.async_payment_succeeded': {
+        if (!orderByToken(o.metadata?.office_order || o.client_reference_id)) break;
         // Subscriptions are read fresh, so a late or reordered event can't put back a state Stripe has moved on from.
         const sub = o.subscription ? await stripe.getSubscription(account, idOf(o.subscription)) : null;
         apply = () => applySession(account, o, sub);
@@ -321,7 +324,7 @@ export function installPay(ext) {
       }
       case 'invoice.paid': {
         const subId = o.parent?.subscription_details?.subscription;
-        if (subId) {
+        if (subId && (o.parent?.subscription_details?.metadata?.office_order || get(db, 'SELECT 1 x FROM pay_orders WHERE account=? AND subscription=?', account, idOf(subId)))) {
           const inv = await stripe.getInvoice(account, o.id);
           const pi = inv.payments?.data?.find((x) => x.status === 'paid' || x.is_default)?.payment?.payment_intent || '';
           const sub = await stripe.getSubscription(account, idOf(subId));
@@ -330,6 +333,8 @@ export function installPay(ext) {
         break;
       }
       case 'customer.subscription.created': case 'customer.subscription.updated': case 'customer.subscription.deleted': {
+        // A connected account is the boss's whole Stripe business, so most subscriptions on it may have nothing to do with us. Only ours cost a call.
+        if (!o.metadata?.office_order && !get(db, 'SELECT 1 x FROM pay_orders WHERE account=? AND subscription=?', account, o.id)) break;
         const sub = await stripe.getSubscription(account, o.id);
         apply = () => applySubscription(account, sub);
         break;
@@ -426,6 +431,7 @@ export function installPay(ext) {
     try {
       const prior = get(db, "SELECT * FROM pay_products WHERE floor_id=? AND project=? AND livemode=? AND key=? AND status='live'", f.id, row.project, LIVE, row.key);
       const product = prior?.stripe_product || (await stripe.createProduct(account.account, { name: row.name, description: row.description || undefined, metadata: { office_floor: String(f.id), office_project: row.project, office_product: row.key } }, `office-product-${row.id}`)).id;
+      if (prior && (prior.name !== row.name || prior.description !== row.description)) { try { await stripe.updateProduct(account.account, product, { name: row.name, description: row.description }); } catch (e) { log('warn', 'pay_product_rename', { err: hideKeys(e?.message) }); } }
       const price = await stripe.createPrice(account.account, { product, unit_amount: row.amount_cents, currency: row.currency, ...(row.interval ? { recurring: { interval: row.interval } } : {}), metadata: { office_product: row.key } }, `office-price-${row.id}`);
       tx(db, () => {
         if (prior) run(db, "UPDATE pay_products SET status='superseded', updated_at=? WHERE id=?", now(), prior.id);

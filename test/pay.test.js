@@ -589,12 +589,28 @@ describe('with Stripe connected (mock)', () => {
       const r2 = await post(b, signed(b)); assert.equal(r2.status, 200); assert.equal(r2.json.ignored, 'mode');
       assert.equal(get(t.db, 'SELECT COUNT(*) n FROM pay_events WHERE account=?', 'acct_nobodyatall').n, 0);
     });
+    test('the boss\'s other Stripe business is left alone and costs no API calls', async () => {
+      const calls = () => mock.state.requests.length;
+      const before = calls();
+      for (const [type, object] of [
+        ['customer.subscription.updated', { id: 'sub_theirs', object: 'subscription', status: 'canceled', metadata: {} }],
+        ['invoice.paid', { id: 'in_theirs', object: 'invoice', amount_paid: 99, parent: { subscription_details: { subscription: 'sub_theirs', metadata: {} } } }],
+        ['checkout.session.completed', { id: 'cs_theirs', object: 'checkout.session', status: 'complete', payment_status: 'paid', mode: 'subscription', subscription: 'sub_theirs', metadata: {} }],
+        ['charge.refunded', { id: 'ch_theirs', object: 'charge', refunded: true, amount_refunded: 500, amount: 500, payment_intent: 'pi_theirs', metadata: {} }],
+      ]) {
+        const p = evt({ type, data: { object } });
+        const r = await post(p, signed(p));
+        assert.equal(r.status, 200, `${type} ${r.text}`);
+      }
+      assert.equal(calls(), before, 'no Stripe call for anything that is not ours');
+    });
     test('malformed JSON and non-events are refused; a retryable failure asks Stripe to try again', async () => {
       const bad = 'not json';
       assert.equal((await post(bad, signed(bad))).status, 400);
       const noId = JSON.stringify({ type: 'x', data: {} });
       assert.equal((await post(noId, signed(noId))).status, 400);
-      const payload = evt({ type: 'customer.subscription.updated', data: { object: { id: 'sub_nonexistent', object: 'subscription' } } });
+      const payload = evt({ type: 'customer.subscription.updated', data: { object: { id: 'sub_nonexistent', object: 'subscription', metadata: { office_order: 'ord_x' } } } });
+      mock.state.failNext.push({ status: 500 }, { status: 500 });
       const r = await post(payload, signed(payload));
       assert.equal(r.status, 500, r.text);
       assert.equal(get(t.db, 'SELECT COUNT(*) n FROM pay_events WHERE id=?', JSON.parse(payload).id).n, 0, 'not marked done, so Stripe\'s retry still counts');
