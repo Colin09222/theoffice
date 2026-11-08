@@ -8,7 +8,7 @@ The code: `server/cloud/pay.js` (everything but the HTTP client), `server/cloud/
 `server/cloud/pay-schema.js`, `server/cloud/pay-config.js`, `public/js/pay-ui.js`, and `office.pay` in `server/app-client/sdk.js`. Built to docs.stripe.com, pinned to API version `2026-10-28.endive`.
 
 ## Going live
-Nothing is deployed by this repo's tests. Stripe has no key yet; until there is one the site shows "Payments are being set up" and `office.pay` answers not-ready. There is no switch to flip in the code.
+Until there is a key the floors show "Payments are being set up" and `office.pay` answers not-ready. There is no switch to flip in the code.
 
 1. Sign up at stripe.com and activate the platform account. Under **Connect**, finish the platform profile and branding (name, icon, colour: Stripe requires them for hosted onboarding) and enable the countries you want. Set **Connect > Settings > Onboarding options** as you like.
 2. Do this all in **test mode first** (see below), then repeat with the live key: the two are kept completely apart.

@@ -59,12 +59,12 @@ export function payStatusRow(db, floor) {
 }
 
 export function installPay(ext) {
-  const { db, cfg, engine, log, now, hooks, GET, POST, json, readJson, requireOwner, HttpError } = ext;
+  const { db, cfg, engine, log, now, hooks, GET, POST, json, requireOwner, HttpError } = ext;
   const key = cfg.stripeSecretKey || '';
   const mode = keyMode(key);
   const ready = payReady(cfg);
   const LIVE = mode === 'live' ? 1 : 0;
-  // A second account row for the same floor once the keys go live: never mix test and live money.
+  // The mode, for code that has only the database (salesSummary, the admin script). Test and live rows are kept apart everywhere by livemode.
   run(db, "INSERT INTO pay_settings (k,v) VALUES ('mode',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", ready ? mode : '');
   if (key && !mode) log('warn', 'pay_bad_key', { why: 'STRIPE_SECRET_KEY does not look like a Stripe secret key, so payments stay off' });
   if (key && mode && !cfg.stripeWebhookSecret) log('warn', 'pay_no_webhook_secret', { why: 'STRIPE_WEBHOOK_SECRET is missing, so payments stay off' });
@@ -75,7 +75,6 @@ export function installPay(ext) {
   const accountByStripe = (account) => get(db, 'SELECT * FROM pay_accounts WHERE account=? AND livemode=?', account, LIVE);
   const orderByToken = (token) => (token ? get(db, 'SELECT * FROM pay_orders WHERE token=?', token) : null);
   const liveProducts = (F, p) => all(db, "SELECT * FROM pay_products WHERE floor_id=? AND project=? AND livemode=? AND status='live' ORDER BY id", F, p, LIVE);
-  const priceText = (r) => `${r.interval ? `${r.interval}ly ` : ''}${(r.amount_cents / 100).toFixed(2)} ${r.currency.toUpperCase()}`;
   const productView = (r) => ({ key: r.key, name: r.name, description: r.description, amountCents: r.amount_cents, currency: r.currency, interval: r.interval || null });
 
   // ---- the boss's Stripe account ----
@@ -369,7 +368,7 @@ export function installPay(ext) {
       if (!v.ok) { log('warn', 'pay_hook_refused', { why: v.reason }); return reply(400, { error: 'bad_signature' }); }
       let ev;
       try { ev = JSON.parse(raw.toString('utf8')); } catch { return reply(400, { error: 'bad_json' }); }
-      if (!ev || typeof ev !== 'object' || typeof ev.id !== 'string' || typeof ev.type !== 'string' || !ev.data || typeof ev.data !== 'object' || !/^evt_[A-Za-z0-9]{8,80}$/.test(ev.id)) return reply(400, { error: 'bad_event' });
+      if (!ev || typeof ev !== 'object' || typeof ev.id !== 'string' || typeof ev.type !== 'string' || !ev.data || typeof ev.data !== 'object' || !/^evt_[A-Za-z0-9_]{8,100}$/.test(ev.id)) return reply(400, { error: 'bad_event' });
       if (get(db, 'SELECT 1 x FROM pay_events WHERE id=?', ev.id)) return reply(200, { received: true, duplicate: true });
       // Live and test events share one production endpoint: only the kind this key speaks counts.
       if (Boolean(ev.livemode) !== Boolean(LIVE)) return reply(200, { received: true, ignored: 'mode' });
@@ -457,8 +456,8 @@ export function installPay(ext) {
     if (!row) throw new HttpError(404, 'not_found');
     const account = accountRow(f.id);
     try {
-      if (row.stripe_price) await stripe.updatePrice(account.account, row.stripe_price, { active: false });
-      if (row.stripe_product) await stripe.updateProduct(account.account, row.stripe_product, { active: false });
+      if (account && row.stripe_price) await stripe.updatePrice(account.account, row.stripe_price, { active: false });
+      if (account && row.stripe_product) await stripe.updateProduct(account.account, row.stripe_product, { active: false });
     } catch (e) {
       log('error', 'pay_archive_failed', { err: hideKeys(e?.message) });
       throw new HttpError(502, 'stripe_failed', 'Stripe didn\'t take that. Nothing changed; try again in a moment.');
