@@ -11,6 +11,8 @@ export const scrub = (s, cfg) => {
   if (cfg?.anthropicKey) out = out.split(cfg.anthropicKey).join('[redacted]');
   if (cfg?.webSearchKey) out = out.split(cfg.webSearchKey).join('[redacted]');
   if (cfg?.namecheapKey) out = out.split(cfg.namecheapKey).join('[redacted]');
+  for (const k of ['clientSecret', 'refreshToken', 'developerToken']) if (cfg?.googleAds?.[k]) out = out.split(cfg.googleAds[k]).join('[redacted]');
+  out = out.replace(/\bya29\.[A-Za-z0-9._-]+/g, '[redacted]').replace(/\b1\/\/[A-Za-z0-9._-]{20,}/g, '[redacted]');
   return out.slice(0, 300);
 };
 

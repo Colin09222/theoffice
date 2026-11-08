@@ -8,6 +8,10 @@ import { helpListing, helpListingText, answerHelp, declineHelp, HelpError, HELP_
 import { budgetReport, budgetReportText } from '../server/budget.js';
 import { purchaseListing, purchaseListingText, decidePurchase, PurchaseError } from '../server/purchases.js';
 import { readFileSync, statSync } from 'node:fs';
+import { googleAdsFromConfig } from '../server/googleads.js';
+import { adsListing, adsListingText, pauseAll } from '../server/ads-guard.js';
+import { ensureAdSpend, resumeAds } from '../server/business.js';
+import { scrub } from '../server/llm.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -25,7 +29,10 @@ const usage = () => {
     '  node scripts/admin.mjs help answer --id N --decline          decline one',
     '  node scripts/admin.mjs budget [--json]          spent, limit and remaining per provider, what each floor has spent, and a flag at 50%, 80% and 100%',
     '  node scripts/admin.mjs purchases list [--json]  what the staff have asked to buy and nobody has decided. Everything a floor wrote is fenced as untrusted data',
-    '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick'].join('\n'));
+    '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick',
+    '  node scripts/admin.mjs ads list [--json]        paid Google ads: approved against spent per campaign (Google\'s own figures), and this month against the cap',
+    '  node scripts/admin.mjs ads pause-all            emergency stop: pause every enabled campaign in the Google Ads account now; no new paid campaign starts until ads resume',
+    '  node scripts/admin.mjs ads resume               lift the stop left by pause-all or by the watchdog (paused campaigns stay paused)'].join('\n'));
   process.exit(1);
 };
 if (!cmd) usage();
@@ -116,5 +123,20 @@ if (cmd === 'code') {
     try { decidePurchase(db, id, status, valueOf('--note') ?? ''); } catch (e) { if (e instanceof PurchaseError) die(e.message); throw e; }
     console.log(`Marked #${id} ${status}. The floor hears on the server's next tick.`);
   } else usage();
+} else if (cmd === 'ads') {
+  // Needs the server's environment (GOOGLE_ADS_*, AD_MONTHLY_CAP_USD), so run it in the container. It prints no token.
+  const api = googleAdsFromConfig(cfg);
+  try {
+    if (rest[0] === 'list') {
+      const listing = await adsListing({ db, cfg, api });
+      console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : adsListingText(listing));
+    } else if (rest[0] === 'pause-all') {
+      if (!api) die('Google Ads is not set up on this server (GOOGLE_ADS_* settings), so there is nothing to pause.');
+      console.log((await pauseAll({ db, api })).line);
+    } else if (rest[0] === 'resume') {
+      ensureAdSpend(db);
+      console.log(resumeAds(db) ? 'ads resume: new paid campaigns can start again. Paused campaigns stay paused.' : 'ads resume: there was no stop to lift.');
+    } else usage();
+  } catch (e) { die(`Google Ads: ${scrub(e?.message || e, cfg)}`); }
 } else usage();
 db.close();

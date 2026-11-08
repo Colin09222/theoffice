@@ -48,4 +48,4 @@ export function createSearch({ cfg, tool, client }) {
     },
   };
 }
-export const createMockSearch = () => ({ model: 'mock-search', async search(query) { return { text: `Mock findings for ${query}: small things that work tend to do well (https://example.com/findings).`, sources: [{ url: 'https://example.com/findings', title: 'Findings' }], failed: '', usage: { prompt: 50, completion: 40, cost: 0.002 }, searches: 1 }; } });
+export const createMockSearch = () => ({ model: 'mock-search', async search(query) { return { text: `Mock findings for ${query}: small things that work tend to do well (https://example.com/findings).`, sources: [{ url: 'https://example.com/findings', title: 'Findings' }, { url: `https://example.org/${String(query).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'topic'}`, title: `About ${String(query).slice(0, 60)}` }], failed: '', usage: { prompt: 50, completion: 40, cost: 0.002 }, searches: 1 }; } });
