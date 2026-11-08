@@ -120,7 +120,9 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
   if (!midShot) shots.push(await d.shot('play'));
   // End a run on purpose, so game over, restart and the cloud are always checked.
   await d.evaluate('window.__pt.padOn = false');
-  if ((await d.evaluate(STATE))?.scene === 'play') await d.evaluate('window.officeGame.forceOver && window.officeGame.forceOver()');
+  // From play, whatever screen the run ended on (an upgrade choice, say).
+  await ensurePlay();
+  await d.evaluate('window.officeGame.forceOver && window.officeGame.forceOver()');
   const over = await until(d, `${STATE}?.scene === 'over'`, 4000);
   if (over) { scenes.add('over'); if (!shots.some((x) => /over/.test(x))) shots.push(await d.shot('over')); }
   // The save is written as game over shows, so it is waited for rather than read once.
@@ -133,6 +135,7 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
   }
   if (over) { await d.key('Enter', true); await d.key('Enter', false); if (!(await until(d, `${STATE}?.scene === 'play'`, 3000))) restartOk = false; }
   rules.cloud = cloud === 'saved' ? posted : cloud === 'nosave' ? false : null;
+  if (rules.cloud === false) notes.push(cloud === 'nosave' ? 'No saved best was found after game over.' : over ? 'The score did not reach the leaderboard.' : 'Game over could not be reached to check saving.');
   if (rules.cloud === null) notes.push(`Office Cloud is '${cloud}' here (a local preview), so saves and the leaderboard are checked once it is published.`);
   rules.nosoftlock = !softlock && restartOk;
   if (softlock) notes.push(`Soft-lock: ${softlock}.`);
@@ -161,6 +164,8 @@ export async function useApp(d, { url, user = `pt${Date.now().toString(36)}`, pa
   // Accounts need the Office server; a local preview on a computer can only check the pages.
   const mode = await d.evaluate('(async () => { const o = window.Office && window.Office.connect && window.Office.connect(); if (!o) return "none"; await (o.ready || Promise.resolve()); return o.mode; })()');
   if (mode !== 'live') { for (const k of ['signup', 'create', 'persist', 'relogin']) rules[k] = null; notes.push(`Office Cloud is '${mode}' here, so sign-up, saving and sign-in are checked once it is published.`); const errors = await errorsOf(d); rules.loads = !errors.length; return { rules, notes, shots, errors }; }
+  // A first-time visitor: any session left from an earlier run in this browser goes first.
+  await d.evaluate('(async () => { const o = window.Office && window.Office.connect && window.Office.connect(); if (o && o.auth && o.auth.user) await o.auth.logOut().catch(() => null); return true; })()');
   await d.goto(`${url}#/signup`);
   if (!(await until(d, visible('[data-office="auth-form"]'), 5000))) { notes.push('No sign-up form with data-office="auth-form".'); return { rules, notes, shots, errors: await errorsOf(d) }; }
   await d.evaluate(fill('[data-office="username"]', user)); await d.evaluate(fill('[data-office="password"]', password)); await d.evaluate(fill('[data-office="name"]', 'Play Tester'));
