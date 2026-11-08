@@ -38,11 +38,11 @@ const work = async (list) => { for (const n of list) await owners[n].post(`/api/
 const b = await launch({ noAngle: true });
 /** Frame times and draw calls over `ms`, while `during` runs. */
 const sample = (p, ms) => p.ev(`new Promise((res) => {
-  const st = window.__stage, r = st.renderer, ts = [], calls = [], tris = [], long = []; let last = performance.now(); const end = last + ${ms};
+  const st = window.__stage, r = st.renderer, ts = [], calls = [], tris = [], long = []; let last = performance.now(); const end = last + ${ms}; const d0 = st.drawn || 0;
   const po = new PerformanceObserver((l) => { for (const e of l.getEntries()) long.push(Math.round(e.duration)); }); try { po.observe({ type: 'longtask' }); } catch {}
-  const f = (now) => { ts.push(now - last); last = now; calls.push(r.info.render.calls); tris.push(r.info.render.triangles); if (now < end) requestAnimationFrame(f); else done(); };
+  const f = (now) => { st.wake?.(); ts.push(now - last); last = now; calls.push(r.info.render.calls); tris.push(r.info.render.triangles); if (now < end) requestAnimationFrame(f); else done(); };
   const q = (a, x) => { const s = [...a].sort((m, n) => m - n); return s[Math.min(s.length - 1, Math.floor(s.length * x))]; };
-  const done = () => { po.disconnect(); res({ long: long.slice(0, 12), frames: ts.length, p50: +q(ts, 0.5).toFixed(1), p95: +q(ts, 0.95).toFixed(1), max: +Math.max(...ts).toFixed(1), fps: +(1000 * ts.length / ${ms}).toFixed(1), calls: Math.max(...calls), callsP50: q(calls, 0.5), tris: Math.max(...tris), geos: r.info.memory.geometries, tex: r.info.memory.textures, heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, tier: st.tier, dpr: st.dpr, full: window.__tower ? [...window.__tower.full.keys()].length : null }); };
+  const done = () => { po.disconnect(); res({ long: long.slice(0, 12), frames: ts.length, p50: +q(ts, 0.5).toFixed(1), p95: +q(ts, 0.95).toFixed(1), max: +Math.max(...ts).toFixed(1), fps: +(1000 * ts.length / ${ms}).toFixed(1), drawnFps: +(1000 * ((st.drawn || 0) - d0) / ${ms}).toFixed(1), calls: Math.max(...calls), callsP50: q(calls, 0.5), tris: Math.max(...tris), geos: r.info.memory.geometries, tex: r.info.memory.textures, heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, tier: st.tier, dpr: st.dpr, full: window.__tower ? [...window.__tower.full.keys()].length : null }); };
   requestAnimationFrame(f);
 })`);
 const wheel = async (p, dy, n = 1, gap = 40) => { for (let i = 0; i < n; i++) { await p.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 400, y: 420, deltaX: 0, deltaY: dy }); await sleep(gap); } };

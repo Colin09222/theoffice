@@ -12,6 +12,7 @@ import { planFor, seatOf, seatSpot, ROOM_W, ROOM_D, WALL_H } from './layouts.js'
 import { tidyLabels } from './labels.js';
 import { handOver, takeHandoff } from './handoff.js';
 import { environmentMap } from './textures.js';
+import { CUT, CUT_AMOUNT, EDGE, cutAmount } from './cutaway.js';
 
 const WS = ROOM_W / TOWER_W;            // the city's scale, the same as on a floor page
 // Floor to floor: a room's walls, then air, then the next slab. Pulled apart like an exploded drawing, so a camera tilted well down sees
@@ -20,6 +21,9 @@ export const FH = 10.5;
 // The camera looks well down, as a floor page does, so people show over their desks and screens; the floors above the one in the
 // middle rise out of its way (GAP), and the stack closes up again away from it.
 const PITCH = 0.55, GAP = 9;
+// Zoom: 1 is a floor across the free area; in to a close look at desk height, out to the whole building (both worked out per screen).
+const CLOSE = 23;  // the closest the camera comes to the floor in the middle
+const TAU = Math.PI * 2;
 const smooth01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const PLATE = TOWER_W * WS + 1.2;       // a floor's slab, as the floor page draws it
 const BASE_Y = GROUND * WS + 0.6;       // the lowest floor's room, on top of the lobby podium
@@ -42,26 +46,40 @@ const BAYER = 'float bayer4(vec2 p){ int x = int(mod(p.x, 4.0)), y = int(mod(p.y
  */
 function patch(mat, U) {
   mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, U);
+    Object.assign(sh.uniforms, U, CUT);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute float aSlot; uniform vec4 uFade[${FADE_N}]; uniform float uLift; uniform float uLiftFrom; uniform float uRide; uniform float uGap; varying float vFade;`)
+      .replace('#include <common>', `#include <common>\nattribute float aSlot; uniform vec4 uFade[${FADE_N}]; uniform float uLift; uniform float uLiftFrom; uniform float uRide; uniform float uGap; uniform float uCutOn; varying float vFade; varying vec3 vCutP; varying vec2 vCut; varying float vFar;`)
       .replace('#include <project_vertex>', `
-        bool _struct = aSlot >= 999.5; float _slot = _struct ? aSlot - 1000.0 : aSlot;
+        bool _col = aSlot >= 2999.5, _far = !_col && aSlot >= 1999.5, _struct = _col || (!_far && aSlot >= 999.5);
+        float _slot = _col ? aSlot - 3000.0 : _far ? aSlot - 2000.0 : _struct ? aSlot - 1000.0 : aSlot;
         int _si = int(clamp(_slot, 0.0, ${FADE_N * 4 - 1}.0) + 0.5);
         vFade = _struct ? 1.0 : uFade[_si / 4][_si - (_si / 4) * 4];
         vec4 mvPosition = vec4(transformed, 1.0);
         #ifdef USE_INSTANCING
           mvPosition = instanceMatrix * mvPosition;
         #endif
+        ${CUT_AMOUNT('uCutOn')}
+        vCutP = vec3(mvPosition.x, mvPosition.y - (${BASE_Y.toFixed(4)} + _slot * ${FH.toFixed(2)}), mvPosition.z); vCut = _struct ? vec2(0.0) : _cut; vFar = _far ? 1.0 : 0.0;
+        // The corner pillar nearest the camera, when it looks in across that corner, stands right in front of the room: it fades.
+        #ifdef USE_INSTANCING
+          if (_col) { vec2 _c = vec2(instanceMatrix[3].x, instanceMatrix[3].z); bool _near = _c.x * cameraPosition.x > 0.0 && _c.y * cameraPosition.z > 0.0;
+            vFar = _near ? -smoothstep(0.3, 0.5, min(abs(_cd.x), abs(_cd.y))) * uCutOn : 0.0; }
+        #endif
         mvPosition.y += uGap * smoothstep(0.0, 1.0, _slot - uRide) + (_slot > uLiftFrom ? uLift : 0.0);
         mvPosition = modelViewMatrix * mvPosition;
         gl_Position = projectionMatrix * mvPosition;
-        if (vFade <= 0.001) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);`);
+        if (vFade <= 0.001 || (_far && (vCutP.z > ${EDGE.FB} ? _cut.x : _cut.y) <= 0.001)) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nvarying float vFade;\n${BAYER}`)
-      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vFade < 0.999 && vFade <= bayer4(gl_FragCoord.xy)) discard;');
+      .replace('#include <common>', `#include <common>\nvarying float vFade; varying vec3 vCutP; varying vec2 vCut; varying float vFar;\n${BAYER}`)
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        float _b = bayer4(gl_FragCoord.xy);
+        if (vFade < 0.999 && vFade <= _b) discard;
+        // The walls facing the camera go down to their sills; the far ones come up as they do (see cutaway.js).
+        if (vFar < 0.0) { if (-vFar > _b) discard; }
+        else if (vFar > 0.5) { if ((vCutP.z > ${EDGE.FB} ? vCut.x : vCut.y) <= _b) discard; }
+        else if (vCutP.y > ${EDGE.SILL} && ((vCutP.z < ${EDGE.HB} && vCut.x > _b) || (vCutP.x < ${EDGE.HL} && vCut.y > _b))) discard;`);
   };
-  mat.customProgramCacheKey = () => `tower-${mat.type}-${mat.map ? 'map' : 'plain'}`;
+  mat.customProgramCacheKey = () => `tower2-${mat.type}-${mat.map ? 'map' : 'plain'}`;
   return mat;
 }
 
@@ -136,9 +154,11 @@ export class TowerView {
     this.slots = []; this.byNumber = new Map(); this.staff = {}; this.rooms = {};
     this.full = new Map(); this.fade = new Float32Array(FADE_N * 4).fill(1);
     this.ride = 0; this.target = 0; this.yaw = 0.35; this.targetYaw = 0.35; this.time = 0;
-    this.radius = 1; this.w = window.innerWidth; this.h = window.innerHeight; this.turns = []; this.stillFor = 0;
+    this.zoom = 1; this.targetZoom = 1; this.zMin = 0.2; this.zMax = 3.4; this.out = 0; this.pts = new Map(); this.lastInput = 0;
+    this.radius = 1; this.w = window.innerWidth; this.h = window.innerHeight; this.turns = []; this.stillFor = 0; this.edge = [0, 1];
     this.plaques = new Map(); this.plaqueRoot = document.createElement('div'); this.plaqueRoot.className = 'tower-plaques';
     this.ray = new THREE.Raycaster(); this.box3 = new THREE.Box3(); this.v = new THREE.Vector3();
+    this.ctrl = this.makeControls();
     this.setTier(stage.q || { density: 1 });
     this.bind();
   }
@@ -203,7 +223,7 @@ export class TowerView {
       // The slab, a hair inside the one a real floor draws, so the two never fight over the same surface.
       box.add(S + k, 0, y - 0.27, 0, PLATE - 0.04, 0.38, PLATE - 0.04, 0, '#e9dfcf');
       box.add(S + k, 0, y - 0.54, 0, PLATE + 0.26, 0.1, PLATE + 0.26, 0, '#d4c8b6');
-      for (const [px, pz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box.add(S + k, px * (PLATE / 2 + 0.36), y - 0.6 + FH / 2, pz * (PLATE / 2 + 0.36), 0.72, FH, 0.72, 0, '#e2d5c1');
+      for (const [px, pz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box.add(3000 + k, px * (PLATE / 2 + 0.36), y - 0.6 + FH / 2, pz * (PLATE / 2 + 0.36), 0.72, FH, 0.72, 0, '#e2d5c1');
       const d = this.rooms[s.n]?.decor || {};
       const L = s.plan;
       const wall = s.kind === 'empty' ? '#5f5a53' : d.wall || '#e9e1d3';
@@ -215,6 +235,10 @@ export class TowerView {
       box.add(k, 0, y - 0.018, 0, ROOM_W + 0.9, 0.012, ROOM_D + 0.9, 0, s.kind === 'empty' ? '#2f2d2a' : primary);
       box.add(k, 0, y - 0.009, 0, ROOM_W, 0.006, ROOM_D, 0, finish);
       for (const [a, b] of L.windows) glow.add(k, (a + b) / 2, y + 1 + (WALL_H - 1.36) / 2, -ROOM_D / 2 - 0.03, b - a, WALL_H - 1.36, 0.02, 0, s.kind === 'empty' ? '#7d8a95' : '#cfe1ee');
+      // The front and right walls, drawn only from behind, as the back and left ones are cut away.
+      box.add(2000 + k, 0, y + WALL_H / 2, ROOM_D / 2 + 0.16, ROOM_W + 0.3, WALL_H, 0.24, 0, wall);
+      box.add(2000 + k, ROOM_W / 2 + 0.16, y + WALL_H / 2, 0, 0.24, WALL_H, ROOM_D + 0.3, 0, wall);
+      for (const [a, b] of L.windows) glow.add(2000 + k, (a + b) / 2, y + 1 + (WALL_H - 1.36) / 2, ROOM_D / 2 + 0.03, b - a, WALL_H - 1.36, 0.02, 0, s.kind === 'empty' ? '#7d8a95' : '#cfe1ee');
       if (s.kind === 'empty') { sign.add(k, 0, y + 2.7, -ROOM_D / 2 - 0.01, 7.2, 1.8, 1, 0, '#ffffff'); continue; }
       const staff = this.staff[s.n] || [];
       const mgr = staff.find((p) => p.role === 'manager'); const crew = staff.filter((p) => p.role !== 'manager');
@@ -381,22 +405,39 @@ export class TowerView {
     const freeW = Math.max(120, w - i.left - i.right), freeH = Math.max(120, h - i.top - i.bottom);
     const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)), aspect = w / h;
     // The room's width as the camera sees it at this turn; a phone crops a little off the sides.
-    const yaw = Math.abs(this.yaw), span = ((ROOM_W + 1.5) * Math.cos(yaw) + (ROOM_D + 1.5) * Math.sin(yaw) + 1) * (w <= 760 ? 0.9 : 1);
+    // The room's widest extent, whichever way round the camera is, so going round never breathes in and out.
+    const span = (Math.hypot(ROOM_W + 1.5, ROOM_D + 1.5) * 0.97 + 1) * (w <= 760 ? 0.9 : 1);
     let dist = (span / 2) / (tanV * aspect * (freeW / w));
     dist = Math.min(dist, (FH * 4.2 / 2) / (tanV * (freeH / h)));  // never so far that more than four floors fit
     return { dist, i, freeW, freeH, pxPerUnit: h / (2 * dist * tanV) };
   }
   rideY(r = this.ride) { return slotY(0) + r * FH; }
   /** How far a floor stands above its place: the gap over the floor in the middle of the screen, and a flight's lift. */
-  offsetOf(k) { return GAP * smooth01(k - this.ride) + (k > this.U.uLiftFrom.value ? this.U.uLift.value : 0); }
+  offsetOf(k) { return this.U.uGap.value * smooth01(k - this.ride) + (k > this.U.uLiftFrom.value ? this.U.uLift.value : 0); }
+  /** The whole building, ground to mast, and how far back a camera must stand to see all of it in the free area. */
+  overview(fr) {
+    const top = slotY(this.slots.length) + 40, p = 0.42, tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const need = (top * Math.cos(p) + PLATE * 1.2 * Math.sin(p)) / 2 * 1.1;
+    return { mid: top / 2, dist: Math.max(fr.dist * 1.2, need / (tanV * (fr.freeH / this.h))) };
+  }
   placeCamera() {
     const fr = this.framing = this.frame();
-    const pitch = PITCH, y = this.rideY() + 1.2;
+    const all = this.overview(fr); this.zMin = Math.min(0.85, fr.dist / all.dist); this.zMax = Math.max(2.4, fr.dist / CLOSE);
+    const z = this.zoom;
+    // Out from 1: the camera backs off and drifts to the building's middle, the gap over the floor in view closing a little. In from 1: closer
+    // and lower, down to desk height.
+    const out = this.out = z < 1 ? smooth01((1 - z) / Math.max(1e-3, 1 - this.zMin)) : 0, inn = z > 1 ? Math.min(1, (z - 1) / (this.zMax - 1)) : 0;
+    this.U.uGap.value = GAP * (1 - 0.55 * out);
+    const pitch = PITCH + (0.42 - PITCH) * out - (PITCH - 0.2) * Math.sqrt(inn);
+    const dist = out > 0 ? fr.dist + (all.dist - fr.dist) * out : fr.dist / z;
+    const y = this.rideY() + (1.2 - 0.3 * inn) + (all.mid - this.rideY() - 1.2) * out;
     const c = this.camera;
-    c.position.set(Math.sin(this.yaw) * Math.cos(pitch) * fr.dist, y + Math.sin(pitch) * fr.dist, Math.cos(this.yaw) * Math.cos(pitch) * fr.dist);
+    c.position.set(Math.sin(this.yaw) * Math.cos(pitch) * dist, y + Math.sin(pitch) * dist, Math.cos(this.yaw) * Math.cos(pitch) * dist);
     c.lookAt(0, y, 0);
     c.setViewOffset(this.w, this.h, (fr.i.right - fr.i.left) / 2, (fr.i.bottom - fr.i.top) / 2, this.w, this.h);
     c.updateProjectionMatrix();
+    // Far out, the haze moves back with the camera, so the whole building stays crisp.
+    const f = this.scene.fog, back = Math.max(1, dist / fr.dist); f.near = 140 * WS * back; f.far = 620 * WS * back;
   }
   clampTarget(t) { return Math.max(0, Math.min(this.slots.length - 1, t)); }
   /** Where the ride was left this visit, or else the highest floor with a company on it. */
@@ -406,6 +447,7 @@ export class TowerView {
     const top = [...this.slots].reverse().find((x) => x.kind === 'company');
     this.rideTo((s || top || this.slots[0] || { k: 0 }).k, { instant: true });
     if (spot?.yaw !== undefined) this.yaw = this.targetYaw = spot.yaw;
+    if (spot?.zoom) this.zoom = this.targetZoom = Math.min(this.zMax, spot.zoom);
   }
   rideTo(k, { instant = false } = {}) { this.target = this.clampTarget(k); if (instant) this.ride = this.target; }
   /** Rides to a floor by its number. */
@@ -413,66 +455,135 @@ export class TowerView {
 
   // ---------- input: wheel, drag, swipe, keys, taps ----------
 
+  /** Up or down a floor, round by an angle, in or out by a factor: the buttons and keys. */
+  step(n) { this.target = this.clampTarget(Math.round(this.target) + n); this.glide = true; this.flyTicket = (this.flyTicket || 0) + 1; this.poke(); }
+  turnBy(a) { this.targetYaw = Math.round((this.targetYaw + a) / (Math.PI / 4)) * (Math.PI / 4); this.poke(); }
+  zoomBy(f) { this.targetZoom = Math.max(this.zMin, Math.min(this.zMax, this.targetZoom * f)); this.poke(); }
+  /** The whole building in view, or back to the floor in the middle when it already is. */
+  wholeBuilding() { this.targetZoom = this.targetZoom < 0.95 ? 1 : this.zMin; this.poke(); }
+  poke() { this.lastInput = performance.now(); stage.wake?.(); }
+
   bind() {
     const el = document.getElementById('scene');
     let wheelAt = 0;
     this.onWheel = (e) => {
       if (!this.active || e.target !== el || this.flight) return;
-      e.preventDefault();
-      const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
+      e.preventDefault(); this.poke();
+      const unit = e.deltaMode === 1 ? 40 : 1, dy = e.deltaY * unit, dx = e.deltaX * unit;
+      // A pinch on a trackpad arrives as ctrl+wheel: zoom. A sideways two-finger swipe turns. The wheel itself rides the floors.
+      if (e.ctrlKey || e.metaKey) { this.targetZoom = Math.max(this.zMin, Math.min(this.zMax, this.targetZoom * Math.exp(-Math.max(-60, Math.min(60, dy)) * 0.012))); return; }
+      if (Math.abs(dx) > Math.abs(dy) * 1.5) { this.targetYaw -= dx * 0.004; return; }
       this.target = this.clampTarget(this.target - dy / 150);
       wheelAt = performance.now(); this.wheeling = true; this.flyTicket = (this.flyTicket || 0) + 1;
     };
     this.snapWheel = () => { if (this.wheeling && performance.now() - wheelAt > 160) { this.wheeling = false; this.target = this.clampTarget(Math.round(this.target)); } };
+    // Safari's own trackpad pinch.
+    this.onGesture = (e) => { if (!this.active || this.flight) return; e.preventDefault(); this.poke(); if (e.type === 'gesturestart') this.gesture = this.targetZoom; else if (this.gesture) this.targetZoom = Math.max(this.zMin, Math.min(this.zMax, this.gesture * e.scale)); };
     this.onDown = (e) => {
       if (!this.active || e.target !== el || this.flight) return;
-      this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), ride: this.ride, yaw: this.targetYaw, moved: false, samples: [[performance.now(), this.ride]] };
-      this.target = this.ride;
+      this.poke();
+      this.pts.set(e.pointerId, [e.clientX, e.clientY]);
       el.setPointerCapture?.(e.pointerId);
+      if (this.pts.size === 2) {
+        // Two fingers: a pinch. Whatever the first finger was doing stops, and the gesture can no longer be a tap.
+        const [a, b] = [...this.pts.values()];
+        this.pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, zoom: this.targetZoom };
+        if (this.drag) { this.drag.moved = true; this.drag.pinched = true; this.target = this.clampTarget(Math.round(this.ride)); this.glide = true; }
+        return;
+      }
+      if (this.pts.size > 2) return;
+      this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), ride: this.ride, yaw: this.targetYaw, moved: false, axis: null, samples: [[performance.now(), this.ride, this.targetYaw]] };
+      this.target = this.ride;
     };
     this.onMove = (e) => {
+      if (!this.active || !this.pts.has(e.pointerId)) return;
+      this.pts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (this.pinch && this.pts.size >= 2) {
+        const [a, b] = [...this.pts.values()];
+        this.targetZoom = Math.max(this.zMin, Math.min(this.zMax, this.pinch.zoom * (Math.hypot(a[0] - b[0], a[1] - b[1]) / this.pinch.d)));
+        this.poke(); return;
+      }
       const d = this.drag;
-      if (!this.active || !d || d.id !== e.pointerId) return;
+      if (!d || d.id !== e.pointerId || d.pinched) return;
       const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
-      if (Math.hypot(dx, dy) > 8) d.moved = true;
+      // Past a few pixels it is a drag, never a tap, and it takes the way it set off: sideways turns, up and down rides the floors.
+      if (!d.moved && Math.hypot(dx, dy) > 8) { d.moved = true; d.axis = Math.abs(dx) > Math.abs(dy) * 1.15 ? 'turn' : 'ride'; d.sx = e.clientX; d.sy = e.clientY; }
       if (!d.moved) return;
+      this.poke();
       if (!d.called) { d.called = true; this.flyTicket = (this.flyTicket || 0) + 1; }
-      const per = FH * (this.framing?.pxPerUnit || 10);
-      this.ride = this.target = Math.max(-0.35, Math.min(this.slots.length - 0.65, d.ride + dy / per));
-      this.targetYaw = Math.max(-0.25, Math.min(0.95, d.yaw - dx * 0.003));
-      const now = performance.now(); d.samples.push([now, this.ride]); while (d.samples.length > 2 && now - d.samples[0][0] > 120) d.samples.shift();
+      const mx = e.clientX - d.sx, my = e.clientY - d.sy;
+      if (d.axis === 'ride') {
+        const per = FH * (this.framing?.pxPerUnit || 10) * Math.max(0.35, Math.min(1.6, this.zoom));
+        this.ride = this.target = Math.max(-0.35, Math.min(this.slots.length - 0.65, d.ride + my / per));
+      } else this.targetYaw = d.yaw - mx * (5.5 / Math.max(320, this.w));
+      const now = performance.now(); d.samples.push([now, this.ride, this.targetYaw]); while (d.samples.length > 2 && now - d.samples[0][0] > 120) d.samples.shift();
     };
     this.onUp = (e) => {
+      const had = this.pts.delete(e.pointerId);
+      if (this.pts.size < 2) this.pinch = null;
       const d = this.drag;
-      if (!this.active || !d || d.id !== e.pointerId) return;
+      if (!this.active || !had || !d || d.id !== e.pointerId) return;
       this.drag = null;
-      if (!d.moved) { if (e.type !== 'pointercancel' && performance.now() - d.t < 600) this.tap(e.clientX, e.clientY); return; }
-      // A flick carries on: the speed of the last tenth of a second, projected forward and settled on a floor.
-      const [t0, r0] = d.samples[0], [t1, r1] = d.samples[d.samples.length - 1];
-      const v = t1 > t0 ? (r1 - r0) / ((t1 - t0) / 1000) : 0;
-      this.target = this.clampTarget(Math.round(this.ride + Math.max(-14, Math.min(14, v * 0.32))));
-      this.glide = true;
+      if (d.pinched) return;
+      if (!d.moved) { if (e.type !== 'pointercancel' && performance.now() - d.t < 600 && this.pts.size === 0) this.tap(e.clientX, e.clientY); return; }
+      // A flick carries on: the speed of the last tenth of a second, projected forward, and a ride settles on a floor.
+      const [t0, r0, y0] = d.samples[0], [t1, r1, y1] = d.samples[d.samples.length - 1];
+      const dt = t1 > t0 ? (t1 - t0) / 1000 : 0;
+      if (d.axis === 'ride') {
+        const v = dt ? (r1 - r0) / dt : 0;
+        this.target = this.clampTarget(Math.round(this.ride + Math.max(-14, Math.min(14, v * 0.32))));
+        this.glide = true;
+      } else if (dt) this.targetYaw += Math.max(-2.5, Math.min(2.5, ((y1 - y0) / dt) * 0.22));
     };
     this.onKey = (e) => {
       if (!this.active || this.flight || e.altKey || e.ctrlKey || e.metaKey) return;
       const t = document.activeElement;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); this.turnBy(e.key === 'ArrowLeft' ? -Math.PI / 4 : Math.PI / 4); return; }
+      if (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_') { e.preventDefault(); this.zoomBy(e.key === '-' || e.key === '_' ? 1 / 1.35 : 1.35); return; }
       const step = { ArrowUp: 1, ArrowDown: -1, PageUp: 3, PageDown: -3, Home: 1e3, End: -1e3 }[e.key];
       if (step === undefined) { if (e.key === 'Enter' && t === document.body) this.enterSlot(Math.round(this.target)); return; }
       e.preventDefault();
-      this.target = this.clampTarget(Math.round(this.target) + step); this.glide = true;
+      this.step(step);
     };
     el.addEventListener('wheel', this.onWheel, { passive: false });
     el.addEventListener('pointerdown', this.onDown);
+    el.addEventListener('gesturestart', this.onGesture); el.addEventListener('gesturechange', this.onGesture);
     window.addEventListener('pointermove', this.onMove);
     window.addEventListener('pointerup', this.onUp);
     window.addEventListener('pointercancel', this.onUp);
     window.addEventListener('keydown', this.onKey);
     this.unbind = () => {
       el.removeEventListener('wheel', this.onWheel); el.removeEventListener('pointerdown', this.onDown);
+      el.removeEventListener('gesturestart', this.onGesture); el.removeEventListener('gesturechange', this.onGesture);
       window.removeEventListener('pointermove', this.onMove); window.removeEventListener('pointerup', this.onUp); window.removeEventListener('pointercancel', this.onUp);
       window.removeEventListener('keydown', this.onKey);
     };
+  }
+  /** Small buttons for all of it, for anyone who'd rather press than drag, and for screen readers. */
+  makeControls() {
+    const bar = document.createElement('div'); bar.className = 'tower-ctrl'; bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Move round the building');
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = (d, flip) => () => {
+      const g = document.createElementNS(NS, 'svg'); g.setAttribute('viewBox', '0 0 24 24'); g.setAttribute('aria-hidden', 'true'); if (flip) g.setAttribute('class', 'flip');
+      const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d); g.append(p); return g;
+    };
+    const ICON = {
+      up: svg('M6 15l6-6 6 6'), down: svg('M6 9l6 6 6-6'),
+      left: svg('M4.5 8.5A8 8 0 1 1 4 13M4.5 3.5v5h5'), right: svg('M4.5 8.5A8 8 0 1 1 4 13M4.5 3.5v5h5', true),
+      in: svg('M12 5v14M5 12h14'), out: svg('M5 12h14'),
+    };
+    const add = (key, label, fn, text) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = `tower-btn tb-${key}`; b.dataset.tower = key; b.title = label; b.setAttribute('aria-label', label);
+      if (text) b.textContent = text; else b.append(ICON[key]());
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+      bar.append(b); return b;
+    };
+    add('up', 'Floor up', () => this.step(1)); add('down', 'Floor down', () => this.step(-1));
+    add('left', 'Turn left', () => this.turnBy(-Math.PI / 4)); add('right', 'Turn right', () => this.turnBy(Math.PI / 4));
+    add('in', 'Zoom in', () => this.zoomBy(1.35)); add('out', 'Zoom out', () => this.zoomBy(1 / 1.35));
+    this.wholeBtn = add('whole', 'See the whole building', () => this.wholeBuilding(), 'Whole building');
+    return bar;
   }
   /** Which floor is under a point on the screen: the nearest floor box the ray goes into. */
   slotAt(x, y) {
@@ -525,10 +636,11 @@ export class TowerView {
     if (this.plaqueKey === `${Math.round(this.ride)}`) { /* same set */ } else { this.plaqueKey = `${Math.round(this.ride)}`; this.syncPlaques(); }
     const v = this.v; const top = this.framing.i.top, bottom = this.h - this.framing.i.bottom;
     for (const p of this.plaques.values()) {
-      // On the slab's open front, at its left end, where it covers nobody.
-      v.set(-PLATE / 2 + 0.6, slotY(p.k) + this.offsetOf(p.k) - 0.3, PLATE / 2).project(this.camera);
+      // On the slab's edge facing the camera, at its left end, where it covers nobody.
+      const [nx, nz] = this.edge;
+      v.set(nx * PLATE / 2 - nz * (PLATE / 2 - 0.6), slotY(p.k) + this.offsetOf(p.k) - 0.3, nz * PLATE / 2 + nx * (PLATE / 2 - 0.6)).project(this.camera);
       const x = (v.x * 0.5 + 0.5) * this.w, y = (-v.y * 0.5 + 0.5) * this.h;
-      const off = v.z > 1 || y < top - 10 || y > bottom + 30 || this.flight;
+      const off = v.z > 1 || y < top - 10 || y > bottom + 30 || this.flight || this.out > 0.85;
       if (p.off !== off) { p.off = off; p.el.classList.toggle('off', off); }
       if (!off) p.el.style.transform = `translate(${Math.max(6, x).toFixed(1)}px, ${y.toFixed(1)}px)`;
     }
@@ -565,7 +677,7 @@ export class TowerView {
     const to = pose.position.clone().add(new THREE.Vector3(0, slotY(s.k), 0));
     this.flight = { kind: 'in', f, ground: slotY(s.k) + pageGround(n), t: 0, dur: reduced() ? 0.35 : 1.45, from: { pos: this.camera.position.clone(), quat: this.camera.quaternion.clone(), view: { ...this.camera.view } }, to: { pos: to, quat: pose.quaternion.clone(), view: pose.view }, pose };
     this.U.uLiftFrom.value = s.k + 0.5;
-    try { sessionStorage.setItem(SPOT_KEY, JSON.stringify({ n, yaw: this.targetYaw })); } catch { /* private mode */ }
+    try { sessionStorage.setItem(SPOT_KEY, JSON.stringify({ n, yaw: this.targetYaw, zoom: Math.max(1, this.targetZoom) })); } catch { /* private mode */ }
     document.body.classList.add('tower-flying');
   }
   /** Back from a floor page: the same room, in its place in the stack, and the camera flying out from where the floor page left it. */
@@ -586,6 +698,7 @@ export class TowerView {
     // Out to the same spot the camera flew in from, when it came from here.
     let spot = null; try { spot = JSON.parse(sessionStorage.getItem(SPOT_KEY) || 'null'); } catch { /* private mode */ }
     this.ride = this.target = s.k; this.targetYaw = this.yaw = spot?.n === h.number && spot.yaw !== undefined ? spot.yaw : this.yaw;
+    if (spot?.n === h.number && spot.zoom) this.zoom = this.targetZoom = Math.min(this.zMax, spot.zoom);
     const from = { pos: h.camera.position.clone().add(new THREE.Vector3(0, slotY(s.k), 0)), quat: h.camera.quaternion.clone(), view: { ...h.camera.view } };
     this.placeCamera();
     this.flight = { kind: 'out', f, ground: slotY(s.k) + pageGround(s.n), t: 0, dur: reduced() ? 0.35 : 1.3, from, to: null };
@@ -600,19 +713,26 @@ export class TowerView {
       // Out: the tower's own framing is where the camera lands; the floors above come back down as it pulls away.
       this.placeCamera();
       const to = { pos: c.position.clone(), quat: c.quaternion.clone(), view: { ...c.view } };
-      c.position.lerpVectors(fl.from.pos, to.pos, e); c.quaternion.slerpQuaternions(fl.from.quat, to.quat, e);
+      this.orbitLerp(fl.from.pos, to.pos, e, c.position); c.quaternion.slerpQuaternions(fl.from.quat, to.quat, e);
       this.lerpView(fl.from.view, to.view, e);
       this.setLift(150 * (1 - e) ** 2);
       this.world.group.position.y = fl.ground * (1 - e);
       if (fl.t >= 1) { this.flight = null; fl.f.pinned = false; this.U.uLiftFrom.value = 1e6; this.setLift(0); document.body.classList.remove('tower-flying'); }
       return;
     }
-    c.position.lerpVectors(fl.from.pos, fl.to.pos, e); c.quaternion.slerpQuaternions(fl.from.quat, fl.to.quat, e);
+    this.orbitLerp(fl.from.pos, fl.to.pos, e, c.position); c.quaternion.slerpQuaternions(fl.from.quat, fl.to.quat, e);
     this.lerpView(fl.from.view, fl.to.view, e);
     this.setLift(150 * e * e);
     // The city comes up to where the floor page has it under this floor, so the landing and the floor page share a background too.
     this.world.group.position.y = fl.ground * e;
     if (fl.t >= 1 && !fl.done) { fl.done = true; this.handIn(fl); }
+  }
+  /** From one camera spot to another round the tower's axis, not through it: a flight from behind a floor swings round to its front. */
+  orbitLerp(a, b, e, out) {
+    const ya = Math.atan2(a.x, a.z), yb = Math.atan2(b.x, b.z), d = ((yb - ya + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    if (Math.abs(d) < 0.2) return out.lerpVectors(a, b, e);
+    const ra = Math.hypot(a.x, a.z), rb = Math.hypot(b.x, b.z), yy = ya + d * e, r = ra + (rb - ra) * e;
+    return out.set(Math.sin(yy) * r, a.y + (b.y - a.y) * e, Math.cos(yy) * r);
   }
   lerpView(a, b, e) {
     const c = this.camera;
@@ -638,16 +758,23 @@ export class TowerView {
 
   // ---------- the stage's view interface ----------
 
+  /** Nothing moving but the people: the stage may draw every other frame. */
+  idle() {
+    return !this.flight && !this.drag && !this.pinch && this.stillFor > 3 && this.building == null && !this.turns.length
+      && Math.abs(this.targetZoom - this.zoom) < 1e-3 && Math.abs(this.targetYaw - this.yaw) < 1e-3 && [...this.full.values()].every((f) => f.ready && (f.show === 0 || f.show === 1));
+  }
+
   enter() {
     this.active = true;
     const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WS); w.group.position.set(0, this.flight?.kind === 'out' ? this.flight.ground : 0, 0);
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
     const r = stage.renderer; r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true; r.toneMappingExposure = 0.92;
-    document.body.append(this.plaqueRoot);
+    document.body.append(this.plaqueRoot, this.ctrl);
+    CUT.uCutOn.value = 1;  // the walls facing the camera are cut away (cutaway.js)
   }
   /** Outside, or off to a floor page: the real floors stop listening while nobody can see them. */
   leave() {
-    this.active = false; this.plaqueRoot.remove();
+    this.active = false; this.plaqueRoot.remove(); this.ctrl.remove(); this.pts.clear(); this.pinch = null; this.drag = null;
     for (const f of this.full.values()) { this.quiet(f); for (const a of f.view.actors.values()) { a.tagOff = true; a.tag.style.visibility = 'hidden'; } }
     const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true;
   }
@@ -671,7 +798,7 @@ export class TowerView {
     this.time += dt;
     this.world.update(dt, this.time);
     this.snapWheel();
-    const moving = !!this.drag || !!this.flight || this.wheeling || Math.abs(this.target - this.ride) > 0.02;
+    const moving = !!this.drag || !!this.pinch || !!this.flight || this.wheeling || Math.abs(this.target - this.ride) > 0.02;
     this.stillFor = moving ? 0 : this.stillFor + dt;
     if (this.turns.length && this.stillFor > 0.12) this.turns.shift()();
     if (this.flight) this.updateFlight(dt);
@@ -680,7 +807,10 @@ export class TowerView {
       const k = 1 - Math.exp(-dt * (this.drag ? 30 : this.glide ? 4.2 : 9));
       if (!this.drag) this.ride += (this.target - this.ride) * k;
       if (this.glide && Math.abs(this.target - this.ride) < 0.002) this.glide = false;
+      // Turning and zooming ease out with a little damping; the turn goes all the way round.
       this.yaw += (this.targetYaw - this.yaw) * (1 - Math.exp(-dt * 6));
+      this.zoom += (this.targetZoom - this.zoom) * (1 - Math.exp(-dt * 7));
+      if (Math.abs(this.targetZoom - this.zoom) < 1e-4) this.zoom = this.targetZoom;
       this.placeCamera();
     }
     this.U.uRide.value = this.ride;
@@ -689,12 +819,16 @@ export class TowerView {
     const y = this.rideY();
     this.sun.position.copy(SUN_DIR).multiplyScalar(64).add(this.v.set(0, y, 0)); this.sun.target.position.set(0, y, 0); this.sun.target.updateMatrixWorld();
     this.manage(dt);
+    // The slab edge that faces the camera: plaques sit on it, and a tag behind the one above is put away.
+    const cx = this.camera.position.x, cz = this.camera.position.z;
+    this.edge = Math.abs(cz) >= Math.abs(cx) ? [0, Math.sign(cz) || 1] : [Math.sign(cx), 0];
+    if (this.wholeBtn) { const whole = this.targetZoom < 0.95; if (this.wholeBtn.dataset.on !== String(whole)) { this.wholeBtn.dataset.on = String(whole); this.wholeBtn.textContent = whole ? 'Back to the floor' : 'Whole building'; } }
     const c = Math.round(this.ride), phone = this.w <= 760, tags = new Map();
     for (const f of this.full.values()) {
       if (!f.view.root.visible) continue;
-      f.view.tagsOn = !this.flight && Math.abs(f.slot.k - c) <= (phone ? 0 : 1);
-      // Where the slab of the floor above meets the open front: a tag whose person is behind it is put away.
-      f.view.coverY = slotY(f.slot.k + 1) + this.offsetOf(f.slot.k + 1) - 0.6; f.view.coverZ = PLATE / 2;
+      f.view.tagsOn = !this.flight && this.zoom > 0.7 && Math.abs(f.slot.k - c) <= (phone ? 0 : 1);
+      // Where the slab of the floor above meets the open side facing the camera: a tag whose person is behind it is put away.
+      f.view.coverY = slotY(f.slot.k + 1) + this.offsetOf(f.slot.k + 1) - 0.6; f.view.coverD = PLATE / 2;
       f.view.update(dt);
       if (f.view.tagsOn) for (const [id, a] of f.view.actors) tags.set(`${f.slot.k}:${id}`, a);
     }
@@ -712,7 +846,7 @@ export class TowerView {
     for (const g of Object.values(this.geos)) g.dispose();
     this.scene.remove(this.world.group);
     this.scene.visible = false;  // the stage may still draw it once or twice before the next view arrives
-    this.plaqueRoot.remove();
+    this.plaqueRoot.remove(); this.ctrl.remove();
     document.body.classList.remove('tower-flying');
   }
 }

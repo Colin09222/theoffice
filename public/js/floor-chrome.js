@@ -4,6 +4,7 @@ import { h, api, clear, put, toast, BASE } from './dom.js';
 
 import { icon } from './icons.js';
 import { portrait } from './portrait.js';
+import { lift, prefetchFloor } from './floorcache.js';
 
 const TAB_ICONS = { chat: 'phone-call', talk: 'chats-teardrop', work: 'notebook', tasks: 'push-pin', projects: 'archive', requests: 'receipt', inbox: 'envelope-simple', orders: 'calendar-check', about: 'identification-badge', business: 'briefcase' };
 export const tabIcon = (tab) => icon(TAB_ICONS[tab] || 'file-text');
@@ -61,9 +62,11 @@ export function buildScrubber(page) {
     const list = d.floors.filter((f) => f.status === 'active').sort((a, b) => b.number - a.number);
     const go = (f) => { if (f) window.officeGo(`/floor/${f.slug}`); };
     const above = [...list].reverse().find((f) => f.number > here), below = list.find((f) => f.number < here);
-    const wire = (btn, to, f, word) => { btn.disabled = !f; to.textContent = f ? String(f.number) : ''; btn.title = f ? `${word}: floor ${f.number}, ${f.name || 'moving in'}` : `No open floor ${word.toLowerCase()}`; btn.setAttribute('aria-label', f ? `${word} to floor ${f.number}` : `No open floor ${word.toLowerCase()}`); btn.onclick = () => go(f); };
+    const wire = (btn, to, f, word) => { btn.disabled = !f; to.textContent = f ? String(f.number) : ''; btn.title = f ? `${word}: floor ${f.number}, ${f.name || 'moving in'}` : `No open floor ${word.toLowerCase()}`; btn.setAttribute('aria-label', f ? `${word} to floor ${f.number}` : `No open floor ${word.toLowerCase()}`); btn.onclick = () => { lift.dir = word === 'Up' ? 1 : -1; go(f); }; };
     wire(up, upTo, above, 'Up'); wire(down, downTo, below, 'Down');
-    page.liftGo = (dir) => go(dir > 0 ? above : below);
+    // The floors either side are fetched while this one is looked at, so the lift opens on them at once.
+    setTimeout(() => { if (!page.dead) { for (const f of [above, below]) if (f) prefetchFloor(f.slug); page.buildAhead?.(above, below); } }, 1200);
+    page.liftGo = (dir) => { lift.dir = dir; go(dir > 0 ? above : below); };
     clear(track);
     let lit = null;
     for (const f of list) {
