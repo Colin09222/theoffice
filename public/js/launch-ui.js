@@ -74,7 +74,12 @@ export function makerCard(page) {
   const m = page.state.makers;
   if (!page.owner || !m?.job || m.job.stage === 'stopped') return null;
   const box = h('div.maker-card', { 'data-maker': '', 'data-stage': m.job.stage });
+  let shown = '';
   const render = (job) => {
+    // Each server step arrives as an event; a redraw of an unchanged card could swallow a tap on Launch.
+    const same = JSON.stringify(job);
+    if (same === shown) return;
+    shown = same;
     box.dataset.stage = job.stage;
     const building = ['doc', 'build', 'test'].includes(job.stage);
     const steps = h('ol.maker-steps', {}, ...job.steps.map((s) => h(`li.${s.state}`, { 'data-step-state': s.state }, icon(STEP_ICON[s.state] || 'caret-down'), s.label, STEP_WORD[s.state] ? h('em.step-word', {}, s.state === 'skipped' && s.note && s.note !== 'not run' ? `skipped, ${s.note}` : STEP_WORD[s.state]) : null)));
