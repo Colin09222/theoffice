@@ -283,8 +283,8 @@ export function installLegal(ext) {
   /** Tells the boss, in the boss's own channel. The facts and the flags are theirs alone. */
   function tell(floorId, text) {
     const a = lawyerOf(floorId);
-    const r = run(db, 'INSERT INTO messages (floor_id,role,agent_id,text,created_at) VALUES (?,?,?,?,?)', floorId, 'report', a?.id ?? null, text, now());
-    engine.emit(floorId, 'message', { id: Number(r.lastInsertRowid), role: 'report', agentId: a?.id ?? null, text, createdAt: now() }, { chat: true, ownerOnly: true });
+    // The building's boss-only notice: never shown to visitors, never read back to a model, and not the manager's launch report.
+    engine.addMessage(floorId, 'budget', a?.id ?? null, text);
   }
   const say = (floorId, text, project) => { const a = lawyerOf(floorId); const f = get(db, 'SELECT * FROM floors WHERE id=?', floorId); if (a && f) try { engine.talk(floorId, a, engine.bossOf(f), text, { kind: 'handoff', project }); } catch { /* talk is a nicety */ } };
   const ping = (floorId) => engine.emit(floorId, 'legal', {}, { ownerOnly: true, persist: false });
