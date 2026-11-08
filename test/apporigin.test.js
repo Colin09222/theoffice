@@ -207,6 +207,9 @@ describe('a project on its own origin', () => {
     assert.doesNotMatch(out, /<b>|it's|"q/); assert.match(out, /^<meta property="og:image" content="https:\/\/a\.example\/[^"]*x\.jpg">$/);
     assert.equal(absoluteMeta('<meta property="og:image" content="data:image/png;base64,AA">', 'https://a.example/'), '<meta property="og:image" content="data:image/png;base64,AA">');
     assert.equal(absoluteMeta('<p>no meta</p>', 'https://a.example/'), '<p>no meta</p>');
+    const latin = Buffer.from([0x3c, 0x70, 0x3e, 0xe9, 0x3c, 0x2f, 0x70, 0x3e]);
+    assert.equal(absoluteMeta(latin, 'https://a.example/'), latin, 'a page with no previews is passed through untouched');
+    assert.match(absoluteMeta(Buffer.from('<meta property="og:image" content="x.jpg">'), 'https://a.example/'), /content="https:\/\/a\.example\/x\.jpg"/);
   });
   test('a suspended floor\'s projects go dark, on both addresses', async () => {
     const c = await claim(t, 'Suspended Co');

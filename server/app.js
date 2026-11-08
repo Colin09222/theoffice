@@ -833,7 +833,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     const etag = `W/"${pr.published_at}"`;
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ...HEAD, etag }); return res.end(); }
     res.writeHead(200, { ...HEAD, etag, 'content-type': hit.type });
-    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(String(hit.body), `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
+    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(hit.body, `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
   }
   async function serveData(req, res, f, pr, label, rawUrl, HEAD) {
     const reply = (status, obj) => { res.writeHead(status, { ...HEAD, 'cache-control': 'no-store', 'content-type': 'application/json; charset=utf-8', ...(status === 429 ? { 'retry-after': '30' } : {}) }); res.end(JSON.stringify(obj)); };

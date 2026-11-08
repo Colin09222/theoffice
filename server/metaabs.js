@@ -3,9 +3,10 @@
 const KEYS = /^(og:image|og:image:url|og:image:secure_url|og:url|twitter:image|twitter:image:src)$/i;
 const attr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** html with relative preview URLs made absolute against pageUrl, the address the page is served at. */
-export function absoluteMeta(html, pageUrl) {
-  if (typeof html !== 'string' || !/og:|twitter:/i.test(html)) return html;
+/** The page with relative preview URLs made absolute against pageUrl, the address it is served at. A page with none comes back as it was, byte for byte. */
+export function absoluteMeta(body, pageUrl) {
+  const html = Buffer.isBuffer(body) ? (body.includes('og:') || body.includes('twitter:') ? body.toString('utf8') : '') : body;
+  if (typeof html !== 'string' || !/og:|twitter:/i.test(html)) return body;
   return html.replace(/<meta\b[^>]{0,2000}>/gi, (tag) => {
     const key = /\b(?:property|name)\s*=\s*["']([^"']{1,60})["']/i.exec(tag)?.[1];
     if (!key || !KEYS.test(key.trim())) return tag;
