@@ -94,9 +94,9 @@ function drawFloorTile(style) {
   }
   if (style === 'carpet') {
     c.width = c.height = 256;
-    x.fillStyle = '#efc7ae'; x.fillRect(0, 0, 256, 256);
-    x.fillStyle = '#f4d1ba'; for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) if ((i + j) % 2) x.fillRect(i * 64, j * 64, 64, 64);
-    x.strokeStyle = 'rgba(160,102,70,.28)'; x.lineWidth = 3; x.strokeRect(0, 0, 256, 256);
+    x.fillStyle = '#c9dfc5'; x.fillRect(0, 0, 256, 256);
+    x.fillStyle = '#d3e7cd'; for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) if ((i + j) % 2) x.fillRect(i * 64, j * 64, 64, 64);
+    x.strokeStyle = 'rgba(90,130,90,.3)'; x.lineWidth = 3; x.strokeRect(0, 0, 256, 256);
     return { c, across: 7 };
   }
   if (style === 'terrazzo') {
