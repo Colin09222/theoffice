@@ -56,7 +56,9 @@ function followList(list, body, rest) {
     stop() { ro.disconnect(); pill.remove(); },
   };
   list.addEventListener('scroll', () => { if (Math.abs(list.scrollTop - ownTop) <= 2) return; f.pinned = near(); if (f.pinned) pill.hidden = true; }, { passive: true });
-  const ro = new ResizeObserver(() => { if (f.pinned) f.settle(); else place(); });
+  // Whenever the list changes size at the bottom, it stays at the bottom. And someone who has just started typing wants to see what they're answering.
+  const typing = () => document.body.classList.contains('kb-open') && document.activeElement?.closest?.('.chat-input');
+  const ro = new ResizeObserver(() => { if (f.pinned || typing()) f.settle(); else place(); });
   ro.observe(list);
   return f;
 }
