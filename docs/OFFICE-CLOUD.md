@@ -10,7 +10,7 @@ through one script. The staff's full reference is `server/app-client/OFFICE-CLOU
 <script src="_office/office.js"></script>
 <script> const office = Office.connect(); </script>
 ```
-`office.auth`, `office.db`, `office.saves`, `office.leaderboard`, `office.rooms`, `office.files`, `office.ai`, `office.fetch`, `office.scrape` (plus `office.shared` and `office.forms`,
+`office.auth`, `office.db`, `office.saves`, `office.leaderboard`, `office.rooms`, `office.files`, `office.pay` (see `docs/PAYMENTS.md`), `office.ai`, `office.fetch`, `office.scrape` (plus `office.shared` and `office.forms`,
 which sit on the older `/_data/v1` store). The same file is at `/theoffice/sdk/office.js` on the main site for reference.
 
 Server code is a separate, rare thing: see `docs/OFFICE-RUNNER.md`. A page finds its project's server with `office.server.url()`.
@@ -20,7 +20,7 @@ Server code is a separate, rare thing: see `docs/OFFICE-RUNNER.md`. A page finds
   CSP (`connect-src 'self'`, now with the same host's `wss:` spelled out) already allows it. The project is whichever one the Host names.
 - Rooms are WebSockets at `/_office/cloud/rooms/<name>`, written by hand (`server/cloud/ws.js`): text frames only, no compression.
   Caddy passes the upgrade straight through, as the live edge config already proxies these hosts to `127.0.0.1:8083`.
-- Code: `server/cloud/` (`index.js` HTTP and upgrade, `store.js` SQLite, `rooms.js`, `ws.js`, `schema.js`, `powers.js` switches and counts, `ai.js`, `web.js`, `robots.js`, `scrape.js`), `server/app-client/sdk.js`.
+- Code: `server/cloud/` (`index.js` HTTP and upgrade, `store.js` SQLite, `rooms.js`, `ws.js`, `schema.js`, `powers.js` switches and counts, `ai.js`, `web.js`, `robots.js`, `scrape.js`), `server/app-client/sdk.js`. Payments are `server/cloud/pay.js` and friends (`docs/PAYMENTS.md`).
 
 ## Safety
 - **Isolation:** every row carries `(floor_id, project)` and every query names both; sessions, files, rooms and boards are looked up the same way.

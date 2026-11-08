@@ -18,7 +18,7 @@ function route() {
   if ((r === 'signup' || r === 'signin') && inn) { location.hash = '#/app'; return; }
   if (r === 'signup' || r === 'signin') return showAuth(r);
   if (r === 'app') { view('app'); return load(); }
-  if (r === 'settings') { view('settings'); return loadSettings(); }
+  if (r === 'settings') { view('settings'); loadSettings(); return loadPlan(); }
   view('landing');
 }
 
@@ -91,6 +91,52 @@ $('[data-office="settings-form"]').addEventListener('submit', async (e) => {
   const s = { display: $('[data-office="display"]').value.trim().slice(0, 40), compact: $('[data-office="compact"]').checked };
   try { await office.saves.set('settings', s); document.body.classList.toggle('compact', s.compact); say(st, 'Saved.'); } catch (x) { say(st, x.message, true); }
 });
+
+// ---- payments: Stripe's own checkout page, and the money goes to the boss. Prices come from office.pay.status(), never hard-coded here. ----
+// Set PRODUCT to the key the manager proposed. A real paid feature checks office.pay.has(PRODUCT), and keeps its data in a collection that product unlocks.
+const PRODUCT = 'pro';
+let pricing = null;
+const priceText = (p) => { const a = new Intl.NumberFormat(undefined, { style: 'currency', currency: p.currency.toUpperCase() }).format(p.amountCents / 100); return p.interval ? `${a} a ${p.interval}` : a; };
+async function buy(product, btn, note) {
+  if (!office.auth.user) { location.hash = '#/signup'; return; }
+  btn.disabled = true; say(note, 'Taking you to Stripe...');
+  const r = await office.pay.checkout({ product });
+  if (!r.ok) { btn.disabled = false; say(note, r.message, true); }
+}
+async function loadPricing() {
+  const box = $('[data-office="payments"]'), status = $('[data-office="pricing-status"]'), list = $('[data-office="plans"]');
+  pricing = await office.pay.status();
+  box.hidden = false; list.replaceChildren();
+  if (!pricing.ready) return say(status, pricing.message || 'Paid plans are coming soon.');
+  say(status, pricing.products.length ? (pricing.testMode ? 'Test mode: no real money moves.' : '') : 'Paid plans are coming soon.');
+  for (const p of pricing.products) {
+    const li = document.createElement('li'); li.className = 'plan';
+    const name = document.createElement('b'); name.textContent = p.name;
+    const price = document.createElement('span'); price.textContent = priceText(p);
+    const about = document.createElement('p'); about.textContent = p.description || '';
+    const go = document.createElement('button'); go.className = 'btn'; go.type = 'button'; go.dataset.office = 'buy'; go.textContent = 'Get it';
+    const note = document.createElement('p'); note.className = 'status'; note.setAttribute('role', 'status');
+    go.addEventListener('click', () => buy(p.key, go, note));
+    li.append(name, price, about, go, note);
+    list.append(li);
+  }
+}
+async function loadPlan() {
+  const st = $('[data-office="plan-status"]'), up = $('[data-office="upgrade"]'), man = $('[data-office="manage"]'), note = $('[data-office="plan-note"]');
+  const [s, paid] = await Promise.all([pricing ? pricing : office.pay.status(), office.pay.has(PRODUCT)]);
+  const p = s.products.find((x) => x.key === PRODUCT);
+  st.textContent = paid ? `You have ${p?.name || 'the paid plan'}.` : s.ready && p ? `You are on the free plan. ${p.name}: ${priceText(p)}.` : 'Free. Paid plans are coming soon.';
+  up.hidden = paid || !s.ready || !p; man.hidden = !paid;
+  if (!s.ready && s.message) say(note, s.message);
+  if (paid && returned === 'success') say(note, 'Thanks. It is yours now.');
+  returned = '';
+}
+$('[data-office="upgrade"]').addEventListener('click', (e) => buy(PRODUCT, e.currentTarget, $('[data-office="plan-note"]')));
+$('[data-office="manage"]').addEventListener('click', async (e) => { const note = $('[data-office="plan-note"]'); e.currentTarget.disabled = true; say(note, 'Taking you to Stripe...'); const r = await office.pay.manage(); if (!r.ok) { e.currentTarget.disabled = false; say(note, r.message, true); } });
+let returned = new URLSearchParams(location.search).get('office_pay') || '';
+if (returned) history.replaceState(null, '', location.pathname + location.hash);
+if (returned === 'success') location.hash = '#/settings';
+loadPricing();
 
 addEventListener('hashchange', route);
 route();

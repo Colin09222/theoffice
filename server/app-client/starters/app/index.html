@@ -34,7 +34,11 @@
       <li><b>Private by default.</b> What you add is only yours.</li>
     </ul>
     <p><a class="btn big" href="#/signup">Get started, free</a></p>
-    <p class="soon" data-office="payments">Paid plans: coming soon. Nothing here takes a card yet.</p>
+    <section class="pricing" data-office="payments" aria-label="Plans" hidden>
+      <h3>Plans</h3>
+      <p class="status" role="status" data-office="pricing-status"></p>
+      <ul class="plans" data-office="plans"></ul>
+    </section>
   </section>
   <section data-view="auth" class="card narrow" hidden>
     <h2 data-office="auth-title">Create your account</h2>
@@ -67,7 +71,10 @@
       <button class="btn" type="submit">Save</button>
       <p class="status" role="status" data-office="settings-status"></p>
     </form>
-    <div class="soon-box"><h3>Plan</h3><p>Free while we build it. Paid plans are coming soon; there is nothing to pay today.</p><button class="btn" type="button" disabled>Upgrade (coming soon)</button></div>
+    <div class="soon-box" data-office="plan"><h3>Plan</h3><p data-office="plan-status">Free while we build it.</p>
+      <button class="btn" type="button" data-office="upgrade" hidden>Upgrade</button>
+      <button class="btn" type="button" data-office="manage" hidden>Manage plan</button>
+      <p class="status" role="status" data-office="plan-note"></p></div>
   </section>
 </main>
 <footer class="foot"><p>{{TITLE}}</p></footer>

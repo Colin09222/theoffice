@@ -342,6 +342,7 @@ export class Engine {
       `Published: ${published.length ? published.map((p) => `${p.title} [slug ${p.slug}] (${p.kind}${p.private ? ', private' : ''}) ${p.url} checklist: ${p.checklist}; design review: ${p.reviewed ? 'done' : 'not done'}; Stripe link from the boss: ${p.payment ? 'yes' : 'no'}; sign-ups: ${p.signups}; launch report given: ${p.reported ? 'yes' : 'no'}`).join(' | ') : 'nothing yet'}`,
       ...(notLive.length ? [`Finished but not live: ${notLive.map((u) => `${u.slug} (${u.never ? 'never published' : 'changed since it was published'})`).join(' | ')}`] : []),
       ...(this.domains.enabled ? [`Domains: ${domainLines.length ? domainLines.join(' | ') : 'none'}. Limit: ${this.cfg.domainsPerFloorDay} a day, and only the boss's click buys one.`] : []),
+      ...(this.pay ? [this.pay.stateLine(floor)] : []),
       ...(this.help && this.cfg.helpEnabled !== false ? [this.help.stateLine(floor.id)] : []),
       ...(this.modes ? [this.modes.stateLine(floor.id)] : []),
       ...(this.business?.active(floor.id) ? [this.business.stateLine(floor.id)] : []),

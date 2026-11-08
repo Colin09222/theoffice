@@ -107,6 +107,22 @@ await office.ai.chat({ prompt: '...', details: true });          // {text, trunc
 - Each site has a daily token allowance and each visitor a rate limit, so a popular site can run out. **Always catch errors and show `err.message` in the page** (`ai_limit`, `ai_resting`, `ai_off`, `rate_limited`, `ai_unavailable`). It reads well as it is: no blank screens, no raw errors.
 - What the model writes comes from the model, and a visitor can steer it. Show it with `textContent`, and never let it decide anything that matters.
 
+## Payments
+A site takes money through `office.pay`. It opens Stripe's own checkout page; the money goes to the boss's own Stripe account, and card details never touch the page, the server or you.
+```js
+const s = await office.pay.status();        // {ready, testMode, message, products: [{key, name, description, amountCents, currency, interval}]}
+await office.pay.checkout({ product: 'pro' });   // takes the visitor to Stripe; {ok: false, message} when it can't
+await office.pay.has('pro');                // true or false, decided on the server
+await office.pay.manage();                  // takes a subscriber to Stripe to cancel or update their plan
+```
+- **Products and prices are proposed, then approved.** The manager proposes each one with `propose_product`; it goes on sale only when the boss taps approve. Until then `checkout` answers `{ok: false, code: 'no_product'}`. Never hard-code a price on the page: read it from `office.pay.status()`.
+- **Always handle "not ready".** `office.pay.status()` gives `ready: false` and a `message` until the building has a Stripe key and the boss has connected their Stripe account. `checkout` and `manage` never throw: when they can't go ahead they resolve to `{ok: false, code, message}`. Show that message in the page, as text.
+- **It needs an account.** A purchase stays with the signed-in Office Cloud account, so `checkout` answers `signed_out` for a guest; send them to sign up first.
+- **Back from Stripe**, the page is at the URL they left with `?office_pay=success` or `?office_pay=cancelled` added (or pass `{ returnPath }` to choose another page on this site). Call `office.pay.has(product)` and unlock; don't trust the URL.
+- **Subscriptions and refunds are automatic.** A subscription that lapses or is cancelled, and a refund, make `has` false again. Refunds are the boss's button; there is no refund from the page.
+- **Paid data is enforced by the server.** List collections in the proposal's `unlocks`: that collection then answers `402 payment_required` to everyone but buyers, whatever the page does. Never put paid content in the site's files or an unlocked collection: anyone can read those.
+- A local preview has no server, so `status()` says not ready: build and check that state there.
+
 ## Web pages: fetch and scrape
 ```js
 const page = await office.scrape('https://example.com/news');   // {url, status, type, title, description, meta, text, links: [{url, text}], truncated, cached}

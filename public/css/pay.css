@@ -1,0 +1,17 @@
+/* The boss's Payments tab and approval cards (public/js/pay-ui.js). Phone first: one column, full-width buttons. */
+.pay-panel { display: flex; flex-direction: column; gap: 14px; max-width: 640px; margin: 0 auto; padding: 4px 2px 40px; }
+.pay-card h3 { margin: 0 0 8px; }
+.pay-card h4 { margin: 12px 0 4px; font-size: 15px; }
+.pay-points, .pay-missing { margin: 0 0 12px; padding-left: 20px; }
+.pay-points li, .pay-missing li { margin: 6px 0; }
+.pay-test { margin: 0; padding: 10px 12px; font-weight: 700; color: #6b4700; background: #fff3cf; border: 2px dashed #d9a634; border-radius: 8px; }
+.pay-note { margin: 0; padding: 10px 12px; background: var(--paper, #fff); border-left: 4px solid var(--teal, #1a9a8a); border-radius: 4px; }
+.pay-product, .pay-order { padding: 10px 0; border-top: 1px solid var(--line, #0002); }
+.pay-product:first-of-type, .pay-order:first-of-type { border-top: 0; }
+.pay-product.pay-off { opacity: .55; }
+.pay-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.pay-tile { display: flex; flex-direction: column; padding: 10px; background: var(--paper-2, #0000000a); border-radius: 8px; overflow-wrap: anywhere; }
+.pay-tile b { font-size: 20px; }
+.pay-tile span { font-size: 13px; opacity: .75; }
+.pay-orders { margin-top: 12px; }
+@media (min-width: 720px) { .pay-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

@@ -4,6 +4,8 @@ import { safeFetch, FetchBlocked } from './safefetch.js';
 import { get, all, run } from './db.js';
 import { DomainRefused, domainsConfigured } from './domains.js';
 import { serversOn } from './runner.js';
+import { CloudError } from './cloud/store.js';
+import { payReady } from './cloud/pay-config.js';
 import { ProviderError, plainProviderText, scrub } from './llm.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './media.js';
 import { imageCheck } from './attachments.js';
@@ -121,6 +123,16 @@ const DEFS = {
   business_action: fn('business_action', 'In Business mode, do what the boss just asked: more_ideas (they want different idea cards), pick (they named a card: idea is its number, from 1), redo_ads (they want the ads changed: say how in notes), skip_ads (launch without ads for now). Use it only because the boss asked.', {
     action: { type: 'string', enum: ['more_ideas', 'pick', 'redo_ads', 'skip_ads'] }, idea: { type: 'integer', description: 'For pick: the card number, from 1' }, notes: S('What the boss wants instead, in their words'),
   }, ['action']),
+  propose_product: fn('propose_product', 'Put a product and its price in front of the boss for their one-tap approval. It only proposes: nothing goes on sale, nothing is charged and no price changes until the boss taps approve. Use it once the boss has said the idea should charge money, and tell them it is waiting under Requests. A new proposal for an existing key is a price change, and it needs the same tap.', {
+    project: { type: 'string', description: 'The slug of the project it sells on.' },
+    key: { type: 'string', description: 'Short name the page uses, like pro or supporter: lowercase letters, digits, - and _.' },
+    name: { type: 'string', description: 'What it is called on Stripe and on the receipt.' },
+    description: { type: 'string', description: 'One sentence on what the buyer gets.' },
+    price_cents: { type: 'integer', description: 'The price in cents, a whole number (500 means five dollars). At least 50.' },
+    billing: { type: 'string', enum: ['one_off', 'monthly', 'yearly'], description: 'one_off for a single payment, or a subscription by the month or year.' },
+    unlocks: { type: 'array', items: { type: 'string' }, description: 'Optional. Office Cloud collections only buyers can read or write, enforced on the server.' },
+    why: { type: 'string', description: 'One line for the boss on why this product at this price.' },
+  }, ['project', 'key', 'name', 'price_cents', 'billing']),
   request_ad_spend: fn('request_ad_spend', 'In Business mode at launch, file the ad money the boss chose as a request. It needs the boss\'s own Approve click; then it runs as a Google search ad for up to a week, never over that amount. It never spends anything itself.', {
     amount: { type: 'integer', description: 'Exactly the amount the boss chose' }, audience: S('Who the ads are shown to, from the campaign plan'),
     ads: { type: 'array', items: { type: 'string' }, description: 'The ad file names in the project\'s ads folder, such as ad-1.png' },
@@ -159,7 +171,7 @@ export const MANAGER_TOOLS = ['write_file', 'read_file', 'list_files', 'view_fil
 const SERVER_TOOLS = ['server_starter', 'deploy_server', 'server_status', 'server_logs', 'server_restart', 'server_check'];
 // Beyond the common set, by job. A tool nobody needs is a tool a hijacked agent can't use. Approving a purchase is not on this list for anyone: it isn't a tool at all.
 const ROLE_EXTRAS = {
-  manager: ['web_search', 'check_domain', 'request_domain', 'launch_check', 'launch_report', 'ios_start', 'ios_request', 'set_standing_order', 'list_standing_orders', 'cancel_standing_order', 'set_work_mode', 'update_backlog', 'ask_buddehbot', 'set_company', 'update_staff', 'let_go_staff', 'make_logo', 'server_status', 'server_logs', 'server_restart'],
+  manager: ['web_search', 'check_domain', 'request_domain', 'propose_product', 'launch_check', 'launch_report', 'ios_start', 'ios_request', 'set_standing_order', 'list_standing_orders', 'cancel_standing_order', 'set_work_mode', 'update_backlog', 'ask_buddehbot', 'set_company', 'update_staff', 'let_go_staff', 'make_logo', 'server_status', 'server_logs', 'server_restart'],
   builder: ['generate_image', 'review_design', 'launch_check', ...SERVER_TOOLS], designer: ['generate_image', 'review_design'], illustrator: ['generate_image', 'review_design'],
   tester: ['review_design', 'launch_check', 'server_status', 'server_logs', 'server_check'], marketer: ['check_domain'],
 };
@@ -174,6 +186,7 @@ export function toolAvailable(name, cfg, role) {
   if (name === 'make_video_ad') return mediaOn(cfg);
   if (['start_business', 'business_action', 'request_ad_spend'].includes(name)) return role === undefined || role === 'manager';
   if (name === 'check_domain' || name === 'request_domain') return domainsConfigured(cfg);
+  if (name === 'propose_product') return payReady(cfg) && (role === undefined || role === 'manager');
   if (name === 'ios_start' || name === 'ios_request') return !!cfg.iosEnabled;
   // Only ever the manager: anyone else who is stuck says so in their report, and the manager decides whether to ask.
   if (name === 'ask_buddehbot') return role === 'manager' && cfg.helpEnabled !== false;
@@ -484,6 +497,15 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
         c.say('typing', 'Asking the boss about a domain', `asked the boss to buy ${domain}`, { project });
         return `Asked. ${domain} ($${r.priceUsd.toFixed(2)}) now has a Buy button in front of the boss. Nothing is bought unless they press it, and you can't press it for them. Tell the boss it is waiting under Requests, then carry on.`;
       } catch (e) { if (e instanceof DomainRefused) throw new WorkspaceError(e.message); throw e; }
+    },
+    propose_product(c, a) {
+      const project = projectFor(c, a);
+      try {
+        const r = engine.pay.propose(c.floor, c.agent?.name, { project, key: a.key, name: str(a, 'name', 80), description: str(a, 'description', 300, false), priceCents: a.price_cents, billing: a.billing, unlocks: a.unlocks, why: str(a, 'why', 400, false) });
+        if (r.already) return `That is already ${r.status === 'live' ? 'live' : 'waiting for the boss'}. Asking again changes nothing.`;
+        c.say('typing', 'Asking the boss about a product', 'asked the boss to approve a product', { project });
+        return `Asked. It is in front of the boss under Requests. Nothing is on sale or changes unless they approve it, and you can't approve it for them. Tell them it is waiting, then carry on; the page can already call office.pay.checkout({ product: '${String(a.key ?? '').toLowerCase().trim()}' }), and it answers "not on sale yet" until they do.`;
+      } catch (e) { if (e instanceof CloudError) throw new WorkspaceError(e.message); throw e; }
     },
     async generate_image(c, a) {
       if (!engine.media) throw new WorkspaceError('image making is not available');

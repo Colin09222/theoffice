@@ -103,7 +103,7 @@ export function composeReport(f, headline, nextSteps) {
   const lines = [`## Launch report: ${f.project.title}`, '', String(headline || '').trim(), '', `**Live at:** ${f.url}`];
   if (f.project.private) lines.push('**Visibility:** private. Only you can open it.');
   lines.push(`**Domain:** ${f.domain ? `${f.domain}` : 'none yet; it is on its project address'}`);
-  lines.push(`**Taking money:** ${f.hasPayment ? 'yes, through your Stripe Payment Link' : 'no. Paste your Stripe Payment Link on the project card to switch it on'}`);
+  lines.push(`**Taking money:** ${f.hasPayment ? 'yes, through your Stripe Payment Link' : 'no. Connect Stripe on the Payments tab, or paste a Stripe Payment Link on the project card, to switch it on'}`);
   lines.push(`**Sign-ups so far:** ${f.signups}`, `**Visitors so far:** ${f.stats.uniques} (${f.stats.views} page views)`);
   // The reviewer is blunt and only sees one screenshot, so "fix first" needs a pointer to what it said, or it is a dead end for the boss.
   if (f.review) lines.push(`**Design review by ${f.review.model}:** ${f.review.verdict === 'fix first' ? 'its last look wanted changes first. The notes are under Report on the project card' : f.review.verdict || 'done'}`); else lines.push('**Design review:** not done');

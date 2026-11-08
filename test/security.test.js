@@ -599,8 +599,8 @@ describe('5. CSRF, rate limits, input limits, logging, noindex', () => {
     assert.equal(calls, before); assert.equal(t2.db.prepare('SELECT COUNT(*) n FROM ledger').get().n, 0);
     await t2.close();
   });
-  test('nothing can charge a card: no payment API is called anywhere, and only the checker, the brand filter and the link validator know these names', async () => {
-    const known = /(launch-check|domains|prompts|ios)\.js$|server\/app\.js$/;
+  test('nothing can charge a card outside server/cloud/pay*: no payment API is called anywhere else, and only the checker, the brand filter, the link validator and the propose tool know these names', async () => {
+    const known = /(launch-check|domains|prompts|ios|tools)\.js$|server\/app\.js$/;
     for (const f of srcFiles()) {
       const src = readFileSync(f, 'utf8');
       assert.doesNotMatch(src, /api\.stripe\.com|api\.paypal\.com|sk_live_[a-z0-9]{8}|card_number/i, f);

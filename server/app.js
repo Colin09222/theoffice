@@ -22,6 +22,7 @@ import { createMockSessions } from './mock-sessions.js';
 import { appLabel, appOrigin, appHostLabel, lookupLabel, appHeaders, previewCookie, previewCookieName } from './apps.js';
 import { handleData, DataError, DATA_LIMITS, clearProjectData } from './appdata.js';
 import { installCloud, SDK_JS, API_PREFIX } from './cloud/index.js';
+import { installPay } from './cloud/pay.js';
 import { recordVisit, projectStats, formEntries, formsCsv, formCount } from './launch.js';
 import { DomainRefused } from './domains.js';
 import { installOrders } from './orders.js';
@@ -76,7 +77,7 @@ function validDecor(input, base = DEFAULT_DECOR) {
 }
 const validColors = (i, base = DEFAULT_COLORS) => ({ primary: hex(i?.primary, base.primary), accent: hex(i?.accent, base.accent) });
 
-export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm, fetcher, httpFetch, sessions, namecheap, media, search, cloudNet }) {
+export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm, fetcher, httpFetch, sessions, namecheap, media, search, cloudNet, payFetch, paySleep }) {
   const bus = new Bus();
   const sessionClient = !cfg.computerEnabled ? null : sessions || (cfg.aiMode === 'mock' ? createMockSessions(cfg) : createManagedClient(cfg));
   const client = llm || (cfg.aiMode === 'mock' ? createMockClient(cfg) : createRouter({ anthropic: createAnthropicClient(cfg), openrouter: createOpenRouterClient(cfg) }));
@@ -717,7 +718,10 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
   // Office Cloud: the backend each published project gets on its own origin. See docs/OFFICE-CLOUD.md.
-  const cloud = installCloud({ ...ext, ipOf, secret, llm: client, cloudNet });
+  // Payments: each boss's own Stripe account, on the apps their team makes. See docs/PAYMENTS.md.
+  const pay = installPay({ ...ext, RateLimiter: A.RateLimiter, payFetch, paySleep });
+  extensions.push(pay);
+  const cloud = installCloud({ ...ext, ipOf, secret, llm: client, cloudNet, pay });
   extensions.push(cloud);
 
   // ---- published sites ----
@@ -1011,6 +1015,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       }
       // Resend's signed webhook carries no Origin, so it is answered before the same-site checks every other call gets. See server/mail.js.
       if (rest === '/api/mail/inbound' && req.method === 'POST') return mail.webhook(req, res, ip);
+      if (rest === '/api/pay/webhook' && req.method === 'POST') return pay.webhook(req, res, ip);  // the same: Stripe's signed webhook carries no Origin
       if (rest.startsWith('/api/')) {
         const method = req.method;
         // A sibling subdomain counts as "same site", so SameSite=Lax alone would let a published page send the owner's cookie here.
