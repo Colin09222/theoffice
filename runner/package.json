@@ -1,0 +1,10 @@
+{
+  "name": "office-runner",
+  "private": true,
+  "type": "module",
+  "description": "Runs friends' project server apps for The Office in gVisor sandboxes on hz (Phase 1).",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
