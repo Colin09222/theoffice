@@ -118,9 +118,11 @@ const RECORD = `(() => { const last = new Map(); const r = window.__rec = { room
         tv.copy(p); tv.y += a.char.headTop ?? 2.4; tv.project(v.camera); const head = (-tv.y * 0.5 + 0.5) * innerHeight; if (a.bubble.getBoundingClientRect().bottom > head + 2) r.bubblesOverHeads++; }
       const pct = a.bubble.querySelector('.pill-done'); if (pct && !a.bubble.hidden) r.pills.add(pct.textContent);
     } };
-  window.__ff = setInterval(() => { const v = window.__office?.view; if (!v) return; for (let i = 0; i < 10; i++) { v.update(0.05); note(v); } }, 50);
+  // Only this clock moves the room while recording: a real frame or two slipped in between two of these steps would count as one jump.
+  const v0 = window.__office.view, realUpdate = v0.update; v0.update = () => {}; window.__unclock = () => { delete v0.update; };
+  window.__ff = setInterval(() => { const v = window.__office?.view; if (!v) return; for (let i = 0; i < 10; i++) { if (v === v0) realUpdate.call(v0, 0.05); else v.update(0.05); note(v); } }, 50);
   return true; })()`;
-const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); const r = window.__rec; return { rooms: r.rooms, jump: r.jump, jumper: r.jumper, cut: r.cut, steps: r.steps, said: [...r.said], pills: [...r.pills], bubblesOverHeads: r.bubblesOverHeads }; })()');
+const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclock?.(); const r = window.__rec; return { rooms: r.rooms, jump: r.jump, jumper: r.jumper, cut: r.cut, steps: r.steps, said: [...r.said], pills: [...r.pills], bubblesOverHeads: r.bubblesOverHeads }; })()');
 
 { // desktop
   const b = await launch(); const p = await b.newPage({ width: 1440, height: 900 });
@@ -146,6 +148,8 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); const r = wind
     const pins = await p.ev('[...document.querySelectorAll(".pin")].map((e) => e.dataset.pin)');
     for (const want of ['chat', 'tasks', 'talk', 'projects', 'requests', 'orders']) {
       if (!pins.includes(want)) throw new Error(`no ${want} pin: ${pins}`);
+      // An open panel can cover a pin at the closer starting view, and its own tabs are the way there then. From the room, every pin opens its tab.
+      if (!(await p.ev('document.querySelector(".floor-panel").classList.contains("closed")'))) { await p.click('.panel-close'); await p.until('document.querySelector(".floor-panel").classList.contains("closed")', 'the panel closed', 4000); }
       await p.click(`.pin[data-pin=${want}]`);
       await p.until(`window.__office.tab === ${JSON.stringify(want)} && !document.querySelector('.floor-panel').classList.contains('closed')`, `${want} tab`, 4000);
     }
