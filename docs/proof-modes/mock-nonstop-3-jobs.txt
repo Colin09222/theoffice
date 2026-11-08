@@ -1,0 +1,11 @@
+set 200: sign "Open 24/7", gap 0.05 min (3 s), goal "[build] Get Nonstop Noodles known"
+job 1: done, started 0.1s, finished 0.5s, tasks done 1, failed 0
+job 2: done, started 3.6s, finished 3.9s, gap 3.1s, tasks done 1, failed 0
+job 3: done, started 6.9s, finished 7.3s, gap 3.0s, tasks done 1, failed 0
+digest 1: **On our own:** Finished "Write a one-page plan for the company" and put it on the drive. Next up: Draft the launch post.
+digest 2: **On our own:** Finished "Draft the launch post" and put it on the drive. Next up: Make a pricing page.
+digest 3: **On our own:** Finished "Make a pricing page" and put it on the drive. Next up: Write three customer stories.
+models: builder claude-sonnet-5-5 x15, manager claude-sonnet-5-5 x18
+plan: goal "[build] Get Nonstop Noodles known", next up ["Write three customer stories","Write a one-page plan for the company","Draft the launch post"]
+tasks: 3, all the team's own: true
+OK: 3 jobs in a row on their own, each at least the gap apart, all on Sonnet, a digest after each

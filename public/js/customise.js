@@ -6,7 +6,19 @@ import { FLOOR_STYLES, PETS, LAYOUTS, WALL_MATS, ART_STYLES, VIBES, TONES, PERSO
 import { PLANS, planBlocks, deskRect, ROOM_W, ROOM_D } from './layouts.js';
 
 const LIMITS = { about: 300, rules: 600, avoid: 300, notes: 200, focus: 120, title: 32, name: 24 };
-const TABS = [['vibe', 'Vibe'], ['company', 'Company'], ['boss', 'You'], ['staff', 'Staff'], ['decor', 'Office']];
+const TABS = [['vibe', 'Vibe'], ['company', 'Company'], ['hours', 'Hours'], ['boss', 'You'], ['staff', 'Staff'], ['decor', 'Office']];
+// Work modes: when the team works on its own. The sign reads the way the floor's door sign does.
+const WORK_MODES = [['ask', 'When I ask', 'The team works on what you ask for, and waits for you.'], ['hours', 'Set hours', 'On the days and hours you pick, the team keeps going on its own.'], ['nonstop', 'Nonstop', 'Around the clock: whenever the floor is quiet, the next job starts.']];
+const DAY_ORDER = [[1, 'Mon'], [2, 'Tue'], [3, 'Wed'], [4, 'Thu'], [5, 'Fri'], [6, 'Sat'], [0, 'Sun']];
+const clock12 = (hhmm) => { const [hr, mi] = String(hhmm).split(':').map(Number); return `${hr % 12 || 12}${mi ? `:${String(mi).padStart(2, '0')}` : ''}`; };
+function signText(w) {
+  if (w.mode === 'nonstop') return ['Open 24/7', 'Every day'];
+  if (w.mode !== 'hours') return ['On call', 'When the boss calls'];
+  const d = [...w.days].sort((a, b) => a - b); const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const days = d.length === 7 ? 'Every day' : d.join() === '1,2,3,4,5' ? 'Mon–Fri' : d.join() === '0,6' ? 'Weekends' : d.length >= 3 && d.every((x, i) => !i || x === d[i - 1] + 1) ? `${names[d[0]]}–${names[d.at(-1)]}` : d.map((x) => names[x]).join(', ');
+  return [`Open ${clock12(w.start)}–${clock12(w.end)}`, days || 'No days picked'];
+}
+const zones = () => { try { return Intl.supportedValuesOf('timeZone'); } catch { return []; } };
 const SHORT = new Set(['vibe', 'decor']);  // tabs where the room above is the point, so the sheet leaves it in view on a phone
 const COMPANY_COLOURS = ['#d9774a', '#27324a', '#c8643c', '#e0559b', '#d3264f', '#1f5fa8', '#7a6fd0', '#2f6f62', '#111318', '#f4c95d', '#c9a24b', '#27e6a4', '#9ec5e8', '#f6b6c8', '#ffd23f', '#f0c068'];
 
@@ -37,7 +49,11 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
     identity: { about: '', tone: '', rules: '', avoid: '', routing: {}, ...(s.identity || {}) },
     staff: s.agents.map(staffDraft),
   };
-  const withoutStaff = () => JSON.stringify({ ...draft, staff: null });
+  const wp = s.workPlan || { mode: 'ask', dayList: [1, 2, 3, 4, 5], start: '09:00', end: '17:00', tz: 'UTC', goal: '' };
+  let ownTz = 'UTC'; try { ownTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { /* UTC */ }
+  const work = { mode: wp.mode, days: [...wp.dayList], start: wp.start, end: wp.end, tz: wp.tzSet ? wp.tz : (wp.tz !== 'UTC' ? wp.tz : ownTz), goal: wp.goal || '' };
+  const workBefore = JSON.stringify(work);
+  const withoutStaff = () => JSON.stringify({ ...draft, staff: null, work });
   const before = withoutStaff();
   const changedStaff = () => draft.staff.filter((a) => JSON.stringify(a) !== JSON.stringify(page.state.agents.map(staffDraft).find((x) => x.id === a.id)));
   const showRoom = (now) => {
@@ -55,6 +71,8 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
       e?.preventDefault();
       const staff = changedStaff().map(({ role: _r, ...a }) => a);
       try {
+        // The hours have their own route: they start or stop the team working on its own, and the chat gets a line about it.
+        if (JSON.stringify(work) !== workBefore) await api(`/floors/${page.slug}/work-mode`, { method: 'POST', body: work });
         await api(`/floors/${page.slug}/customise`, { method: 'POST', body: { name: draft.name, tagline: draft.tagline, colors: draft.colors, decor: draft.decor, publicChat: draft.publicChat, defaultPrivate: draft.defaultPrivate, boss: draft.boss, identity: draft.identity, staff } });
         saved = true; toast('Saved'); close();
       } catch (x) { toast(x.message, 'bad'); }
@@ -109,6 +127,35 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
         h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.publicChat, onchange: (e) => { draft.publicChat = e.target.checked; } }), h('span', {}, 'Visitors can read my chat with the manager. Private project names are hidden, but anything else said about them isn\'t')),
         h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.defaultPrivate, onchange: (e) => { draft.defaultPrivate = e.target.checked; } }), h('span', {}, 'New projects start private')),
         h('button.btn.ghost.wide', { type: 'button', onclick: async () => { try { await api('/logout', { method: 'POST' }); await refreshMe(); close(); window.officeGo('/'); } catch (e) { toast(e.message, 'bad'); } } }, 'Sign out of this floor')));
+    };
+
+    const tabHours = () => {
+      const plate = h('div.hours-plate', { 'aria-live': 'polite' }, h('small', {}, 'On the door'), h('b'), h('span'));
+      const paintPlate = () => { const [big, small] = signText(work); plate.children[1].textContent = big; plate.children[2].textContent = small; plate.dataset.mode = work.mode; };
+      const when = h('div.stack.hours-when');
+      const days = h('div.chips.day-chips', { role: 'group', 'aria-label': 'Days' });
+      for (const [n, label] of DAY_ORDER) {
+        days.append(h('button.chip', { type: 'button', 'data-day': String(n), 'aria-pressed': String(work.days.includes(n)), onclick: (e) => {
+          work.days = work.days.includes(n) ? work.days.filter((x) => x !== n) : [...work.days, n].sort((a, b) => a - b);
+          e.currentTarget.setAttribute('aria-pressed', String(work.days.includes(n))); paintPlate();
+        } }, label));
+      }
+      const time = (key, label) => h('label.field', {}, h('span', {}, label), h('input', { type: 'time', value: work[key], name: `hours-${key}`, step: 900, oninput: (e) => { if (e.target.value) { work[key] = e.target.value; paintPlate(); } } }));
+      const list = zones();
+      const tz = list.length
+        ? h('select', { name: 'hours-tz', onchange: (e) => { work.tz = e.target.value; } }, ...[...new Set([work.tz, ...list])].map((z) => h('option', { value: z, selected: z === work.tz }, z.replace(/_/g, ' '))))
+        : h('input', { name: 'hours-tz', value: work.tz, oninput: (e) => { work.tz = e.target.value.trim(); } });
+      when.append(h('div.field', {}, h('span', {}, 'Days'), days), h('div.time-row', {}, time('start', 'From'), time('end', 'Until')), field('Time zone', tz, 'Overnight works too: 22:00 until 06:00 belongs to the day it starts.'));
+      const paintWhen = () => { when.hidden = work.mode !== 'hours'; };
+      const modes = h('div.mode-pick', { role: 'radiogroup', 'aria-label': 'When the team works' });
+      const markMode = () => { for (const b of modes.children) b.setAttribute('aria-checked', String(b.dataset.v === work.mode)); };
+      for (const [id, label, blurb] of WORK_MODES) modes.append(h('button.mode-card', { type: 'button', role: 'radio', 'data-v': id, 'data-work-mode': id, onclick: () => { work.mode = id; markMode(); paintWhen(); paintPlate(); } }, h('b', {}, label), h('small', {}, blurb)));
+      markMode(); paintWhen(); paintPlate();
+      pane.append(h('div.stack', {},
+        h('p.lede', {}, 'When does the team work? On call is how it has always been. With set hours or nonstop, your manager picks the next most useful job toward the goal whenever the floor is quiet, and posts a line in the chat after each one.'),
+        plate, modes, when,
+        field('The goal', area(work.goal, 300, 2, (v) => { work.goal = v; }, { name: 'hours-goal', placeholder: 'Get our first hundred players.' }), 'Your manager keeps this and a next-up list under Work. Leave it empty and they will write one.'),
+        h('small.field-hint', {}, 'The team makes most calls itself. Anything that spends money still waits for your Buy click, and while a question waits for you they get on with something else. Outside set hours everyone goes home, but you can still call your manager.')));
     };
 
     const tabBoss = () => {
@@ -195,7 +242,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
       clear(pane);
       pane.scrollTop = 0;
       card.classList.toggle('short', SHORT.has(id));
-      ({ vibe: tabVibe, company: tabCompany, boss: tabBoss, staff: tabStaff, decor: tabOffice })[id]();
+      ({ vibe: tabVibe, company: tabCompany, hours: tabHours, boss: tabBoss, staff: tabStaff, decor: tabOffice })[id]();
     };
 
     body.append(h('form.custom-form', { onsubmit: save }, tabs, pane,

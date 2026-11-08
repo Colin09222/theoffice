@@ -68,7 +68,9 @@ function directoryRow(card, onEnter, onHover) {
     h('span.dir-num', {}, String(card.number)),
     h('span.dir-mark', { 'aria-hidden': 'true' }),
     h('span.dir-text', {}, h('b', {}, card.name || 'Moving in'), card.filler ? h('span.demo-tag', { title: 'A fictional demo company. Nothing here is real.' }, 'demo') : null, h('small', {}, card.status === 'suspended' ? 'Closed by the building manager' : card.tagline || (card.name ? 'A tiny company' : 'Boxes still in the corridor'))),
-    card.busy ? h('span.dir-busy', { title: `${card.busy} at work` }, h('i'), String(card.busy)) : null);
+    card.busy ? h('span.dir-busy', { title: `${card.busy} at work` }, h('i'), String(card.busy)) : null,
+    // The floor's hours, as its door sign shows them. On call is the usual, so it goes unsaid here.
+    card.workMode && card.workMode.label !== 'On call' ? h(`span.dir-hours${card.workMode.closed ? '.closed' : ''}`, { title: card.workMode.closed ? 'Closed for now' : 'Working on its own' }, card.workMode.label) : null);
 }
 
 export async function showLobby(root) {

@@ -625,6 +625,9 @@ export class Actor {
       g.rotation.y += diff * Math.min(1, dt * 10);
     }
     this.shadow.position.set(g.position.x, 0.02, g.position.z);
+    // Outside set hours the staff have gone home: their desks stay, they don't. Checked every frame, so a new hire or a fresh model follows too.
+    const home = !!this.view.closed && !this.isBoss;
+    if (g.visible === home) { g.visible = !home; this.shadow.visible = !home; this.tag.hidden = home; }
     this.char.update(dt, moving);
   }
 }
@@ -1521,6 +1524,8 @@ export class OfficeView {
     }
     return best;
   }
+  /** The floor is closed and nobody has been called in: everyone but the boss goes home. */
+  setClosed(on) { this.closed = !!on; }
   agentEvent(ev) { const a = this.actors.get(ev.id); if (a) { a.taskId = ev.taskId ?? null; a.setState(ev.state, ev.activity); } }
   taskFor(actor) { return actor.taskId == null ? null : this.tasks.find((t) => t.id === actor.taskId) || null; }
   /** A free place to stand and talk to someone: in the same room as them, on the side the camera can see, and not where someone else is already standing. */

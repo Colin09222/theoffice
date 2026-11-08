@@ -49,6 +49,9 @@ function talkStep(meta) {
 
 const DAYS_SAID = [[/weekends?/i, ['sat', 'sun']], [/every ?day|daily/i, ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']], [/./, ['mon', 'tue', 'wed', 'thu', 'fri']]];
 const MODE_SAID = /\b(work(?:ing)? nonstop|work(?:ing)? 24\/7|only when i ask|work(?:ing)? \d{1,2}(?::\d\d)? ?(?:to|-|–) ?\d{1,2})/i;
+// What a mock manager thinks of next, in order, when the team works on its own.
+const NEXT_IDEAS = ['Write a one-page plan for the company', 'Draft the launch post', 'Make a pricing page', 'Write three customer stories', 'Plan a launch week', 'Tidy the shared drive'];
+const topUp = (list, done = '') => [...list, ...NEXT_IDEAS.filter((x) => x !== done && !list.includes(x))].slice(0, 3);
 function modeArgs(boss) {
   if (/only when i ask/i.test(boss)) return { mode: 'ask' };
   if (/nonstop|24\/7/i.test(boss)) return { mode: 'nonstop' };
@@ -95,7 +98,7 @@ function managerStep(meta, messages = []) {
     const item = a.nextUp[0] || 'Write a one-page plan for the company';
     if (meta.step === 0) {
       const calls = [];
-      if (!a.goal) calls.push(call('update_backlog', { goal: 'Get the company known', next_up: ['Write a one-page plan for the company', 'Draft the launch post', 'Make a pricing page'] }, 0));
+      if (!a.goal || !a.nextUp.length) calls.push(call('update_backlog', { ...(a.goal ? {} : { goal: 'Get the company known' }), next_up: topUp(a.nextUp) }, 0));
       const pass = ['[ask]', '[buy]'].filter((f) => (a.goal || '').includes(f)).join(' ');
       calls.push(call('assign_task', { to: /\[build\]/.test(a.goal || '') ? 'builder' : /\[buy\]/.test(a.goal || '') ? 'researcher' : 'writer', title: item, brief: `Do the next thing on our list: ${item}.${pass ? ` ${pass}` : ''}`, project: 'next-up' }, 1));
       return { toolCalls: calls };
@@ -124,7 +127,7 @@ function managerStep(meta, messages = []) {
     if (meta.autonomous && meta.step === 1 && !meta.openCount && !meta.toReview.some(sendBack)) {
       const list = meta.modeList || [];
       const doneTitle = meta.toReview[0].title;
-      return { toolCalls: [call('update_backlog', { next_up: [...list.filter((x) => x !== doneTitle), `Follow up on "${doneTitle}"`].slice(0, 8), summary: `Finished "${doneTitle}" and put it on the drive.` })] };
+      return { toolCalls: [call('update_backlog', { next_up: topUp(list.filter((x) => x !== doneTitle), doneTitle), summary: `Finished "${doneTitle}" and put it on the drive.` })] };
     }
     if (meta.openCount || meta.toReview.some(sendBack)) return { content: 'Sent one thing back for another pass. I will report when it returns.' };
     const links = meta.published.map((p) => `[${p.title}](${p.url})`).join(', ');
