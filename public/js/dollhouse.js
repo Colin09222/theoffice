@@ -69,7 +69,6 @@ export class Room {
     const brand = card.colors?.primary || '#d9774a', accent = card.colors?.accent || brand;
     this.accent = accent;
     const shown = staff.slice(0, max);
-    this.extra = Math.max(0, staff.length - shown.length);
     const P = this.p = plan(width, k, shown.length);
     const s = P.s;
     this.el = h('span.dh-room', { 'aria-hidden': 'true' });
