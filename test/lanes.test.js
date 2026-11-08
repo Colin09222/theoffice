@@ -109,6 +109,9 @@ describe('each person\'s part', () => {
     const game = laneBrief('game', 'builder', FULL);
     assert.match(game, /every room, level, item, enemy, boss and screen it names goes in/); assert.match(game, /about 25 for one with rooms or levels/); assert.match(game, /a win where the game can be won/);
     assert.match(laneBrief('game', 'tester', FULL), /win screen as well as game over/);
+    // A long report is cut before the manager reads it, so the verdict goes first.
+    for (const role of ['game', 'website']) assert.match(laneBrief(role, 'tester', FULL), /Begin your reply with PASS/);
+    assert.match(computerPrompt(FULL, 'tester', {}), /verdict first/); assert.match(computerPrompt(FULL, 'builder', {}), /cut off before the Office Manager reads it/);
   });
   test('on a computer it goes in the first message, because the system prompt is cached across floors', () => {
     const task = { id: 7, title: 'T', project: 'p', brief: 'Do it', lane: 'game' };
