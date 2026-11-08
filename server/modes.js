@@ -280,7 +280,7 @@ export function installModes(ext) {
     seenRunning.delete(r.id);
     // The digest: a line or two, in the manager's voice. Never a figure about money.
     const next = JSON.parse(rowOf(floor.id).backlog || '[]')[0];
-    const did = r.summary ? r.summary.replace(/\s*$/, '').replace(/([^.!?])$/, '$1.')
+    const did = r.summary ? (/[.!?]$/.test(r.summary.trim()) ? r.summary.trim() : `${r.summary.trim()}.`)
       : status === 'failed' ? `${timedOut ? 'That job ran too long and I stopped it.' : brokeDown ? 'That job stopped when the floor was paused.' : `${failed === 1 ? 'One task' : `${failed} tasks`} couldn't finish.`}`
         : done ? `Finished ${tasks.filter((x) => x.status === 'done' || x.status === 'review').slice(0, 3).map((x) => `"${x.title}"`).join(', ')}.` : 'Looked over where things stand.';
     const live = published.length ? ` Live: ${published.slice(0, 3).map((p) => `[${p.title.replace(/[[\]]/g, '')}](${p.url})`).join(', ')}.` : '';

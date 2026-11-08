@@ -83,7 +83,8 @@ function managerStep(meta, messages = []) {
     return { content: `I have asked buddehbot and I am carrying on meanwhile, boss.${/^Error/.test([...messages].reverse().find((m) => m.role === 'tool')?.content || '') ? ' It did not go through.' : ''}` };
   }
   // Work modes, said in chat.
-  if (MODE_SAID.test(boss) && meta.isFreshBoss && !meta.toReview.length) {
+  // The boss's say on the mode comes first, even with reports waiting: those get accepted when the turn ends.
+  if (MODE_SAID.test(boss) && meta.isFreshBoss) {
     if (meta.step === 0) return { toolCalls: [call('set_work_mode', modeArgs(boss))] };
     const last = [...messages].reverse().find((m) => m.role === 'tool')?.content || '';
     return { content: /^Error/.test(last) ? 'That did not work, boss.' : `Done, boss. ${last.replace(/^Work mode set: /, 'From now on: ').split('. The boss')[0]}.` };

@@ -106,8 +106,8 @@ describe('setting the mode', () => {
       assert.equal(bad.status, 400); assert.match(bad.data.message, /Pick the days/);
       assert.equal((await new Client(t).post(`/api/floors/${c.slug}/work-mode`, { mode: 'nonstop' })).status >= 400, true, 'only the boss');
       const lobby = (await new Client(t).get('/api/floors')).data;
-      const card = (lobby.floors || lobby).find?.((x) => x.slug === c.slug);
-      if (card) assert.equal(card.workMode.label, 'Open 9–5');
+      const card = lobby.floors.find((x) => x.slug === c.slug);
+      assert.equal(card.workMode.label, 'Open 9–5'); assert.equal(card.workMode.closed, true);
     } finally { await t.close(); }
   });
 
@@ -116,18 +116,20 @@ describe('setting the mode', () => {
     try {
       const c = await claim(t);
       const f = floorOf(t, c);
-      const say = async (text) => {
-        const before = messagesOf(t, f, 'manager').length;
+      // A job the team starts on its own may be running alongside, so this waits for the mode itself.
+      const say = async (text, mode) => {
         assert.equal((await c.post(`/api/floors/${c.slug}/chat`, { text })).status, 202);
-        await until(() => messagesOf(t, f, 'manager').length > before && !t.app.engine.runs.size, { what: `answer to ${text}` });
-        return (await floorState(c)).workPlan;
+        // And for the manager to finish answering, as a boss would, before the next line.
+        return until(async () => { const w = (await floorState(c)).workPlan; return w.mode === mode && !t.app.engine.runs.size && !get(t.db, 'SELECT manager_wake w FROM floors WHERE id=?', f.id).w ? w : null; }, { what: `${mode} after "${text}"` });
       };
-      let w = await say('Work nonstop from now on please');
-      assert.equal(w.mode, 'nonstop'); assert.equal(w.label, 'Open 24/7');
-      w = await say('Actually, work 9 to 5 on weekdays');
-      assert.equal(w.mode, 'hours'); assert.equal(w.start, '09:00'); assert.equal(w.end, '17:00'); assert.deepEqual(w.dayList, [1, 2, 3, 4, 5]);
-      w = await say('Only when I ask, thanks');
-      assert.equal(w.mode, 'ask'); assert.equal(w.label, 'On call');
+      t.clock.t = MON_NY_10 - 2 * DAY;  // a Saturday, so set hours don't open while this runs
+      let w = await say('Work 9 to 5 on weekdays from now on please', 'hours');
+      assert.equal(w.start, '09:00'); assert.equal(w.end, '17:00'); assert.deepEqual(w.dayList, [1, 2, 3, 4, 5]); assert.equal(w.label, 'Open 9–5');
+      w = await say('Only when I ask, thanks', 'ask');
+      assert.equal(w.label, 'On call');
+      w = await say('Actually, work nonstop', 'nonstop');
+      assert.equal(w.label, 'Open 24/7');
+      w = await say('No, only when I ask', 'ask');
       const lines = messagesOf(t, f, 'office');
       assert.ok(lines.some((m) => /^Now working nonstop/.test(m)) && lines.some((m) => /^Now working 9am to 5pm/.test(m)) && lines.some((m) => /^Back on call/.test(m)), lines.join(' | '));
       // Words in a page or a staff report can't switch it on: the tool only works on the boss's own turn.

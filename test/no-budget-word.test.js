@@ -9,7 +9,7 @@ const literals = (src) => [...src.matchAll(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.
 const says = (s) => /\bbudget\b/i.test(s.replace(/\$\{[^}]*\}/g, '')) && !/^['"`]budget['"`]$/.test(s);
 
 test('notices to the boss and order wait reasons never say budget', () => {
-  for (const file of ['server/engine.js', 'server/orders.js', 'server/purchases.js', 'server/domains.js']) {
+  for (const file of ['server/engine.js', 'server/orders.js', 'server/purchases.js', 'server/domains.js', 'server/modes.js']) {
     const src = read(file);
     const told = [...src.matchAll(/(?:bossNotice|officeNotice|managerSays|backToBoss)\([^,]+,\s*(`(?:[^`\\]|\\.)*`|'(?:[^'\\]|\\.)*')/g)].map((m) => m[1]);
     for (const s of told) assert.ok(!says(s), `${file}: ${s}`);
@@ -21,4 +21,12 @@ test('notices to the boss and order wait reasons never say budget', () => {
 test('the boss\'s pages never say budget', () => {
   const pages = readdirSync(new URL('../public/js/', import.meta.url)).filter((f) => f.endsWith('.js') && f !== 'admin-ui.js');
   for (const f of pages) for (const s of literals(read(`public/js/${f}`))) assert.ok(!says(s), `public/js/${f}: ${s.slice(0, 120)}`);
+});
+
+test('what the work modes say to the boss and show visitors never says budget or names a sum', () => {
+  const src = read('server/modes.js');
+  for (const s of literals(src)) {
+    assert.ok(!says(s), `server/modes.js: ${s.slice(0, 120)}`);
+    assert.ok(!/\$\d|\bUSD\b|\bdollars?\b|\bspen[dt]\b/i.test(s.replace(/\$\{[^}]*\}/g, '')), `server/modes.js names money: ${s.slice(0, 120)}`);
+  }
 });
