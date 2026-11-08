@@ -559,6 +559,18 @@ describe('office.fetch and office.scrape', () => {
     } finally { await s.t.close(); await w.close(); }
   });
 
+  test('the cache is kept within its size', async () => {
+    const big = 'x'.repeat(5000);
+    const w = await site({ '/a': { type: 'text/plain', body: big }, '/b': { type: 'text/plain', body: big }, '/c': { type: 'text/plain', body: 'small' } });
+    const s = await setup(WEB({ cacheBytes: 8000 }), { cloudNet: LOCAL });
+    try {
+      await s.fetchPage(w.url('/a')); await s.fetchPage(w.url('/b'));
+      assert.equal((await s.fetchPage(w.url('/b'))).json.cached, true, 'the newest stays');
+      await s.fetchPage(w.url('/a'));
+      assert.equal(pageHits(w, '/a'), 2, 'the oldest was dropped to make room, so it was fetched again');
+    } finally { await s.t.close(); await w.close(); }
+  });
+
   test('the same page asked for at once is fetched once', async () => {
     const w = await site({ '/slow': async (req, res) => { await sleep(80); res.writeHead(200, { 'content-type': 'text/plain' }); res.end('slow'); } });
     const s = await setup(WEB(), { cloudNet: LOCAL });
