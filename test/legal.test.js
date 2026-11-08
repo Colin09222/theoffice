@@ -115,7 +115,7 @@ describe('on a floor', () => {
     assert.equal(d.status, 'needs_facts');
     assert.equal(s.legal.honesty, HONESTY_LINE);
     assert.match(HONESTY_LINE, /Drafted by AI, not legal advice\. Have a real lawyer check it before relying on it\./);
-    const asked = all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='report'", floorOf(c).id).map((m) => m.text).join('\n');
+    const asked = all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='budget'", floorOf(c).id).map((m) => m.text).join('\n');
     assert.match(asked, /legal or trading name/); assert.ok(asked.includes(HONESTY_LINE));
     // Nothing goes up without the facts, even with a tap.
     assert.equal((await c.post(`/api/floors/${c.slug}/legal/candles/approve`, { version: d.version })).status, 409);
@@ -166,7 +166,7 @@ describe('on a floor', () => {
     await until(() => docOf(c, 'slots'), { what: 'a review' });
     const d = docOf(c, 'slots');
     assert.equal(d.status, 'regulated'); assert.deepEqual(JSON.parse(d.pages), {});
-    const said = all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='report'", floorOf(c).id).map((m) => m.text).join('\n');
+    const said = all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='budget'", floorOf(c).id).map((m) => m.text).join('\n');
     assert.match(said, /needs a real lawyer before launch/);
     assert.equal((await c.post(`/api/floors/${c.slug}/legal/slots/approve`, { version: d.version })).status, 409);
   });

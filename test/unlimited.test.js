@@ -115,7 +115,7 @@ describe('prompts and pages with no caps', () => {
   test('a floor can hire every job there is with no cap in the way', async () => {
     const h = await floor(scripted());
     for (const role of ['analyst', 'marketer', 'tester', 'illustrator']) assert.match(h.e.hireStaff(h.f, role, ''), /Hired/);
-    assert.equal(get(h.t.db, "SELECT COUNT(*) n FROM agents WHERE floor_id=? AND role!='manager'", h.f.id).n, 8);
+    assert.equal(get(h.t.db, "SELECT COUNT(*) n FROM agents WHERE floor_id=? AND role!='manager'", h.f.id).n, 9);  // the founding five, the default Lawyer, and these four
   });
 });
 
