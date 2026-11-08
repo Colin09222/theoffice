@@ -133,3 +133,15 @@ Nothing new to set. The tables are made at boot, Phaser is served from `public/v
 
 - The playtest's model half (judging screenshots) is the Tester's own model call; it was not run against a real model here.
 - On a computer, app accounts can't be checked before publishing, because Office Cloud runs only on the project's origin.
+
+## Proof (Node 22, `AI_MODE=mock`, no model calls)
+
+- **Node suite:** 977/977 (`npm test`, with `test/makers.test.js` at 19/19).
+- **`node test/browser/makers.mjs`, full 60 s runs:** 48/48.
+  - The 3-tap launch passes on a phone and on a desktop, through Launch to a share link that opens.
+  - Both games pass every browser rule at desktop and phone size, with a saved best and a posted score on the server:
+    - `game-2d`: about 54 fps on desktop and 60 on a phone;
+    - `game-3d`: about 54 and 41, in headless Chrome.
+  - The app passes sign up, create, reload, and sign out and back in, at both sizes.
+  - The site passes the phone layout, links, meta and the form.
+- **Screenshots:** four, in `media/out/office-makers/`.
