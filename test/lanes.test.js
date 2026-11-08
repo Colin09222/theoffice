@@ -34,7 +34,7 @@ describe('the manager\'s playbooks', () => {
   });
   test('the business lane covers research, estimates, plan, page, checklist and what only a human can do, and says what nobody here can do', () => {
     const biz = full.slice(full.indexOf('BUSINESS\n'), full.indexOf('Security rules'));
-    assert.match(biz, /nobody here can send email, post, run ads, talk to customers or spend money/);
+    assert.match(biz, /nobody here can post, run ads or spend money, and email to anyone new waits for their OK/);
     assert.match(biz, /cited sources/); assert.match(biz, /named competitors/); assert.match(biz, /target customer/); assert.match(biz, /role analyst/); assert.match(biz, /role marketer/);
     assert.match(biz, /offer and pricing/); assert.match(biz, /estimates/); assert.match(biz, /launch checklist/); assert.match(biz, /waitlist/); assert.match(biz, /only the boss can do/);
   });
@@ -62,7 +62,7 @@ describe('the manager\'s playbooks', () => {
   });
   test('every agent is told what nobody here can do, and to label estimates', () => {
     for (const p of [full, staffPrompt(floor, { name: 'S', title: 'T', role: 'writer' }, {}, {}, FULL), computerPrompt(FULL, 'builder', {}), computerPrompt(FULL, 'tester', {})]) {
-      assert.match(p, /Nobody in this building can send email, post anywhere, run ads, contact anyone, sign up for a service or spend money/);
+      assert.match(p, /Nobody in this building can post anywhere, run ads, sign up for a service or spend money\. The only way to contact anyone is the company's own email/);
       assert.match(p, /label it "Estimate"/); assert.match(p, /source link/); assert.match(p, /marked as proposed/); assert.match(p, /traction/);
     }
   });
@@ -77,7 +77,7 @@ describe('each person\'s part', () => {
     assert.equal(laneBrief('', 'writer', FULL), ''); assert.equal(laneBrief('game', 'writer', FULL), ''); assert.equal(laneBrief('nonsense', 'builder', FULL), '');
   });
   test('the staff get the concrete steps', () => {
-    assert.match(laneBrief('game', 'builder', FULL), /Office\.submitScore/); assert.match(laneBrief('game', 'builder', FULL), /Keyboard and touch/); assert.match(laneBrief('game', 'builder', FULL), /do not publish: the Tester plays it next/);
+    assert.match(laneBrief('game', 'builder', FULL), /office\.leaderboard\.submit/); assert.match(laneBrief('game', 'builder', FULL), /Keyboard and touch/); assert.match(laneBrief('game', 'builder', FULL), /do not publish: the Tester plays it next/);
     assert.match(laneBrief('game', 'tester', FULL), /press real keys/); assert.match(laneBrief('game', 'tester', FULL), /PASS/); assert.match(laneBrief('game', 'tester', FULL), /Do not publish/);
     assert.match(laneBrief('website', 'designer', FULL), /a name and a hex value/); assert.match(laneBrief('website', 'builder', FULL), /call review_design/); assert.match(laneBrief('website', 'writer', FULL), /No placeholder text/);
     assert.match(laneBrief('business', 'researcher', FULL), /at least three named competitors/); assert.match(laneBrief('business', 'researcher', FULL), /source URL/);
@@ -85,7 +85,7 @@ describe('each person\'s part', () => {
     assert.match(laneBrief('business', 'builder', FULL), /Office\.submitForm/); assert.match(laneBrief('business', 'builder', FULL), /Never promise an automatic email/); assert.match(laneBrief('business', 'builder', FULL), /not open yet/);
   });
   test('and with features off they are told so, rather than building something that can\'t work', () => {
-    assert.match(laneBrief('game', 'builder', BARE), /session only/); assert.doesNotMatch(laneBrief('game', 'builder', BARE), /submitScore/); assert.match(laneBrief('game', 'builder', BARE), /has not been played/);
+    assert.match(laneBrief('game', 'builder', BARE), /session only/); assert.doesNotMatch(laneBrief('game', 'builder', BARE), /submitScore|office\.leaderboard/); assert.match(laneBrief('game', 'builder', BARE), /has not been played/);
     assert.match(laneBrief('game', 'tester', BARE), /You have no browser here/);
     assert.match(laneBrief('business', 'builder', BARE), /no form/); assert.doesNotMatch(laneBrief('business', 'builder', BARE), /submitForm/);
     assert.doesNotMatch(laneBrief('website', 'builder', BARE), /review_design/);
@@ -127,7 +127,7 @@ describe('a lane through the engine', () => {
   test('tapping a lane is a short conversation that starts no work', async () => {
     const t = await boot();
     try {
-      for (const [text, re] of [['Let\'s do a game. What could we build?', /Three small ideas/], ['Let\'s do a website. What do you need from me?', /Two quick questions/], ['Let\'s do a small business. Help me work it out.', /Nobody here can send email, post, run ads or spend money/]]) {
+      for (const [text, re] of [['Let\'s do a game. What could we build?', /Three small ideas/], ['Let\'s do a website. What do you need from me?', /Two quick questions/], ['Let\'s do a small business. Help me work it out.', /Nobody here can post, run ads or spend money, and email to anyone new waits for your OK/]]) {
         const a = await claim(t, `Lane ${text.slice(10, 20)}`);
         const fresh = await floorState(a);
         assert.equal(fresh.messages.length, 1); assert.match(fresh.messages[0].text, /Tap one below/);

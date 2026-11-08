@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mailSettings } from './mail-config.js';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -87,6 +88,21 @@ export function loadConfig(env = process.env, overrides = {}) {
     namecheapKey: env.NAMECHEAP_API_KEY || '',
     namecheapClientIp: env.NAMECHEAP_CLIENT_IP || '',
     namecheapBase: (env.NAMECHEAP_BASE_URL || 'https://api.namecheap.com/xml.response').replace(/\/+$/, ''),
+    // Paid ads on Google Search (Business mode). Off unless ADS_PAID_ENABLED=1: then only the free path exists. The monthly cap is the building's,
+    // for the admin only. The Google credentials stay in this process like Namecheap's; the access token is bought from the refresh token in memory.
+    adsPaidEnabled: /^(1|true|yes|on)$/i.test(String(env.ADS_PAID_ENABLED || '').trim()),
+    adMonthlyCapUsd: Math.max(0, num(env.AD_MONTHLY_CAP_USD, 50)),
+    adCpcCeilingUsd: num(env.AD_CPC_CEILING_USD, 0.5),
+    adsTickMs: num(env.ADS_TICK_MS, 60000),
+    adsSyncMs: num(env.ADS_SYNC_MS, 15 * 60000),
+    googleAds: {
+      customerId: String(env.GOOGLE_ADS_CUSTOMER_ID || '').replace(/\D/g, ''),
+      clientId: env.GOOGLE_ADS_CLIENT_ID || '', clientSecret: env.GOOGLE_ADS_CLIENT_SECRET || '', refreshToken: env.GOOGLE_ADS_REFRESH_TOKEN || '',
+      developerToken: env.GOOGLE_ADS_DEVELOPER_TOKEN || '', loginCustomerId: env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '',
+      apiBase: (env.GOOGLE_ADS_API_BASE || 'https://googleads.googleapis.com').replace(/\/+$/, ''),
+      tokenUrl: env.GOOGLE_ADS_TOKEN_URL || 'https://oauth2.googleapis.com/token',
+      timeZone: env.GOOGLE_ADS_TIME_ZONE || 'America/New_York',
+    },
     domainContactSource: String(env.DOMAIN_CONTACT_SOURCE || '').trim().toLowerCase(),
     domainMaxUsd: num(env.DOMAIN_MAX_USD, 25),
     domainsPerFloorDay: num(env.DOMAINS_PER_FLOOR_DAY, 2),
@@ -131,6 +147,7 @@ export function loadConfig(env = process.env, overrides = {}) {
     helpTimeoutMin: num(env.HELP_TIMEOUT_MIN, 30),
     helpPerFloorDay: num(env.HELP_PER_FLOOR_DAY, 5),
     helpTickMs: num(env.HELP_TICK_MS, 5000),
+    ...mailSettings(env),  // email: RESEND_API_KEY, RESEND_WEBHOOK_SECRET, MAIL_DOMAIN and the caps (docs/MAIL.md)
     ...overrides,
   };
 }

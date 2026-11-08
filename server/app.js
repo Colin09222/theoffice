@@ -21,6 +21,7 @@ import { createManagedClient } from './sessions.js';
 import { createMockSessions } from './mock-sessions.js';
 import { appLabel, appOrigin, appHostLabel, lookupLabel, appHeaders, previewCookie, previewCookieName } from './apps.js';
 import { handleData, DataError, DATA_LIMITS, clearProjectData } from './appdata.js';
+import { installCloud, SDK_JS, API_PREFIX } from './cloud/index.js';
 import { recordVisit, projectStats, formEntries, formsCsv, formCount } from './launch.js';
 import { DomainRefused } from './domains.js';
 import { installOrders } from './orders.js';
@@ -32,6 +33,9 @@ import { installPurchases } from './purchases.js';
 import { budgetReport } from './budget.js';
 import { installCustomise } from './customise.js';
 import { installModes } from './modes.js';
+import { installBusiness } from './business.js';
+import { installMail } from './mail.js';
+import { installMakers } from './makers.js';
 import { absoluteMeta } from './metaabs.js';
 
 const BASE = '/theoffice';
@@ -81,6 +85,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // Same-origin copies every project can load, so nothing published needs a CDN or a shared host.
   const clientLib = readFileSync(join(ROOT, 'server/app-client/office.js'));
   const threeLib = statics.get('/vendor/three/three.module.min.js');
+  const phaserLib = statics.get('/vendor/phaser/phaser.min.js');
   const mainCsp = cfg.appsBaseDomain ? APP_CSP.replace("frame-src 'self'", `frame-src 'self' ${cfg.appsScheme}://*.${cfg.appsBaseDomain}`) : APP_CSP;
   const secret = A.serverSecret(db);
   const adminHash = cfg.adminPassword ? A.hashSecret(cfg.adminPassword) : '';
@@ -548,6 +553,11 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     if (!pr) throw new HttpError(404, 'not_found');
     json(res, 200, { url: previewUrl(f, pr.slug) });
   });
+  // The boss's live look at a project while it is being built: its working files, not the published ones. Signed for this floor and project only.
+  const workspacePreviewUrl = (f, slug) => {
+    const exp = Math.floor(now() / 1000) + 3600;
+    return `${BASE}/f/${f.slug}/${slug}/~w${exp}.${A.signPreview(secret, f.id, `w:${slug}`, exp)}/`;
+  };
   const previewUrl = (f, slug) => {
     const exp = Math.floor(now() / 1000) + 3600;
     const token = `~p${exp}.${A.signPreview(secret, f.id, slug, exp)}`;
@@ -678,11 +688,17 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
 
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
-  const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext)].filter(Boolean);
+  const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext)].filter(Boolean);
+  // Email: every company's own address. See docs/MAIL.md.
+  const mail = installMail(ext);
+  extensions.push(mail);
   // Their timers run with the engine's: started by whoever starts the engine, stopped on close.
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
+  // Office Cloud: the backend each published project gets on its own origin. See docs/OFFICE-CLOUD.md.
+  const cloud = installCloud({ ...ext, ipOf, secret });
+  extensions.push(cloud);
 
   // ---- published sites ----
   const docCache = new Map();
@@ -724,6 +740,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (!slugPattern.test(fslug || '') || !slugPattern.test(pslug || '')) return miss();
     const f = get(db, 'SELECT * FROM floors WHERE slug=?', fslug);
     if (!f || f.status !== 'active') return miss();
+    if (rest[0]?.startsWith('~w')) return serveWorking(req, res, f, pslug, rest, SITE, miss);
     const pr = get(db, 'SELECT * FROM projects WHERE floor_id=? AND slug=? AND published_at IS NOT NULL', f.id, pslug);
     if (!pr) return miss();
     // Private projects answer exactly like missing ones, unless a valid owner session or signed link is present.
@@ -766,6 +783,25 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     res.writeHead(200, { ...SITE, ...cors, 'content-type': hit.type });
     res.end(req.method === 'HEAD' ? undefined : hit.body);
   }
+  // Work in progress, for the boss's live preview: the drive's copy of a project, under the same sandbox as any published page, never counted as a visit.
+  function serveWorking(req, res, f, slug, rest, SITE, miss) {
+    const m = rest[0].match(/^~w(\d{1,12})\.([A-Za-z0-9_-]{20,64})$/);
+    if (!m) return miss();
+    const exp = Number(m[1]);
+    if (exp * 1000 < now() || !A.safeEqual(m[2], A.signPreview(secret, f.id, `w:${slug}`, exp))) return miss();
+    const tail = rest.slice(1);
+    const lib = sharedAsset(tail);
+    if (lib) { res.writeHead(200, { ...SITE, 'content-type': lib.type, 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' }); return res.end(req.method === 'HEAD' ? undefined : lib.body); }
+    let path = tail.filter((s, i) => !(s === '' && i === tail.length - 1)).join('/');
+    if (path === '' || req.url.split('?')[0].endsWith('/')) path = path ? `${path}/index.html` : 'index.html';
+    let safe; try { safe = cleanPath(`projects/${slug}/${path}`, { binary: true }); } catch { return miss(); }
+    const file = readFile(db, f.id, safe);
+    if (!file) return miss();
+    const type = mimeOf(safe);
+    const cors = /^text\/html/.test(type) ? {} : { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' };
+    res.writeHead(200, { ...SITE, ...cors, 'content-type': type });
+    res.end(req.method === 'HEAD' ? undefined : file.content);
+  }
   // The boss's Stripe link lives on the server, so a hijacked bot can't swap the money for its own: pages can only link here.
   function servePay(res, pr, head) {
     if (!pr.payment_link) { res.writeHead(404, { ...head, 'content-type': 'text/plain; charset=utf-8' }); return res.end('Payments are not set up yet.'); }
@@ -775,9 +811,13 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   const visit = (req, f, pr, path) => { try { recordVisit(db, { floorId: f.id, project: pr.slug, path: `/${path}`, referer: req.headers.referer, ownHost: req.headers.host, ua: req.headers['user-agent'], ip: ipOf(req), secret, now: now() }); } catch (e) { log('warn', 'visit', { err: scrub(e?.message, cfg) }); } };
   // Paths the server answers itself on every project: the client library and the vendored Three.js. They win over any published file of that name.
   function sharedAsset(segs) {
-    if (segs[0] !== '_office' || segs.length !== 2) return null;
-    if (segs[1] === 'client.js') return { type: 'text/javascript; charset=utf-8', body: clientLib };
-    if (segs[1] === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
+    // At any depth, so a page in a folder can use a relative path too.
+    const [dir, name] = segs.slice(-2);
+    if (dir !== '_office' || segs.length < 2) return null;
+    if (name === 'client.js') return { type: 'text/javascript; charset=utf-8', body: clientLib };
+    if (name === 'office.js') return { type: 'text/javascript; charset=utf-8', body: SDK_JS };
+    if (name === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
+    if (name === 'phaser.min.js') return { type: 'text/javascript; charset=utf-8', body: phaserLib?.body };
     return null;
   }
 
@@ -786,6 +826,9 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   function serveApp(req, res, label, rawUrl) {
     const HEAD = { ...appHeaders(cfg), 'cache-control': 'no-cache' };
     const ownHost = String(req.headers.host || '').toLowerCase().split(':')[0];
+    // Office Cloud rooms connect back to this same host. 'self' covers that in current browsers; older Safari needs it spelled out.
+    const hostHeader = String(req.headers.host || '').toLowerCase();
+    if (/^[a-z0-9.-]{1,253}(:\d{1,5})?$/.test(hostHeader)) HEAD['content-security-policy'] = HEAD['content-security-policy'].replace("connect-src 'self'", `connect-src 'self' ${cfg.appsScheme === 'https' ? 'wss' : 'ws'}://${hostHeader}`);
     const miss = () => { res.writeHead(404, { ...HEAD, 'content-type': 'text/plain; charset=utf-8' }); res.end('Not found'); };
     delete req.headers.authorization;
     const pass = A.parseCookies(req.headers.cookie)[previewCookieName(cfg)];
@@ -818,6 +861,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     const welcome = !pr.private && (onOwnDomain || !!pr.indexable);
     if (welcome) delete HEAD['x-robots-tag'];
     if (segs[0] === '_data') return serveData(req, res, f, pr, label, rawUrl, HEAD);
+    if (segs[0] === '_office' && segs[1] === 'cloud') return cloud.serve(req, res, { f, pr, label, segs: segs.slice(2), rawUrl, HEAD });
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...HEAD, allow: 'GET, HEAD' }); return res.end(); }
     limit('publicSite', ipOf(req));
     if (segs[0] === '_office' && segs[1] === 'pay' && segs.length === 2) return servePay(res, pr, HEAD);
@@ -862,8 +906,11 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       try { segments = m[1].split('/').filter(Boolean).map((s) => decodeURIComponent(s)); } catch { return reply(400, { error: 'bad_path' }); }
       // Counted once the path is really parsed, so no spelling of it slips past.
       if (segments[0] === 'form') limit('form', `${label}:${ip}`);
-      const [status, out] = await handleData({ db, req, floorId: f.id, project: pr.slug, segments, query: url.searchParams, body: () => readJson(req, DATA_LIMITS.bodyBytes), now });
+      let sent = null;
+      const [status, out] = await handleData({ db, req, floorId: f.id, project: pr.slug, segments, query: url.searchParams, body: () => readJson(req, DATA_LIMITS.bodyBytes).then((b) => (sent = b)), now });
       reply(status, out);
+      // A contact form on the company's own site also lands in its inbox.
+      if (segments[0] === 'form' && status === 200 && sent?.fields) { try { mail.formToInbox(f, pr.slug, segments[1], sent.fields); } catch (e) { log('error', 'mail_form', { err: scrub(e?.message, cfg) }); } }
     } catch (e) {
       if (e instanceof DataError || e instanceof HttpError) return reply(e.status, { error: e.code, message: e.message });
       log('error', 'data', { err: scrub(e?.message, cfg) });
@@ -931,11 +978,14 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (!pathname.startsWith(`${BASE}/`)) return send(res, 404, 'Not found', { 'content-type': 'text/plain; charset=utf-8' });
       const rest = pathname.slice(BASE.length);
       if (rest === '/robots.txt') return send(res, 200, 'User-agent: *\nDisallow: /\n', { 'content-type': 'text/plain; charset=utf-8' });
+      if (rest === '/sdk/office.js' && (req.method === 'GET' || req.method === 'HEAD')) { limit('read', ip); return send(res, 200, req.method === 'HEAD' ? undefined : SDK_JS, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }); }
       if (rest.startsWith('/f/')) {
         limit('publicSite', ip);
         if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...BASE_HEADERS, 'content-security-policy': SANDBOX_CSP, allow: 'GET, HEAD' }); return res.end(); }
         return serveSite(req, res, rawSegments(req.url));
       }
+      // Resend's signed webhook carries no Origin, so it is answered before the same-site checks every other call gets. See server/mail.js.
+      if (rest === '/api/mail/inbound' && req.method === 'POST') return mail.webhook(req, res, ip);
       if (rest.startsWith('/api/')) {
         const method = req.method;
         // A sibling subdomain counts as "same site", so SameSite=Lax alone would let a published page send the owner's cookie here.
@@ -975,7 +1025,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   // Node's requestTimeout is one number for the whole server, so it is set to the upload's and every other request is
   // held to the shorter limit here, the way Node does it: a 408 if nothing has been written yet, then the line is cut.
   const UPLOAD_URL = new RegExp(`^${BASE}/api/floors/[^/]+/attachments$`);
-  const isUpload = (req) => req.method === 'POST' && UPLOAD_URL.test(req.url.split('?')[0]);
+  const isUpload = (req) => req.method === 'POST' && (UPLOAD_URL.test(req.url.split('?')[0]) || req.url.split('?')[0] === `${API_PREFIX}files`);
   const holdTo = (req, ms) => {
     const timer = setTimeout(() => {
       if (req.complete) return;
@@ -990,9 +1040,11 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (!isUpload(req)) holdTo(req, cfg.requestTimeoutMs);
     handle(req, res).catch(() => { try { res.destroy(); } catch { /* gone */ } });
   });
+  // Multiplayer rooms: WebSockets on a project's own origin. Everything else that asks to upgrade is refused there.
+  server.on('upgrade', (req, socket, head) => cloud.upgrade(req, socket, head));
   server.requestTimeout = Math.max(cfg.requestTimeoutMs, cfg.uploadTimeoutMs); server.headersTimeout = 15000; server.keepAliveTimeout = 5000; server.maxConnections = 1200;
   return {
-    server, engine, bus, rates,
+    server, engine, bus, rates, cloud,
     /** Brotli every asset ahead of the first visitor. Called by the real entry point only, so tests don't pay for it. */
     warmStatics: () => warmBrotli(statics),
     async close() {

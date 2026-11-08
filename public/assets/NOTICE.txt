@@ -28,3 +28,6 @@ From Poly Haven (https://polyhaven.com, CC0), 1k JPG maps from dl.polyhaven.org:
 From ambientCG (https://ambientcg.com, CC0), 1K-JPG downloads:
   carpet     Carpet016               https://ambientcg.com/view?id=Carpet016
   terrazzo   Terrazzo009             https://ambientcg.com/view?id=Terrazzo009
+
+Phaser
+- public/vendor/phaser/phaser.min.js: Phaser 3.90.0 (npm phaser@3.90.0, dist/phaser.min.js), MIT License, Copyright (c) 2024 Richard Davey, Phaser Studio Inc. LICENSE beside it. Served to published games as _office/phaser.min.js.

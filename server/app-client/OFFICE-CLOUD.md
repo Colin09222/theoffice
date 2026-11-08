@@ -1,0 +1,100 @@
+# Office Cloud: the backend every published project has
+
+Accounts, a database, saves, leaderboards, multiplayer rooms and uploads, with no server code, no keys and nothing to set up.
+It works on the published site (its own address, and any domain bought for it). Each project's data is its own: no other site can read it.
+
+```html
+<script src="_office/office.js"></script>          <!-- from a page in a folder: ../_office/office.js -->
+<script>
+  const office = Office.connect();
+</script>
+```
+
+Every call returns a promise. When one fails, show `err.message` to the person; `err.code` says which problem it was (such as `username_taken`, `bad_login`, `rate_limited`, `quota`, `offline`).
+Show anything a visitor wrote (names, posts, chat) with `textContent`, never `innerHTML`.
+
+## Saves: this player's own
+```js
+await office.saves.set('progress', { level: 3, coins: 120 });   // any JSON up to 64 KB; true once the server has it
+const p = await office.saves.get('progress', { level: 1, coins: 0 });  // the fallback when there is nothing yet
+await office.saves.remove('progress'); await office.saves.list();       // [{key, size, updatedAt}]
+```
+A guest's saves stay with their browser. Logged in, they follow the account to any device, and a guest who signs up keeps them.
+Up to 200 keys and 1 MB per player.
+
+## Accounts
+```js
+const user = await office.auth.signUp({ username: 'sam', email: 'sam@example.com', password: 'at least 8', name: 'Sam' }); // username or email, or both
+await office.auth.logIn({ login: 'sam', password: '...' });   // login is the username or the email
+await office.auth.logOut();
+office.auth.user;                       // {id, username, email, name} or null, right away
+office.auth.onChange((user) => ...);    // after log-in, log-out, or a session that ran out
+await office.ready;                     // the stored login has been checked with the server
+await office.auth.setName('Sammy'); await office.auth.changePassword(old, next); await office.auth.deleteAccount(password);
+```
+**Nothing here sends email, so there is no password reset and no email confirmation.** Say so where people sign up ("keep your password safe: there's no reset yet"), and never promise an email.
+Each project has its own list of people. Passwords are stored hashed; logging in is rate-limited. Usernames are 3 to 24 letters, digits, `_ . -`.
+
+## Leaderboards
+```js
+const r = await office.leaderboard.submit('high', 4200, { name: 'Sam' });       // {best, improved, rank}
+await office.leaderboard.submit('fastest', 31.4, { name: 'Sam', lower: true }); // lower is better, such as a time
+const { entries, me } = await office.leaderboard.top('high', { limit: 10 });   // entries: [{rank, name, score, you}], me: {rank, score} or null
+```
+One entry per player, best kept. A logged-in player's name is their account name; `name` is for guests. A board's direction is settled by its first score.
+Scores are numbers up to a trillion either way. Up to 50 boards a project.
+
+## Data: collections of JSON documents
+```js
+const posts = office.db.collection('posts');
+const doc = await posts.add({ text: 'Hello', tags: ['news'] });   // {id, data, owner: {id, name}, mine, private, createdAt, updatedAt, version}
+await posts.add({ phone: '...' }, { private: true });             // only whoever added it can ever read it
+await posts.get(doc.id);                                          // null if there is none you can see
+await posts.update(doc.id, { text: 'Hi' });                       // change some fields; null removes one
+await posts.set('about', { text: 'Fixed id' });                   // create or replace by id
+await posts.remove(doc.id);
+const list = await posts.find({ where: { author: 'sam' }, sort: '-createdAt', limit: 20, offset: 0 });
+await posts.find({ mine: true }); await posts.count();
+```
+- Anyone can read a document unless it was added with `{private: true}`. Only whoever added it can change or delete it. Logged out, "whoever" is that browser.
+- Anything personal, such as an email address or a phone number, is `{private: true}`, or goes to the boss with `Office.submitForm`.
+- `where` matches top-level or dotted fields exactly (strings, numbers, true, false, null). `sort` is a field, `createdAt` or `updatedAt`, with `-` in front for newest or biggest first. Up to 100 a page.
+- Documents are objects up to 32 KB. Collection names are 1 to 40 letters, digits, `_ -`. Up to 50 collections and 20 MB of data a project.
+- `update` and `set` take `{ifVersion}` to refuse a change if someone else got there first (`version_conflict`).
+
+## Multiplayer rooms
+```js
+const room = office.rooms.join('lobby', { name: 'Sam', presence: { x: 0, y: 0 } });
+room.on('ready', () => draw(room.members));             // room.me, room.members (you included, you: true), room.state
+room.on('join', (m) => ...); room.on('leave', (m) => ...);
+room.on('message', (data, from) => ...);                 // from room.send by someone else
+room.on('state', (key, value, by) => ...);               // shared state changed (yours too)
+room.on('presence', (m) => ...);                         // m.presence changed
+room.on('error', (err) => ...); room.on('close', () => ...);
+room.send({ type: 'shot', x: 3 });                       // to everyone else
+room.sendTo(memberId, data);                             // to one person
+room.set('door', 'open');                                // shared state: everyone sees it, including people who join later
+room.setPresence({ x: 4, y: 2 });                        // little things about you: position, colour, status
+room.leave();
+await office.rooms.list();                               // [{name, players, full}]
+```
+Up to 16 people a room. Messages are JSON up to 8 KB, about 20 a second each; send positions a few times a second, not every frame.
+A room's state is kept while anyone is in it and forgotten when the last person leaves: keep anything lasting in saves or data.
+It reconnects by itself after a dropped connection.
+
+## Uploads
+```js
+const f = await office.files.upload(input.files[0]);   // {id, url, type, size, name}; up to 5 MB
+img.src = f.url;
+await office.files.list(); await office.files.remove(f.id);
+```
+Images (PNG, JPEG, GIF, WebP, AVIF), sound (MP3, OGG, WAV, M4A) and video (MP4, WebM). The type is read from the file itself; anything else is refused.
+Keep the url (or the id) in a document to show it to other people. Up to 100 files and 25 MB per person, 50 MB a project.
+
+## Also
+- `office.shared.get(key, fallback)`, `office.shared.set(key, value)`, `office.shared.incr(key, by)`: values every visitor shares, such as a counter. Anyone can change them.
+- `Office.submitForm('waitlist', { email, name })`: a form only the boss can read (`office.forms.submit` is the same).
+- `office.mode` is `'live'` on the published site and `'local'` on a preview with no Office server behind it. There, everything runs on that one device: accounts are pretend, nobody else is in a room, and nothing reaches the server. Say so rather than calling it saved.
+- Too many requests get `rate_limited`; a full project gets `quota`. Show the message and carry on.
+
+The example in `.office/examples/cloud-game/index.html` uses all of the main parts in one small page.

@@ -1,0 +1,18 @@
+:root { --ink: #1b2a22; --paper: #f6f3ea; --hot: #d2552b; --soft: #e5dfcf; font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; color: var(--ink); background: var(--paper); }
+* { box-sizing: border-box; } html { scroll-behavior: smooth; } body { margin: 0; } img { max-width: 100%; height: auto; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+.skip { position: absolute; left: -999px; } .skip:focus { left: 8px; top: 8px; background: #fff; padding: 8px; }
+.top { position: sticky; top: 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px clamp(16px, 5vw, 56px); background: var(--paper); border-bottom: 2px solid var(--ink); }
+.brand { font-weight: 700; font-size: 20px; color: var(--ink); text-decoration: none; } nav { display: flex; gap: 16px; flex-wrap: wrap; } nav a { color: var(--ink); }
+.hero { padding: clamp(48px, 10vw, 120px) clamp(16px, 5vw, 56px); max-width: 1100px; }
+.hero h1 { font-size: clamp(44px, 10vw, 104px); line-height: 0.92; letter-spacing: -0.03em; margin: 0 0 20px; max-width: 11ch; }
+.lede { font-size: clamp(19px, 2.6vw, 24px); line-height: 1.45; max-width: 36ch; margin: 0 0 26px; }
+.btn { display: inline-block; background: var(--hot); color: #fff; padding: 13px 22px; border: 0; border-radius: 4px; font: 700 17px system-ui, sans-serif; text-decoration: none; cursor: pointer; min-height: 46px; }
+.band { padding: clamp(36px, 7vw, 80px) clamp(16px, 5vw, 56px); border-top: 2px solid var(--ink); } .band.alt { background: var(--soft); }
+.band h2 { font-size: clamp(30px, 5vw, 52px); margin: 0 0 16px; letter-spacing: -0.02em; } .band p, .steps { max-width: 60ch; font-size: 19px; line-height: 1.55; }
+.steps { padding-left: 1.2em; } .steps li { margin: 0 0 10px; }
+.contact { display: grid; gap: 14px; max-width: 520px; font-family: system-ui, sans-serif; }
+.contact label { display: grid; gap: 6px; font-weight: 600; }
+.contact input, .contact textarea { font: 16px system-ui, sans-serif; padding: 12px; border: 2px solid var(--ink); border-radius: 4px; background: #fff; width: 100%; }
+.trap { position: absolute; left: -9999px; } .status { min-height: 1.4em; } .bad { color: #a3241c; }
+.foot { padding: 20px clamp(16px, 5vw, 56px); border-top: 2px solid var(--ink); font-size: 15px; }

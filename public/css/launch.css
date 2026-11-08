@@ -1,0 +1,35 @@
+/* The launcher and the maker card (public/js/launch-ui.js). Phone first: everything is a big thumb target. */
+.launcher { display: grid; gap: 12px; margin: 6px 0 14px; padding: 16px; background: var(--paper-2); border: 2px solid var(--line); border-radius: 14px; }
+.launch-step { margin: 0; font: 600 13px var(--cond); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.launch-q { margin: 0; font: 400 26px/1.1 var(--display); color: var(--ink); }
+.launch-types { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.launch-type, .launch-card { position: relative; display: grid; gap: 4px; align-content: start; text-align: left; padding: 14px; min-height: 96px; background: var(--white); color: var(--ink); border: 0; border-radius: 12px; box-shadow: 0 4px 0 #bda876; cursor: pointer; transition: transform .07s, box-shadow .07s; font: inherit; }
+.launch-type:active, .launch-card:active { transform: translateY(3px); box-shadow: 0 1px 0 #bda876; }
+.launch-type:focus-visible, .launch-card:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+.launch-type .ico { width: 26px; height: 26px; fill: var(--tomato); }
+.launch-type:nth-child(2) .ico { fill: var(--teal); } .launch-type:nth-child(3) .ico { fill: var(--sky); } .launch-type:nth-child(4) .ico { fill: var(--sun-d); }
+.launch-type b, .launch-card b { font: 400 20px/1.1 var(--display); }
+.launch-type span, .launch-card span { font-size: 14px; line-height: 1.35; color: var(--ink-2); }
+.launch-cards { display: grid; gap: 10px; }
+.launch-card .tag { position: absolute; top: 10px; right: 12px; font: 700 12px var(--cond); font-style: normal; background: var(--teal-l); color: var(--teal-d); padding: 2px 7px; border-radius: 6px; }
+.launch-card.surprise { min-height: 64px; background: var(--brass-l); }
+.launch-card.surprise .ico { width: 22px; height: 22px; fill: var(--brass-d); }
+.launch-own { display: flex; gap: 8px; align-items: stretch; } .launch-own textarea { flex: 1; min-height: 48px; resize: vertical; font: 16px var(--sans); padding: 10px; border: 2px solid var(--line); border-radius: 10px; background: var(--white); }
+.launch-row { display: flex; justify-content: space-between; }
+.launch-review { display: grid; gap: 10px; }
+.launch-review label { display: grid; gap: 4px; } .launch-review label span { font: 600 13px var(--cond); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); }
+.launch-review input, .launch-review textarea { font: 16px var(--sans); padding: 10px 12px; border: 2px solid var(--line); border-radius: 10px; background: var(--white); color: var(--ink); width: 100%; min-height: 44px; }
+.launch-go { min-height: 56px; font-size: 20px; width: 100%; justify-content: center; }
+.launch-loading { margin: 0; color: var(--ink-3); }
+.maker-card { display: grid; gap: 10px; margin: 10px 0; padding: 14px; background: var(--white); border: 2px solid var(--ink); border-radius: 14px; box-shadow: 0 4px 0 var(--line); }
+.maker-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; } .maker-head b { font: 400 22px/1.1 var(--display); }
+.maker-head span { font: 700 13px var(--cond); text-transform: uppercase; letter-spacing: .06em; color: var(--teal); }
+.maker-card[data-stage="asking"] .maker-head span { color: var(--tomato); }
+.maker-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.maker-steps li { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--ink-3); } .maker-steps .ico { width: 18px; height: 18px; fill: currentColor; }
+.maker-steps li.done { color: var(--leaf); } .maker-steps li.doing { color: var(--ink); font-weight: 700; } .maker-steps li.failed { color: var(--tomato); }
+.maker-report { margin: 0; font-size: 14px; color: var(--ink-2); }
+.maker-launch { min-height: 56px; font-size: 20px; width: 100%; justify-content: center; }
+.maker-share { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .maker-share a { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 700; color: var(--teal-d); }
+.maker-ask { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; } .maker-ask p { flex-basis: 100%; margin: 0; }
+@media (min-width: 761px) { .launch-cards { grid-template-columns: 1fr 1fr; } }

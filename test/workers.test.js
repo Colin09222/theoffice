@@ -96,7 +96,7 @@ describe('what good work means, per job', () => {
     assert.match(computerPrompt(FULL, 'builder', {}), /work in big steps/); assert.match(computerPrompt(FULL, 'builder', {}), /twice is the limit/);
     const writer = staffPrompt(floor, { name: 'S', title: 'Writer', role: 'writer' }, {}, {}, FULL);
     const builder = staffPrompt(floor, { name: 'S', title: 'Builder', role: 'builder' }, {}, {}, FULL);
-    assert.doesNotMatch(writer, /Office\.submitScore/); assert.match(builder, /Office\.submitScore/);
+    assert.doesNotMatch(writer, /office\.leaderboard\.submit/); assert.match(builder, /office\.leaderboard\.submit/);
     assert.match(writer, /choose sensibly and say what you assumed/);
   });
   test('code, games and pictures stay on Opus; planning, words and the Tester\'s computer run on Sonnet; search stays on Sonnet at low effort', () => {

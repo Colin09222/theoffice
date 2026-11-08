@@ -2,20 +2,36 @@
 // Building-manager CLI. The plaintext code goes to this terminal only; the database stores its hash and nothing logs it.
 import { loadConfig, loadModels } from '../server/config.js';
 import { openDb, all, get, run } from '../server/db.js';
-import { issueCode } from '../server/auth.js';
+import { issueCode, createSession, sha256 } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
+import { createStore } from '../server/cloud/store.js';
+import { slugPattern } from '../server/workspace.js';
+import { writeFileSync } from 'node:fs';
 import { helpListing, helpListingText, answerHelp, declineHelp, HelpError, HELP_LIMITS, newFence } from '../server/help.js';
 import { budgetReport, budgetReportText } from '../server/budget.js';
 import { purchaseListing, purchaseListingText, decidePurchase, PurchaseError } from '../server/purchases.js';
 import { readFileSync, statSync } from 'node:fs';
+import { googleAdsFromConfig } from '../server/googleads.js';
+import { adsListing, adsListingText, pauseAll } from '../server/ads-guard.js';
+import { ensureAdSpend, resumeAds } from '../server/business.js';
+import { scrub } from '../server/llm.js';
+import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, MailError } from '../server/mail.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
 const usage = () => {
   console.log(['Usage:',
     '  node scripts/admin.mjs code [--floor N]       issue a one-time office code',
+    '  node scripts/admin.mjs mail status [--json]   email: sending and receiving, today\'s counts, each floor\'s address, pauses and alerts. No message text',
+    '  node scripts/admin.mjs mail pause|resume [--floor N]   stop or restart sending for one floor, or for the whole building. Receiving carries on',
+    '  node scripts/admin.mjs mail suppress <address>   never send to this address again, from any floor',
+    '  node scripts/admin.mjs login --floor N [--minutes M]   a short boss login to check floor N by hand (default 60 minutes, at most 240): the office_s cookie value, to this terminal only',
+    '  node scripts/admin.mjs login revoke           end such a login now: give its cookie value on stdin',
     '  node scripts/admin.mjs floors                 list floors',
     '  node scripts/admin.mjs floors hide|show --floor N   hide floor N from the lobby, directory and lift, or show it again. It still opens by its own link',
+    '  node scripts/admin.mjs backend usage [--json]   every project\'s Office Cloud backend: accounts, documents, saves, scores, files and storage. Counts only',
+    '  node scripts/admin.mjs backend export --floor N --project SLUG [--files] [--out FILE]   everything one project keeps, as JSON. Accounts leave without their passwords',
+    '  node scripts/admin.mjs backend wipe --floor N --project SLUG --yes   delete everything one project keeps: accounts, documents, saves, scores and files',
     '  node scripts/admin.mjs filler list            list filler (demo) companies and removed ones',
     '  node scripts/admin.mjs filler seed            seed the filler companies, bringing back any that were removed',
     '  node scripts/admin.mjs filler remove --floor N  remove the filler company on floor N (stays removed)',
@@ -25,7 +41,10 @@ const usage = () => {
     '  node scripts/admin.mjs help answer --id N --decline          decline one',
     '  node scripts/admin.mjs budget [--json]          spent, limit and remaining per provider, what each floor has spent, and a flag at 50%, 80% and 100%',
     '  node scripts/admin.mjs purchases list [--json]  what the staff have asked to buy and nobody has decided. Everything a floor wrote is fenced as untrusted data',
-    '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick'].join('\n'));
+    '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick',
+    '  node scripts/admin.mjs ads list [--json]        paid Google ads: approved against spent per campaign (Google\'s own figures), and this month against the cap',
+    '  node scripts/admin.mjs ads pause-all            emergency stop: pause every enabled campaign in the Google Ads account now; no new paid campaign starts until ads resume',
+    '  node scripts/admin.mjs ads resume               lift the stop left by pause-all, the watchdog or the server\'s spend check, once you\'ve looked (paused campaigns stay paused)'].join('\n'));
   process.exit(1);
 };
 if (!cmd) usage();
@@ -44,6 +63,21 @@ if (cmd === 'code') {
     if (get(db, 'SELECT 1 x FROM floors WHERE number=?', floor)) { console.error(`Floor ${floor} is already taken.`); process.exit(1); }
   }
   console.log(issueCode(db, floor));
+} else if (cmd === 'login') {
+  // For checking a floor as its boss: a boss session like the one a claim or a recovery code gives, but short. Its value goes to this terminal only.
+  if (rest[0] === 'revoke') {
+    const token = readFileSync(0, 'utf8').trim();
+    const r = token ? run(db, "DELETE FROM sessions WHERE hash=? AND kind='owner'", sha256(token)) : { changes: 0 };
+    console.log(r.changes ? 'That login has ended.' : 'No such login.');
+  } else {
+    const n = floorArg();
+    const f = get(db, "SELECT id FROM floors WHERE number=? AND status!='killed'", n);
+    if (!f) die(`Floor ${n} has no company on it.`);
+    const i = rest.indexOf('--minutes');
+    const minutes = i >= 0 ? Number(rest[i + 1]) : 60;
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 240) die('--minutes must be 1 to 240');
+    console.log(createSession(db, 'owner', f.id, minutes * 60).token);
+  }
 } else if (cmd === 'floors' && (rest[0] === 'hide' || rest[0] === 'show')) {
   // Works on the database file alone. A running server leaves a hidden floor out of its next lobby reply.
   const n = floorArg();
@@ -56,6 +90,31 @@ if (cmd === 'code') {
   const fence = newFence();
   console.log(`${fence.notice}\n`);
   for (const f of all(db, 'SELECT number,slug,name,status,filler,hidden FROM floors ORDER BY number')) console.log(`${String(f.number).padStart(3)}  ${f.status.padEnd(10)} ${fence.wrap('floor', `${f.slug}: ${f.name}`)}${f.filler ? '  [filler]' : ''}${f.hidden ? '  [hidden]' : ''}`);
+} else if (cmd === 'backend') {
+  // Office Cloud, the backend published projects use. Counts, an export, or a wipe. Run it in the container, beside the live database.
+  const store = createStore(db);
+  const projectArg = () => {
+    const i = rest.indexOf('--project'); const p = i >= 0 ? String(rest[i + 1] || '') : '';
+    if (!slugPattern.test(p)) die('--project must be a project slug, such as space-game');
+    return p;
+  };
+  const floorRow = () => { const n = floorArg(); const f = get(db, 'SELECT * FROM floors WHERE number=?', n); if (!f) die(`There is no company on floor ${n}.`); return f; };
+  const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
+  if (rest[0] === 'usage') {
+    const rows = store.projects().map((x) => ({ floor: get(db, 'SELECT number FROM floors WHERE id=?', x.floor_id)?.number ?? null, project: x.project, ...store.summary(x.floor_id, x.project) }));
+    if (rest.includes('--json')) console.log(JSON.stringify(rows, null, 2));
+    else if (!rows.length) console.log('No project has used Office Cloud yet.');
+    else for (const r of rows) console.log(`floor ${r.floor ?? '(closed)'} ${r.project}: ${r.users} accounts, ${r.docs} documents in ${r.collections} collections, ${r.saves} saves, ${r.scores} scores on ${r.boards} boards, ${r.files} files; data ${kb(r.bytes)} of ${kb(r.limits.bytes)}, files ${kb(r.fileBytes)} of ${kb(r.limits.fileBytes)}; ${r.requestsToday} requests today`);
+  } else if (rest[0] === 'export') {
+    const f = floorRow(); const p = projectArg();
+    const out = JSON.stringify(store.exportProject(f.id, p, { withFiles: rest.includes('--files') }), null, 2);
+    const i = rest.indexOf('--out');
+    if (i >= 0 && rest[i + 1]) { writeFileSync(rest[i + 1], out, { mode: 0o600 }); console.log(`Wrote ${rest[i + 1]} (${kb(Buffer.byteLength(out))}).`); } else console.log(out);
+  } else if (rest[0] === 'wipe') {
+    const f = floorRow(); const p = projectArg();
+    if (!rest.includes('--yes')) die(`This deletes every account, document, save, score and file of ${p} on floor ${f.number}. Add --yes to do it.`);
+    console.log(`Wiped ${p} on floor ${f.number}: ${store.wipeProject(f.id, p)} rows removed. Anyone in one of its rooms right now stays until they leave; their accounts are gone.`);
+  } else usage();
 } else if (cmd === 'filler') {
   // These work on the database file alone. A running server notices a removal on its next tick.
   const sub = rest[0];
@@ -115,6 +174,36 @@ if (cmd === 'code') {
     if (status !== 'bought' && status !== 'rejected') die('--status must be bought or rejected.');
     try { decidePurchase(db, id, status, valueOf('--note') ?? ''); } catch (e) { if (e instanceof PurchaseError) die(e.message); throw e; }
     console.log(`Marked #${id} ${status}. The floor hears on the server's next tick.`);
+  } else usage();
+} else if (cmd === 'ads') {
+  // Needs the server's environment (GOOGLE_ADS_*, AD_MONTHLY_CAP_USD), so run it in the container. It prints no token.
+  const api = googleAdsFromConfig(cfg);
+  try {
+    if (rest[0] === 'list') {
+      const listing = await adsListing({ db, cfg, api });
+      console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : adsListingText(listing));
+    } else if (rest[0] === 'pause-all') {
+      if (!api) die('Google Ads is not set up on this server (GOOGLE_ADS_* settings), so there is nothing to pause.');
+      console.log((await pauseAll({ db, api })).line);
+    } else if (rest[0] === 'resume') {
+      ensureAdSpend(db);
+      console.log(resumeAds(db) ? 'ads resume: new paid campaigns can start again. Paused campaigns stay paused.' : 'ads resume: there was no stop to lift.');
+    } else usage();
+  } catch (e) { die(`Google Ads: ${scrub(e?.message || e, cfg)}`); }
+} else if (cmd === 'mail') {
+  // Reads and writes the database only; the server sees a pause or a suppression on its next send. It prints no key or secret.
+  ensureMailSchema(db);
+  const sub = rest[0];
+  const fl = rest.indexOf('--floor') >= 0 ? Number(rest[rest.indexOf('--floor') + 1]) : null;
+  const floorRow = () => { const f = get(db, 'SELECT id, number, name FROM floors WHERE number=?', fl); if (!f) die(`There is no floor ${fl}.`); return f; };
+  if (sub === 'status') {
+    const s = mailStatus(db, cfg);
+    console.log(rest.includes('--json') ? JSON.stringify(s, null, 2) : mailStatusText(s));
+  } else if (sub === 'pause' || sub === 'resume') {
+    const on = sub === 'pause';
+    if (fl !== null) { const f = floorRow(); setFloorPause(db, f.id, on, 'building manager'); console.log(`Email sending ${on ? 'paused' : 'back on'} for floor ${f.number} ${f.name}.`); } else { setBuildingPause(db, on); console.log(`Email sending ${on ? 'paused' : 'back on'} for the whole building.`); }
+  } else if (sub === 'suppress') {
+    try { console.log(`${suppressAddress(db, rest[1], 'building manager')} will get no more email from the building.`); } catch (e) { if (e instanceof MailError) die(e.message); throw e; }
   } else usage();
 } else usage();
 db.close();

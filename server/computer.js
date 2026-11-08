@@ -60,7 +60,13 @@ console.log(formatReport(r));
 process.exitCode = r.errors.length || r.claims.length ? 1 : 0;
 `;
 const CLIENT_JS = readFileSync(join(ROOT, 'server/app-client/office.js'));
+// Office Cloud: the browser library, its guide, and a starter game that uses it (saves, an account, a leaderboard, a shared room).
+const CLOUD_FILES = [['office.js', 'sdk.js'], ['OFFICE-CLOUD.md', 'OFFICE-CLOUD.md'], ['examples/cloud-game/index.html', 'examples/cloud-game.html']]
+  .map(([to, from]) => ({ path: `.office/${to}`, data: readFileSync(join(ROOT, 'server/app-client', from)) }));
 const THREE_JS = readFileSync(join(ROOT, 'public/vendor/three/three.module.min.js'));
+// The maker flow (server/makers.js): Phaser for 2D games, served as _office/phaser.min.js once published, and the Tester's browser half as one file.
+const PHASER_JS = readFileSync(join(ROOT, 'public/vendor/phaser/phaser.min.js'));
+export const PLAYTEST = `${readFileSync(join(ROOT, 'server/playtest.js'), 'utf8')}\n${readFileSync(join(ROOT, 'server/playtest-box.mjs'), 'utf8')}`;
 // Real sound and art for a game, so it has more than beeps and shapes: the CC0 Kenney packs the office itself uses (public/models/NOTICE.txt). Games only, to keep every other box small.
 export const GAME_ASSETS = (() => {
   const out = Object.entries(SOUNDS).map(([name, b64]) => ({ path: `.office/assets/sounds/${name}.mp3`, data: Buffer.from(b64, 'base64') }));
@@ -350,9 +356,12 @@ export class Computer {
       const box = packTgz([
         { path: '.office/save.sh', data: Buffer.from(SAVE_SH), mode: 0o755 },
         { path: '.office/client.js', data: CLIENT_JS },
+        ...CLOUD_FILES,
         { path: '.office/launch-check.mjs', data: Buffer.from(LAUNCH_CHECK) },
         { path: '.office/three.module.min.js', data: THREE_JS },
         ...(task.lane === 'game' ? GAME_ASSETS : []),
+        ...(task.lane === 'game' ? [{ path: '.office/phaser.min.js', data: PHASER_JS }] : []),
+        ...(agent.role === 'tester' ? [{ path: '.office/playtest.mjs', data: Buffer.from(PLAYTEST) }] : []),
         ...files.map((f) => ({ path: `project/${f.path}`, data: f.data })),
         // The boss's files for this task, beside the project rather than in it: only what the agent copies in is saved back.
         ...e.taskFiles(task).map((a) => ({ path: a.path, data: Buffer.from(get(e.db, 'SELECT content FROM files WHERE floor_id=? AND path=?', floor.id, a.path)?.content ?? '') })),

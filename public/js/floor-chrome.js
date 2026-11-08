@@ -6,7 +6,7 @@ import { icon } from './icons.js';
 import { portrait } from './portrait.js';
 import { lift, prefetchFloor } from './floorcache.js';
 
-const TAB_ICONS = { chat: 'phone-call', talk: 'chats-teardrop', work: 'notebook', tasks: 'push-pin', projects: 'archive', requests: 'receipt', orders: 'calendar-check', about: 'identification-badge' };
+const TAB_ICONS = { chat: 'phone-call', talk: 'chats-teardrop', work: 'notebook', tasks: 'push-pin', projects: 'archive', requests: 'receipt', inbox: 'envelope-simple', orders: 'calendar-check', about: 'identification-badge', business: 'briefcase' };
 export const tabIcon = (tab) => icon(TAB_ICONS[tab] || 'file-text');
 
 export { portrait };

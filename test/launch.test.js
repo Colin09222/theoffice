@@ -6,7 +6,7 @@ import { get, all, run } from '../server/db.js';
 import { loadConfig, loadModels } from '../server/config.js';
 import { toolsForRole, toolDefs, mentionsPrivate } from '../server/tools.js';
 import { checkSite, formatReport } from '../server/launch-check.js';
-import { createMedia, sniffImage } from '../server/media.js';
+import { createMedia, sniffImage, createMockMedia } from '../server/media.js';
 import { createSearch, readSearch } from '../server/search.js';
 import { createMockSessions } from '../server/mock-sessions.js';
 import { formsCsv } from '../server/launch.js';
@@ -426,7 +426,7 @@ describe('on a computer, the OpenRouter tools run on the server', () => {
     h.t.app.engine.kick();
     await until(() => { const r = get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id); return ['review', 'failed'].includes(r.status) && !h.t.app.engine.runs.size; });
     assert.match(seen.image, /\/mnt\/session\/uploads\/generated\/1-hero\.png/); assert.match(seen.image, /cp /);
-    assert.deepEqual(sessions.calls.mounts[0].data, TINY);
+    assert.deepEqual(sessions.calls.mounts[0].data, (await createMockMedia({}).generateImage()).bytes, 'the picture the model made is the one mounted');
     assert.ok(get(h.t.db, "SELECT 1 x FROM files WHERE path='projects/teacups/public/images/hero.png'"));
     assert.match(seen.review, /FIX FIRST/);
     assert.match(seen.traversal, /no such file/); assert.match(seen.tgz, /no such file/);

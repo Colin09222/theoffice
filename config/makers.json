@@ -1,0 +1,115 @@
+{
+  "_comment": "The maker flow: what the boss can start in three taps, the passes each kind of job goes through, and the bars its Tester and the review loop hold it to. server/makers.js reads this file. No money anywhere in it.",
+  "passes": {
+    "_comment": "depth: depth passes after the playable slice (0 to max). A pass that fails twice asks the boss instead of looping. maxJobTokens counts every model token the floor spends after the job starts.",
+    "depth": 3,
+    "max": 3,
+    "failsBeforeAsking": 2,
+    "maxJobTokens": 6000000
+  },
+  "types": {
+    "game": {
+      "label": "Game",
+      "blurb": "A real game with levels, enemies and upgrades",
+      "lane": "game",
+      "goal": "A game people play for 10+ minutes, with saves and a shared leaderboard, live at a link",
+      "plan": ["Design doc: core loop, controls, 3+ mechanics, levels, upgrades, juice", "Playable slice on the starter", "Depth passes, each one played by the Tester in a real browser", "Launch with a share link"],
+      "doneRules": [
+        { "id": "loads", "text": "Loads with 0 console errors", "check": "browser" },
+        { "id": "inputs", "text": "Keyboard, touch and gamepad input change the game state", "check": "browser" },
+        { "id": "nosoftlock", "text": "No soft-lock over 60 s of scripted plus random input, and restart always works", "check": "browser" },
+        { "id": "fps", "text": "Frame rate stays playable", "check": "browser" },
+        { "id": "screens", "text": "Menu, play, pause, game over and settings are all reachable", "check": "browser" },
+        { "id": "cloud", "text": "Progress saves and scores post to the leaderboard through Office Cloud", "check": "browser" },
+        { "id": "mechanics", "text": "At least 3 distinct mechanics or enemy types, as the design doc says", "check": "judge" },
+        { "id": "progression", "text": "Levels or waves that ramp, upgrades or unlocks, scoring and a win or lose", "check": "judge" },
+        { "id": "juice", "text": "Juice and audio: shake, particles, tweens, hit-stop and sound, with mute", "check": "judge" },
+        { "id": "phone", "text": "Plays on a phone with on-screen or tap controls", "check": "judge" },
+        { "id": "depth", "text": "Enough content for 10+ minutes of play", "check": "judge" }
+      ],
+      "bars": { "maxConsoleErrors": 0, "softlockSeconds": 60, "frozenSeconds": 12, "minFps": 30, "headlessMinFps": 18, "minMechanics": 3, "minPlayMinutes": 10 }
+    },
+    "app": {
+      "label": "App / SaaS",
+      "blurb": "A signed-in web app with real accounts and data",
+      "lane": "app",
+      "goal": "A working web app: sign up, make something, find it again tomorrow, live at a link",
+      "plan": ["Spec: who it is for, the core object, the screens", "Landing page plus a signed-in app shell on the starter", "Polish passes, each tested end to end by the Tester", "Launch with a share link"],
+      "doneRules": [
+        { "id": "loads", "text": "Landing and app load with 0 console errors", "check": "browser" },
+        { "id": "signup", "text": "Sign up works and lands in the app", "check": "browser" },
+        { "id": "create", "text": "Creating something shows it at once", "check": "browser" },
+        { "id": "persist", "text": "After a reload it is still there", "check": "browser" },
+        { "id": "relogin", "text": "Sign out and back in, and it is still there", "check": "browser" },
+        { "id": "mobile", "text": "Fits a 390 px phone with nothing scrolling sideways", "check": "browser" },
+        { "id": "states", "text": "Empty, loading and error states are real, not blank", "check": "judge" },
+        { "id": "crud", "text": "Edit and delete work as well as create", "check": "judge" },
+        { "id": "settings", "text": "A settings screen that does something", "check": "judge" },
+        { "id": "honest", "text": "Payments only as a clearly marked coming-soon hook, nothing invented", "check": "judge" }
+      ],
+      "bars": { "maxConsoleErrors": 0, "phoneWidth": 390, "maxPageKB": 600 }
+    },
+    "website": {
+      "label": "Website",
+      "blurb": "A fast, good-looking site with real words",
+      "lane": "website",
+      "goal": "A fast site that looks made for this subject, with a contact form that works, live at a link",
+      "plan": ["Words and look: who it is for, the one thing a visitor should do", "The site on the starter", "Polish passes, each checked by the Tester at phone and desktop size", "Launch with a share link"],
+      "doneRules": [
+        { "id": "loads", "text": "Loads with 0 console errors", "check": "browser" },
+        { "id": "mobile", "text": "Fits a 390 px phone with nothing scrolling sideways", "check": "browser" },
+        { "id": "links", "text": "No broken links or missing sections", "check": "browser" },
+        { "id": "meta", "text": "Title, description, og tags, favicon and lang", "check": "browser" },
+        { "id": "form", "text": "The contact form really submits and thanks the visitor", "check": "browser" },
+        { "id": "look", "text": "Looks made for this subject, not a template", "check": "judge" },
+        { "id": "words", "text": "Real words only: nothing invented, no placeholder", "check": "judge" }
+      ],
+      "bars": { "maxConsoleErrors": 0, "phoneWidth": 390, "maxPageKB": 500 }
+    },
+    "business": {
+      "label": "Business",
+      "blurb": "Research, a plan and a landing page, step by step",
+      "lane": "business",
+      "goal": "A researched idea with a plan and a live landing page",
+      "plan": ["Researched idea cards with real links", "Website, product, payments and analytics", "Ads to share", "Launch"],
+      "doneRules": [],
+      "bars": {}
+    }
+  },
+  "ideas": {
+    "game": [
+      { "id": "lantern", "title": "Lighthouse Keeper", "starter": "game-2d", "pitch": "Keep the lamps lit through a storm night while moths, gulls and waves come for the light. Upgrade the tower between nights.", "tags": ["sea", "night", "cozy", "defence", "light"], "mechanics": ["aim the beam to scare moths", "gulls that dive and must be dodged", "waves that knock out lamps you relight"] },
+      { "id": "scrap", "title": "Scrapyard Courier", "starter": "game-2d", "pitch": "Race parcels across a robot junkyard. Magnet drones pull you, rust crawlers block lanes, sparkers chain. Spend salvage on boosts.", "tags": ["robot", "delivery", "city", "action", "shop"], "mechanics": ["dash through gaps", "magnet drones that pull", "sparkers that chain between scrap"] },
+      { "id": "hive", "title": "Neon Hive", "starter": "game-2d", "pitch": "Defend a glowing hive from wasps, hornets and a queen. Collect pollen to grow new cells that fire back.", "tags": ["bee", "nature", "arcade", "defence"], "mechanics": ["fly and sting", "build turret cells with pollen", "hornet charges you must sidestep"] },
+      { "id": "ferry", "title": "Sky Ferry", "starter": "game-3d", "pitch": "Fly a little ferry between floating islands, pick up passengers and dodge storm cells. Each island day adds a new hazard.", "tags": ["flying", "islands", "3d", "travel", "calm"], "mechanics": ["pick-ups and drop-offs on a timer", "storm cells that drift", "wind lanes that push the ferry"] },
+      { "id": "glacier", "title": "Glacier Post", "starter": "game-3d", "pitch": "A penguin postie slides down a glacier: carve lanes, grab letters, jump crevasses, outrun the avalanche.", "tags": ["penguin", "snow", "3d", "runner", "winter"], "mechanics": ["lane carving", "jumps over crevasses", "an avalanche that speeds up"] },
+      { "id": "mole", "title": "Mole Mayor", "starter": "game-2d", "pitch": "Dig tunnels for your town and hold off beetles, roots and floods. Each wave unlocks a new room to build.", "tags": ["dig", "town", "builder", "underground"], "mechanics": ["dig paths", "beetles that follow tunnels", "floods that fill low rooms"] },
+      { "id": "orbit", "title": "Pocket Planet", "starter": "game-3d", "pitch": "Run around a tiny planet planting trees while meteors fall. Trees shield you; the planet grows each wave.", "tags": ["space", "planet", "3d", "garden"], "mechanics": ["plant and water", "meteors with warning shadows", "comets that split"] },
+      { "id": "kitchen", "title": "Midnight Kitchen", "starter": "game-2d", "pitch": "A one-cook diner at 2am. Juggle orders, fend off raccoons and keep the grill from catching fire. Unlock new dishes nightly.", "tags": ["food", "cooking", "night", "busy", "restaurant", "cafe", "bakery"], "mechanics": ["order juggling", "raccoons that steal plates", "grill fires to put out"] }
+    ],
+    "app": [
+      { "id": "swap", "title": "Shift Swap", "pitch": "A small team posts shifts they can't make, and teammates claim them in a tap. Everyone sees the week at a glance.", "tags": ["team", "work", "cafe", "restaurant", "schedule"], "object": "shift" },
+      { "id": "habits", "title": "Streak Jar", "pitch": "Track a few habits with a jar that fills as you keep streaks. Notes per day, a weekly look back.", "tags": ["health", "habit", "personal", "wellness"], "object": "habit" },
+      { "id": "setlist", "title": "Setlist", "pitch": "Bands build setlists from their song bank, drag to reorder, and share a read-only link with the venue.", "tags": ["music", "band", "gig"], "object": "song" },
+      { "id": "pantry", "title": "Pantry Pal", "pitch": "Log what's in the cupboard and when it runs out. See what to use first and what to buy next.", "tags": ["food", "home", "kitchen"], "object": "item" },
+      { "id": "crm", "title": "Client Notes", "pitch": "A tiny CRM for freelancers: clients, the last time you spoke, and what you promised.", "tags": ["freelance", "business", "sales", "studio"], "object": "client" },
+      { "id": "feedback", "title": "Feedback Wall", "pitch": "Collect feature requests from your users, let them vote, and mark what shipped.", "tags": ["product", "startup", "saas", "software"], "object": "request" },
+      { "id": "tools", "title": "Tool Library", "pitch": "Neighbours list tools they'll lend, borrow with a tap, and see who has the ladder.", "tags": ["neighbour", "community", "local", "share"], "object": "tool" }
+    ],
+    "website": [
+      { "id": "studio", "title": "Studio Portfolio", "pitch": "A portfolio that feels like walking into the studio: the work big, the story short, a way to get in touch.", "tags": ["art", "design", "photo", "studio", "portfolio"] },
+      { "id": "bakery", "title": "Corner Bakery", "pitch": "A neighbourhood bakery's site: what's on the counter, when it opens, and a pre-order form.", "tags": ["food", "bakery", "cafe", "local"] },
+      { "id": "band", "title": "Band Site", "pitch": "A band's home on the web: the next gigs, the songs, and a booking form for venues.", "tags": ["music", "band", "gig"] },
+      { "id": "repair", "title": "Bike Repair Stand", "pitch": "A pop-up repair stand: what it fixes, where it parks this week, and a form to book a slot.", "tags": ["bike", "repair", "local", "service"] },
+      { "id": "walker", "title": "Dog Walker", "pitch": "A local dog walker's site that says the area, the routine and how to book a meet-and-greet.", "tags": ["dog", "pet", "local", "service"] },
+      { "id": "event", "title": "Event Page", "pitch": "One event, done properly: the when and where, the programme, and an RSVP form.", "tags": ["event", "party", "wedding", "community"] }
+    ],
+    "business": [
+      { "id": "meals", "title": "Meal prep for shift workers", "pitch": "Find out if night-shift nurses would pay for meals that fit their hours, then plan it and put up a landing page.", "tags": ["food", "health"] },
+      { "id": "grooming", "title": "Dog grooming at home", "pitch": "Research home grooming visits in your area: who charges what, who would book, and what to offer first.", "tags": ["dog", "pet", "local"] },
+      { "id": "tutoring", "title": "Exam tutoring pods", "pitch": "Small-group tutoring before exams. Research prices and demand, then plan the offer and the page.", "tags": ["school", "education"] },
+      { "id": "repairs", "title": "Phone repair pickups", "pitch": "Pick up broken phones from offices and return them fixed the same day. Check the market first.", "tags": ["tech", "repair", "local"] },
+      { "id": "plants", "title": "Office plant care", "pitch": "Weekly plant care for small offices. Who does it now, what they charge, and what would win the first ten clients.", "tags": ["plant", "office", "service"] }
+    ]
+  }
+}

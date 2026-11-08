@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { boot, claim, Client, waitDone } from './helpers.js';
 import { openDb, run, get, all } from '../server/db.js';
+import { loadSession } from '../server/auth.js';
 import { pickParties, PARTY } from '../server/life.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -96,6 +97,19 @@ describe('hidden floors', () => {
       assert.equal(r.status, 0, r.stderr);
       assert.equal(get(db, 'SELECT hidden FROM floors WHERE number=7').hidden, 0);
       assert.notEqual(cli('floors', 'hide', '--floor', '8').status, 0, 'an empty floor is refused');
+      // A short boss login for checking a floor by hand, and its end.
+      r = cli('login', '--floor', '7', '--minutes', '5');
+      assert.equal(r.status, 0, r.stderr);
+      const token = r.stdout.trim();
+      const s = loadSession(db, token, 'owner');
+      assert.equal(s.floor_id, get(db, 'SELECT id FROM floors WHERE number=7').id);
+      assert.ok(s.expires_at - s.created_at === 5 * 60 * 1000, 'as short as asked');
+      assert.notEqual(cli('login', '--floor', '8').status, 0, 'an empty floor is refused');
+      assert.notEqual(cli('login', '--floor', '7', '--minutes', '999').status, 0, 'no long logins');
+      r = spawnSync(process.execPath, ['--no-warnings', join(ROOT, 'scripts/admin.mjs'), 'login', 'revoke'], { input: `${token}\n`, env: { PATH: process.env.PATH, DATA_DIR: dir, ADMIN_PASSWORD: 'x' }, encoding: 'utf8', timeout: 30000 });
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /ended/);
+      assert.equal(loadSession(db, token, 'owner'), null, 'revoked');
       db.close();
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });

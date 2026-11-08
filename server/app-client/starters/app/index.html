@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<meta name="description" content="{{PITCH}}">
+<meta property="og:title" content="{{TITLE}}">
+<meta property="og:description" content="{{PITCH}}">
+<meta property="og:image" content="og.svg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <a class="brand" href="#/">{{TITLE}}</a>
+  <nav aria-label="Account" data-office="nav">
+    <a href="#/app" data-when="in">Your list</a>
+    <a href="#/settings" data-when="in">Settings</a>
+    <button type="button" class="ghost" data-office="signout" data-when="in">Sign out</button>
+    <a href="#/signin" data-when="out">Sign in</a>
+    <a href="#/signup" class="btn" data-when="out">Get started</a>
+  </nav>
+</header>
+<main id="main" tabindex="-1">
+  <section data-view="landing" class="landing">
+    <h1>{{TITLE}}</h1>
+    <p class="lede">{{PITCH}}</p>
+    <ul class="points">
+      <li><b>Yours, everywhere.</b> Sign in on any device and it is all there.</li>
+      <li><b>Fast.</b> Add something in a tap; edit or remove it just as fast.</li>
+      <li><b>Private by default.</b> What you add is only yours.</li>
+    </ul>
+    <p><a class="btn big" href="#/signup">Get started, free</a></p>
+    <p class="soon" data-office="payments">Paid plans: coming soon. Nothing here takes a card yet.</p>
+  </section>
+  <section data-view="auth" class="card narrow" hidden>
+    <h2 data-office="auth-title">Create your account</h2>
+    <form data-office="auth-form" novalidate>
+      <label>Username <input name="username" autocomplete="username" required minlength="3" maxlength="32" data-office="username"></label>
+      <label data-only="signup">Your name <input name="name" autocomplete="name" maxlength="40" data-office="name"></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required minlength="8" data-office="password"></label>
+      <p class="error" role="alert" data-office="auth-error"></p>
+      <button class="btn" type="submit" data-office="auth-submit">Create account</button>
+      <p class="fine">There is no email here, so there is no password reset: keep your password somewhere safe.</p>
+      <p data-only="signup">Have an account? <a href="#/signin">Sign in</a></p>
+      <p data-only="signin">New here? <a href="#/signup">Create an account</a></p>
+    </form>
+  </section>
+  <section data-view="app" class="app" hidden>
+    <h2>Your list</h2>
+    <form class="add" data-office="create-form">
+      <label class="sr" for="new-title">New item</label>
+      <input id="new-title" name="title" required maxlength="120" placeholder="Add something..." data-office="create-input">
+      <button class="btn" type="submit" data-office="create-submit">Add</button>
+    </form>
+    <p class="status" role="status" data-office="list-status"></p>
+    <ul class="items" data-office="list"></ul>
+  </section>
+  <section data-view="settings" class="card narrow" hidden>
+    <h2>Settings</h2>
+    <form data-office="settings-form">
+      <label>Display name <input name="display" maxlength="40" data-office="display"></label>
+      <label class="row"><input type="checkbox" name="compact" data-office="compact"> Compact list</label>
+      <button class="btn" type="submit">Save</button>
+      <p class="status" role="status" data-office="settings-status"></p>
+    </form>
+    <div class="soon-box"><h3>Plan</h3><p>Free while we build it. Paid plans are coming soon; there is nothing to pay today.</p><button class="btn" type="button" disabled>Upgrade (coming soon)</button></div>
+  </section>
+</main>
+<footer class="foot"><p>{{TITLE}}</p></footer>
+<script src="_office/office.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
