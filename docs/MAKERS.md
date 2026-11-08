@@ -62,6 +62,16 @@ Tables: `maker_jobs`, `maker_tasks` and `maker_snapshots`, made at boot. Routes 
 
 The floor snapshot carries `makers` for the owner, and each step sends an owner-only `maker` event.
 
+## Setup: the first run of a fresh floor
+
+A floor with no company name (`floor.setup`) gets a full-screen Setup instead of the launcher in the chat: `public/js/setup-ui.js` and `public/css/setup.css`, opened by the single hook in `floor-ui.js`'s `mount()`. It shows the one-time recovery code first (when the boss has just claimed the floor), then the launcher's three questions: What are we making, Which one, Ready. It uses the launcher's endpoints through helpers exported from `launch-ui.js`. The only additions are optional `company` fields on `POST /makers/start` and `POST /business/start`: on a nameless floor the server saves that name through the manager's own `set_company` (`engine.company.setCompany`) before the work starts.
+
+- Only the boss of a nameless floor sees it, and only while they haven't spoken to the manager and nothing has started. Named floors keep the launcher in the chat.
+- "I'd rather just tell the manager" closes it for good on that device, and the chat shows a note in place of the launcher.
+- The boss's place is kept in `localStorage` per floor, so leaving (lobby, reload, the phone's Back) and returning lands on the same step with what they typed. The recovery code is never stored.
+- Back is on screen; the phone's own Back gesture leaves the floor like any page and returning restores the step.
+- "Make something new" on a maker card opens the same flow, full screen, with Back returning to the card.
+
 ## Done-rules and quality bars
 
 These are in `config/makers.json`, per type.
