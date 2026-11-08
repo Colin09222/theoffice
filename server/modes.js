@@ -239,7 +239,7 @@ export function installModes(ext) {
   function updatePlan(floor, { goal, nextUp, summary, goalReached = false, bossSaid = false } = {}) {
     const row = rowOf(floor.id);
     const fields = {}; let refused = '', reached = null;
-    const next = typeof goal === 'string' ? plain(goal, GOAL_MAX) : '';
+    const next = typeof goal === 'string' ? plain(engine.daily ? engine.daily.clean(floor.id, goal) : goal, GOAL_MAX) : '';  // a proposed next goal gets said in the chat
     if (goalReached) {
       if (!row.goal) refused = 'There is no goal to reach yet: the boss gives one or picks one of yours.';
       else if (!next || next === row.goal) refused = 'Put the next goal you propose in goal, so the team can keep going. The goal was not changed.';

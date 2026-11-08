@@ -71,6 +71,7 @@ function paint(page, box, v) {
     sold ? tile('Sales', money(win.grossCents, v.sales.currency)) : tile('Sales', '–', v.sales.state === 'error' ? 'couldn\'t be read just now' : 'no sales yet'),
     sold ? tile('Orders', count(win.orders)) : null, sold || v.sales.activeSubs ? tile('Active subscribers', count(v.sales.activeSubs)) : null));
   if (v.sales.wholeCompany && sold) box.append(h('p.num-note', {}, 'Sales are for the whole company, not this one project.'));
+  if (v.usage.accounts || v.signupsTotal) box.append(h('p.num-note', {}, `So far: ${count(v.usage.accounts)} account${v.usage.accounts === 1 ? '' : 's'} and ${count(v.signupsTotal)} sign-up${v.signupsTotal === 1 ? '' : 's'}.`));
 
   // Today has no bars of its own, so it shows the last 7 days with today picked out.
   const days = v.series.slice(st.win === 'month' ? -30 : -7);
@@ -123,7 +124,7 @@ export function dailyFields(daily, ownTz) {
   when.append(h('label.field', {}, h('span', {}, 'What time'), h('input', { type: 'time', name: 'daily-at', value: state.at, step: 900, oninput: (e) => { if (e.target.value) state.at = e.target.value; } })),
     h('small.field-hint', {}, `In your own time zone: ${state.tz.replace(/_/g, ' ')}. The first run is the next time the clock gets there.${d.needsGoal ? ' Your manager will ask you for a goal first.' : ''}`));
   const el = h('div.stack.daily-box', { 'data-daily': '' },
-    h('label.daily-switch', {}, box, h('span', {}, h('b', {}, 'Run my company every day'), h('small', {}, 'Once a day your manager looks at the numbers, the inbox and open bugs, picks one improvement and has the team build it. It only goes live if the Tester passes it, and you get a short report. Off unless you turn it on, because each run costs AI money.'))),
+    h('label.daily-switch', {}, box, h('span', {}, h('b', {}, 'Run my company every day'), h('small', {}, 'Once a day your manager looks at the numbers, the inbox and open bugs, picks one improvement and has the team build it. It only goes live if the Tester passes it, and you get a short report. Off unless you turn it on.'))),
     when);
   return { el, changed: () => JSON.stringify(state) !== before, value: () => ({ on: state.on, at: state.at, tz: state.tz }) };
 }

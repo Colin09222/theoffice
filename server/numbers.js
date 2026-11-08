@@ -1,6 +1,6 @@
 // The company dashboard: what the boss sees under Numbers, and the same figures for the manager's private prompt and the daily report.
-// It only reads what is already on record: visits (launch.js), form sign-ups, Office Cloud accounts, the ads ledger (business.js) and, once the
-// checkout is in, sales (cloud/pay.js). Boss-only: one owner-only route, and nothing here goes in a snapshot, an event, the feed, the tower,
+// It only reads what is already on record: visits (launch.js), form sign-ups, Office Cloud accounts, the ads ledger (business.js) and, once that
+// module is in, sales (cloud/pay.js). Boss-only: one owner-only route, and nothing here goes in a snapshot, an event, the feed, the tower,
 // the ticker or a leaderboard. Days are UTC, because that is how visits are counted. See docs/NUMBERS.md.
 import { get, all } from './db.js';
 import { ensureAdSpend } from './business.js';
