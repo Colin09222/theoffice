@@ -229,7 +229,9 @@ export function installLegal(ext) {
   engine.seedStaff = (floorId) => {
     seed(floorId);
     const f = get(db, 'SELECT * FROM floors WHERE id=?', floorId);
-    if (f && !f.filler && engine.models.all[LAWYER_ROLE]) addLawyer(f);
+    // He never takes the last seat under a staff limit: a floor capped at its founding team keeps its room to hire, and can add him later.
+    const n = f ? get(db, "SELECT COUNT(*) n FROM agents WHERE floor_id=? AND role!='manager'", f.id).n : 0;
+    if (f && !f.filler && engine.models.all[LAWYER_ROLE] && n + 1 < cfg.maxStaff) addLawyer(f);
   };
   // Hired any other way (the manager's hire_staff, the Customise panel), he is still Hollis.
   const hire = engine.hireStaff.bind(engine);
