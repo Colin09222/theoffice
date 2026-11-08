@@ -81,7 +81,7 @@ describe('a company made by talking', () => {
     assert.equal(ev.data.setup, false); assert.equal(ev.data.colors.primary, '#123456');
     assert.ok(live.events.some((e) => e.type === 'reload'));
     assert.equal(JSON.stringify(ev.data).includes('budgetStopped'), false);
-    assert.equal(s.floor.slug, c.slug, 'the address stays put');
+    assert.equal(s.floor.slug, 'ladle-up', 'a floor opened without a name takes the slug from its first name, and the old one keeps working');
     const v = await floorState(visitor, c.slug);
     assert.equal(v.identity, undefined, 'what the boss said it does stays with the boss');
   });

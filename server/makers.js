@@ -150,7 +150,7 @@ export function decide(job, ev, cfg = CONFIG) {
     if (ev.ok) return { action: 'wait', patch: {} };
     const fails = (job.fails || 0) + 1;
     if (fails >= limit) return { action: 'ask', patch: { fails }, why: `pass ${job.pass} did not finish twice` };
-    return { action: 'build', pass: job.pass, patch: { fails }, bugs: job.bugs || [], regressions: [] };
+    return { action: 'build', pass: job.pass, patch: { fails }, bugs: job.bugs || [], regressions: [], fix: !!job.fixing };
   }
   // A test.
   const r = ev.ok ? ev.report : null;
