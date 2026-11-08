@@ -7,6 +7,7 @@ import * as A from '../runner/src/apps.mjs';
 import { DEFAULTS } from '../runner/src/config.mjs';
 import { HttpError } from '../runner/src/util.mjs';
 
+export { HttpError };
 export const FAKE_TOKEN = 'fake-runner-token-0123456789';
 
 export async function fakeRunner({ buildMs = 5, ...limits } = {}) {
@@ -33,6 +34,7 @@ export async function fakeRunner({ buildMs = 5, ...limits } = {}) {
   const need = (label) => { A.assertLabel(label); const a = apps[label]; if (!a) throw new HttpError(404, 'no_app', `No app called ${label}.`); return a; };
   function deploy(label, body) {
     A.assertLabel(label);
+    if (state.deployError) throw state.deployError;
     const files = A.checkFiles(body.files, cfg);
     const man = A.readManifest(files, body.tier, cfg);
     const existing = apps[label];

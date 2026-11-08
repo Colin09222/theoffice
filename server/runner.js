@@ -2,8 +2,6 @@
 import http from 'node:http';
 import { statSync, readFileSync } from 'node:fs';
 
-export const RUNNER_SOCKET = '/run/office-runner/api/runner.sock';
-export const RUNNER_TOKEN_FILE = '/opt/office-runner/shared/api.token';
 const MAX_ANSWER = 2 * 1048576;
 
 export class RunnerError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }

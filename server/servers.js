@@ -107,11 +107,12 @@ export function createServers({ db, cfg, engine, httpFetch = fetch }) {
   }
 
   /** Spelled out once so the Builder and the boss hear the same thing. */
-  const words = (e) => ({
+  const KNOWN = {
     capacity: 'Every server slot in the building is in use right now.', browser_capacity: 'Every place for a server with a real browser is in use right now.',
     busy: 'A build for this server is already running. Wait for it, then check server_status.', runner_down: 'The server room isn\'t answering right now. Try again in a few minutes.',
     no_app: 'That server isn\'t on the runner any more.', killed: 'The building has switched off all servers for now.',
-  }[e.code] || String(e.message).slice(0, 600));
+  };
+  const words = (e) => KNOWN[e.code] || (e.status >= 500 ? KNOWN.runner_down : String(e.message).slice(0, 600));
   const forTool = (fn) => async (...a) => { try { return await fn(...a); } catch (e) { if (e instanceof RunnerError) throw new WorkspaceError(words(e)); throw e; } };
   function asBoss(e) {
     if (e instanceof RunnerError) return new ServerError(e.status >= 500 ? 503 : 409, e.code, words(e));
@@ -348,7 +349,7 @@ export function createServers({ db, cfg, engine, httpFetch = fetch }) {
     let s; try { s = await slots(); } catch (e) { throw asBoss(e); }
     if (s.killed) throw new ServerError(409, 'killed', words({ code: 'killed' }));
     if (s.used >= s.max) throw fullError(floor.id, 'all', `All ${s.max} server slots in the building are in use right now.`);
-    if (built.tier === 'browser' && s.browserUsed >= s.browserMax) throw fullError(floor.id, 'browser', `Both of the building's places for a server with a real browser are in use right now.`);
+    if (built.tier === 'browser' && s.browserUsed >= s.browserMax) throw fullError(floor.id, 'browser', 'Every place for a server with a real browser in the building is in use right now.');
     // The yes is recorded first, so a second tap during a slow call can't deploy twice.
     if (!run(db, "UPDATE server_apps SET status='approved', updated_at=? WHERE floor_id=? AND project=? AND status='awaiting_boss'", engine.now(), floor.id, project).changes) throw new ServerError(409, 'already', 'That one is already decided.');
     r.status = 'approved';
@@ -364,6 +365,8 @@ export function createServers({ db, cfg, engine, httpFetch = fetch }) {
         engine.kick();
         throw new ServerError(409, 'not_built', 'The server code needs a fix first. The team has the error and will deploy again.');
       }
+      // The runner didn't answer: nothing happened, so the yes hasn't either, and the boss can tap again.
+      if (e instanceof RunnerError) set(r, { status: 'awaiting_boss' });
       throw asBoss(e);
     }
     engine.emit(floor.id, 'reload', {}, { persist: false });

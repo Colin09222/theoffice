@@ -8,7 +8,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { get, all, run } from '../server/db.js';
 import { boot, claim, until } from './helpers.js';
-import { fakeRunner } from './fake-runner.js';
+import { fakeRunner, HttpError as RunnerHttpError } from './fake-runner.js';
 import { publish, hit, cloud, BASE } from './cloud-helpers.js';
 import { writeFile, publishSnapshot, slugPattern } from '../server/workspace.js';
 import { toolsForRole, toolDefs, toolAvailable } from '../server/tools.js';
@@ -202,6 +202,31 @@ test('the browser tier has its own, smaller limit', async () => {
     await h.tool('deploy_server', { project: 'shop', why: 'needs a real browser' });
     const r = await h.post('shop', 'approve');
     assert.equal(r.status, 409); assert.equal(r.data.full, 'browser'); assert.match(r.data.message, /real browser/);
+  } finally { await h.close(); }
+});
+
+test('a runner that isn\'t answering loses nothing: the request stays, and the boss can tap again', async () => {
+  const h = await setup();
+  try {
+    h.code();
+    await h.tool('deploy_server', { project: 'shop', why: 'x' });
+    h.fake.state.deployError = new RunnerHttpError(503, 'internal', 'Docker is not answering.');
+    const r = await h.post('shop', 'approve');
+    assert.equal(r.status, 503);
+    assert.doesNotMatch(r.data.message, /Docker/, 'the boss hears the short version');
+    assert.equal(h.row().status, 'awaiting_boss');
+    h.fake.state.deployError = null;
+    assert.equal((await h.post('shop', 'approve')).status, 200);
+    assert.equal(h.row().status, 'approved');
+    // The code being wrong is different: the yes stands and the Builder fixes it.
+    h.fake.state.deployError = new RunnerHttpError(400, 'bad_manifest', 'office.json is not a JSON object.');
+    await until(() => !h.row().building, { what: 'the first build to finish' });
+    h.code('other');
+    await h.tool('deploy_server', { project: 'other', why: 'y' }, 'builder', 'other');
+    const bad = await h.post('other', 'approve');
+    assert.equal(bad.status, 409); assert.equal(bad.data.error, 'not_built');
+    assert.equal(h.row('other').status, 'approved');
+    assert.match(h.row('other').note, /JSON object/);
   } finally { await h.close(); }
 });
 
