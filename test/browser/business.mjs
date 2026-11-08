@@ -174,13 +174,17 @@ try {
     if (!fits) throw new Error('cards spill sideways');
     if (await m.ev('document.querySelectorAll(".biz-chips .chip").length') < 2) throw new Error('no chips');
     await shot(m, 'business-5-phone-ideas.jpg');
+    holdJourney = true;  // held at Build for the tracks' picture, as on the desktop (the team still works; the journey just doesn't move on)
+    try {
     await m.click('[data-pick="1"]');
     await m.until('document.querySelectorAll(".tracks .track").length === 4', 'tracks');
     await m.until('[...document.querySelectorAll(".track")].some((x) => x.classList.contains("done") || x.classList.contains("working"))', 'a lamp lit', 30000);
     const twoUp = await m.ev('(() => { const r = [...document.querySelectorAll(".track")].map((x) => x.getBoundingClientRect()); return r.every((x) => x.right <= innerWidth + 1) && Math.abs(r[0].top - r[1].top) < 2; })()');
     if (!twoUp) throw new Error('tracks do not sit two by two');
     if (!await m.ev(noSideScroll)) throw new Error('the page scrolls sideways');
+    await m.ev('document.querySelector(".tracks").scrollIntoView({ block: "start" })');
     await shot(m, 'business-6-phone-tracks.jpg');
+    } finally { holdJourney = false; }
     // On to the ads: the pictures, then where paid ads run (Facebook & Instagram coming soon) and the ad money, $0 to start with.
     await m.until('!!document.querySelector("[data-money-box] [data-launch]:not([disabled])")', 'the ads are ready', 60000);
     await m.until('[...document.querySelectorAll(".ad.picture img")].every((i) => i.complete && i.naturalWidth >= 64)', 'the ad pictures drawn');
@@ -189,7 +193,8 @@ try {
     if (!await m.ev(noSideScroll)) throw new Error('the page scrolls sideways');
     await m.ev('document.querySelector(".ad-wall").scrollIntoView({ block: "start" })');
     await shot(m, 'business-7-phone-ads.jpg');
-    await m.ev('document.querySelector("[data-ad-where]").scrollIntoView({ block: "center" })');
+    // The sheet is short on a phone: the coins at the top of what shows, with the 'coming soon' plate just above them.
+    await m.ev('(() => { const coin = document.querySelector(".coin.on"); coin.scrollIntoView({ block: "start" }); const box = coin.closest(".tab-body") || coin.parentElement; box.scrollTop -= 90; })()');
     await shot(m, 'business-8-phone-money.jpg');
     mb.close();
   });
