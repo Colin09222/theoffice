@@ -11,12 +11,15 @@ export function launchFlow(page) {
   const root = h('div.launcher', { role: 'group', 'aria-label': 'Start something', 'data-launcher': '' });
   const types = page.state.makers?.types?.map((t) => [t.id, t.label, t.blurb]) || FALLBACK_TYPES;
   // Each step starts at its question, so a phone shows the choices rather than the middle of the last list.
-  const step = (n, ...kids) => { root.replaceChildren(h('p.launch-step', {}, `Step ${n} of 3`), ...kids); root.querySelector('button:not([disabled]), input, textarea')?.focus({ preventScroll: true }); if (root.isConnected) root.scrollIntoView({ block: 'start', behavior: 'smooth' }); };
+  const step = (n, ...kids) => { root.replaceChildren(h('p.launch-step', {}, `Step ${n} of 3`), ...kids.filter(Boolean)); root.querySelector('button:not([disabled]), input, textarea')?.focus({ preventScroll: true }); if (root.isConnected) root.scrollIntoView({ block: 'start', behavior: 'smooth' }); };
 
   function pickType() {
-    step(1, h('h3.launch-q', {}, 'What are we making?'),
+    const setup = page.state.floor.setup;
+    step(1, setup ? h('div.setup-note', { 'data-setup': '' }, h('b', {}, 'No forms, no paperwork.'), h('span', {}, `Tap one below, or just tell ${page.manager?.name || 'your manager'} what you want to make. They'll name the company and get everyone moving.`)) : null,
+      h('h3.launch-q', {}, 'What are we making?'),
       h('div.launch-types', {}, ...types.map(([id, label, blurb]) => h('button.launch-type', { type: 'button', 'data-type': id, onclick: () => pickIdea(id, label) }, icon(TYPE_ICON[id] || 'sparkle'), h('b', {}, label), h('span', {}, blurb)))),
-      h('p.fineprint', {}, 'Your team designs it, builds it, plays it in a real browser and fixes it. You launch it with one tap. Nobody here can send email, post, run ads or spend money, so they will tell you what only you can do.'));
+      h('p.fineprint', {}, 'Your team designs it, builds it, plays it in a real browser and fixes it. You launch it with one tap. Nobody here can send email, post, run ads or spend money, so they will tell you what only you can do.'),
+      setup ? null : h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => page.openCustomise?.('vibe') }, 'First, make this office yours'));
   }
   async function pickIdea(type, label, seed = 0) {
     const cards = h('div.launch-cards', {}, h('p.launch-loading', {}, 'Thinking of ideas...'));
@@ -82,10 +85,10 @@ export function makerCard(page) {
       h('button.btn', { type: 'button', 'data-retry': '', onclick: () => decide('retry') }, 'Try again'),
       job.asking.canLaunch && !job.launched ? h('button.btn.primary', { type: 'button', onclick: () => launch?.click() }, 'Launch what works') : null,
       h('button.btn.ghost', { type: 'button', onclick: () => decide('stop') }, 'Stop')) : null;
-    box.replaceChildren(
+    box.replaceChildren(...[
       h('div.maker-head', {}, h('b', {}, job.title), h('span', {}, building ? 'Team is building' : job.stage === 'ready' ? (job.launched ? 'Live' : 'Ready to launch') : job.stage === 'asking' ? 'Needs you' : '')),
       steps, job.report ? h('p.maker-report', {}, `Last test: ${job.report.verdict === 'pass' ? 'passed' : 'not yet'}${job.report.summary ? `, ${job.report.summary}` : ''}`) : null,
-      asking, launch, link);
+      asking, launch, link].filter(Boolean));
   };
   async function decide(choice) { try { const r = await api(`/floors/${page.slug}/makers/decide`, { method: 'POST', body: { choice } }); render(r.makers.job); } catch (e) { toast(e.message, 'bad'); } }
   async function share(url) {
