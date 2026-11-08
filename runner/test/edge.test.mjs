@@ -114,6 +114,21 @@ test('WebSockets are proxied both ways', async () => {
   sock.destroy();
 });
 
+test('malformed requests are refused without taking the edge down', async () => {
+  const raw = (text) =>
+    new Promise((resolve) => {
+      const s = net.connect(edgePort, '127.0.0.1', () => s.write(text));
+      let d = '';
+      s.on('data', (c) => (d += c));
+      s.on('close', () => resolve(d.split('\r\n')[0]));
+      s.on('error', () => resolve('error'));
+      setTimeout(() => s.destroy(), 2000);
+    });
+  await raw('GET http://[::1 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n');
+  await raw('GET /a b HTTP/1.1\r\nHost: api--good.middistance.com\r\nConnection: close\r\n\r\n');
+  assert.equal((await req('api--good.middistance.com', '/still-up')).status, 200);
+});
+
 test('activity is reported to the control daemon', async () => {
   await req('api--good.middistance.com', '/');
   await edge.flushActivity();

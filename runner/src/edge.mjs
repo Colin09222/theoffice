@@ -164,9 +164,14 @@ export function createEdge({ cfg, control, now = Date.now }) {
     if (label) {
       if ((conns.get(label) ?? 0) >= cfg.MAX_CONNS_PER_APP) return sendText(res, 503, 'Too many connections to this app.\n', { 'retry-after': '5' });
       track(label, res);
-      return proxyHttp(req, res, label);
+      return proxyHttp(req, res, label).catch(() => (res.headersSent ? res.destroy() : sendText(res, 502, 'The app did not answer.\n')));
     }
-    const url = new URL(req.url, 'http://edge');
+    let url;
+    try {
+      url = new URL(req.url, 'http://edge');
+    } catch {
+      return sendText(res, 400, 'Bad request.\n');
+    }
     if (INTERNAL_HOSTS.has(host.replace(/:\d+$/, '')) && url.pathname === '/__office_runner/tls-ask' && req.method === 'GET') {
       return tlsAsk(res, url).catch(() => sendText(res, 503, 'no\n'));
     }
@@ -179,7 +184,7 @@ export function createEdge({ cfg, control, now = Date.now }) {
     if (!label) return sock.end('HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n');
     if ((conns.get(label) ?? 0) >= cfg.MAX_CONNS_PER_APP) return sock.end('HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\n\r\n');
     track(label, sock);
-    proxyUpgrade(req, sock, head, label);
+    proxyUpgrade(req, sock, head, label).catch(() => sock.destroy());
   });
   appServer.headersTimeout = 30000;
   appServer.requestTimeout = 0; // long uploads and streams are fine; idle sockets are not
