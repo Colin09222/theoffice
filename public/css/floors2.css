@@ -393,3 +393,10 @@
 @media (max-width: 1000px) and (max-height: 500px) {
   .floor-top .card-more { display: none; }
 }
+
+/* On a desktop the panels around the room are quiet paper, like the phone's white cards, so the room is what catches the eye. */
+@media (min-width: 761px) {
+  .floor-top, .floor-scrubber { background: #fbf6ea; box-shadow: 0 10px 30px rgba(40, 26, 10, .22), inset 0 0 0 1px rgba(60, 40, 20, .08); }
+  .talk-pill { background: #fff; color: var(--ink); box-shadow: 0 6px 18px rgba(40, 26, 10, .28); }
+  .talk-pill .ico { background: var(--tomato); color: #fff; }
+}
