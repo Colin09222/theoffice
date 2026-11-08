@@ -434,7 +434,7 @@ export class Actor {
     if (view.host) { this.tagOff = true; this.tag.style.visibility = 'hidden'; }  // the tower shows it once the floor is in view
     view.labels.append(this.tag);
     // The kit's model takes over from the stand-in when it lands; a failed load changes nothing.
-    Promise.resolve(view.turn()).then(() => (this.dead ? null : loadModelCharacter(info.look, { accent: view.colors.accent }))).then((mc) => mc && this.swapChar(mc)).catch((e) => { if (!this.dead) console.warn('character model unavailable', e); });
+    Promise.resolve(view.turn()).then(() => (this.dead ? null : loadModelCharacter(info.look, { accent: view.colors.accent, far: !!view.host }))).then((mc) => mc && this.swapChar(mc)).catch((e) => { if (!this.dead) console.warn('character model unavailable', e); });
   }
   /** Same place, same pose, same props: the viewer only sees the person get a little more real. */
   swapChar(next) {
@@ -447,6 +447,8 @@ export class Actor {
     this.view.root.remove(old.group); old.dispose();
     this.char = next; this.group = next.group; this.view.root.add(next.group);
     if (this.seated) this.sitDown();
+    // A coarse copy that lands after the floor was flown into: the full person is on the way.
+    if (next.far && !this.view.host) loadModelCharacter(this.info.look, { accent: this.view.colors.accent }).then((mc) => this.swapChar(mc)).catch(() => {});
   }
   destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); }
   sitDown() {
@@ -465,7 +467,7 @@ export class Actor {
     if (!this.seated) return;
     const f = this.seatFace();
     this.seated = false; this.char.inChair = false;
-    this.group.position.x -= Math.sin(f) * 0.36; this.group.position.z -= Math.cos(f) * 0.36;
+    this.backStep = 0.36; this.backFace = f;  // the half step back is taken over the next moment, in update
   }
   goTo(x, z, then) {
     this.seated = false; this.char.inChair = false;
@@ -644,6 +646,7 @@ export class Actor {
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       g.rotation.y += diff * Math.min(1, dt * 10);
     }
+    if (this.backStep > 0) { const d = Math.min(this.backStep, dt * 2.2); g.position.x -= Math.sin(this.backFace) * d; g.position.z -= Math.cos(this.backFace) * d; this.backStep -= d; }
     // Onto the seat and off it at the pace the sitting pose blends, so the hips glide instead of jumping.
     g.position.y += ((this.seated ? this.seatY : 0) - g.position.y) * Math.min(1, dt * 9);
     this.shadow.position.set(g.position.x, 0.02, g.position.z);
@@ -662,7 +665,7 @@ export class Actor {
 export class OfficeView {
   constructor({ state, labels, onSelect, onSmallTalk, keep = null, host = null, pace = null }) {
     this.labels = labels; this.onSelect = onSelect; this.host = host; this.pace = pace;
-    this.colors = state.floor.colors; this.decor = state.floor.decor; this.logoUrl = state.floor.logoUrl || null; this.companyName = state.floor.name;
+    this.bossView = !!state.viewer?.owner; this.colors = state.floor.colors; this.decor = state.floor.decor; this.logoUrl = state.floor.logoUrl || null; this.companyName = state.floor.name;
     this.plan = planFor(this.decor.layout);
     this.staffCount = state.agents.filter((a) => a.role !== 'manager').length;
     this.scene = new THREE.Scene();
@@ -670,9 +673,10 @@ export class OfficeView {
     this.scene.fog = new THREE.Fog('#ffffff', 140 * WORLD_SCALE, 620 * WORLD_SCALE);
     this.root = new THREE.Group(); this.root.name = `floor-${state.floor.number}`;
     if (!host) this.scene.add(this.root);
-    this.grade = { vignette: 0.22, grain: 0.016 };
-    this.ao = { radius: 0.9, intensity: 1.9, color: '#2b1b10', falloff: 1 };
-    this.bloom = 0.1;
+    // Late afternoon light with a gentle grade: gold in the highlights, a little violet in the shadows, and enough contrast to pull the rooms apart.
+    this.grade = { vignette: 0.3, grain: 0.014, warm: 0.62 };
+    this.ao = { radius: 1.05, intensity: 2.3, color: '#22140b', falloff: 1 };
+    this.bloom = 0.16;
     this.floorNumber = state.floor.number;
     this.camera = host ? host.camera : new THREE.PerspectiveCamera(24, 1, 1, 3800);
     this.tagsOn = true;
@@ -717,6 +721,14 @@ export class OfficeView {
     const pbr = this.pbr;
     // The panorama is shared (see textures.js), so it is never this view's to dispose. In the tower it lights the tower's scene instead.
     if (pbr && stage.renderer && !this.host) environmentMap(stage.renderer).then((rt) => { if (rt && !this.dead) { this.scene.environment = rt.texture; this.scene.environmentIntensity = 0.5; } });
+    // A timber deck for the terrace, just above the slab and under the room's edge, so nothing else has to change.
+    if (pbr) textureSet('wood', { pbr: false }).then((set) => {
+      if (!set?.map || this.dead || this.deck) return;
+      const plate = TOWER_W * WORLD_SCALE + 1.1;
+      const deck = new THREE.Mesh(new THREE.PlaneGeometry(plate, plate), new THREE.MeshStandardMaterial({ map: repeating(set.map, { color: true, repeat: plate / 3.4 }), color: '#ead9c0', roughness: 0.82, metalness: 0 }));
+      deck.rotation.x = -Math.PI / 2; deck.position.y = -0.055; deck.receiveShadow = true; deck.userData.keep = true;
+      this.deck = deck; this.room.add(deck);
+    });
     const style = this.decor.wallMat || 'paint';
     if (WALL_TEX[style]) textureSet(WALL_TEX[style], { pbr }).then((set) => { if (set && !this.dead) this.skinWalls(style, set); });
     this.loadFloorSets();
@@ -744,8 +756,8 @@ export class OfficeView {
     const s = this.scene; const { primary, accent } = this.colors; const d = this.decor; const L = this.plan;
     this.lounge = hasSofa(L);
     for (const [x, z, w, dd, bake] of planBlocks(L, { coffee: d.coffee, arcade: d.arcade, plants: d.plants, staffCount: this.staffCount })) this.nav.block(x, z, w, dd, { bake });
-    s.add(new THREE.HemisphereLight('#cfe0f6', '#c4a98a', 1.1));
-    const sun = new THREE.DirectionalLight('#ffdcb4', 2.7);
+    s.add(new THREE.HemisphereLight('#f2e6d6', '#a68f7a', 0.92));
+    const sun = new THREE.DirectionalLight('#ffd9ac', 3.05);
     sun.position.copy(SUN_DIR).multiplyScalar(SUN_FAR); sun.target.position.set(0, 0, 0);
     const size = stage.q?.shadow || 0;
     sun.castShadow = size > 0;
@@ -755,7 +767,7 @@ export class OfficeView {
     sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.035;
     this.sun = sun;
     s.add(sun, sun.target);
-    const fill = new THREE.DirectionalLight('#bcd2f5', 0.55); fill.position.set(-17, 13, 23); s.add(fill);
+    const fill = new THREE.DirectionalLight('#c7d6f0', 0.4); fill.position.set(-17, 13, 23); s.add(fill);
     const env = getWorld().environment();
     s.environment = env; s.environmentIntensity = 0.35;
     const R = this.root;
@@ -774,6 +786,16 @@ export class OfficeView {
     const rail = new THREE.MeshStandardMaterial({ color: '#cfe0ec', roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false, envMap: env });
     for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(room, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
     for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { piece(room, '#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); piece(room, '#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
+    // The terrace is part of the company too: planters along the rail in its colours and somewhere to sit outside. A timber deck follows in loadLooks.
+    for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
+      const x = i * 6.4 + (sz < 0 ? 1.4 : 0), z = sz * (plate / 2 - 0.85);
+      piece(room, mix(primary, '#cfc4b0', 0.62), 1.9, 0.55, 0.85, x, 0, z);
+      piece(room, i % 2 ? '#5c8650' : '#6c9452', 1.7, 0.36 + ((i * i) % 3) * 0.14, 0.66, x, 0.55, z);
+    }
+    for (const [x, z] of [[-10.5, plate / 2 - 2.9], [8.5, plate / 2 - 3.1]]) {
+      piece(room, '#a8825c', 1.25, 0.07, 1.25, x, 0.72, z, { geo: cyl }); piece(room, '#3d3b44', 0.09, 0.72, 0.09, x, 0, z, { geo: cyl });
+      for (const a of [0.4, 2.5, 4.6]) { const sx = x + Math.cos(a) * 1.3, sz = z + Math.sin(a) * 1.3; piece(room, mix(primary, '#ffffff', 0.32), 0.62, 0.1, 0.62, sx, 0.44, sz); piece(room, '#3d3b44', 0.07, 0.44, 0.07, sx, 0, sz, { cast: false }); }
+    }
     this.floorMat = new THREE.MeshStandardMaterial({ roughness: { carpet: 0.95, rubber: 0.8, tile: 0.35, checker: 0.35 }[d.floor] ?? 0.55, metalness: 0, envMapIntensity: 0.6 });
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), this.floorMat);
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.userData.keep = true; room.add(floor);
@@ -1011,7 +1033,7 @@ export class OfficeView {
   }
   buildWalls(room, env) {
     const { primary, accent } = this.colors; const L = this.plan;
-    const GH = 3.1, frame = L.frame || '#454852';
+    const GH = 3.1, frame = L.frame || mix(this.decor.wall, '#3a2d22', 0.74);
     const dado = L.frame ? '#8a6a45' : mix(this.decor.wall, '#f4efe6', 0.55), dadoCap = L.frame ? '#5e4430' : mix(frame, '#ffffff', 0.15);
     const pos = [], idx = [];
     const pane = (x0, z0, x1, z1, y0, y1) => { const b = pos.length / 3; pos.push(x0, y0, z0, x1, y0, z1, x1, y1, z1, x0, y1, z0); idx.push(b, b + 1, b + 2, b, b + 2, b + 3); };
@@ -1166,7 +1188,7 @@ export class OfficeView {
    */
   async loadModels() {
     const { primary, accent } = this.colors; const d = this.decor; const L = this.plan;
-    const names = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'computerMouse', 'chairModernCushion', 'tableCross', 'bookcaseOpen', 'books', 'pottedPlant', 'plantSmall1', 'plantSmall2', 'plantSmall3', 'trashcan', 'cardboardBoxOpen', 'coatRackStanding', 'laptop'];
+    const names = ['desk', 'chairDesk', 'computerScreen', 'computerKeyboard', 'computerMouse', 'chairModernCushion', 'tableCross', 'bookcaseOpen', 'books', 'pottedPlant', 'plantSmall1', 'plantSmall2', 'plantSmall3', 'trashcan', 'cardboardBoxOpen', 'coatRackStanding', 'laptop', 'lampRoundTable'];
     if (d.coffee) names.push('kitchenCabinet', 'kitchenSink', 'kitchenCoffeeMachine', 'kitchenMicrowave', 'kitchenFridgeLarge', 'stoolBar', 'kitchenBar');
     if (this.lounge) names.push('loungeSofa', 'loungeChair', 'tableCoffee', 'lampRoundFloor', 'pillow', 'pillowBlue', 'speaker');
     for (const p of L.props || []) names.push(p.m);
@@ -1189,6 +1211,7 @@ export class OfficeView {
       // Keys near the front edge, where a seated person's hands land (see TYPE_A in character.js).
       put('computerKeyboard', { y: big ? 1.2 : 1.06, z: big ? 0.26 : 0.19 });
       put('computerMouse', { x: 0.56, y: big ? 1.2 : 1.06, z: big ? 0.28 : 0.21 });
+      if (T.lampRoundTable) put('lampRoundTable', { x: big ? -1.15 : -0.86, y: big ? 1.2 : 1.06, z: -0.5, scale: FS * 0.72 });
       put('chairDesk', { z: 0.84, ry: Math.PI, tint: chairTint(chairColor), scale: big ? FS * 1.15 : FS });
       if (big) put('laptop', { x: 1.05, y: big ? 1.2 : 1.06, z: -0.15, ry: 0.3 });
       target = outer;
@@ -1293,7 +1316,16 @@ export class OfficeView {
       for (const r of this.plan.rooms || []) {
         const [x0, z0, x1, z1] = r.rect;
         if (tone[r.kind]) { x.fillStyle = tone[r.kind]; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); }
-        if (r.desk) { const s = seatOf(r.desk).at; const g = x.createRadialGradient(px(s[0]), pz(s[1]), 0, px(s[0]), pz(s[1]), 2.4 * ppu); g.addColorStop(0, 'rgba(255,214,150,.2)'); g.addColorStop(1, 'rgba(255,214,150,0)'); x.fillStyle = g; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); }
+        const empty = r.kind === 'staff' && this.offices.get(r.id)?.info.role === 'vacant';
+        // A company's colour on the way through: a long runner down the middle of each corridor.
+        if (r.kind === 'corridor') { const mw = (x1 - x0) > (z1 - z0), inset = 0.42; x.fillStyle = this.tint(0.34); x.fillRect(px(x0 + (mw ? 0 : inset)), pz(z0 + (mw ? inset : 0)), px(x1) - px(x0) - (mw ? 0 : inset * 2) * ppu, pz(z1) - pz(z0) - (mw ? inset * 2 : 0) * ppu); }
+        // Nobody works there yet: the light is off, so the eye goes to the rooms with people in them.
+        if (empty) { x.fillStyle = 'rgba(30,24,20,.42)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); continue; }
+        if (r.desk) { const s = seatOf(r.desk).at; const g = x.createRadialGradient(px(s[0]), pz(s[1]), 0, px(s[0]), pz(s[1]), 3.1 * ppu); g.addColorStop(0, 'rgba(255,212,150,.44)'); g.addColorStop(0.55, 'rgba(255,212,150,.16)'); g.addColorStop(1, 'rgba(255,212,150,0)'); x.fillStyle = g; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); }
+      }
+      // Pools of warm light around the meeting table and the manager's and boss's desks.
+      for (const [cx, cz, rad] of [[...this.plan.meet.table, 5.2], [...seatOf(this.plan.manager).at, 4.2], [...seatOf(this.plan.boss).at, 4.2]]) {
+        const g = x.createRadialGradient(px(cx), pz(cz), 0, px(cx), pz(cz), rad * ppu); g.addColorStop(0, 'rgba(255,208,145,.42)'); g.addColorStop(1, 'rgba(255,208,145,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H);
       }
       // A threshold strip in every doorway.
       x.fillStyle = 'rgba(40,32,24,.32)';
@@ -1457,6 +1489,8 @@ export class OfficeView {
     const owned = new Set(this.owners.values()); let vacant = 0;
     for (const r of this.plan.rooms) if (r.kind === 'staff' && !owned.has(r.id) && !this.offices.has(r.id)) { this.nav.block(...deskRect(r.desk)); this.addOffice(r, { id: `free-${r.id}`, role: 'vacant', name: null }, { own: true }); vacant++; }
     if (fresh.length || vacant || !this.floorMat.map) { this.rebuildOffices(); this.bakeSoon(); this.loadFloorSets(); if (this.modelsOn) this.furnishOffices(); }
+    // The boss sees which rooms are free to hire into; a visitor doesn't. A room built in the tower learns who is looking when the page takes it over.
+    if (state.viewer && !!state.viewer.owner !== this.bossView) { this.bossView = !!state.viewer.owner; this.drawSigns(); }
     const seen = new Set();
     const mgr = state.agents.find((a) => a.role === 'manager');
     if (mgr) {
@@ -1482,6 +1516,7 @@ export class OfficeView {
   /** Records whose a room is and how it's done out. The furniture follows in rebuildOffices and furnishOffices. */
   addOffice(room, info, { own = true, actor = null } = {}) {
     const theme = officeTheme(info);
+    if (theme.bare) own = false;
     const slots = officeSlots(room);
     // Everything that stands on the floor is in the way of walking; rugs and wall pieces aren't.
     for (const t of theme.things) { const sl = t.slot && slots.slots[t.slot]; if (sl) this.nav.block(sl.x, sl.z, 0.8, 0.8); }
@@ -1566,7 +1601,8 @@ export class OfficeView {
     const T = this.kit; const g = new THREE.Group(); g.userData.fromKit = true;
     const tints = (c) => ({ carpet: c, carpetBlue: c });
     for (const o of this.offices.values()) {
-      if (o.own) this.deskInto(g, o.room.desk[0], o.room.desk[1], this.colors.accent, o.room.desk[2]);
+      const empty = o.info.role === 'vacant', first = g.children.length;
+      if (o.own) this.deskInto(g, o.room.desk[0], o.room.desk[1], empty ? '#7d7c78' : this.colors.accent, o.room.desk[2]);
       for (const sh of o.shared || []) this.deskInto(g, sh.desk[0], sh.desk[1], this.colors.accent, sh.desk[2]);
       for (const t of o.theme.things) {
         if (!t.m || !T[t.m]) continue;
@@ -1576,6 +1612,8 @@ export class OfficeView {
         if (ON_TABLE.has(t.m) && T.sideTableDrawers) { const tb = place(T.sideTableDrawers, { x: at.x, z: at.z, ry: at.ry, scale: FS }); g.add(tb); y = T.sideTableDrawers.userData.size.y * FS; }
         g.add(place(T[t.m], { x: at.x, y, z: at.z, ry: at.ry, scale: FS * (t.s ?? 1), tint: t.rug ? tints(mix(o.theme.wall, '#f4efe6', 0.45)) : t.m.startsWith('chair') || t.m.startsWith('lounge') ? tints(o.theme.wall) : null }));
       }
+      // The room's lights are off too: its furniture bakes in dimmer than the rooms people are in.
+      if (empty) for (let i = first; i < g.children.length; i++) g.children[i].traverse((m) => { if (m.isMesh) m.userData.shade = [0, 3, 0.62, 0.62]; });
     }
     if (this.host || this.pace) { await this.turn(); if (this.dead || token < this.furnishedToken) return; }
     mergeColored(g, ROOM_MAT);
@@ -1587,20 +1625,22 @@ export class OfficeView {
   }
   /** A name plate over every office door, all on one texture: the owner's name and what they do, so you can find anyone at a glance. */
   drawSigns() {
-    const list = [...this.offices.values()].filter((o) => o.room.door);
+    // A free office only says so to the boss, who can hire into it. To visitors a dark room is just a dark room.
+    const list = [...this.offices.values()].filter((o) => o.room.door && (o.info.role !== 'vacant' || this.bossView));
     const cols = 2, rows = Math.max(1, Math.ceil(list.length / cols)); const cw = 512, ch = 128;
     const tex = canvasTex(cw * cols, ch * rows, (x) => {
       list.forEach((o, i) => {
         const px = (i % cols) * cw, py = Math.floor(i / cols) * ch;
-        x.fillStyle = '#1f2129'; x.fillRect(px, py, cw, ch);
+        // A brass-and-cream plate rather than a black slab, so a row of them stays quiet.
+        x.fillStyle = '#efe3cb'; x.fillRect(px, py, cw, ch);
         x.fillStyle = o.theme.wall; x.fillRect(px, py, 18, ch);
-        x.strokeStyle = 'rgba(255,255,255,.25)'; x.lineWidth = 4; x.strokeRect(px + 2, py + 2, cw - 4, ch - 4);
+        x.strokeStyle = 'rgba(70,50,28,.45)'; x.lineWidth = 4; x.strokeRect(px + 2, py + 2, cw - 4, ch - 4);
         const free = o.info.role === 'vacant';
         const name = free ? 'Free office' : o.info.name || (o.room.id === 'boss' ? 'The boss' : 'Office'); const role = free ? 'Ready for a hire' : o.room.id === 'boss' ? 'Boss' : ROLE_TITLE[o.info.role] || o.info.title || o.info.role || '';
-        x.textBaseline = 'middle'; x.fillStyle = '#fff8e8';
+        x.textBaseline = 'middle'; x.fillStyle = '#2a2118';
         let size = 58; do { x.font = `700 ${size}px ui-sans-serif, system-ui, sans-serif`; size -= 4; } while (x.measureText(name).width > cw - 60 && size > 24);
         x.fillText(name, px + 36, py + ch * 0.4);
-        x.font = '600 30px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = mix(o.theme.wall, '#ffffff', 0.6); x.fillText(role.toUpperCase(), px + 38, py + ch * 0.8);
+        x.font = '600 30px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = mix(o.theme.wall, '#2a2118', 0.5); x.fillText(role.toUpperCase(), px + 38, py + ch * 0.8);
       });
     });
     const pos = [], uv = [], idx = [];
@@ -1810,6 +1850,8 @@ export class OfficeView {
       this.insetsHeldUntil = performance.now() + 600;  // whatever the page then asks for waits until the cross-fade is over
     }
     this.buildWorld(); this.bind();
+    // Up close now: the full-detail people take over from the tower's coarse ones, one by one.
+    for (const a of this.actors.values()) if (a.char.far) loadModelCharacter(a.info.look, { accent: this.colors.accent }).then((mc) => a.swapChar(mc)).catch(() => {});
     // The same light the tower gave it. Its materials are already the floor page's own, so nothing reloads or bakes again under the camera.
     this.pageLight();
   }
@@ -1835,6 +1877,7 @@ export class OfficeView {
     if (this.world) this.scene.remove(this.world.group);  // shared with the lobby, so never disposed here
     this.root.removeFromParent();
     for (const root of [this.room, this.detail, this.legacy, this.models, this.officeStatic, this.officeDetail, this.officeLegacy, this.officeModels, this.stub?.group, this.pet?.group].filter(Boolean)) this.disposeTree(root);
+    this.deck?.geometry.dispose(); this.deck?.material.map?.dispose(); this.deck?.material.dispose();
     this.glassGeo?.dispose(); this.glassMat?.dispose();
     this.ring?.geometry.dispose(); this.ring?.material.dispose();
     if (this.signMesh2) { this.signMesh2.geometry.dispose(); this.signMesh2.material.map.dispose(); this.signMesh2.material.dispose(); }
@@ -1846,7 +1889,7 @@ export class OfficeView {
     this.w = w; this.h = h;
     // A phone sees a corner of the floor up close rather than the whole of it too small to read; a drag slides across the rest.
     // Not so close that a room's pin ends up under the page's own controls; a pinch goes closer.
-    if (!this.sized && !this.kept) { const phone = w <= 760; this.zoom = this.targetZoom = phone ? 1.3 : 1.25; const pz = phone ? 0 : -1.5; this.pan.set(0, pz); this.targetPan.set(0, pz); }
+    if (!this.sized && !this.kept) { const phone = w <= 760; this.zoom = this.targetZoom = phone ? 1.42 : 1.42; const pz = phone ? 0 : -1.2; this.pan.set(0, pz); this.targetPan.set(0, pz); }
     this.sized = true;
     if (!this.insetNow) this.insetNow = { ...(this.insets || this.defaultInsets()) };
     this.applyInsets();
@@ -1899,7 +1942,7 @@ export class OfficeView {
   homePose(w, h, insets = null) {
     const keep = { camera: this.camera, w: this.w, h: this.h, insetNow: this.insetNow, visW: this.visW, visH: this.visH, fitKey: this.fitKey, fitValue: this.fitValue, yaw: this.yaw };
     const cam = new THREE.PerspectiveCamera(24, 1, 1, 3800);
-    const phone = w <= 760, zoom = phone ? 1.3 : 1.25, pan = [0, phone ? 0 : -1.5];
+    const phone = w <= 760, zoom = phone ? 1.42 : 1.42, pan = [0, phone ? 0 : -1.2];
     Object.assign(this, { camera: cam, w, h, yaw: 0.5, fitKey: null });
     this.insetNow = { ...(insets || this.defaultInsets()) }; this.applyInsets();
     this.placeCamera(this.fitDistance() / zoom, pan[0], pan[1]);

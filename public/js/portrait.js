@@ -67,7 +67,7 @@ async function develop() {
       // Frame head and shoulders from the person's own height, so a top hat or a short stature both fit.
       box.setFromObject(mc.group); box.getCenter(at);
       const tall = box.max.y - box.min.y, top = box.max.y;
-      const view = tall * 0.5, aimY = top - view * 0.47;
+      const view = tall * (mc.portraitView ?? 0.5), aimY = top - view * 0.47;
       cam.position.set(at.x + 0.12, aimY + tall * 0.04, at.z + view / 2 / Math.tan(THREE.MathUtils.degToRad(9)) + 0.4);
       cam.lookAt(at.x, aimY, at.z);
       renderer.render(scene, cam);

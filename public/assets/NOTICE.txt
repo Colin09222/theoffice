@@ -19,7 +19,6 @@ From Poly Haven (https://polyhaven.com, CC0), 1k JPG maps from dl.polyhaven.org:
   darkwood   wood_floor_worn         https://polyhaven.com/a/wood_floor_worn
   parquet    herringbone_parquet     https://polyhaven.com/a/herringbone_parquet
   concrete   concrete_floor_02       https://polyhaven.com/a/concrete_floor_02
-  tile       floor_tiles_06          https://polyhaven.com/a/floor_tiles_06
   brick      red_brick_03            https://polyhaven.com/a/red_brick_03
   plaster    painted_plaster_wall    https://polyhaven.com/a/painted_plaster_wall
   cast       concrete_wall_008       https://polyhaven.com/a/concrete_wall_008
@@ -28,6 +27,7 @@ From Poly Haven (https://polyhaven.com, CC0), 1k JPG maps from dl.polyhaven.org:
 From ambientCG (https://ambientcg.com, CC0), 1K-JPG downloads:
   carpet     Carpet016               https://ambientcg.com/view?id=Carpet016
   terrazzo   Terrazzo009             https://ambientcg.com/view?id=Terrazzo009
+  tile       Tiles143                https://ambientcg.com/view?id=Tiles143  (downloaded 8 November 2026 as Tiles143_1K-JPG.zip, sha256 afbda7adaf4c0048a9224a09ab326fe0f8313e9add1343ad8c09c157a98d881f)
 
 Phaser
 - public/vendor/phaser/phaser.min.js: Phaser 3.90.0 (npm phaser@3.90.0, dist/phaser.min.js), MIT License, Copyright (c) 2024 Richard Davey, Phaser Studio Inc. LICENSE beside it. Served to published games as _office/phaser.min.js.

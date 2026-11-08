@@ -12,9 +12,17 @@ const T = {
   marketer: { floor: 'terrazzo', wall: '#c96a4a', things: [{ m: 'televisionModern', slot: 'behindA', s: 0.8 }, { m: 'speakerSmall', slot: 'behindB', s: 1.4 }, { m: 'chairRounded', slot: 'sideA' }, { m: 'pottedPlant', slot: 'sideB', s: 1.3 }, { m: 'rugSquare', rug: true }, { p: 'posters' }] },
   tester: { floor: 'tile', wall: '#3f6b4f', things: [{ m: 'televisionVintage', slot: 'behindA', s: 0.9 }, { m: 'cardboardBoxClosed', slot: 'behindB', s: 1.1 }, { m: 'sideTableDrawers', slot: 'sideA' }, { m: 'bear', slot: 'nearA', s: 0.9 }, { p: 'bugboard' }] },
   illustrator: { floor: 'parquet', wall: '#5d4a7d', things: [{ p: 'easel', slot: 'behindA' }, { p: 'easel', slot: 'sideB' }, { m: 'tableRound', slot: 'sideA', s: 0.7 }, { m: 'plantSmall1', slot: 'nearA', s: 2 }, { m: 'rugRounded', rug: true }, { p: 'moodboard' }] },
-  // A room nobody has yet: a bare desk, a box of someone's things on the way, and a doormat.
-  vacant: { floor: 'carpet', wall: '#8d9299', things: [{ m: 'cardboardBoxClosed', slot: 'nearA', s: 1.1 }, { m: 'rugDoormat', rug: true }] },
+  // A room nobody has yet: dim, quiet and each one a little different, so a floor of them doesn't read as a warehouse.
+  vacant: { floor: 'carpet', wall: '#b4aea2', things: [{ m: 'cardboardBoxClosed', slot: 'nearA', s: 1.1 }, { m: 'rugDoormat', rug: true }] },
 };
+const EMPTY = [
+  { things: [{ m: 'cardboardBoxClosed', slot: 'nearA', s: 1.1 }, { m: 'rugDoormat', rug: true }] },
+  { bare: true, things: [{ m: 'pottedPlant', slot: 'behindB', s: 1.15 }] },
+  { bare: true, things: [{ m: 'cardboardBoxClosed', slot: 'sideA', s: 1.2 }, { m: 'cardboardBoxOpen', slot: 'sideB', s: 1.05 }] },
+  { things: [{ m: 'plantSmall1', slot: 'nearA', s: 1.9 }] },
+  { bare: true, things: [{ m: 'chairRounded', slot: 'sideA' }, { m: 'rugRound', rug: true }] },
+  { bare: true, things: [{ m: 'bookcaseOpenLow', slot: 'behindA' }, { m: 'plantSmall2', slot: 'nearB', s: 1.9 }] },
+];
 const SPARE = ['researcher', 'analyst', 'designer', 'tester', 'marketer'];
 // Words in someone's persona or quirk that add one more thing to the room, in the first free slot.
 const TOUCHES = [
@@ -28,7 +36,8 @@ const text = (info) => [info.persona, info.quirk, info.bio].filter((v) => typeof
 /** The room a person gets: the look of their role, or of a role picked from their id when it's one we have no look for. */
 export function officeTheme(info) {
   const base = T[info.role] || T[SPARE[hash(info.id ?? info.name ?? '') % SPARE.length]];
-  const things = [...base.things];
+  const empty = info.role === 'vacant' ? EMPTY[hash(info.id ?? '') % EMPTY.length] : null;
+  const things = [...(empty ? empty.things : base.things)];
   const words = text(info); const used = new Set(things.map((t) => t.slot).filter(Boolean));
   for (const [re, piece] of TOUCHES) {
     if (!re.test(words)) continue;
@@ -36,7 +45,7 @@ export function officeTheme(info) {
     if (!slot) break;
     used.add(slot); things.push({ ...piece, slot });
   }
-  return { floor: base.floor, wall: base.wall, things };
+  return { floor: base.floor, wall: base.wall, things, bare: !!empty?.bare };
 }
 /** How someone moves, the same every time for the same person: a gait, a walking pace and a way of standing about. */
 export function manner(id) {

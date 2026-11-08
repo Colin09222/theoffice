@@ -1,12 +1,11 @@
 // The little people. Two kinds share one interface (group, setAnim, update, paper/mug/phone, dispose, seatedY, labelY):
 // - Character: built from a few low-poly shapes, every rigid part baked into one vertex-coloured mesh. It appears at once and
 //   stays if a model never arrives.
-// - ModelCharacter: one of Kenney's CC0 mini characters (see /models/NOTICE.txt), a 7-bone rig with its own walk, idle and
-//   sit clips, recoloured to the saved look. The same procedural layers (typing, talking, carrying, cheering, thinking...)
-//   are added on top of the clips by turning the bones, so every agent state reads the same on both.
+// - ModelCharacter: one of Quaternius's CC0 people (see /models/NOTICE.txt) on a 22-bone rig, with the walk and idle clips
+//   shared and every pose solved live on top (hips on the seat, hands placed by IK), so every agent state reads the same on both.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { mergeColored, disposeMerged } from './batch.js';
-import { character as loadCharacterAsset, accessory, skeletonUtils, ATLAS } from './models.js';
+import { person as loadPersonAsset, personClips, skeletonUtils } from './models.js';
 
 const G = {
   head: new THREE.SphereGeometry(0.36, 20, 14),
@@ -95,11 +94,11 @@ function buildModelHair(head, look) {
   if (look.hair === 'long') { head.add(part(G.box, c, 0, -0.36, -0.28, 0.66, 0.66, 0.12)); for (const s of [-1, 1]) head.add(part(G.box, c, s * 0.36, -0.36, -0.08, 0.1, 0.6, 0.34)); }
 }
 /** Everything worn apart from a hat. `head` and `chest` are groups already sized for the character they sit on, facing +z. */
-function buildExtras(head, chest, look, accent) {
+function buildExtras(head, chest, look, accent, slim = false) {
   const e = look.wear;
   if (!e || e === 'none') return;
   const hair = look.hair === 'none' ? '#4a2f1d' : look.hairColor;
-  if (e === 'beard') { head.add(part(G.box, hair, 0, -0.26, 0.28, 0.5, 0.26, 0.14)); head.add(part(G.box, hair, 0, -0.34, 0.3, 0.3, 0.16, 0.12)); }
+  if (e === 'beard') { if (slim) { head.add(part(G.box, hair, 0, -0.27, 0.18, 0.44, 0.17, 0.18)); head.add(part(G.box, hair, 0, -0.37, 0.2, 0.24, 0.1, 0.13)); } else { head.add(part(G.box, hair, 0, -0.26, 0.28, 0.5, 0.26, 0.14)); head.add(part(G.box, hair, 0, -0.34, 0.3, 0.3, 0.16, 0.12)); } }
   if (e === 'moustache') for (const s of [-1, 1]) { const m = part(G.box, hair, s * 0.08, -0.1, 0.36, 0.17, 0.05, 0.06); m.rotation.z = s * -0.25; head.add(m); }
   if (e === 'scarf') { chest.add(part(G.cyl, accent, 0, 0.3, 0.03, 0.34, 0.15, 0.34)); chest.add(part(G.box, darker(accent, 0.85), 0.14, 0.02, 0.32, 0.17, 0.42, 0.06)); }
   if (e === 'bowtie') for (const s of [-1, 1]) { const b = part(G.cone, accent, s * 0.1, 0.25, 0.33, 0.1, 0.2, 0.05); b.rotation.z = s * Math.PI / 2; chest.add(b); }
@@ -108,6 +107,12 @@ function buildExtras(head, chest, look, accent) {
   if (e === 'cape') { chest.add(part(G.box, accent, 0, -0.14, -0.34, 0.62, 0.74, 0.04)); chest.add(part(G.cyl, darker(accent, 0.8), 0, 0.3, 0, 0.3, 0.07, 0.3)); }
   if (e === 'backpack') { chest.add(part(G.box, accent, 0, 0.03, -0.38, 0.46, 0.5, 0.2)); chest.add(part(G.box, darker(accent, 0.8), 0, -0.06, -0.5, 0.3, 0.22, 0.07)); }
   if (e === 'wings') for (const s of [-1, 1]) { const w = part(G.box, '#f7f4ec', s * 0.42, 0.12, -0.42, 0.6, 0.34, 0.04); w.rotation.y = s * 0.55; w.rotation.z = s * 0.35; chest.add(w); const t = part(G.box, '#e6e0d2', s * 0.36, -0.1, -0.4, 0.42, 0.24, 0.04); t.rotation.y = s * 0.55; t.rotation.z = s * 0.2; chest.add(t); }
+}
+/** Glasses, in head units, for the packed people (eyes about 0.47 of a head out from the middle and a little low). */
+function buildGlasses(head, look) {
+  const x = 0.17, y = -0.03, z = 0.33;
+  if (look.glasses === 'round') { for (const s of [-1, 1]) { const r = new THREE.Mesh(G.ring, mat('#22202a')); r.position.set(s * x, y, z); r.scale.setScalar(1.15); head.add(r); } head.add(part(G.box, '#22202a', 0, y, z, 0.09, 0.014, 0.014)); }
+  if (look.glasses === 'shades') { for (const s of [-1, 1]) head.add(part(G.box, '#101114', s * x, y, z, 0.2, 0.11, 0.02)); head.add(part(G.box, '#101114', 0, y + 0.02, z, 0.14, 0.02, 0.014)); }
 }
 /** The eyewear the kit has no model for. */
 function buildFaceWear(head, look, z, y = 0.03) {
@@ -332,33 +337,23 @@ export class Character {
   dispose() { disposeMerged(this.group); this.group.removeFromParent(); }
 }
 
-// ---------- Kenney's mini characters ----------
+// ---------- the people ----------
+// Quaternius's Ultimate Modular Men and Women (see /models/NOTICE.txt): one skinned mesh and one material per person. The vertices name
+// their role (skin, hair, top...) and the material holds the palette, so everyone shares one shader. Poses are the shared walk and idle
+// clips with the rest solved live: hips onto the seat, feet on the floor, and every hand placed with two-bone IK.
 
-/** Which atlas cell ([column, row] of the 8x4 colormap) each variant uses for its skin, hair, top and trousers, measured from the meshes. */
-const VARIANTS = {
-  'character-male-a': { skin: [1, 2], hair: [3, 3], top: [4, 2], legs: [0, 1] },
-  'character-male-b': { skin: [2, 2], hair: [0, 2], top: [7, 2], legs: [0, 1] },
-  'character-male-c': { skin: [2, 2], hair: [0, 2], top: [3, 3], legs: [0, 1] },
-  'character-male-d': { skin: [2, 2], hair: [0, 2], top: [3, 3], legs: [3, 3] },
-  'character-male-e': { skin: [2, 2], hair: [1, 2], top: [7, 3], legs: [0, 3] },
-  'character-male-f': { skin: [0, 2], hair: [3, 3], top: [2, 2], legs: [4, 2] },
-  'character-female-a': { skin: [1, 2], hair: [3, 3], top: [0, 1], legs: [2, 1] },
-  'character-female-b': { skin: [2, 2], hair: [0, 2], top: [2, 1], legs: [0, 3] },
-  'character-female-c': { skin: [0, 2], hair: [1, 3], top: [0, 1], legs: [7, 2] },
-  'character-female-d': { skin: [2, 2], hair: [0, 2], top: [1, 3], legs: [3, 3] },
-  'character-female-e': { skin: [2, 2], hair: [3, 3], top: [7, 3], legs: [3, 3] },
-  'character-female-f': { skin: [2, 2], hair: [1, 2], top: [3, 3], legs: [0, 3] },
-};
-/** Outfits map to the variants whose clothes are closest; the hair style then picks a side, and the rest of the look picks within it. */
+/** World height per model unit: the rig stands 1.86 tall, so a person is about 2.6 room units, right beside a 1.06 desk and a 0.5 seat. */
+export const MODEL_SCALE = 1.38;
+const BODIES = /^(male|female)-[a-f]$/;
+/** Outfits map to the people dressed closest; the hair style then picks a side, and the rest of the look picks within it. */
 const BY_OUTFIT = {
-  suit: ['character-male-d', 'character-female-d'], shirt: ['character-male-e', 'character-female-e'], hoodie: ['character-male-a', 'character-female-f'],
-  tee: ['character-male-b', 'character-female-a'], dress: ['character-female-d', 'character-female-b'], labcoat: ['character-male-e', 'character-female-e'],
-  overalls: ['character-male-c', 'character-female-b'],
+  suit: ['male-d', 'female-d'], shirt: ['male-a', 'female-a'], hoodie: ['male-b', 'female-f'], tee: ['male-a', 'female-a'],
+  dress: ['female-b', 'female-e'], labcoat: ['male-d', 'female-d'], overalls: ['male-c', 'female-c'],
 };
 const FEMALE_HAIR = ['long', 'bun', 'pigtails'], MALE_HAIR = ['short', 'side', 'mohawk'];
 const hashLook = (look) => { let h = 7; for (const ch of JSON.stringify([look.skin, look.hairColor, look.outfitColor, look.glasses, look.hat])) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
 export function variantFor(look) {
-  if (look.body && look.body !== 'auto' && VARIANTS[`character-${look.body}`]) return `character-${look.body}`;
+  if (look.body && BODIES.test(look.body)) return look.body;
   const cands = BY_OUTFIT[look.outfit] || BY_OUTFIT.tee;
   const female = cands.map((c) => c.includes('female'));
   let i = hashLook(look) % cands.length;
@@ -366,221 +361,316 @@ export function variantFor(look) {
   else if (MALE_HAIR.includes(look.hair) && female.includes(false)) i = female.indexOf(false);
   return cands[i];
 }
-const MODEL_HEAD = 0.53;  // our head parts are sized for a head of radius 0.36; this fits them to the kit's
-export const MODEL_SCALE = 2.45;  // model units are about 0.67 per person; the room's people stand about 1.65 tall, 1.7 desks
 
-// The kit's arms are modelled straight out to the sides, and its clips turn them 45° down, clear of the wide body. So an
-// arm is posed here by two turns at the shoulder, made in the body's own frame on top of the clip: `s` how far the arm is
-// out from the side (MODEL_OUT is the clip's own), then `a` the swing forward and up (negative is forward, -PI overhead).
-// Turning the bone about its own x instead, as the stand-in's hanging arms allow, only rolls the kit's arm along its length.
-const MODEL_OUT = Math.PI / 4;
-// Seated, the desk top is a little above the shoulder: the arms go up over its edge (about 42° up at a staff desk, 55° at
-// the taller manager's and boss's) and the hands come down on the keys, a little in from the shoulders.
-const TYPE_A = -2.3, TYPE_A_BIG = -2.53, TYPE_S = -0.1, TAP = 0.055;
-const smooth01 = (x) => { const c = Math.min(1, Math.max(0, x)); return c * c * (3 - 2 * c); };
-const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1);
-const _q = new THREE.Quaternion(), PHONE_TILT = new THREE.Quaternion().setFromAxisAngle(AX, -0.6);
-/** Shoulder angles for the kit's people in every state: the same states as poseFor, measured on this rig. */
-function modelArms(b, t, dt, self, still, m) {
-  const O = MODEL_OUT, ty = self.ty;
-  let aL = 0, sL = O, aR = 0, sR = O;
-  const to = (w, al, sl, ar, sr) => { if (w < 0.001) return; aL += w * (al - aL); sL += w * (sl - sL); aR += w * (ar - aR); sR += w * (sr - sR); };
-  // Standing about: everyone has their own thing to do with their arms.
-  if (m && still > 0.001) {
-    if (m.stance === 1) to(still, 0, O, -0.3, O + 0.25);
-    if (m.stance === 2) to(still, -0.85, 0.12, -0.85, 0.12);
-    if (m.stance === 3) to(still, 0.45, 0.5, 0.45, 0.5);
-  }
-  to(b.sit, -0.3, O, -0.3, O);
-  to(b.talk, -0.45 + Math.sin(t * 3.3) * 0.12, 0.62, -1.3 + Math.sin(t * 5) * 0.3, 0.45 + Math.sin(t * 2.3) * 0.08);
-  to(b.listen, -0.45, 0.32, -0.45, 0.32);
-  to(b.carry, -1.35, 0.06, -1.35, 0.06);
-  to(b.cheer, -2.85 + Math.sin(t * 11) * 0.18, 0.8, -2.85 - Math.sin(t * 11) * 0.18, 0.8);
-  to(b.think, -0.7, 0.3, -2.25, 0.62);
-  const st = Math.min(1, Math.max(0, Math.sin(t * 1.1) * 0.5 + 0.5));
-  to(b.stretch, -2.7 - 0.3 * st, 0.8, -2.7 - 0.3 * st, 0.8);
-  to(b.sip, -0.2, O, -1.5 - 0.75 * (self.sipK ?? 0), 0.22);
-  to(b.phone, -0.3, O, -1.55, 0.1);
-  to(b.pour, -0.25, O, -1.0, 0.45);
-  // Typing: up over the desk's edge first, then in over the keys, so a hand never passes through the desk. Standing up runs
-  // it backwards. It is the longest reach any pose makes, so it gets its own steady 0.4s, eased at both ends.
-  const k = (self.typeK = Math.min(1, Math.max(0, (self.typeK ?? 0) + Math.sign((self.anim === 'type' ? 1 : 0) - (self.typeK ?? 0)) * dt * 2.5)));
-  const up = smooth01(k / 0.7), inw = smooth01((k - 0.3) / 0.7);
-  const lean = 0.05 * up;  // the body leans in a touch; the arms make up for it so the hands stay on the keys
-  const A = (self.bigDesk ? TYPE_A_BIG : TYPE_A) - lean;
-  aL += up * (A - ty.l * TAP - aL); aR += up * (A - ty.r * TAP - aR);
-  sL += inw * (TYPE_S + ty.l * 0.03 - sL); sR += inw * (TYPE_S + ty.r * 0.03 - sR);
-  return { aL, sL, aR, sR, lean };
+const TROUSERS = ['#2a3448', '#3a3d45', '#27262e', '#4a4438', '#2f3d37', '#3d3346'], SHOES = ['#241f1c', '#3b2a20', '#1d2230', '#55432f', '#2c2c32', '#6a6459'];
+/** The colour of every role for this person, as linear RGB, in the slot order of the packed model. */
+function personColours(asset, look, accent) {
+  const h = hashLook(look), o = look.outfit, c = (x) => new THREE.Color(x);
+  const skin = c(look.skin), hairless = look.hair === 'none';
+  const top = c(o === 'labcoat' ? '#f2efe8' : look.outfitColor);
+  const legs = c(o === 'suit' ? darker(look.outfitColor, 0.85) : o === 'overalls' || o === 'dress' ? look.outfitColor : o === 'labcoat' ? '#3a3f4c' : TROUSERS[(h >> 3) % TROUSERS.length]);
+  const own = (role, fallback) => c(asset.extras.palette[role]?.hex || fallback);
+  const roles = {
+    skin, skinDark: skin.clone().multiplyScalar(0.84), hair: c(look.hairColor), brow: hairless ? skin.clone().multiplyScalar(0.5) : c(look.hairColor).multiplyScalar(0.62),
+    eye: c('#17120f'), top, legs, shirt: c(o === 'hoodie' ? '#d8d4ca' : '#efeadf'), accent: c(accent), shoes: c(SHOES[(h >> 7) % SHOES.length]), sole: c('#d9d5ca'),
+    dark: own('dark', '#2b2b30'), fixed: own('fixed', '#8a8a86'),
+  };
+  return asset.extras.roles.map((r) => roles[r] || c('#808080'));
+}
+const ROLE_COUNT = 13;
+const PERSON_MAT = new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.74, metalness: 0 });
+/** A copy of the one person material holding this person's colours. Every copy compiles to the same program. */
+function dressed(colours) {
+  const m = PERSON_MAT.clone();
+  m.userData.roles = { value: colours };
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uRoles = m.userData.roles;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\nattribute vec4 _slot; uniform vec3 uRoles[${ROLE_COUNT}]; varying vec3 vRole;`)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRole = uRoles[int(_slot.x)];');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRole;')
+      .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb *= vRole;');
+  };
+  m.customProgramCacheKey = () => 'person-roles';
+  return m;
+}
+/** The same geometry with the hair left out, for the bald (and for a mohawk, which is ours). Built once per body. */
+const baldCache = new WeakMap();
+function baldGeometry(asset) {
+  if (baldCache.has(asset)) return baldCache.get(asset);
+  const src = asset.mesh.geometry, hair = asset.extras.roles.indexOf('hair'), idx = src.index.array, out = [];
+  for (let i = 0; i < idx.length; i += 3) if (asset.slots[idx[i]] !== hair) out.push(idx[i], idx[i + 1], idx[i + 2]);
+  const g = new THREE.BufferGeometry();
+  for (const k of Object.keys(src.attributes)) g.setAttribute(k, src.attributes[k]);
+  g.setIndex(out);
+  baldCache.set(asset, g);
+  return g;
 }
 
-/** Replaces the colours of chosen atlas cells, keeping each cell's light-to-dark shading. Uniforms live on the material so a clone keeps its look. */
-function tintMaterial(src, slots, means) {
-  const m = src.clone();
-  const cells = [], tints = [], meansU = [];
-  for (const [cell, color] of slots) {
-    cells.push(new THREE.Vector2(cell[0], cell[1]));
-    tints.push(new THREE.Color(color));
-    meansU.push(means[cell[1] * ATLAS.cols + cell[0]] || new THREE.Color(0.5, 0.5, 0.5));
-  }
-  while (cells.length < 4) { cells.push(new THREE.Vector2(-1, -1)); tints.push(new THREE.Color(1, 1, 1)); meansU.push(new THREE.Color(1, 1, 1)); }
-  m.userData.tint = { uCells: { value: cells }, uTints: { value: tints }, uMeans: { value: meansU }, uCount: { value: slots.length } };
-  m.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, m.userData.tint);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec2 uCells[4]; uniform vec3 uTints[4]; uniform vec3 uMeans[4]; uniform int uCount;')
-      .replace('#include <map_fragment>', `#include <map_fragment>
-        { vec2 _cell = floor(vMapUv * vec2(${ATLAS.cols.toFixed(1)}, ${ATLAS.rows.toFixed(1)}));
-          for (int i = 0; i < 4; i++) { if (i >= uCount) break; if (_cell == uCells[i]) diffuseColor.rgb *= uTints[i] / max(uMeans[i], vec3(0.03)); } }`);
-  };
-  m.customProgramCacheKey = () => 'tinted-atlas';
-  m.roughness = 0.78; m.metalness = 0;
-  return m;
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3(), _e = new THREE.Vector3(), _pole = new THREE.Vector3();
+const _q0 = new THREE.Quaternion(), _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _m = new THREE.Matrix4();
+const AX = new THREE.Vector3(1, 0, 0), AY = new THREE.Vector3(0, 1, 0), AZ = new THREE.Vector3(0, 0, 1);
+const worldQ = (o, out) => out.setFromRotationMatrix(_m.extractRotation(o.matrixWorld));
+const worldP = (o, out) => out.setFromMatrixPosition(o.matrixWorld);
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const smooth01 = (x) => { const c = clamp01(x); return c * c * (3 - 2 * c); };
+const PHONE_TILT = new THREE.Quaternion().setFromAxisAngle(AX, -0.6);
+const HIP_Y = 0.93, SEAT_CLEAR = 0.1;      // model units: the hip joint standing, and how far it sits above a cushion
+const PERSON_TOP = 1.87;
+// A keyboard on a desk, from the seat: how far in front (room units) and how high. The manager's and boss's desk is deeper and taller.
+const KEYS_Z = 0.59, KEYS_Z_BIG = 0.52, KEYS_Y = 1.1, KEYS_Y_BIG = 1.24;
+// Where each hand goes in the model's own space, per hand side (+1 = model +x, the person's left).
+const HEAD_C = new THREE.Vector3(0, 1.71, 0.05), HEAD_R = 0.125, CHEST_C = new THREE.Vector3(0, 1.3, 0.04);
+
+/** Turns `bone` so the point `tip` (in its own frame) heads for the world point `target`, by weight `w`. Nothing assumes which way the bone's axes lie. */
+function aim(bone, tip, target, w) {
+  worldP(bone, _a); worldQ(bone, _q0);
+  _b.copy(tip).applyQuaternion(_q0).normalize();
+  _c.subVectors(target, _a).normalize();
+  _q1.setFromUnitVectors(_b, _c).multiply(_q0);
+  worldQ(bone.parent, _q2).invert();
+  _q2.multiply(_q1);
+  if (w >= 0.999) bone.quaternion.copy(_q2); else bone.quaternion.slerp(_q2, w);
+  bone.updateWorldMatrix(false, true);
 }
 
 export class ModelCharacter {
-  /** `asset` is a loaded template from models.js; `utils` is SkeletonUtils; `glasses` an optional accessory scene to clone. */
-  constructor(asset, utils, look, { accent = '#d9774a', scale = MODEL_SCALE, variant, glasses = null } = {}) {
+  constructor(asset, utils, clips, look, { accent = '#d9774a', scale = MODEL_SCALE, variant } = {}) {
     this.group = new THREE.Group();
     this.look = look; this.accent = accent; this.scale = scale; this.variant = variant;
     this.t = Math.random() * 10;
     this.anim = 'stand'; this.blend = Object.fromEntries(ANIMS.map((n) => [n, 0]));
-    this.isModel = true;
+    this.isModel = true; this.far = !!asset.far;
     const model = utils.clone(asset.scene);
     this.model = model;
-    // The kit's people face +z, the same way ours do, so the model needs no turn inside its group.
     this.group.add(model);
     this.group.scale.setScalar(scale);
-    const bone = (n) => { let b = null; model.traverse((o) => { if (o.name === n) b = o; }); return b; };
-    this.root = bone('root'); this.torso = bone('torso'); this.head = bone('head');
-    // Poses call the arm on the -x side "L", so the rig's own left and right are matched to that by position, not by name.
-    const armA = bone('arm-left'), armB = bone('arm-right'), legA = bone('leg-left'), legB = bone('leg-right');
-    const swap = (armA?.position.x ?? 0) > 0;
-    this.armL = swap ? armB : armA; this.armR = swap ? armA : armB; this.legL = swap ? legB : legA; this.legR = swap ? legA : legB;
-    this.rest = new Map();
-    for (const b of [this.root, this.torso, this.head, this.armL, this.armR, this.legL, this.legR]) if (b) this.rest.set(b, { q: b.quaternion.clone(), p: b.position.clone() });
-    this.clip = new Map([...this.rest].map(([b, r]) => [b, { q: r.q.clone(), p: r.p.clone() }]));  // what the clips last set
-    // Each arm at the clips' own 45°, still: what a walker's arms go back to while their hands are full.
-    this.armOut = new Map([[this.armL, -1], [this.armR, 1]].filter(([b]) => b).map(([b, side]) => [b, b.quaternion.clone().premultiply(new THREE.Quaternion().setFromAxisAngle(AZ, -side * MODEL_OUT))]));
-    // Recolour: skin and hair on the head, skin, top and trousers on the body.
-    const v = VARIANTS[variant] || VARIANTS['character-male-a'];
-    const o = look.outfit;
-    const top = o === 'labcoat' ? '#f2f0ea' : look.outfitColor;
-    const legs = o === 'suit' ? darker(look.outfitColor, 0.85) : o === 'overalls' ? look.outfitColor : o === 'dress' ? look.outfitColor : null;
-    const bald = look.hair === 'none' || look.hair === 'mohawk';  // a mohawk is ours, so the variant's own hair goes
-    const headSlots = [[v.skin, look.skin], [v.hair, bald ? look.skin : look.hairColor]];
-    const bodySlots = [[v.skin, look.skin], [v.top, top]];
-    if (legs && (v.legs[0] !== v.top[0] || v.legs[1] !== v.top[1])) bodySlots.push([v.legs, legs]);
-    this.materials = [];
-    model.traverse((obj) => {
-      if (!obj.isMesh) return;
-      obj.castShadow = true; obj.receiveShadow = false; obj.frustumCulled = false;
-      const slots = obj.name === 'head-mesh' ? headSlots : bodySlots;
-      if (asset.means && obj.material?.map) { obj.material = tintMaterial(obj.material, slots, asset.means); this.materials.push(obj.material); }
-    });
-    // Clips: idle, walk and sit from the kit, cross-faded by the same blend the procedural character uses.
+    let mesh = null; model.traverse((o) => { if (o.isSkinnedMesh) mesh = o; });
+    this.mesh = mesh;
+    this.material = dressed(personColours(asset, look, accent));
+    mesh.material = this.material;
+    if (look.hair === 'none' || look.hair === 'mohawk') mesh.geometry = baldGeometry(asset);
+    mesh.castShadow = true; mesh.receiveShadow = false; mesh.frustumCulled = false;
+    const bone = (n) => model.getObjectByName(n);
+    const B = this.bones = {
+      root: bone('Root'), body: bone('Body'), abdomen: bone('Abdomen'), torso: bone('Torso'), chest: bone('Chest'), neck: bone('Neck'), head: bone('Head'),
+    };
+    this.torso = B.chest; this.head = B.head;
+    // Each limb remembers its bone lengths in model units, and the joint after it even where the rig has no such child (the foot hangs off the root).
+    this.group.updateMatrixWorld(true);  // the group's scale is part of what is measured below
+    const bindW = (b) => worldP(b, new THREE.Vector3());
+    const limb = (upper, lower, end) => {
+      const q = worldQ(upper, new THREE.Quaternion()), qL = worldQ(lower, new THREE.Quaternion());
+      const a = bindW(upper), b = bindW(lower), c = bindW(end);
+      return {
+        upper, lower, end,
+        upperTip: b.clone().sub(a).applyQuaternion(q.clone().invert()), lowerTip: c.clone().sub(b).applyQuaternion(qL.clone().invert()),
+        l1: a.distanceTo(b) / scale, l2: b.distanceTo(c) / scale,
+      };
+    };
+    this.limbs = { L: limb(bone('UpperArmL'), bone('LowerArmL'), bone('WristL')), R: limb(bone('UpperArmR'), bone('LowerArmR'), bone('WristR')),
+      legL: limb(bone('UpperLegL'), bone('LowerLegL'), bone('FootL')), legR: limb(bone('UpperLegR'), bone('LowerLegR'), bone('FootR')) };
+    // What each wrist and foot looks like at rest, world-relative, so a hand can be laid flat and a foot stood flat whatever the arm did.
+    this.handRest = { L: worldQ(this.limbs.L.end, new THREE.Quaternion()), R: worldQ(this.limbs.R.end, new THREE.Quaternion()) };
+    this.footRest = { legL: this.limbs.legL.end.quaternion.clone(), legR: this.limbs.legR.end.quaternion.clone() };
+    this.modelInv = new THREE.Quaternion();
+    // Hat, glasses and the rest of what they wear, sized for this head and held in the model's own axes.
+    const inModelAxes = (b, at, s) => {
+      const g = new THREE.Group(), q = worldQ(b, new THREE.Quaternion()).invert();
+      g.quaternion.copy(q); g.position.copy(at).sub(bindW(b).divideScalar(scale)).applyQuaternion(q); g.scale.setScalar(s);
+      return g;
+    };
+    const hat = inModelAxes(B.head, HEAD_C, HEAD_R / 0.36);
+    buildHat(hat, look, accent, 1.06);
+    buildModelHair(hat, look);
+    buildGlasses(hat, look);
+    buildFaceWear(hat, look, 0.0, 0.0);
+    const chest = inModelAxes(B.chest, CHEST_C, 0.4);
+    buildExtras(hat, chest, look, accent, true);
+    if (hat.children.length) { mergeColored(hat, CHAR_MAT); B.head.add(hat); this.hat = hat; }
+    if (chest.children.length) { mergeColored(chest, CHAR_MAT); B.chest.add(chest); this.chestWear = chest; }
+    // Props, in room units and held in the right hand; a paper carried against the chest.
+    const ps = 1 / scale, wrist = this.limbs.R.end;
+    const hand = new THREE.Group(), hq = worldQ(wrist, new THREE.Quaternion()).invert();
+    hand.quaternion.copy(hq); this.handGroup = hand; wrist.add(hand);
+    const front = inModelAxes(B.chest, new THREE.Vector3(0, 1.18, 0.2), 1);
+    this.paper = new THREE.Mesh(G.paper, mat('#fbf7ea')); this.paper.visible = false; this.paper.rotation.x = 0.3; this.paper.scale.setScalar(ps); front.add(this.paper); B.chest.add(front);
+    this.mug = new THREE.Mesh(G.mug, mat(accent)); this.mug.visible = false; this.mug.position.set(0, -0.04, 0.05); this.mug.scale.setScalar(ps);
+    this.phone = new THREE.Mesh(G.phone, mat('#1b1c22')); this.phone.visible = false; this.phone.position.set(0, -0.02, 0.06); this.phone.scale.setScalar(ps);
+    hand.add(this.mug, this.phone);
+    // Clips: the idle and the walk, cross-faded by the same blend the stand-in uses.
     this.mixer = new THREE.AnimationMixer(model);
-    const clip = (n) => asset.animations.find((c) => c.name === n);
     this.actions = {};
-    for (const n of ['idle', 'walk', 'sit']) { const c = clip(n); if (c) { const a = this.mixer.clipAction(c); a.play(); a.setEffectiveWeight(n === 'idle' ? 1 : 0); this.actions[n] = a; } }
-    if (this.actions.walk) this.actions.walk.setEffectiveTimeScale(1.35);
-    // A hat from our own parts and glasses from the kit, on the head bone. The hat group is sized to the model's head.
-    if (this.head) {
-      // The head mesh spans y 0..0.38 from this bone and is about 0.19 across from its centre, which is one "head unit" at 0.53.
-      const hat = new THREE.Group(); hat.position.set(0, 0.19, -0.002); hat.scale.setScalar(MODEL_HEAD);
-      buildHat(hat, look, accent, 1.22);
-      buildModelHair(hat, look);
-      buildFaceWear(hat, look, 0.0, -0.06);
-      const chest = new THREE.Group();
-      if (this.torso) { chest.position.set(0, 0.07, 0.012); chest.scale.setScalar(0.4); }
-      buildExtras(hat, chest, look, accent);
-      if (hat.children.length) { mergeColored(hat, CHAR_MAT); this.head.add(hat); this.hat = hat; }
-      if (chest.children.length && this.torso) { mergeColored(chest, CHAR_MAT); this.torso.add(chest); this.chest = chest; }
-      if (glasses) {
-        const g = glasses.clone(true);
-        g.traverse((obj) => { if (obj.isMesh) { obj.castShadow = false; obj.frustumCulled = false; } });
-        g.position.set(0, 0.125, 0.085); this.head.add(g); this.glasses = g;
-      }
+    // What the clips last wrote to each bone. The mixer only writes a bone whose value changed, so without this the turns made below would pile up.
+    this.pose = [];
+    model.traverse((o) => { if (o.isBone) this.pose.push({ b: o, q: o.quaternion.clone(), p: o.position.clone() }); });
+    const ph = Math.random();
+    for (const [key, name] of [['idle', 'Idle_Neutral'], ['walk', 'Walk']]) {
+      const clip = clips.find((c) => c.name === name); if (!clip) continue;
+      const a = this.mixer.clipAction(clip); a.play(); a.time = ph * clip.duration; a.setEffectiveWeight(key === 'idle' ? 1 : 0); this.actions[key] = a;
     }
-    // Props, scaled back to world size and held in the right hand.
-    const ps = 1 / scale;
-    this.paper = new THREE.Mesh(G.paper, mat('#fbf7ea')); this.paper.visible = false; this.paper.position.set(0, 0.11, 0.11); this.paper.rotation.x = 0.3; this.paper.scale.setScalar(ps);
-    if (this.torso) this.torso.add(this.paper);
-    // The arm runs along the bone's x, so the hand is out along x; the props are turned upright every frame (holdProps).
-    const hx = Math.sign(this.armR?.position.x || 1);
-    this.mug = new THREE.Mesh(G.mug, mat(accent)); this.mug.visible = false; this.mug.position.set(hx * 0.25, 0, 0.055); this.mug.scale.setScalar(ps);
-    this.phone = new THREE.Mesh(G.phone, mat('#1b1c22')); this.phone.visible = false; this.phone.position.set(hx * 0.25, 0, 0.05); this.phone.scale.setScalar(ps);
-    if (this.armR) this.armR.add(this.mug, this.phone);
-    this.headTop = 0.672 * scale;
-    this.labelY = this.headTop + (HAT_CLEAR[look.hat] || 0) * MODEL_HEAD * scale;
+    this.headTop = PERSON_TOP * scale;
+    this.labelY = this.headTop + (HAT_CLEAR[look.hat] || 0) * HEAD_R / 0.36 * scale;
+    // A head and shoulders for the ID photos (portrait.js), as a share of the person's height.
+    this.portraitView = 0.3;
   }
-  seatedY(seatTop) { return seatTop - 0.03 * this.scale; }
+  /** Group height that puts the hips on a seat whose cushion is `seatTop` high. The legs reach down to the floor on their own. */
+  seatedY(seatTop) { return seatTop + (SEAT_CLEAR - HIP_Y) * this.scale; }
   setAnim(name) { this.anim = name; }
-  /** How this person moves (see manner in offices.js): their pace sets the walk clip's speed, and the rest shapes how they stand about. */
-  setManner(m) { this.manner = m; if (m && this.actions.walk) this.actions.walk.setEffectiveTimeScale(1.35 * (m.pace / 2.6)); }
+  /** How this person moves (see manner in offices.js): their pace sets the walk's speed, and the rest shapes how they stand about. */
+  setManner(m) { this.manner = m; if (m && this.actions.walk) this.actions.walk.setEffectiveTimeScale(1.45 * (m.pace / 2.6)); }
+  /** Turns a bone about an axis given in the model's own space. */
+  spin(bone, axis, angle) {
+    if (!bone || Math.abs(angle) < 1e-4) return;
+    worldQ(this.model, _q0); _e.copy(axis).applyQuaternion(_q0);
+    worldQ(bone, _q1); _q2.setFromAxisAngle(_e, angle).multiply(_q1);
+    worldQ(bone.parent, _q0).invert();
+    bone.quaternion.copy(_q0.multiply(_q2));
+    bone.updateWorldMatrix(false, true);
+  }
+  /** Two-bone IK: lays the limb so its end reaches `target` (model space), the middle joint bending toward `pole` (model space direction). */
+  solve(limb, tx, ty, tz, px, py, pz, w) {
+    const { upper, lower } = limb, S = _a, T = _d;
+    worldP(upper, S);
+    T.set(tx, ty, tz).applyMatrix4(this.model.matrixWorld);
+    const s = this.scale, l1 = limb.l1 * s, l2 = limb.l2 * s;
+    _b.subVectors(T, S);
+    const reach = Math.min(_b.length(), (l1 + l2) * 0.996);
+    if (reach < 1e-4) return;
+    _b.normalize();
+    T.copy(S).addScaledVector(_b, reach);
+    const a = (l1 * l1 - l2 * l2 + reach * reach) / (2 * reach), h = Math.sqrt(Math.max(0, l1 * l1 - a * a));
+    _pole.set(px, py, pz).applyQuaternion(worldQ(this.model, _q0));
+    _pole.addScaledVector(_b, -_pole.dot(_b)).normalize();
+    _c.copy(S).addScaledVector(_b, a).addScaledVector(_pole, h);
+    const E = _e.copy(_c), T2 = _d.copy(T);  // the aim below reuses the scratch vectors
+    const elbow = E.clone(), wrist = T2.clone();
+    aim(upper, limb.upperTip, elbow, w);
+    aim(lower, limb.lowerTip, wrist, w);
+  }
+  /** Lays a hand flat, or leaves it where the forearm put it (w 0). `fx, fz` is the way the fingers point, in model space; the palm faces down. */
+  layHand(limb, rest, fx, fy, fz, w) {
+    if (w <= 0.001) return;
+    const wrist = limb.end;
+    worldQ(this.model, _q0);
+    _a.set(fx, fy, fz).normalize().applyQuaternion(_q0);
+    _b.set(limb === this.limbs.L ? 1 : -1, 0, 0);  // the hand pointed out to the side in the bind pose
+    _c.set(0, -1, 0).applyQuaternion(_q0);          // the palm, down
+    _d.crossVectors(_a, _c).normalize();
+    _c.crossVectors(_d, _a).normalize();
+    // Bind frame: x along the hand, -y through the palm.
+    _m.makeBasis(_b.set(limb === this.limbs.L ? 1 : -1, 0, 0), new THREE.Vector3(0, -1, 0), new THREE.Vector3().crossVectors(_b, new THREE.Vector3(0, -1, 0)));
+    const m2 = new THREE.Matrix4().makeBasis(_a, _c, new THREE.Vector3().crossVectors(_a, _c));
+    _q1.setFromRotationMatrix(m2.multiply(_m.invert()));
+    _q1.multiply(rest);
+    worldQ(wrist.parent, _q2).invert();
+    wrist.quaternion.slerp(_q2.multiply(_q1), w);
+    wrist.updateWorldMatrix(false, true);
+  }
   update(dt, speed = 0) {
     this.t += dt;
-    const t = this.t, b = this.blend;
+    const t = this.t, b = this.blend, s = this.scale;
     const want = wantFor(this.anim, speed, this.paper.visible, this.inChair);
     ease(this, want, dt);
     this.mug.visible = b.sip > 0.2 || b.pour > 0.2;
     this.phone.visible = b.phone > 0.2;
     const A = this.actions;
     const sit = Math.min(1, b.sit), walk = Math.min(1 - sit, b.walk);
-    A.sit?.setEffectiveWeight(sit); A.walk?.setEffectiveWeight(walk); A.idle?.setEffectiveWeight(Math.max(0, 1 - sit - walk));
-    // Back to the clips' own pose first, as they left it last frame, because our turns below are relative and would
-    // otherwise pile up. Not the rest pose: the mixer only writes a bone when its value changes, so under a still clip
-    // (sit) the bone would be left at rest, which on this rig is arms straight out, and flick back whenever a weight moved.
-    for (const [bone, r] of this.clip) { bone.quaternion.copy(r.q); bone.position.copy(r.p); }
+    A.walk?.setEffectiveWeight(walk); A.idle?.setEffectiveWeight(Math.max(0, 1 - walk));
+    for (const r of this.pose) { r.b.quaternion.copy(r.q); r.b.position.copy(r.p); }
     this.mixer.update(dt);
-    for (const [bone, r] of this.clip) { r.q.copy(bone.quaternion); r.p.copy(bone.position); }
-    // The kit's clips set the base pose; our poses turn the bones on top of it.
-    const p = poseFor(b, t, dt, this);
-    const m = this.manner;
-    // Standing about, everyone has their own way of doing it: a lean, a slow shift of weight, and something to do with their arms.
+    for (const r of this.pose) { r.q.copy(r.b.quaternion); r.p.copy(r.b.position); }
+    const p = poseFor(b, t, dt, this), ty = this.ty, m = this.manner;
+    // Everything below is measured against the rig as the clips left it this frame.
+    this.group.updateWorldMatrix(true, true);
+    const B = this.bones;
     const still = m ? Math.max(0, 1 - sit - walk - b.talk - b.sip - b.phone - b.cheer - b.pour - b.stretch - b.type - b.think - b.carry) : 0;
-    const lean = b.walk * 0.05 - b.stretch * 0.1 + b.phone * 0.05;
-    if (this.root) {
-      this.root.position.y += (Math.abs(Math.sin(t * 7)) * 0.045 * b.cheer + Math.sin(t * 2) * 0.002);
-      this.root.rotateX(lean); this.root.rotateZ(Math.sin(t * 0.9) * 0.02 * b.listen);
-    }
-    const arms = modelArms(b, t, dt, this, still, m);
-    // Walking, the clip swings the arms, unless the hands are full: then they stay out in front, holding it.
-    const hold = Math.min(1, b.carry + b.sip + b.phone + b.pour) * walk;
-    const own = 1 - walk + hold;
-    this.poseArm(this.armL, -1, arms.aL * own, (arms.sL - MODEL_OUT) * own, 0, hold);
-    this.poseArm(this.armR, 1, arms.aR * own, (arms.sR - MODEL_OUT) * own, b.pour * -0.6 * own, hold);
-    if (this.head) { this.head.rotateX(p.headX); this.head.rotateY(p.headY); this.head.rotateZ(p.headZ); }
-    if (this.torso) { this.torso.rotateX(arms.lean + this.ty.nod * 0.008 * b.type); this.torso.rotateY(b.talk * Math.sin(t * 2.1) * 0.08); }
-    if (m) {
-      if (this.root) { this.root.rotateZ((m.lean + Math.sin(t * m.shift) * 0.012) * (1 - sit)); this.root.position.x += Math.sin(t * m.shift) * 0.006 * still; }
-      if (this.head) this.head.rotateY(Math.sin(t * 0.37 + m.shift * 9) * 0.22 * still);
-      if (m.sway && this.torso) this.torso.rotateY(Math.sin(t * 7.6) * 0.05 * m.sway * walk);
-    }
+    // The spine: a little forward over the keys, a little of everyone's own way of standing, and a breath.
+    const ky = (this.typeK = clamp01((this.typeK ?? 0) + Math.sign((this.anim === 'type' ? 1 : 0) - (this.typeK ?? 0)) * dt * 2.8));
+    if (b.cheer > 0.001) B.body.position.y += Math.abs(Math.sin(t * 7)) * 0.05 * b.cheer;
+    this.spin(B.abdomen, AX, 0.05 * sit + 0.1 * smooth01(ky) + 0.06 * b.walk - b.stretch * 0.1 + b.phone * 0.05);
+    this.spin(B.chest, AX, Math.sin(t * 2) * 0.012 + 0.03 * smooth01(ky));
+    if (m) { this.spin(B.abdomen, AZ, (m.lean + Math.sin(t * m.shift) * 0.012) * (1 - sit)); this.spin(B.torso, AY, Math.sin(t * 7.6) * 0.05 * m.sway * walk); }
+    this.spin(B.chest, AY, b.talk * Math.sin(t * 2.1) * 0.08);
+    // The head keeps its own little life going, turned in the model's axes.
+    this.spin(B.head, AX, p.headX); this.spin(B.head, AY, p.headY + (m ? Math.sin(t * 0.37 + m.shift * 9) * 0.22 * still : 0)); this.spin(B.head, AZ, p.headZ);
+    // Seated: hips stay where the seat holds them (the group has been lowered), knees forward, shins and feet to the floor.
+    if (sit > 0.001) this.seatLegs(sit);
+    this.poseHands(b, t, ty, still, m);
     if (this.mug.visible || this.phone.visible) this.holdProps();
   }
-  /**
-   * One arm, turned at the shoulder in the body's frame on top of what the clips left it at: out from the side by `ds`,
-   * round by `ry`, then forward and up by `a`. Every frame starts again from the clip, so nothing builds up.
-   */
-  poseArm(bone, side, a, ds, ry, hold) {
-    if (!bone) return;
-    if (hold > 0.001) bone.quaternion.slerp(this.armOut.get(bone), hold);
-    bone.quaternion.premultiply(_q.setFromAxisAngle(AZ, side * ds));
-    if (ry) bone.quaternion.premultiply(_q.setFromAxisAngle(AY, ry));
-    bone.quaternion.premultiply(_q.setFromAxisAngle(AX, a));
+  seatLegs(w) {
+    const groupY = this.group.position.y, s = this.scale;
+    const floorY = -groupY / s;
+    for (const [limb, side] of [[this.limbs.legL, 1], [this.limbs.legR, -1]]) {
+      worldP(limb.upper, _a); _b.copy(_a); this.model.worldToLocal(_b);
+      const hx = _b.x, hy = _b.y, hz = _b.z;
+      const kneeX = hx + side * 0.012, kneeY = hy - 0.02, kneeZ = hz + limb.l1 * 0.98;
+      const ankleY = floorY + 0.045, ankleZ = kneeZ + 0.02;
+      // A pole out in front keeps the knee bending the right way.
+      this.solve(limb, kneeX, ankleY, ankleZ, side * 0.1, 0.25, 1, w);
+      const foot = limb.end;
+      // The foot follows the ankle and stays flat on the floor.
+      _a.set(kneeX, ankleY, ankleZ).applyMatrix4(this.model.matrixWorld); foot.parent.worldToLocal(_a);
+      foot.position.lerp(_a, w);
+      const rest = limb === this.limbs.legL ? this.footRest.legL : this.footRest.legR;
+      foot.quaternion.slerp(rest, w);
+      foot.updateWorldMatrix(false, true);
+    }
+  }
+  /** Where the hands go: on the keys at the desk, at the mouth with a mug, and so on, each hand blended like the rest of the pose. */
+  poseHands(b, t, ty, still, m) {
+    const s = this.scale, sit = Math.min(1, b.sit);
+    let lx = 0, ly = 0, lz = 0, lw = 0, rx = 0, ry = 0, rz = 0, rw = 0;
+    const toL = (w, x, y, z) => { if (w <= 0) return; lx += w * (x - lx); ly += w * (y - ly); lz += w * (z - lz); lw = 1 - (1 - lw) * (1 - w); };
+    const toR = (w, x, y, z) => { if (w <= 0) return; rx += w * (x - rx); ry += w * (y - ry); rz += w * (z - rz); rw = 1 - (1 - rw) * (1 - w); };
+    // Hands on the thighs, in a chair.
+    toL(sit, 0.13, 1.0, 0.26); toR(sit, -0.13, 1.0, 0.26);
+    // Standing about: everyone has their own way of doing it.
+    if (m && still > 0.001) {
+      if (m.stance === 1) toR(still, -0.2, 0.98, 0.0);
+      if (m.stance === 2) { toL(still, 0.05, 1.2, 0.18); toR(still, -0.07, 1.16, 0.17); }
+      if (m.stance === 3) { toL(still, 0.18, 0.86, 0.02); toR(still, -0.18, 0.86, 0.02); }
+    }
+    toL(b.listen, 0.07, 0.94, 0.19); toR(b.listen, -0.07, 0.94, 0.19);
+    toL(b.talk, 0.15, 1.0 + Math.sin(t * 3.3) * 0.02, 0.24); toR(b.talk, -0.16 + Math.sin(t * 2.3) * 0.03, 1.22 + Math.sin(t * 5) * 0.05, 0.28 + Math.sin(t * 3.7) * 0.03);
+    toL(b.carry, 0.14, 1.12, 0.3); toR(b.carry, -0.14, 1.12, 0.3);
+    toL(b.cheer, 0.26, 1.95 + Math.sin(t * 11) * 0.03, 0.1); toR(b.cheer, -0.26, 1.95 - Math.sin(t * 11) * 0.03, 0.1);
+    toL(b.think, 0.1, 1.1, 0.2); toR(b.think, -0.03, 1.6, 0.25);
+    const st = clamp01(Math.sin(t * 1.1) * 0.5 + 0.5);
+    toL(b.stretch, 0.25, 2.0 + 0.08 * st, 0); toR(b.stretch, -0.25, 2.0 + 0.08 * st, 0);
+    toL(b.sip, 0.15, 1.0, 0.2); toR(b.sip, -0.08, 1.1 + 0.5 * (this.sipK ?? 0), 0.2);
+    toL(b.phone, 0.15, 1.0, 0.2); toR(b.phone, -0.19, 1.66, 0.08);
+    toL(b.pour, 0.15, 1.0, 0.2); toR(b.pour, -0.2, 1.12, 0.33);
+    // Typing is on top of everything else: wrists just short of the keyboard, the fingers lying on it.
+    const k = this.typeK ?? 0;
+    if (k > 0.001) {
+      const big = !!this.bigDesk, kz = (big ? KEYS_Z_BIG : KEYS_Z) / s, ky = ((big ? KEYS_Y_BIG : KEYS_Y) - this.group.position.y) / s;
+      const up = smooth01(k / 0.75);
+      toL(up, 0.11, ky + 0.02 + (ty?.l ?? 0) * 0.018, kz - 0.17 + (ty?.l ?? 0) * 0.006);
+      toR(up, -0.11, ky + 0.02 + (ty?.r ?? 0) * 0.018, kz - 0.17 + (ty?.r ?? 0) * 0.006);
+    }
+    // Elbows out and a little down, so an arm never folds through the body.
+    if (lw > 0.001) this.solve(this.limbs.L, lx / lw, ly / lw, lz / lw, 0.9, -0.55, -0.5, lw);
+    if (rw > 0.001) this.solve(this.limbs.R, rx / rw, ry / rw, rz / rw, -0.9, -0.55, -0.5, rw);
+    if (k > 0.001) {
+      const w = smooth01((k - 0.25) / 0.6);
+      this.layHand(this.limbs.L, this.handRest.L, -0.15, -0.12, 1, w);
+      this.layHand(this.limbs.R, this.handRest.R, 0.15, -0.12, 1, w);
+    }
   }
   /** A mug or phone stays upright in the hand whichever way the arm is turned. */
   holdProps() {
-    _q.identity();
-    for (const b of [this.root, this.torso, this.armR]) if (b) _q.multiply(b.quaternion);
-    _q.invert();
-    this.mug.quaternion.copy(_q);
-    this.phone.quaternion.copy(_q).multiply(PHONE_TILT);
+    worldQ(this.handGroup, _q0).invert();
+    worldQ(this.model, _q1);
+    this.mug.quaternion.copy(_q0).multiply(_q1);
+    this.phone.quaternion.copy(_q0).multiply(_q1).multiply(PHONE_TILT);
   }
   dispose() {
-    for (const m of this.materials) m.dispose();
+    this.material.dispose();
     if (this.hat) disposeMerged(this.hat);
-    if (this.chest) disposeMerged(this.chest);
+    if (this.chestWear) disposeMerged(this.chestWear);
     this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.model);
     // Each person's cloned skeleton has its own bone texture on the GPU, and it stays there until told otherwise.
     this.model.traverse((o) => { if (o.isSkinnedMesh) o.skeleton.dispose(); });
@@ -590,15 +680,12 @@ export class ModelCharacter {
 
 /**
  * Loads the model character for a look. Resolves to a ready ModelCharacter, or rejects (the caller keeps its procedural one).
- * Everything it needs is cached after the first call, so a floor's crew costs one fetch per distinct variant.
+ * Everything it needs is cached after the first call, so a floor's crew costs one fetch per distinct body.
  */
 export async function loadModelCharacter(look, opts = {}) {
   const variant = variantFor(look);
-  const [asset, utils, glasses] = await Promise.all([
-    loadCharacterAsset(variant), skeletonUtils(),
-    look.glasses === 'round' ? accessory('aid-glasses') : look.glasses === 'shades' ? accessory('aid-sunglasses') : null,
-  ]);
-  return new ModelCharacter(asset, utils, look, { ...opts, variant, glasses });
+  const [asset, utils, clips] = await Promise.all([loadPersonAsset(variant, { far: !!opts.far }), skeletonUtils(), personClips()]);
+  return new ModelCharacter(asset, utils, clips, look, { ...opts, variant });
 }
 
 /** A turntable preview for the character builder, with its own small renderer. The model replaces the stand-in when it lands. */
@@ -623,7 +710,7 @@ export function createPreview(canvas, look, accent) {
   // The person on screen stays until the next one is ready, so changing an option never flashes a stand-in once the model is cached.
   const swapIn = (next, acc) => {
     const my = ++gen;
-    return loadModelCharacter(next, { accent: acc, scale: 2.5 }).then((mc) => {  // the same height in the frame as the stand-in
+    return loadModelCharacter(next, { accent: acc, scale: 0.91 }).then((mc) => {  // the same height in the frame as the stand-in
       if (dead || my !== gen) { mc.dispose(); return; }
       const y = ch.group.rotation.y;
       ch.dispose(); ch = mc; ch.group.rotation.y = y; scene.add(ch.group);
@@ -641,8 +728,8 @@ export function createPreview(canvas, look, accent) {
     const size = `${canvas.clientWidth}x${canvas.clientHeight}`;
     if (size !== shown && canvas.clientWidth && canvas.clientHeight) { shown = size; renderer.setSize(canvas.clientWidth, canvas.clientHeight, false); cam.aspect = canvas.clientWidth / canvas.clientHeight; cam.updateProjectionMatrix(); }
     const dt = Math.min((now - last) / 1000, 0.1); last = now;
-    // People walk with their backs to the room's camera, so here they turn round to face you.
-    ch.group.rotation.y = Math.PI + Math.sin(now / 1400) * 0.55;
+    // The preview's camera is out in front of them, so everyone faces it, swaying a little from side to side.
+    ch.group.rotation.y = Math.sin(now / 1400) * 0.55;
     ch.update(dt);
     renderer.render(scene, cam);
   };
