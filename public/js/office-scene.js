@@ -289,7 +289,7 @@ function makeDesk(parent, detail, legacy, x, z, chairColor, brand, accent, { big
   piece(lg, '#2a2b33', 1.1, 0.74, 0.06, 0, 1.24, -0.58);
   let screenMat = null, glow = null, bar = null;
   if (live) {
-    screenMat = new THREE.MeshBasicMaterial({ color: '#1a2030' });
+    screenMat = new THREE.MeshBasicMaterial({ color: '#1a2030', toneMapped: false });
     const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.64), screenMat);
     screen.position.set(0, 1.61, -0.545); g.add(screen);
     glow = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 1.4), new THREE.MeshBasicMaterial({ map: parent.userData.glowTex, color: '#000000', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
@@ -526,8 +526,9 @@ export class Actor {
     if (screen) {
       const v = this.view;
       const on = s !== 'idle';
-      if (s === 'typing') { screen.map = v.codeTex; screen.color.set('#ffffff'); }
-      else if (s === 'browsing' || s === 'reading') { screen.map = v.pageTex; screen.color.set('#ffffff'); }
+      // A screen at work glows a little past white, untouched by the tone curve, so the bloom picks it out: the room's own little lights.
+      if (s === 'typing') { screen.map = v.codeTex; screen.color.setScalar(1.3); }
+      else if (s === 'browsing' || s === 'reading') { screen.map = v.pageTex; screen.color.setScalar(1.18); }
       else if (on) { screen.map = v.pageTex; screen.color.set('#c9c4ba'); }
       else { screen.map = v.idleTex; screen.color.set('#ffffff'); }
       screen.needsUpdate = true;

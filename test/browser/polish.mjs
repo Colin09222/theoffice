@@ -214,7 +214,7 @@ async function profile(kind) {
       // Timed in the page, frame by frame: from the press to the first frame on which the new floor is there in full detail.
       await p.ev(`(() => { window.__t0 = performance.now(); window.__t1 = 0; window.__doors = 0; const w = () => { if (document.querySelector("#fade")?.classList.contains("in") || document.querySelector("#boot:not(.gone)")) window.__doors++;
         if (window.__office?.state?.floor?.number === ${n} && (${fullDetail})) { window.__t1 = performance.now(); return; } requestAnimationFrame(w); }; requestAnimationFrame(w); })()`);
-      await click(p, `[data-scrub=${dir}]`);
+      if (phone) { const at = await p.ev(`(() => { const q = document.querySelector('[data-scrub=${dir}]').getBoundingClientRect(); return [q.left + q.width / 2, q.top + q.height / 2]; })()`); await tapAt(p, at[0], at[1], true); } else await click(p, `[data-scrub=${dir}]`);
       await p.until('window.__t1 > 0', `floor ${n}`, 20000);
       times.push(await p.ev('({ ms: Math.round(window.__t1 - window.__t0), doors: window.__doors })'));
       await sleep(phone ? 2500 : 1500);

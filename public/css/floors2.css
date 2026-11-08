@@ -249,7 +249,7 @@
 /* The way up and down is the lit pair of big buttons, each showing the floor it goes to. */
 .scrub-btn:not(:disabled) { width: 52px; height: 52px; background: radial-gradient(circle at 50% 40%, #fff3b4, #ffb31f 74%); border-color: #7a4d00; box-shadow: 0 3px 0 #5f4610, 0 0 12px 2px rgba(255, 186, 40, .7); }
 .scrub-btn:not(:disabled) .ico { width: 28px; height: 28px; margin-top: -8px; }
-.scrub-btn { position: relative; }
+.scrub-btn { position: relative; touch-action: manipulation; }  /* a tap on the lift goes at once, with no wait to see if it was a double tap */
 .scrub-to { position: absolute; left: 0; right: 0; bottom: 6px; font: 700 14px/1 var(--cond); text-align: center; pointer-events: none; }
 .scrub-btn[data-scrub="down"]:not(:disabled) .ico { margin-top: 8px; }
 .scrub-btn[data-scrub="down"] .scrub-to { bottom: auto; top: 6px; }
