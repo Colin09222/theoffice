@@ -7,7 +7,7 @@ import { slugify, sniff, uploadName, floorBytes, MAX_FILES, cleanPath, Workspace
 import { createResend, verifySvix, MailProviderError } from './mail-provider.js';
 import { mailSettings } from './mail-config.js';
 export { mailSettings };
-import { createMailDomains, EmailDomainRefused } from './mail-domains.js';
+import { createMailDomains, EmailDomainRefused, HOLDS_PLACE } from './mail-domains.js';
 import { sanitizeHtml, htmlToText, cleanText, oneLine, parseAddress, addressList, isAddress, machineMail } from './mail-sanitize.js';
 import { wrapUntrusted, mentionsPrivate } from './tools.js';
 import { isOpen } from './modes.js';
@@ -62,7 +62,6 @@ export const ensureMailSchema = (db) => db.exec(MAIL_SCHEMA);
 export class MailError extends Error { constructor(message, status = 400, code = 'mail_refused') { super(message); this.name = 'MailError'; this.status = status; this.code = code; } }
 export const NOT_READY = 'Email is being set up for this building, so nothing was sent. The address is saved and starts working as soon as the building manager switches email on.';
 
-const HOLDS_PLACE = ['creating', 'dns', 'records', 'verifying', 'verified'];
 const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
 const count = (db, key, d) => get(db, 'SELECT n FROM mail_counters WHERE day=? AND key=?', d, key)?.n || 0;
 const bump = (db, key, d, by = 1) => run(db, 'INSERT INTO mail_counters (day,key,n) VALUES (?,?,?) ON CONFLICT(day,key) DO UPDATE SET n=n+excluded.n', d, key, by);

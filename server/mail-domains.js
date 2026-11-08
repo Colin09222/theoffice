@@ -10,7 +10,8 @@ import { MailProviderError } from './mail-provider.js';
 import { zoneName } from './namecheap.js';
 
 export const MAIL_LOCALS = ['hello', 'team', 'contact', 'support', 'info'];
-const ACTIVE = "'creating','dns','records','verifying','verified'";   // the ones holding one of the provider's few places
+export const HOLDS_PLACE = ['creating', 'dns', 'records', 'verifying', 'verified'];   // the ones holding one of the provider's few places
+const ACTIVE = HOLDS_PLACE.map((x) => `'${x}'`).join(',');
 const BOSS_SHOWN = ['creating', 'dns', 'records', 'verifying', 'verified', 'conflict', 'full', 'failed'];
 const HOSTNAME = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
 const BIG_MAIL = /(^|\.)(gmail|googlemail|outlook|hotmail|live|msn|yahoo|ymail|icloud|me|mac|aol|proton|protonmail|pm|gmx|zoho|yandex|fastmail|hey)\.(com|me|net|org|io)$/;
@@ -53,6 +54,9 @@ export function createMailDomains({ db, set, provider, mailDomain, now, log, eng
     run(db, `UPDATE mail_domains SET ${keys.map((k) => `${k}=?`).join(',')}, updated_at=? WHERE domain=?`, ...keys.map((k) => patch[k]), now(), domain);
   };
   const addressFor = (d) => `${d.local}@${d.domain}`;
+  // A boss's press and the tick never work on the same domain at once: the provider's create isn't safe to send twice side by side.
+  const working = new Set();
+  const once = async (domain, fn) => { if (working.has(domain)) return undefined; working.add(domain); try { return await fn(); } finally { working.delete(domain); } };
   // MAIL_DOMAIN itself is one of the places.
   const usedPlaces = () => 1 + get(db, `SELECT COUNT(*) n FROM mail_domains WHERE status IN (${ACTIVE})`).n;
   const roomLeft = () => usedPlaces() < set.mailMaxDomains;
@@ -65,7 +69,7 @@ export function createMailDomains({ db, set, provider, mailDomain, now, log, eng
   /** Which floor a full address at a company's own domain belongs to, or null. Only a domain in use can take mail. Mail can arrive before sending is confirmed. */
   const route = (address) => get(db, "SELECT a.floor_id FROM mail_domain_addresses a JOIN mail_domains d ON d.domain=a.domain AND d.floor_id=a.floor_id WHERE a.address=? AND d.status NOT IN ('removed','expired')", address)?.floor_id ?? null;
   /** Is this domain one of the building's own, for the loop guard? */
-  const inBuilding = (host) => host === mailDomain || !!get(db, "SELECT 1 x FROM mail_domains WHERE domain=? AND status NOT IN ('removed','expired')", host);
+  const inBuilding = (host) => !!host && (host === mailDomain || !!get(db, "SELECT 1 x FROM mail_domains WHERE domain=? AND status NOT IN ('removed','expired')", host));
 
   /** Makes `local@domain` the domain's sending address. Any earlier name stays as well: mail to it keeps arriving. */
   function useAddress(floorId, domain, local) {
@@ -151,6 +155,7 @@ export function createMailDomains({ db, set, provider, mailDomain, now, log, eng
     }
     if (out.result === 'conflict') {
       setRow(d.domain, { status: 'conflict', tries: 0, next_at: 0, note: '', told: 1 });
+      if (d.told) { notifyBoss(d.floor_id, { domain: true }); return undefined; }  // said once; pressing Check again doesn't say it again
       addAlert(d.floor_id, 'domain_conflict', `${d.domain} already gets email somewhere else, so nothing was changed and the company stays on ${mailDomain}.`);
       tell(d.floor_id, `**${d.domain}** already gets email somewhere else, boss, so I left it exactly as it is. Your company's email stays on ${fallbackOf(d.floor_id)}. If that's not right, tell the building manager and press Check again in the Inbox.`);
       return undefined;
@@ -187,14 +192,15 @@ export function createMailDomains({ db, set, provider, mailDomain, now, log, eng
     return retry(d, {}, 30 * 60e3);
   }
   function markVerified(d) {
-    const address = addressFor(d);
+    const cur = row(d.domain);  // the boss may have picked another name since this row was read
     const fresh = tx(db, () => {
-      if (!row(d.domain) || !['verifying', 'records', 'failed', 'conflict'].includes(row(d.domain).status)) return false;
+      if (!cur || !['verifying', 'records', 'failed', 'conflict'].includes(cur.status)) return false;
       setRow(d.domain, { status: 'verified', verified_at: now(), tries: 0, next_at: now() + 6 * 3600e3, note: '', told: 0 });
-      useAddress(d.floor_id, d.domain, d.local);
+      useAddress(d.floor_id, d.domain, cur.local);
       return true;
     });
     if (!fresh) return;
+    const address = addressFor(cur);
     tell(d.floor_id, `Your company's email now goes out from **${address}**, boss. Replies come to your Inbox, and mail sent to ${fallbackOf(d.floor_id)} still reaches you too.`);
     log('info', 'mail_domain_verified', { domain: d.domain });
   }
@@ -213,9 +219,9 @@ export function createMailDomains({ db, set, provider, mailDomain, now, log, eng
   }
   /** The provider refused to send from this domain, so look at it again now instead of at the next six-hourly check. */
   const doubt = (domain) => run(db, "UPDATE mail_domains SET next_at=0 WHERE domain=? AND status='verified'", domain);
-  function expire(d) {
+  async function expire(d) {
     tx(db, () => { setRow(d.domain, { status: 'expired', note: '', told: 1 }); dropAddresses(d.domain); });
-    if (d.resend_id && provider) provider.deleteDomain(d.resend_id).catch((e) => log('warn', 'mail_domain_delete', { domain: d.domain, err: hide(e?.message || e).slice(0, 160) }));
+    if (d.resend_id && provider) await provider.deleteDomain(d.resend_id).catch((e) => log('warn', 'mail_domain_delete', { domain: d.domain, err: hide(e?.message || e).slice(0, 160) }));
     tell(d.floor_id, `**${d.domain}** was never finished for email after a week, so I've let it go. Your email is unchanged, and you can add it again from the Inbox whenever you like.`);
   }
 
@@ -245,7 +251,7 @@ export function createMailDomains({ db, set, provider, mailDomain, now, log, eng
       // A floor that's gone gives its place back.
       for (const d of all(db, "SELECT d.* FROM mail_domains d WHERE d.status NOT IN ('removed','expired') AND NOT EXISTS (SELECT 1 FROM floors f WHERE f.id=d.floor_id) LIMIT 5")) await release(d).catch((e) => log('error', 'mail_domain_release', { domain: d.domain, err: hide(e?.message || e).slice(0, 200) }));
       for (const d of all(db, "SELECT * FROM mail_domains WHERE status IN ('full','creating','dns','records','verifying','verified') AND next_at<=? ORDER BY next_at LIMIT 3", now())) {
-        await advance(d).catch((e) => log('error', 'mail_domain_tick', { domain: d.domain, err: hide(e?.message || e).slice(0, 200) }));
+        await once(d.domain, () => advance(d)).catch((e) => log('error', 'mail_domain_tick', { domain: d.domain, err: hide(e?.message || e).slice(0, 200) }));
       }
     } finally { busy = false; }
   }
@@ -257,23 +263,27 @@ export function createMailDomains({ db, set, provider, mailDomain, now, log, eng
     const held = get(db, "SELECT 1 x FROM domain_orders WHERE floor_id=? AND domain=? AND status='live'", f.id, domain) ? 'building' : 'outside';
     if (held === 'outside' && get(db, "SELECT 1 x FROM domain_orders WHERE domain=? AND status IN ('sent','uncertain','bought','live')", domain)) throw new EmailDomainRefused('That domain is already in use for email here.');
     const d = start(f, domain, held);
-    if (d.status === 'creating') await create(d);
+    if (d.status === 'creating') await once(domain, () => create(row(domain)));
     return view(f);
   }
   async function recheck(f, domain) {
     const d = own(f, domain);
-    if (d.status === 'verified') { await recheckVerified(d); return view(f); }
-    if (d.status === 'conflict') { setRow(domain, { status: 'dns', tries: 0, next_at: 0 }); await writeDns(row(domain)); return view(f); }
-    if (d.status === 'full') { if (roomLeft()) { setRow(domain, { status: 'creating', next_at: 0, told: 0 }); await create(row(domain)); } return view(f); }
-    if (d.status === 'creating') { await create(d); return view(f); }
-    if (d.status === 'dns') { await writeDns(d); return view(f); }
+    await once(domain, () => checkNow(d));
+    return view(f);
+  }
+  async function checkNow(d) {
+    const { domain } = d;
+    if (d.status === 'verified') { await recheckVerified(d); return; }
+    if (d.status === 'conflict') { setRow(domain, { status: 'dns', tries: 0, next_at: 0 }); await writeDns(row(domain)); return; }
+    if (d.status === 'full') { if (roomLeft()) { setRow(domain, { status: 'creating', next_at: 0, told: 0 }); await create(row(domain)); } return; }
+    if (d.status === 'creating') { await create(d); return; }
+    if (d.status === 'dns') { await writeDns(d); return; }
     // Failed, or waiting on records: ask the provider to look again now, and look soon. A boss's "check again" also gives a stale domain a fresh window.
     if (d.resend_id) await askToVerify(d);
-    if (d.status === 'failed') setRow(domain, { status: d.resend_id ? 'verifying' : 'creating', tries: 0, next_at: 0, created_at: now() });
-    else setRow(domain, { next_at: 0, asked_at: now() });
-    const fresh = row(domain);
-    await advance(fresh);
-    return view(f);
+    // Records that never reached the zone need writing again, not more waiting.
+    if (d.status === 'failed') setRow(domain, { status: !d.resend_id ? 'creating' : d.held === 'building' ? 'dns' : 'verifying', tries: 0, next_at: 0, created_at: now() });
+    else setRow(domain, { next_at: 0, asked_at: now(), created_at: now() });
+    await advance(row(domain));
   }
   function setLocal(f, domain, raw) {
     const local = String(raw ?? '').trim().toLowerCase();

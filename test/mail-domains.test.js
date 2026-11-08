@@ -116,6 +116,8 @@ describe('the merge of DNS records', () => {
     assert.equal(JSON.stringify(zoneOf(t, 'claymugs.com')), before);
     assert.equal(t.mail.addressOf(floorOf(t, c).id), 'clay-mugs@middistance.com');
     assert.match(all(t.db, "SELECT text FROM mail_alerts WHERE kind='domain_conflict'")[0].text, /claymugs\.com/);
+    assert.equal((await c.post(`/api/floors/${c.slug}/mail/domain/check`, { domain: 'claymugs.com' })).status, 200);
+    assert.equal(all(t.db, "SELECT * FROM mail_alerts WHERE kind='domain_conflict'").length, 1, 'a press of Check again doesn\'t alert again');
 
     const c2 = await claim(t, 'Fwd Co');
     live(t, c2, 'fwdco.com');
@@ -200,6 +202,7 @@ describe('one company, several addresses', () => {
     await settle(t);
     await mailIn(t, { from: 'Beta <hello@betacorp.com>', to: ['hello@alphacorp.com'], subject: 'Hi from next door' });
     await until(() => inbox(t, c).length === 1, { what: 'filed' });
+    assert.equal(t.domains.inBuilding(undefined), false, 'mail with no sender at all doesn\'t trip it');
     assert.match(inbox(t, c)[0].machine, /another-company-here/);
     const reply = await t.mail.toolReply({ floor: floorOf(t, c), agent: get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", floorOf(t, c).id) }, inbox(t, c)[0].id, 'Thanks!').catch((e) => e);
     assert.match(String(reply?.message || reply), /machine|mailing list/);
@@ -349,7 +352,7 @@ describe('what the boss can do', () => {
     assert.equal(row(t, 'saucers.com').floor_id, floorOf(t, other).id);
   });
 
-  test('stopping uses gives the place back, and mail to the domain no longer arrives', async () => {
+  test('stopping gives the place back, and mail to the domain no longer arrives', async () => {
     const t = await start();
     const c = await claim(t, 'Teacups');
     live(t, c, 'teacups.com');
@@ -364,6 +367,46 @@ describe('what the boss can do', () => {
     await until(() => all(t.db, "SELECT outcome FROM mail_inbound WHERE outcome='unknown_recipient'").length === 1, { what: 'dropped' });
     await settle(t);
     assert.equal(row(t, 'teacups.com').status, 'removed', 'it doesn\'t come back by itself');
+  });
+
+  test('Check again on a failed domain the building manages writes its records again', async () => {
+    const t = await start();
+    const c = await claim(t, 'Teacups');
+    live(t, c, 'teacups.com');
+    await settle(t);
+    const writes = t.stub.count('namecheap.domains.dns.setHosts');
+    run(t.db, "UPDATE mail_domains SET status='failed' WHERE domain='teacups.com'");
+    const r = await c.post(`/api/floors/${c.slug}/mail/domain/check`, { domain: 'teacups.com' });
+    assert.equal(r.data.domains[0].status, 'verifying');
+    assert.ok(t.stub.count('namecheap.domains.dns.setHosts') > writes, 'written again');
+  });
+
+  test('Check again gives a domain held elsewhere a fresh week, and it expires untouched after one', async () => {
+    const t = await start();
+    const c = await claim(t, 'Teacups');
+    await c.post(`/api/floors/${c.slug}/mail/domain`, { domain: 'teacups-shop.co' });
+    run(t.db, "UPDATE mail_domains SET created_at=? WHERE domain='teacups-shop.co'", Date.now() - 8 * 86400e3);
+    assert.equal((await c.post(`/api/floors/${c.slug}/mail/domain/check`, { domain: 'teacups-shop.co' })).data.domains[0].status, 'records');
+    assert.ok(Date.now() - row(t, 'teacups-shop.co').created_at < 60000);
+    run(t.db, "UPDATE mail_domains SET created_at=?, next_at=0 WHERE domain='teacups-shop.co'", Date.now() - 8 * 86400e3);
+    await t.domains.tick();
+    assert.equal(row(t, 'teacups-shop.co').status, 'expired');
+    assert.equal(t.mock.state.domains.length, 0, 'the place is given back');
+    assert.equal(all(t.db, "SELECT * FROM mail_domain_addresses WHERE domain='teacups-shop.co'").length, 0);
+    assert.equal(t.domains.usedPlaces(), 1);
+  });
+
+  test('a floor that is gone gives its place back', async () => {
+    const t = await start();
+    const c = await claim(t, 'Teacups');
+    live(t, c, 'teacups.com');
+    await settle(t);
+    assert.equal(t.domains.usedPlaces(), 2);
+    t.app.engine.killFloor(floorOf(t, c).id);
+    await t.domains.tick();
+    assert.equal(row(t, 'teacups.com').status, 'removed');
+    assert.equal(t.domains.usedPlaces(), 1);
+    assert.equal(t.mock.state.domains.length, 0);
   });
 
   test('visitors get none of it', async () => {
