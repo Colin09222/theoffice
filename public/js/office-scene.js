@@ -898,7 +898,10 @@ export class OfficeView {
       piece(c, '#9aa3ad', 0.7, 0.03, 0.8, 0, 1.08, 0.9, { cast: false }); piece(c, '#7d858e', 0.6, 0.02, 0.7, 0, 1.085, 0.9, { cast: false });
       const tap = piece(c, '#aeb6be', 0.05, 0.42, 0.05, 0.3, 1.08, 0.9, { geo: cyl, cast: false }); tap.rotation.z = 0;
       piece(c, '#aeb6be', 0.05, 0.3, 0.05, 0.16, 1.33, 0.9, { geo: cyl, cast: false }).rotation.z = Math.PI / 2;
-      piece(c, '#2f3036', 0.55, 0.62, 0.5, 0, 1.08, -0.9); piece(c, '#c8392b', 0.5, 0.1, 0.46, 0, 1.7, -0.9); piece(c, '#1a1b20', 0.4, 0.08, 0.3, 0, 1.16, -0.9, { cast: false });
+      piece(c, '#2f3036', 0.55, 0.62, 0.5, 0, 1.08, -0.9); piece(c, '#c8392b', 0.5, 0.1, 0.46, 0, 1.7, -0.9);
+      // A wisp of steam off the machine, three puffs on a loop. Small, and only where the tier has the detail to spare.
+      this.steam = [];
+      for (let i = 0; i < 3; i++) { const m = new THREE.Mesh(sph, new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false })); m.position.set(L.coffee[0], 1.8, L.coffee[1] - 0.9); m.userData.keep = true; detail.add(m); this.steam.push(m); } piece(c, '#1a1b20', 0.4, 0.08, 0.3, 0, 1.16, -0.9, { cast: false });
       piece(c, '#dfe3e8', 0.22, 0.26, 0.22, 0, 1.08, -0.25, { geo: cyl }); piece(c, '#2a2b33', 0.08, 0.08, 0.08, 0, 1.34, -0.25, { geo: sph, cast: false });
       for (let i = 0; i < 4; i++) piece(cd, ['#f3ead8', primary, accent, '#f3ead8'][i], 0.15, 0.15, 0.15, -0.22 + (i % 2) * 0.3, 1.08, 0.1 + Math.floor(i / 2) * 0.3, { geo: cyl, cast: false });
       piece(cd, '#f0e4c8', 0.3, 0.1, 0.3, 0.2, 1.08, -0.5, { cast: false }); piece(cd, '#e8b24a', 0.12, 0.12, 0.12, 0.2, 1.18, -0.5, { geo: sph, cast: false });
@@ -947,13 +950,14 @@ export class OfficeView {
     const pr = new THREE.Group(); pr.position.set(L.printer[0], 0, L.printer[1]); room.add(pr);
     piece(pr, '#5e5a64', 1.0, 0.75, 1.0, 0, 0, 0); piece(pr, '#e8e4da', 0.92, 0.3, 0.92, 0, 0.75, 0); piece(pr, '#cfcac0', 0.6, 0.06, 0.5, 0.3, 1.05, 0, { cast: false });
     piece(pr, '#fbf7ea', 0.5, 0.04, 0.6, -0.1, 1.05, 0, { cast: false }); piece(pr, '#f3f0e6', 0.4, 0.2, 0.3, 0.2, 0.75, 0.5, { cast: false });
-    piece(pr, '#4ad17a', 0.05, 0.03, 0.05, -0.35, 1.05, 0.3, { cast: false, mat: new THREE.MeshBasicMaterial({ color: '#4ad17a' }) }).userData.keep = true;
-    // Plants, in a stable order so more means more. Two of them sway a little.
+    this.printerLight = piece(pr, '#4ad17a', 0.05, 0.03, 0.05, -0.35, 1.05, 0.3, { cast: false, mat: new THREE.MeshBasicMaterial({ color: '#4ad17a' }) });
+    this.printerLight.userData.keep = true;
+    // Plants, in a stable order so more means more. A few of them sway a little.
     const spots = L.plants;
     for (let i = 0; i < d.plants; i++) {
       const [x, z] = spots[i];
       const p = makePlant(legacy, x, z, i % 3, i < 2 ? 1.3 : 1);
-      if (i < 2) { mergeColored(p.canopy, ROOM_MAT); p.canopy.children.forEach((m) => { m.userData.keep = true; }); this.sway.push(p.canopy); }
+      if (i < 4) { mergeColored(p.canopy, ROOM_MAT); p.canopy.children.forEach((m) => { m.userData.keep = true; }); this.sway.push(p.canopy); }
       this.plantSpots.push(spots[i]);
     }
 
@@ -1999,6 +2003,8 @@ export class OfficeView {
     this.winMat.opacity = 0.3 + drift * 0.04;
     // The front and right walls are drawn only while the camera is round behind the room (see cutaway.js).
     if (this.farWalls) { const c = this.camera.position, [cb, cl] = cutAmount(c.x, c.z); this.farWalls.visible = cb > 0.001 || cl > 0.001; }
+    if (this.steam && this.detailOn) for (let i = 0; i < 3; i++) { const m = this.steam[i], k = (this.time * 0.34 + i / 3) % 1; m.position.y = 1.8 + k * 1.15; m.scale.setScalar(0.16 + k * 0.28); m.material.opacity = 0.42 * Math.min(1, k * 4) * (1 - k); }
+    if (this.printerLight) this.printerLight.visible = Math.sin(this.time * 2.4) > -0.4;
     for (let i = 0; i < this.sway.length; i++) { const c = this.sway[i]; c.rotation.z = Math.sin(this.time * 0.9 + i * 2) * 0.035; c.rotation.x = Math.cos(this.time * 0.7 + i) * 0.025; }
     const sec = Math.floor(Date.now() / 1000);
     if (sec !== this.clockSec) { this.clockSec = sec; this.drawClock(this.clockTex.image.getContext('2d')); this.clockTex.needsUpdate = true; }

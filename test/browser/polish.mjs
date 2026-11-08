@@ -66,13 +66,18 @@ async function profile(kind) {
   const p = await b.newPage(phone ? { mobile: true, width: 390, height: 844 } : { width: 1440, height: 900 });
   if (phone) await p.send('Emulation.setCPUThrottlingRate', { rate: 4 });
   const r = results[kind] = {};
-  await step(`${kind}: job titles sit above the names on a floor page's tags`, async () => {
+  await step(`${kind}: a tapped person's job title sits above their name, and only theirs`, async () => {
     await work(phone ? [15, 16, 18] : [10, 11, 12, 14]);
     await p.goto(`${base}/floor/${owners[12].slug}`);
     await p.until(fullDetail, 'floor 12', 40000);
     await sleep(phone ? 3000 : 1500);
-    const tags = await p.ev(`[...document.querySelectorAll('#labels .char-tag')].filter((t) => t.style.visibility !== 'hidden' && t.offsetParent !== null).map((t) => { const r = t.querySelector('.char-role'), n = t.querySelector('.char-name'); return { role: r?.textContent || '', name: n?.textContent || '', above: !!r && !!n && r.getBoundingClientRect().top < n.getBoundingClientRect().top, px: r ? parseFloat(getComputedStyle(r).fontSize) : 0 }; })`);
-    if (tags.length < 2) throw new Error(`only ${tags.length} tags showing`);
+    // Everyone keeps a name, and the job shows for whoever is talking or has been tapped: tap one person and read the labels.
+    await p.ev('(() => { const v = window.__office.view; const a = [...v.actors.values()].find((x) => !x.speech); v.highlight(a.id); })()');
+    await sleep(phone ? 1500 : 800);
+    const quiet = await p.ev(`[...document.querySelectorAll('#labels .char-tag:not(.full)')].filter((t) => t.style.visibility !== 'hidden' && t.offsetParent !== null && getComputedStyle(t.querySelector('.char-role')).display !== 'none').length`);
+    if (quiet) throw new Error(`${quiet} job titles showing on people nobody tapped`);
+    const tags = await p.ev(`[...document.querySelectorAll('#labels .char-tag.full')].filter((t) => t.style.visibility !== 'hidden' && t.offsetParent !== null).map((t) => { const r = t.querySelector('.char-role'), n = t.querySelector('.char-name'); return { role: r?.textContent || '', name: n?.textContent || '', above: !!r && !!n && r.getBoundingClientRect().top < n.getBoundingClientRect().top, px: r ? parseFloat(getComputedStyle(r).fontSize) : 0 }; })`);
+    if (tags.length < 1) throw new Error(`only ${tags.length} tags showing`);
     const bad = tags.filter((x) => !x.role || !x.above);
     if (bad.length) throw new Error(`no title above: ${JSON.stringify(bad.slice(0, 3))}`);
     return `${tags.length} tags, e.g. ${tags.slice(0, 3).map((x) => `${x.role} / ${x.name}`).join('; ')}; title ${tags[0].px}px`;

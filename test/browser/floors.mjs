@@ -327,6 +327,10 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
   });
   await step(tag('pins and scrubber buttons are big enough to tap, and a pin opens its tab'), async () => {
     await p.ev('window.__office.setSheet("half"); true');
+    // Pins come out when the room is pulled back: up close the tabs below do their job and the people have the room to themselves.
+    await p.ev('(() => { const v = window.__office.view; v.targetZoom = 1.2; })()');
+    await p.until('Math.abs(window.__office.view.zoom - 1.2) < 0.05', 'pulled back', 20000);
+    await sleep(600);
     const sizes = await p.ev(`(() => { const hit = (e) => { const r = e.getBoundingClientRect(); const b = getComputedStyle(e, '::before'); const grow = -2 * (parseFloat(b.top) || 0); return Math.min(r.width, r.height) + grow; }; return { pins: [...document.querySelectorAll('.pin')].map(hit), scrub: [...document.querySelectorAll('.scrub-btn')].map(hit) }; })()`);
     if (sizes.pins.some((n) => n < 43.5)) throw new Error(`pins ${sizes.pins}`);
     if (sizes.scrub.some((n) => n < 43.5)) throw new Error(`scrub ${sizes.scrub}`);
@@ -350,7 +354,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     await sleep(900);
     await p.ev('for (const a of window.__office.view.actors.values()) a.idleTimer = 1e9; true');
     await p.ev(RECORD);
-    await p.ev(`window.__bubbleBad = []; window.__watch = setInterval(() => { for (const e of document.querySelectorAll('#labels .char-bubble.speech:not([hidden])')) { const r = e.getBoundingClientRect(); const sheet = document.querySelector('.floor-panel').getBoundingClientRect(); if (r.left < -2 || r.right > innerWidth + 2) window.__bubbleBad.push('off side ' + Math.round(r.left) + ' ' + Math.round(r.right)); if (r.bottom > sheet.top + 2) window.__bubbleBad.push('under the sheet'); if (parseFloat(getComputedStyle(e).fontSize) < 11) window.__bubbleBad.push('too small'); } }, 120); true`);
+    await p.ev(`window.__bubbleBad = []; window.__watch = setInterval(() => { const zones = ['.floor-top', '.floor-scrubber', '.visitor-note'].map((q) => document.querySelector(q)).filter(Boolean).map((z) => z.getBoundingClientRect()).filter((z) => z.width > 0); const shown = [...document.querySelectorAll('#labels .char-tag:not(.crowded) .char-bubble:not([hidden])')].filter((e) => e.getBoundingClientRect().width > 0); if (shown.length > (innerWidth <= 760 ? 2 : 6)) window.__bubbleBad.push('too many bubbles at once ' + shown.length); for (const e of shown) { const r = e.getBoundingClientRect(); for (const z of zones) if (r.left < z.right - 3 && r.right > z.left + 3 && r.top < z.bottom - 3 && r.bottom > z.top + 3) window.__bubbleBad.push('over the header, lift or banner'); } for (const e of document.querySelectorAll('#labels .char-bubble.speech:not([hidden])')) { const r = e.getBoundingClientRect(); const sheet = document.querySelector('.floor-panel').getBoundingClientRect(); if (r.left < -2 || r.right > innerWidth + 2) window.__bubbleBad.push('off side ' + Math.round(r.left) + ' ' + Math.round(r.right)); if (r.bottom > sheet.top + 2) window.__bubbleBad.push('under the sheet'); if (parseFloat(getComputedStyle(e).fontSize) < 11) window.__bubbleBad.push('too small'); } }, 120); true`);
     await neighbour.post(`/api/floors/${neighbour.slug}/chat`, { text: 'go build little buns' });
     await p.until('window.__office.state.tasks.length >= 4 && window.__office.state.tasks.every((x) => x.status === "done") && [...window.__office.view.actors.values()].every((a) => a.seated && !a.scene) && !window.__office.view.life.queues.size', 'everyone back', 110000);
     const r = await readRec(p);
@@ -362,6 +366,12 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     const s = await p.ev('({ calls: __stage.renderer.info.render.calls, tris: __stage.renderer.info.render.triangles })');
     console.log(`  phone low, living floor: ${s.calls} calls, ${s.tris} triangles`);
     if (s.calls > 200) throw new Error(`${s.calls} draw calls`);
+  });
+  await step(tag('a toast sits clear of the banner, the header and the lift, and confetti stays under them'), async () => {
+    const r = await p.ev(`(async () => { const m = await import('/theoffice/js/dom.js'); m.toast('Published: a-thing'); await new Promise((d) => setTimeout(d, 400)); const t = document.querySelector('#toasts .toast').getBoundingClientRect(); const near = ['.visitor-note', '.floor-top', '.floor-scrubber', '.controls .btn'].map((q) => document.querySelector(q)).filter(Boolean).map((e) => e.getBoundingClientRect()).filter((z) => z.width > 0); const clash = near.filter((z) => t.left < z.right && t.right > z.left && t.top < z.bottom && t.bottom > z.top).length; const party = await import('/theoffice/js/party.js'); party.confetti({}); await new Promise((d) => setTimeout(d, 120)); const c = document.querySelector('.confetti'); const out = { clash, confetti: c ? Number(getComputedStyle(c).zIndex) : -1, ui: Number(getComputedStyle(document.querySelector('#ui')).zIndex) }; await new Promise((d) => setTimeout(d, 2900)); return { ...out, gone: !document.querySelector('.confetti') }; })()`);
+    if (r.clash) throw new Error(`the toast covers ${r.clash} control(s)`);
+    if (r.confetti >= r.ui) throw new Error(`confetti at z-index ${r.confetti} over the interface at ${r.ui}`);
+    if (!r.gone) throw new Error('the confetti was still falling three seconds later');
   });
   await step(tag('no console errors'), async () => {
     const errs = p.errors.filter((e) => !/status of 40[0-9]|status of 429/.test(e));
