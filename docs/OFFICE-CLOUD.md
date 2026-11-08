@@ -38,7 +38,7 @@ which sit on the older `/_data/v1` store). The same file is at `/theoffice/sdk/o
 ## Limits (defaults; `cloudLimits`, `cloudRoomLimits` and `cloudRates` in config overrides)
 | | |
 |---|---|
-| Storage per project | 20 MB of data (documents, saves, scores, accounts), 50 MB of files; 20 GB for the whole building |
+| Storage per project | 20 MB of data (documents, saves, scores, accounts), 50 MB of files; 8 GB for the whole building (hz has about 60 GB free) |
 | Documents | 32 KB each, 50 collections, 20,000 per project, 2,000 per person, 100 per page |
 | Saves | 64 KB each, 200 keys and 1 MB per person |
 | Leaderboards | 50 per project, 5,000 entries each (a full board keeps its best), scores within plus or minus a trillion |
