@@ -22,6 +22,7 @@ import { createRunnerClient, runnerConfigured } from '../server/runner.js';
 import { ensureServerSchema } from '../server/servers.js';
 import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, MailError } from '../server/mail.js';
 import { dailyStatus, dailyStatusText, requestDailyRun, setDailyPaused, ensureDailySchema } from '../server/daily.js';
+import { chatAdminCommand } from '../server/cloud/chat.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -48,6 +49,8 @@ const usage = () => {
     '  node scripts/admin.mjs runner release          lift the kill switch',
     '  node scripts/admin.mjs pay status <floor>       a floor\'s Stripe account as the building sees it: connected, what is missing, product and order counts. No sales figures',
     '  node scripts/admin.mjs pay disconnect <floor>   stop new sales on a floor. Its Stripe account stays the boss\'s own, and their existing customers are theirs to manage',
+    '  node scripts/admin.mjs chat status [PROJECT] [--floor N] [--json]   the website chat: what is on, conversations and questions waiting. Counts only, never what anyone said',
+    '  node scripts/admin.mjs chat pause|resume PROJECT|--all [--floor N]   stop or restart the website chat for one project, or for the whole building',
     '  node scripts/admin.mjs filler list            list filler (demo) companies and removed ones',
     '  node scripts/admin.mjs filler seed            seed the filler companies, bringing back any that were removed',
     '  node scripts/admin.mjs filler remove --floor N  remove the filler company on floor N (stays removed)',
@@ -157,6 +160,9 @@ if (cmd === 'code') {
     if (!n) die(`Floor ${f.number} has no connected Stripe account.`);
     console.log(`Floor ${f.number} can no longer start new sales. Its Stripe account stays the boss's own: any subscriptions keep billing there until the boss cancels them in Stripe, and webhooks still keep access correct. The boss can reconnect from the Payments tab.`);
   }
+} else if (cmd === 'chat') {
+  // The website chat (docs/CHAT.md). On the database file alone: a running server sees a pause on its next message.
+  if (!chatAdminCommand(db, cfg, rest, { die, floorArg, lookupLabel })) usage();
 } else if (cmd === 'cloud' && (rest[0] === 'ai' || rest[0] === 'fetch')) {
   // AI and web fetching for published apps. Works on the database file alone: a running server sees a pause on its next call. Counts only.
   const [kind, sub] = rest;

@@ -48,8 +48,28 @@ CREATE TABLE IF NOT EXISTS cloud_power_days (
   ai_calls INTEGER NOT NULL DEFAULT 0, fetches INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (floor_id, project, day)
 );
 CREATE INDEX IF NOT EXISTS cloud_power_days_day ON cloud_power_days(day);
+CREATE TABLE IF NOT EXISTS chat_settings (
+  floor_id INTEGER NOT NULL, project TEXT NOT NULL, enabled INTEGER, paused INTEGER NOT NULL DEFAULT 0, faq TEXT NOT NULL DEFAULT '[]', faq_by TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (floor_id, project)
+);
+CREATE TABLE IF NOT EXISTS chat_conversations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, token TEXT NOT NULL UNIQUE, email TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open', unread INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, last_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS chat_conversations_recent ON chat_conversations(floor_id, project, last_at);
+CREATE INDEX IF NOT EXISTS chat_conversations_age ON chat_conversations(last_at);
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL, floor_id INTEGER NOT NULL, project TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS chat_messages_conversation ON chat_messages(conversation_id, id);
+CREATE TABLE IF NOT EXISTS chat_questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL, floor_id INTEGER NOT NULL, project TEXT NOT NULL, question TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'waiting', created_at INTEGER NOT NULL, answered_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS chat_questions_waiting ON chat_questions(floor_id, status, id);
 `;
 // Child rows first, so a wipe never leaves orphans if it stops part way.
-export const CLOUD_TABLES = ['cloud_docs', 'cloud_saves', 'cloud_scores', 'cloud_file_chunks', 'cloud_files', 'cloud_sessions', 'cloud_users', 'cloud_usage'];
+export const CLOUD_TABLES = ['cloud_docs', 'cloud_saves', 'cloud_scores', 'cloud_file_chunks', 'cloud_files', 'cloud_sessions', 'cloud_users', 'cloud_usage', 'chat_messages', 'chat_questions', 'chat_conversations'];
 // Switches and today's AI and web counts. Clearing a project's data leaves these alone, or clearing it would hand back the day's allowance and lift a pause. They only go with the floor.
-export const CLOUD_POWER_TABLES = ['cloud_powers', 'cloud_power_days'];
+export const CLOUD_POWER_TABLES = ['cloud_powers', 'cloud_power_days', 'chat_settings'];

@@ -689,7 +689,7 @@ export function installMail(ext) {
     out.mail = { ready: ready(), address: addressOf(f.id), unread: unreadOf(f.id), waiting: all(db, "SELECT * FROM mail_messages WHERE floor_id=? AND status='awaiting_boss' ORDER BY id DESC LIMIT 20", f.id).map((m) => msgView(m, f)) };
   });
 
-  engine.mail = { stateLine, toolInbox, toolRead, toolReply, toolSend, addressOf, ensureAddress, formToInbox, webhook, ready, provider, drain, tick: () => tick(), settings: set };
+  engine.mail = { stateLine, toolInbox, toolRead, toolReply, toolSend, send: sendMail, addressOf, ensureAddress, formToInbox, webhook, ready, provider, drain, tick: () => tick(), settings: set };
   return {
     webhook, formToInbox,
     start() { stopped = false; backfill(); timer = setInterval(() => { tick(); }, set.mailTickMs || 4000); timer.unref?.(); },

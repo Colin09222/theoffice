@@ -19,6 +19,7 @@ import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } fr
 import { renderServers, renderServerRequests, serverTab, serversPending } from './server-panel.js';
 import { payTab, payPending, renderPayRequests, renderPay, onPayLanding } from './pay-ui.js';
 import { renderNumbers } from './numbers-ui.js';
+import { onChatEvent } from './chat-ui.js';
 import { launchFlow, makerCard } from './launch-ui.js';
 import { recoveryBox } from './dom.js';
 import * as THREE from '../vendor/three/three.module.min.js';
@@ -1039,6 +1040,7 @@ class FloorPage {
     on('hired', () => this.reload());
     on('mail', (d) => onMailEvent(this, d));
     on('pay', () => { this.reload(); });
+    on('sitechat', (d) => onChatEvent(this, d));
     on('reload', () => this.reload());
     on('floor', (d) => {
       if (d.status === 'gone') { toast('This floor has been closed.'); window.officeGo('/'); return; }

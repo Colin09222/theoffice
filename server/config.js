@@ -78,6 +78,7 @@ export function loadConfig(env = process.env, overrides = {}) {
     fetchDenyHosts: (env.FETCH_DENY_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
     // What published apps may do through Office Cloud: call AI and fetch public pages. Both on unless switched off here. See docs/OFFICE-CLOUD.md.
     officeAiEnabled: !/^(0|false|no|off)$/i.test(String(env.OFFICE_AI_ENABLED ?? '').trim()),
+    officeChatEnabled: !/^(0|false|no|off)$/i.test(String(env.OFFICE_CHAT_ENABLED ?? '').trim()),
     officeFetchEnabled: !/^(0|false|no|off)$/i.test(String(env.OFFICE_FETCH_ENABLED ?? '').trim()),
     // The defaults are in server/cloud/powers.js; a setting here replaces one. The building's daily ceiling is for the admin's eyes only.
     cloudAiLimits: numbersOnly({ maxTokens: env.OFFICE_AI_MAX_TOKENS, dayFast: env.OFFICE_AI_DAY_FAST, daySmart: env.OFFICE_AI_DAY_SMART, buildingDayUsd: env.OFFICE_AI_BUILDING_DAY_USD }),

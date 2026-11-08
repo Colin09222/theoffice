@@ -73,6 +73,9 @@ Measured: 300 live players in 19 full rooms, each setting 1 KB of state and send
 - **Only text:** HTML, JSON, XML and plain text, at most 512 KB, 15 seconds and 4 redirects. Nothing is sent but the address. `office.scrape` parses without running anything, in one forward pass so a hostile page costs only its own length.
 - **Cache:** a page is kept for 5 minutes, up to 24 MB for the whole building, and shared between projects since it holds only public pages fetched without credentials. A cache hit, or joining a fetch already running, doesn't count against the daily allowance.
 
+## Website chat
+A small AI assistant added to launched sites and apps at serve time, on top of `office.ai` and its limits. See `docs/CHAT.md`.
+
 ## The boss and the admin
 - The boss's **Backend** panel also shows AI requests today, tokens left today (quick and smart), pages read today and pages left, with a switch for each, on by default. Counts only.
 - The boss's project card has a **Backend** button: accounts, documents, saves, scores, uploads, who's playing now, requests today, storage used.

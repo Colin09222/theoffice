@@ -547,7 +547,7 @@ describe('project code', () => {
     for (const path of ['/theoffice/api/admin/help', `/theoffice/api/admin/help/${id}`, '/api/admin/help', '/_data/v1/help', '/_data/v1/admin/help']) {
       // A path with no extension is a client-side route, so at most this is the project's own page. It is never the office's API.
       const g = await hit(t.port, host, path, { headers: { ...cookies(), origin: `https://${host}`, 'sec-fetch-site': 'same-origin' } });
-      assert.ok(g.status === 404 || g.status === 400 || g.text === '<h1>page</h1>', `${path} gave ${g.status}: ${g.text.slice(0, 80)}`);
+      assert.ok(g.status === 404 || g.status === 400 || g.text.startsWith('<h1>page</h1>'), `${path} gave ${g.status}: ${g.text.slice(0, 80)}`);
       assert.ok(!g.text.includes('PROJECTCODE'));
       const p = await hit(t.port, host, path, { method: 'POST', body: { text: 'from a page' }, headers: { ...cookies(), origin: `https://${host}`, 'sec-fetch-site': 'same-origin', 'x-office-csrf': admin.csrf } });
       assert.ok([403, 404, 405, 400].includes(p.status), `${path} POST gave ${p.status}`);

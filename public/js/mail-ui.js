@@ -2,11 +2,12 @@
 // server answers nobody else. Messages show as plain text; the formatted version opens in a sandboxed frame, without outside pictures until asked.
 import { h, api, clear, toast, timeAgo, modal, BASE } from './dom.js';
 import { icon } from './icons.js';
+import { chatBox, chatWaiting } from './chat-ui.js';
 
 const STATUS = { awaiting_boss: 'Waiting for your OK', queued: 'Sending', sending: 'Sending', sent: 'Sent', delivered: 'Delivered', failed: 'Not sent', declined: 'You said no', bounced: 'Bounced', complained: 'Marked as spam' };
 const SETUP = 'Email is being set up for the building. Your address is saved; mail starts arriving and sending as soon as the building manager switches it on.';
 
-export const mailUnread = (page) => page.state?.mail?.unread || 0;
+export const mailUnread = (page) => (page.state?.mail?.unread || 0) + chatWaiting(page);
 export const mailPending = (page) => (page.state?.mail?.waiting || []).length;
 export const mailTab = (page) => { const n = mailUnread(page); return ['inbox', n ? `Inbox ${n}` : 'Inbox']; };
 
@@ -24,6 +25,7 @@ export function onMailEvent(page, d) {
 
 export async function renderInbox(page) {
   page.mailView ||= { mode: 'list', folder: 'inbox', thread: null };
+  page.bodyEl.append(chatBox(page));  // the website chat: chat-ui.js
   const box = h('div.mail', { 'data-mail': page.mailView.mode });
   page.bodyEl.append(box);
   box.append(h('p.empty', {}, 'Opening the inbox…'));
