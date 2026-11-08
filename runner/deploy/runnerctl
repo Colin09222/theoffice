@@ -1,0 +1,13 @@
+#!/bin/bash
+# Calls the office-runner control API as the operator, e.g.
+#   runnerctl GET /v1/apps
+#   runnerctl POST /v1/apps/hello/stop
+#   runnerctl PUT /v1/apps/hello/secrets '{"env":{"API_KEY":"..."}}'
+# The token goes to curl on stdin, so it never shows in the process list.
+set -euo pipefail
+[ $# -ge 2 ] || { echo "usage: runnerctl METHOD PATH [JSON|@file]" >&2; exit 2; }
+TOKEN_FILE=${RUNNER_TOKEN_FILE:-/opt/office-runner/secrets/api.token}
+args=(-sS -X "$1" -H 'content-type: application/json' --max-time 900)
+[ $# -ge 3 ] && args+=(--data-binary "$3")
+printf 'header = "authorization: Bearer %s"\n' "$(cat "$TOKEN_FILE")" | curl --config - "${args[@]}" "http://127.0.0.1:8092$2"
+echo

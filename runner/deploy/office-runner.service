@@ -1,0 +1,27 @@
+[Unit]
+Description=office-runner control daemon (friends' project apps in gVisor; loopback API)
+Documentation=file:///opt/office-runner/app/README.md
+After=network-online.target docker.service office-apps-firewall.service
+Wants=network-online.target docker.service
+Requires=office-apps-firewall.service
+
+[Service]
+Type=simple
+Environment=RUNNER_CONFIG=/opt/office-runner/etc/runner.json
+ExecStart=/opt/office-runner/bin/node /opt/office-runner/app/src/control.mjs
+Restart=always
+RestartSec=3
+UMask=0077
+# Root because it drives Docker (root-equivalent anyway), loop-mounts the per-app /data images and
+# owns the root-only secrets. No ProtectSystem/PrivateTmp/ProtectHome: those give the daemon its own
+# mount namespace, and the /data mounts must be visible to dockerd.
+NoNewPrivileges=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+MemoryMax=384M
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

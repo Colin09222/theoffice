@@ -30,6 +30,9 @@ export const DEFAULTS = Object.freeze({
   BASE_BROWSER: 'office-runner/browser:pw1.65.0',
   PLAYWRIGHT_VERSION: '1.65.0',
   RUNTIME: 'runsc',
+  // Builds use runsc with --overlay2=none: by default gVisor keeps root filesystem writes inside the
+  // sandbox, and `docker commit` would then save an image without the installed packages.
+  BUILD_RUNTIME: 'runsc-build',
   PIDS_LIMIT: 128,
   BUILD_PIDS_LIMIT: 256,
   DATA_MB: 256, // per-app /data volume (a loop-mounted ext4 image, so the size is a hard quota)

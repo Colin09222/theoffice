@@ -75,7 +75,8 @@ class FakeDocker {
 }
 const docker = new FakeDocker();
 const volumes = [];
-const sys = { ensureVolume: async (l) => volumes.push(['ensure', l]), dropVolume: async (l) => volumes.push(['drop', l]) };
+let firewall = true;
+const sys = { ensureVolume: async (l) => volumes.push(['ensure', l]), dropVolume: async (l) => volumes.push(['drop', l]), firewallReady: async () => firewall };
 const ctl = createControl({ cfg, docker, sys, tokens: { api: API, edge: EDGE }, now: () => clock, probe: async () => true });
 let srv, port;
 
@@ -232,6 +233,16 @@ test('TLS ask knows deployed labels only; delete frees the slot', async () => {
   assert.ok(volumes.some(([k, l]) => k === 'drop' && l === 'gamma'));
   assert.equal((await call('GET', '/internal/known/gamma', undefined, EDGE)).status, 404);
   assert.equal((await deploy('epsilon')).status, 200);
+});
+
+test('fails closed: no firewall, no app start', async () => {
+  firewall = false;
+  await call('POST', '/v1/apps/alpha/sleep');
+  const r = await call('POST', '/internal/wake/alpha', undefined, EDGE);
+  assert.equal(r.status, 503);
+  assert.equal(r.body.error, 'no_firewall');
+  firewall = true;
+  assert.equal((await call('POST', '/internal/wake/alpha', undefined, EDGE)).status, 200);
 });
 
 test('bad input is refused before anything runs', async () => {

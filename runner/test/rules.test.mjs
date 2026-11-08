@@ -35,13 +35,15 @@ test('cron: parses, matches in UTC, refuses schedules tighter than 5 minutes', (
 });
 
 test('labels and hosts', () => {
-  for (const ok of ['a', 'my-app', 'x1', 'a'.repeat(40)]) assert.ok(A.validLabel(ok), ok);
-  for (const bad of ['', '-a', 'a-', 'a--b', 'A', 'a.b', 'a'.repeat(41), 'a_b']) assert.ok(!A.validLabel(bad), bad);
+  for (const ok of ['a', 'my-app', 'x1', 'candle-shop--arcade-qa', 'a'.repeat(58)]) assert.ok(A.validLabel(ok), ok);
+  for (const bad of ['', '-a', 'a-', 'A', 'a.b', 'a'.repeat(59), 'a_b']) assert.ok(!A.validLabel(bad), bad);
+  assert.ok(A.appHost('a'.repeat(58), cfg).split('.')[0].length <= 63);
   assert.equal(A.hostLabel('api--my-app.middistance.com', cfg), 'my-app');
   assert.equal(A.hostLabel('API--My-App.middistance.com:443', cfg), 'my-app');
   assert.equal(A.hostLabel('my-app.middistance.com', cfg), null);
   assert.equal(A.hostLabel('api--x.middistance.com.evil.com', cfg), null);
-  assert.equal(A.hostLabel('api--a--b.middistance.com', cfg), null);
+  assert.equal(A.hostLabel('api--candle-shop--arcade-qa.middistance.com', cfg), 'candle-shop--arcade-qa');
+  assert.equal(A.hostLabel('api--.middistance.com', cfg), null);
 });
 
 test('files: no traversal, no absolute paths, size limits', () => {

@@ -159,6 +159,14 @@ export function createControl({ cfg, docker, sys, tokens, now = Date.now, probe 
     if (!app.image) throw new HttpError(503, app.build?.status === 'failed' ? 'build_failed' : 'building', app.build?.status === 'failed' ? 'The last build failed.' : 'The app is still being built.');
   }
 
+  // Fail closed: no app or build starts unless the office-apps firewall tables are loaded.
+  async function firewallOrRefuse() {
+    if (!(await sys.firewallReady())) {
+      log('firewall.missing');
+      throw new HttpError(503, 'no_firewall', 'The apps firewall is not loaded, so no app may start.');
+    }
+  }
+
   // Starts the app if needed and resolves once it accepts connections.
   async function wake(label, reason) {
     const app = getApp(label);
@@ -167,6 +175,7 @@ export function createControl({ cfg, docker, sys, tokens, now = Date.now, probe 
       refuseIfDown(app);
       const r = rt(label);
       if (r.backoffUntil > now()) throw new HttpError(503, 'crashing', 'The app keeps crashing; it will be retried in a few minutes. See its logs.');
+      await firewallOrRefuse();
       await sys.ensureVolume(label);
       const c = await ensureContainer(app);
       if (!c.State.Running) {
@@ -327,6 +336,7 @@ export function createControl({ cfg, docker, sys, tokens, now = Date.now, probe 
     let logText = '';
     try {
       if (!(await docker.imageExists(base))) throw new Error(`base image ${base} is missing; run deploy/install.sh`);
+      if (!(await sys.firewallReady())) throw new Error('the apps firewall is not loaded');
       await docker.remove(b);
       const t = cfg.BUILD_MEMORY_MB * 1048576;
       await docker.create(b, {
@@ -336,7 +346,7 @@ export function createControl({ cfg, docker, sys, tokens, now = Date.now, probe 
         Cmd: ['sh', '-c', buildScript(man)],
         Labels: { 'office.runner': 'build', 'office.app': label },
         HostConfig: {
-          Runtime: cfg.RUNTIME,
+          Runtime: cfg.BUILD_RUNTIME,
           CapDrop: ['ALL'],
           SecurityOpt: ['no-new-privileges'],
           PidsLimit: cfg.BUILD_PIDS_LIMIT,
@@ -587,7 +597,19 @@ export function createControl({ cfg, docker, sys, tokens, now = Date.now, probe 
 export function realSys(cfg) {
   const P = cfg.paths;
   const mounted = (dir) => fs.readFileSync('/proc/self/mountinfo', 'utf8').split('\n').some((l) => l.split(' ')[4] === dir);
+  let fwOkUntil = 0;
   return {
+    async firewallReady() {
+      if (fwOkUntil > Date.now()) return true;
+      try {
+        const { stdout } = await execFileP('nft', ['list', 'table', 'inet', 'office_apps']);
+        const ok = stdout.includes('chain from_apps') && stdout.includes('chain apps_to_host');
+        if (ok) fwOkUntil = Date.now() + 30000;
+        return ok;
+      } catch {
+        return false;
+      }
+    },
     async ensureVolume(label) {
       const img = `${P.volumes}/${label}.img`;
       const mnt = `${P.mnt}/${label}`;
@@ -616,7 +638,8 @@ async function main() {
   const cfg = loadConfig();
   const P = cfg.paths;
   for (const d of [P.state, P.secrets, P.appSecrets, P.volumes, P.logs]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
-  fs.mkdirSync(P.mnt, { recursive: true, mode: 0o711 });
+  fs.mkdirSync(P.mnt, { recursive: true });
+  fs.chmodSync(P.mnt, 0o711);
   const tokens = { api: readSecretFile(P.apiToken), edge: readSecretFile(P.edgeToken) };
   const ctl = createControl({ cfg, docker: new Docker(), sys: realSys(cfg), tokens });
   await ctl.boot();

@@ -1,0 +1,18 @@
+[Unit]
+Description=office-runner firewall (office-apps / office-build isolation and rate limits)
+Documentation=file:///opt/office-runner/app/README.md
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target docker.service office-runner.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Replaces only the tables inet office_apps and bridge office_apps_l2. There is deliberately no
+# ExecStop: stopping this unit must never open the apps up. To remove the rules, see README.md.
+ExecStart=/usr/sbin/nft -f /opt/office-runner/firewall/office-apps.nft
+ExecReload=/usr/sbin/nft -f /opt/office-runner/firewall/office-apps.nft
+
+[Install]
+WantedBy=multi-user.target

@@ -4,15 +4,17 @@ import path from 'node:path';
 import { parseCron } from './cron.mjs';
 import { HttpError } from './util.mjs';
 
-const LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
+// Office project labels look like <project>--<floor>, so double hyphens are fine; the whole host
+// label api--<label> has to stay within DNS's 63 characters.
+const LABEL_RE = /^[a-z0-9](?:[a-z0-9-]{0,56}[a-z0-9])?$/;
 export const TIERS = ['standard', 'browser'];
 
 export function validLabel(label) {
-  return typeof label === 'string' && LABEL_RE.test(label) && !label.includes('--');
+  return typeof label === 'string' && LABEL_RE.test(label);
 }
 
 export function assertLabel(label) {
-  if (!validLabel(label)) throw new HttpError(400, 'bad_label', 'App names are 1-40 characters: a-z, 0-9 and single hyphens, not at the ends.');
+  if (!validLabel(label)) throw new HttpError(400, 'bad_label', 'App names are 1-58 characters: a-z, 0-9 and hyphens, not at the ends.');
 }
 
 // api--<label>.middistance.com (any port, any case) -> label, else null.

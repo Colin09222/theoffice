@@ -1,0 +1,67 @@
+# office-runner Phase 1: the Caddy changes, as applied to /opt/edge/Caddyfile on hz (edited in place,
+# validated, then `docker exec edge-caddy-1 caddy reload --config /etc/caddy/Caddyfile`).
+# Everything else in that file is unchanged.
+
+# 1. In the global options block, the on-demand TLS ask now points at a loopback dispatcher:
+{
+	on_demand_tls {
+		# office-runner Phase 1: asks go to the loopback dispatcher below, which sends
+		# api--<label>.middistance.com to the runner and every other name to the Office as before.
+		ask http://127.0.0.1:8091/ask
+	}
+}
+
+# 2. New site: the dispatcher. api--<label>.middistance.com asks the runner, every other name
+#    is asked to the Office exactly as before (same path, same Host, no X-Forwarded-*).
+http://127.0.0.1:8091 {
+	bind 127.0.0.1
+	@runner expression `{query.domain}.matches("^api--[a-z0-9-]+[.]middistance[.]com$")`
+	handle @runner {
+		rewrite * /__office_runner/tls-ask?{query}
+		reverse_proxy 127.0.0.1:8090 {
+			header_up Host 127.0.0.1:8090
+			header_up -X-Forwarded-For
+		}
+	}
+	handle {
+		# Exactly the request Caddy used to make: same path and host, no X-Forwarded-* headers
+		# (the Office refuses an ask that carries X-Forwarded-For).
+		rewrite * /theoffice/api/apps/tls-check?{query}
+		reverse_proxy 127.0.0.1:8083 {
+			header_up Host 127.0.0.1:8083
+			header_up -X-Forwarded-For
+			header_up -X-Forwarded-Proto
+			header_up -X-Forwarded-Host
+		}
+	}
+}
+
+# 3. The *.middistance.com site: the Office's original handling moved into a default handle, with a
+#    runner handle in front for api--<label> hosts.
+*.middistance.com {
+	tls {
+		on_demand
+	}
+	# office-runner Phase 1: api--<label>.middistance.com is a project's server app. The runner's edge
+	# wakes it if it sleeps and proxies to it, WebSockets included. Apps get their own cookies and
+	# Authorization headers; the edge strips Domain= from any cookie they set.
+	@runner header_regexp Host ^api--[a-z0-9-]+\.middistance\.com$
+	handle @runner {
+		request_body {
+			max_size 32MB
+		}
+		reverse_proxy 127.0.0.1:8090 {
+			flush_interval -1
+		}
+	}
+	handle {
+		# Only a private project's preview pass needs a cookie. Dropping the rest also stops a planted cookie breaking public projects.
+		@nopass not header Cookie *__Host-office_preview=*
+		request_header @nopass -Cookie
+		reverse_proxy 127.0.0.1:8083 {
+			header_up -Authorization
+			header_up Cookie "(^|;\s*)(office_s|office_a|bhq_auth)=[^;]*" ""
+			flush_interval -1
+		}
+	}
+}
