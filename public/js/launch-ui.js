@@ -7,7 +7,7 @@ const TYPE_ICON = { game: 'play', app: 'lightning', website: 'globe', business: 
 const FALLBACK_TYPES = [['game', 'Game', 'A real game with levels, enemies and upgrades'], ['app', 'App / SaaS', 'A signed-in web app with real accounts and data'], ['website', 'Website', 'A fast, good-looking site with real words'], ['business', 'Business', 'Research, a plan and a landing page, step by step']];
 
 // Shared with the full-screen Setup (setup-ui.js): the same four choices, the same endpoints, the same landing.
-export const LAUNCH_NOTE = 'Your team designs it, builds it, plays it in a real browser and fixes it. You launch it with one tap. Nobody here can post, run ads or spend money, and email to anyone new waits for your OK, so they will tell you what only you can do.';
+const LAUNCH_NOTE = 'Your team designs it, builds it, plays it in a real browser and fixes it. You launch it with one tap. Nobody here can post, run ads or spend money, and email to anyone new waits for your OK, so they will tell you what only you can do.';
 export const launchTypes = (page) => page.state.makers?.types?.map((t) => [t.id, t.label, t.blurb]) || FALLBACK_TYPES;
 export const typeIcon = (id) => icon(TYPE_ICON[id] || 'sparkle');
 export const ideaTag = (c) => (c.starter === 'game-3d' ? h('i.tag', {}, '3D') : c.starter === 'game-2d' ? h('i.tag', {}, '2D') : '');

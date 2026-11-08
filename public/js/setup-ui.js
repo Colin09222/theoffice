@@ -2,9 +2,11 @@
 // The questions and their endpoints are the launcher's (launch-ui.js). A floor that already has a name never gets this by itself; "Make something new" opens the same flow later.
 import { h, session, recoveryBox, toast } from './dom.js';
 import { icon } from './icons.js';
-import { LAUNCH_NOTE, launchTypes, typeIcon, ideaTag, fetchIdeas, wordsToCard, startWork, landInChat } from './launch-ui.js';
+import { launchTypes, typeIcon, ideaTag, fetchIdeas, wordsToCard, startWork, landInChat } from './launch-ui.js';
 
 const QUESTIONS = ['what', 'which', 'ready'];
+const TILE = { game: '#FFE6EF', app: '#E0EEFC', website: '#E3F6EC', business: '#FFF2D6' };
+const FACE = { manager: '#FF9C7A', researcher: '#7FB8F0', writer: '#C8A2EE', builder: '#7DD3A8', designer: '#FFC65C', tester: '#F48FB1' };
 // The place a boss has reached is kept per floor, per device. The recovery code is never in it.
 const placeKey = (slug) => `office-setup-${slug}`;
 const recall = (slug) => { try { return JSON.parse(localStorage.getItem(placeKey(slug))) || {}; } catch { return {}; } };
@@ -14,10 +16,10 @@ const text = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
 
 /** What a saved place is worth: anything stale or broken falls back to the start rather than to a crash. */
 function restored(saved, types) {
-  const s = { step: 'what', type: '', label: '', seed: 0, own: '', card: null, company: '', typedCompany: false, name: '', pitch: '', goal: '', plan: '' };
+  const s = { step: 'what', type: '', label: '', picked: '', own: '', card: null, company: '', typedCompany: false, name: '', pitch: '', goal: '', plan: '' };
   const t = types.find(([id]) => id === saved.type);
   if (!t) return s;
-  Object.assign(s, { type: t[0], label: t[1], seed: Number.isInteger(saved.seed) && saved.seed >= 0 ? saved.seed : 0, own: text(saved.own, 400), step: saved.step === 'what' ? 'what' : 'which' });
+  Object.assign(s, { type: t[0], label: t[1], picked: text(saved.picked, 30), own: text(saved.own, 400), step: saved.step === 'what' ? 'what' : 'which' });
   if (saved.card && typeof saved.card === 'object' && typeof saved.card.name === 'string' && typeof saved.card.pitch === 'string') {
     Object.assign(s, { card: saved.card, company: text(saved.company, 60), typedCompany: !!saved.typedCompany, name: text(saved.name, 40), pitch: text(saved.pitch, 400), goal: text(saved.goal, 200), plan: text(saved.plan, 600) });
     if (saved.step === 'ready') s.step = 'ready';
@@ -41,53 +43,30 @@ function openSetup(page, { again = false } = {}) {
   const rec = !again && session.pendingRecovery?.slug === page.slug ? session.pendingRecovery : null;
   const head = h('div.setup-head'), main = h('div.setup-main'), foot = h('div.setup-foot');
   const root = h('div.setup', { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Set up your company', 'data-setup-flow': '', 'data-launcher': '' }, head, main, foot);
-  let depth = history.state?.setup?.slug === page.slug ? history.state.setup.depth : 0;
-  let settling = null, asking = 0;
+  let asking = 0;
+  const save = () => { if (!again) remember(page.slug, S); };
 
-  const save = () => { if (!again) remember(page.slug, { ...S, card: S.card }); };
-  const entry = (step) => ({ setup: { slug: page.slug, step, depth } });
-
-  // ---- moving between steps. Each step is a history entry, so the phone's Back gesture and the button here are the same Back. ----
+  // ---- moving between steps. The phone's own Back gesture leaves the floor, as any page would; the place is saved, so coming back lands on the same step. ----
   const backOf = { keys: null, what: rec ? 'keys' : null, which: 'what', ready: 'which' };
-  function forward(step) { depth += 1; history.pushState(entry(step), '', location.href); render(step); }
+  const canGoBack = (step) => !!backOf[step] || (again && step === 'what');
   function goBack() {
     if (again && S.step === 'what') { close(); return; }
-    const to = backOf[S.step];
-    if (!to) return;
-    if (depth > 0) { history.back(); return; }
-    render(to); history.replaceState(entry(to), '', location.href);
+    if (backOf[S.step]) render(backOf[S.step]);
   }
-  const onPop = (e) => {
-    if (!root.isConnected) { window.removeEventListener('popstate', onPop, true); return; }
-    if (settling) { e.stopImmediatePropagation(); settling(); return; }
-    const at = e.state?.setup;
-    if (at?.slug === page.slug) { e.stopImmediatePropagation(); depth = at.depth; render(at.step); }
-    // Anything else is a real trip off this floor, the router's to handle; the place is saved for the way back.
-  };
-  // Before leaving Setup or naming the floor (the name can change the address), come back down to the floor's own history entry.
-  const unwind = () => new Promise((done) => {
-    if (!depth) { done(); return; }
-    const finish = () => { if (settling === finish) settling = null; done(); };
-    settling = finish;
-    history.go(-depth); depth = 0;
-    setTimeout(finish, 500);
-  });
 
   // ---- the screen follows the part of the phone you can actually see, keyboard and browser bars included ----
   const vv = window.visualViewport;
+  const keepFieldInView = () => { const f = document.activeElement; if (f && /^(INPUT|TEXTAREA)$/.test(f.tagName) && main.contains(f)) f.scrollIntoView({ block: 'center' }); };
   const fit = () => {
     if (!root.isConnected) { vv?.removeEventListener('resize', fit); vv?.removeEventListener('scroll', fit); return; }
     root.style.setProperty('--setup-top', `${Math.round(vv.offsetTop)}px`);
     root.style.setProperty('--setup-h', `${Math.round(vv.height)}px`);
     keepFieldInView();
   };
-  const keepFieldInView = () => { const f = document.activeElement; if (f && /^(INPUT|TEXTAREA)$/.test(f.tagName) && main.contains(f)) f.scrollIntoView({ block: 'center' }); };
 
   function close() {
     root.remove(); page.setupEl = null;
-    window.removeEventListener('popstate', onPop, true);
     vv?.removeEventListener('resize', fit); vv?.removeEventListener('scroll', fit);
-    if (history.state?.setup) { const { setup: _, ...rest } = history.state; history.replaceState(rest, '', location.href); }
   }
 
   // ---- the steps ----
@@ -98,20 +77,21 @@ function openSetup(page, { again = false } = {}) {
     S.step = step; save(); root.dataset.step = step;
     ({ keys, what, which, ready })[step]();
     const n = QUESTIONS.indexOf(step) + 1;
-    head.replaceChildren(
-      backOf[step] || (again && step === 'what')
-        ? h('button.setup-back', { type: 'button', 'data-setup-back': '', ...(again && step === 'what' ? { 'data-launcher-back': '' } : {}), onclick: goBack }, icon('arrow-left'), 'Back')
-        : h('span.setup-back-gap'),
-      n ? h('div.setup-progress', { 'data-setup-step': n }, h('span', {}, `Step ${n} of 3`), h('div.setup-dots', { 'aria-hidden': 'true' }, ...QUESTIONS.map((_, i) => h(`i${i < n ? '.on' : ''}`)))) : null);
+    const dots = n ? h('div.setup-steps', { 'data-setup-step': n }, h('span.setup-dots', { 'aria-hidden': 'true' }, ...QUESTIONS.map((_, i) => h(`i${i < n ? '.on' : ''}`))), h('span', {}, `Step ${n} of 3`)) : h('span');
+    head.replaceChildren(...(canGoBack(step)
+      ? [h('button.setup-back', { type: 'button', 'aria-label': 'Back', 'data-setup-back': '', ...(again && step === 'what' ? { 'data-launcher-back': '' } : {}), onclick: goBack }, icon('arrow-left')), dots]
+      : [dots, step === 'what' ? h('span.setup-floor', {}, `Floor ${page.state.floor.number}`) : h('span')]));
     main.scrollTop = 0;
     // The heading takes the focus, never a field: the keyboard shouldn't jump up unasked.
     root.querySelector('.setup-q')?.focus({ preventScroll: true });
   }
   const q = (t) => h('h1.setup-q', { tabindex: '-1' }, t);
-  const wayOut = () => (again ? null : h('button.link.setup-out', { type: 'button', 'data-setup-out': '', onclick: toTheManager }, 'I\'d rather just tell the manager'));
+  const btn = (cls, attrs, ...kids) => h(`button.setup-btn.${cls}`, { type: 'button', ...attrs }, ...kids);
+  const face = (a) => h('span.setup-face', { css: { '--face': FACE[a?.role] || '#ECE4D8' } }, page.face(a));
+  // The manager's on the phone, so the faces in the room are everyone else.
+  const crew = () => { const all = page.state.agents || []; const rest = all.filter((a) => a.role !== 'manager'); return rest.length ? rest : all; };
 
-  async function toTheManager() {
-    await unwind();
+  function toTheManager() {
     remember(page.slug, { out: true });
     close();
     page.setTab?.('chat');
@@ -122,79 +102,92 @@ function openSetup(page, { again = false } = {}) {
     main.replaceChildren(q('The keys are yours.'),
       h('p.setup-sub', {}, 'Keep this recovery code somewhere safe. It is the only way back in from another device, and it won\'t be shown again.'),
       h('div.setup-keys', { 'data-setup-keys': '' }, recoveryBox(rec.code)));
-    foot.replaceChildren(h('button.btn.primary.setup-go', { type: 'button', 'data-setup-saved': '', onclick: () => { session.pendingRecovery = null; page.recoveryEl?.remove(); page.recoveryEl = null; forward('what'); } }, 'I\'ve saved it'));
+    foot.replaceChildren(btn('primary.wide', { 'data-setup-saved': '', onclick: () => { session.pendingRecovery = null; page.recoveryEl?.remove(); page.recoveryEl = null; render('what'); } }, 'I\'ve saved it'));
   }
   function what() {
-    main.replaceChildren(q('What are we making?'),
-      h('div.setup-types', {}, ...types.map(([id, label, blurb]) => h('button.setup-type', { type: 'button', 'data-type': id, onclick: () => { Object.assign(S, { type: id, label, seed: 0 }); forward('which'); } }, typeIcon(id), h('b', {}, label), h('span', {}, blurb)))),
-      h('p.setup-fine', {}, LAUNCH_NOTE));
-    foot.replaceChildren(...[wayOut()].filter(Boolean));
+    const team = crew().slice(0, 3);
+    main.replaceChildren(
+      h('div.setup-team', {}, h('span.setup-faces', {}, ...team.map(face)), h('span', {}, 'The team is stretching. Pick a job.')),
+      q('What are we making?'),
+      h('div.setup-list', {}, ...types.map(([id, label, blurb]) => h('button.setup-choice', { type: 'button', 'data-type': id, onclick: () => { Object.assign(S, { type: id, label, picked: '', own: '' }); render('which'); } },
+        h('span.setup-tile', { css: { background: TILE[id] || '#FFF2D6' } }, typeIcon(id)), h('span', {}, h('b', {}, label), h('small', {}, blurb))))));
+    foot.replaceChildren(btn('ghost.wide.setup-out', { 'data-setup-out': '', onclick: toTheManager }, 'I\'d rather just tell the manager'));
   }
   function which() {
-    const cards = h('div.setup-cards', {}, h('p.setup-loading', {}, 'Thinking of ideas...'));
-    const own = h('textarea', { name: 'own', rows: 2, maxlength: 400, placeholder: S.type === 'game' ? 'A frog who delivers mail across a swamp...' : 'Say it in your own words...', 'aria-label': 'In your own words' });
+    const who = (page.state.agents || []).find((a) => a.role === 'researcher')?.name;
+    const list = h('div.setup-list', {}, h('p.setup-loading', {}, 'Thinking of ideas...'));
+    const own = h('textarea', { name: 'own', rows: 3, maxlength: 400, placeholder: S.type === 'game' ? 'A frog who delivers mail across a swamp...' : 'Say it in your own words...', 'aria-label': 'In your own words' });
     own.value = S.own;
-    const useOwn = h('button.btn.primary.setup-go', { type: 'button', 'data-own': '', hidden: !S.own.trim(), onclick: async () => {
+    let cards = [];
+    const chosen = () => cards.find((c) => c.id === S.picked);
+    const next = btn('primary.wide', { 'data-next': '', disabled: true, onclick: async () => {
+      const card = chosen();
+      if (card) { pick(card); return; }
       const t = own.value.trim(); if (!t) { own.focus(); return; }
-      useOwn.disabled = true;
-      try { const r = await wordsToCard(page, S.type, t); if (root.isConnected) pick(r.card); } catch (e) { toast(e.message, 'bad'); useOwn.disabled = false; }
-    } }, 'Use my words');
-    own.addEventListener('input', () => { S.own = own.value; save(); useOwn.hidden = !own.value.trim(); });
-    main.replaceChildren(q(`Which ${S.label.toLowerCase().split(' ')[0]}?`), cards,
-      h('button.link.setup-more', { type: 'button', 'data-more': '', onclick: () => { S.seed += 1; save(); which(); main.scrollTop = 0; } }, 'More ideas'),
-      h('label.setup-own', {}, h('span', {}, 'Or in your own words'), own));
-    foot.replaceChildren(useOwn, ...[wayOut()].filter(Boolean));
+      next.disabled = true;
+      try { const r = await wordsToCard(page, S.type, t); if (root.isConnected) pick(r.card); } catch (e) { toast(e.message, 'bad'); refresh(); }
+    } }, 'Next');
+    const refresh = () => {
+      for (const b of list.querySelectorAll('[data-idea]')) { const on = b.dataset.idea === S.picked; b.classList.toggle('sel', on); b.setAttribute('aria-pressed', String(on)); }
+      next.disabled = !(chosen() || own.value.trim());
+    };
+    own.addEventListener('input', () => { S.own = own.value; if (own.value.trim()) S.picked = ''; save(); refresh(); });
+    main.replaceChildren(q('Which one?'), h('p.setup-sub', {}, `${S.label.split(' ')[0]} ideas from ${who || 'the team'}. Tap one, or tell us yours.`), list,
+      h('label.setup-own', {}, h('span.setup-label', {}, 'Or in your own words'), own));
+    foot.replaceChildren(next);
     const mine = ++asking;
-    fetchIdeas(page, S.type, S.seed).then((r) => {
-      if (mine !== asking || !cards.isConnected) return;  // they've moved on
-      cards.replaceChildren(
-        ...r.cards.map((c) => h('button.setup-card', { type: 'button', 'data-idea': c.id, onclick: () => pick(c) }, h('b', {}, c.title), h('span', {}, c.pitch), ideaTag(c))),
-        h('button.setup-card.surprise', { type: 'button', 'data-surprise': '', onclick: () => pick(r.surprise) }, icon('sparkle'), h('b', {}, 'Surprise me'), h('span', {}, 'The team picks one it believes in')));
+    fetchIdeas(page, S.type).then((r) => {
+      if (mine !== asking || !list.isConnected) return;  // they've moved on
+      cards = r.cards;
+      list.replaceChildren(
+        ...cards.map((c) => h('button.setup-choice.idea', { type: 'button', 'data-idea': c.id, onclick: () => { S.picked = c.id; S.own = ''; own.value = ''; save(); refresh(); } }, h('span', {}, h('b', {}, c.title), h('small', {}, c.pitch)), ideaTag(c))),
+        btn('soft.wide', { 'data-surprise': '', onclick: () => pick(r.surprise) }, icon('sparkle'), 'Surprise me'));
+      if (S.picked && !chosen()) S.picked = '';
+      refresh();
     }).catch((e) => {
-      if (mine !== asking || !cards.isConnected) return;
-      cards.replaceChildren(h('p.bad', {}, e.message), h('button.btn.ghost', { type: 'button', 'data-setup-retry': '', onclick: () => which() }, 'Try again'));
+      if (mine !== asking || !list.isConnected) return;
+      list.replaceChildren(h('p.bad', {}, e.message), btn('soft.wide', { 'data-setup-retry': '', onclick: () => which() }, 'Try again'));
     });
   }
   function pick(card) {
     S.card = card;
     Object.assign(S, { name: card.name, pitch: card.pitch, goal: card.goal, plan: (card.plan || []).join('\n') });
     if (!S.typedCompany) S.company = card.name;
-    forward('ready');
+    render('ready');
   }
   function ready() {
     const nameless = !!page.state.floor.setup;
     const input = (name, maxlength, what) => { const i = h('input', { name, maxlength, autocomplete: 'off', 'aria-label': what }); i.value = S[name]; return i; };
-    const area = (name, maxlength, rows, what) => { const i = h('textarea', { name, maxlength, rows, 'aria-label': what }); i.value = S[name]; return i; };
-    const field = (label, el, hint) => h('label.setup-field', {}, h('span', {}, label), el, hint ? h('small', {}, hint) : null);
+    const field = (label, el) => h('label.setup-field', {}, h('span.setup-label', {}, label), h('span.setup-input', {}, el, icon('pencil-simple')));
     const company = nameless ? input('company', 60, 'Company name') : null;
-    const name = input('name', 40, 'What we are making'), pitch = area('pitch', 400, 2, 'What it is'), goal = input('goal', 200, 'Goal'), plan = area('plan', 600, 4, 'The plan, one step a line');
-    const fields = { company, name, pitch, goal, plan };
-    for (const [k, el] of Object.entries(fields)) el?.addEventListener('input', () => { S[k] = el.value; if (k === 'company') S.typedCompany = true; el.closest('.setup-field').classList.remove('bad'); save(); });
-    const complain = (el, why) => { const f = el.closest('.setup-field'); f.classList.add('bad'); f.querySelector('small') ? (f.querySelector('small').textContent = why) : f.append(h('small', {}, why)); el.focus(); };
-    const go = h('button.btn.primary.setup-go', { type: 'button', 'data-go': '', onclick: async () => {
+    const name = input('name', 40, nameless ? 'What we are making' : 'Name'), goal = input('goal', 200, 'Goal');
+    for (const [k, el] of Object.entries({ company, name, goal })) el?.addEventListener('input', () => { S[k] = el.value; if (k === 'company') S.typedCompany = true; el.closest('.setup-field').classList.remove('bad'); save(); });
+    const complain = (el, why) => { const f = el.closest('.setup-field'); f.classList.add('bad'); f.querySelector('small')?.remove(); f.append(h('small', {}, why)); el.focus(); };
+    const steps = S.plan.split('\n').filter(Boolean);
+    const rows = steps.map((_, i) => { const r = h('input', { 'data-plan-step': i, maxlength: 120, autocomplete: 'off', 'aria-label': `Step ${i + 1} of the plan` }); r.value = steps[i]; r.addEventListener('input', () => { steps[i] = r.value; S.plan = steps.filter(Boolean).join('\n'); save(); }); return r; });
+    const team = crew();
+    const go = btn('primary.wide.setup-go', { 'data-go': '', onclick: async () => {
       if (company && company.value.trim().length < 2) { complain(company, 'The company needs a name of at least two letters.'); return; }
       if (!name.value.trim()) { complain(name, 'Give it a name.'); return; }
       go.disabled = true; go.textContent = 'Starting...';
       try {
-        await unwind();
-        await startWork(page, { type: S.type, card: S.card, name: name.value.trim(), pitch: pitch.value.trim(), goal: goal.value.trim(), plan: plan.value.split('\n').map((s) => s.trim()).filter(Boolean), ...(company ? { company: company.value.trim() } : {}) });
+        const plan = rows.map((r) => r.value.trim()).filter(Boolean);
+        await startWork(page, { type: S.type, card: S.card, name: name.value.trim(), pitch: S.pitch, goal: goal.value.trim(), ...(plan.length ? { plan } : {}), ...(company ? { company: company.value.trim() } : {}) });
       } catch (e) { toast(e.message, 'bad'); go.disabled = false; go.replaceChildren(icon('rocket-launch'), 'Go'); return; }
       forget(page.slug);
       try { await landInChat(page); } finally { close(); }
     } }, icon('rocket-launch'), 'Go');
     main.replaceChildren(q('Ready?'),
-      h('div.setup-ready', {},
-        company ? field('Company name', company, 'What the company is called. Change it any time.') : null,
-        field('What we\'re making', name), field('What it is', pitch), field('Goal', goal), field('Plan', plan, 'One step a line.')));
-    foot.replaceChildren(go, ...[wayOut()].filter(Boolean));
+      company ? field('Company name', company) : null,
+      field(nameless ? 'What we\'re making' : 'Name', name),
+      field('Goal', goal),
+      steps.length ? h('div.setup-field', {}, h('span.setup-label', {}, 'The plan'), h('div.setup-plan', {}, ...rows.map((r, i) => h('div.setup-plan-row', {}, face(team[i % team.length]), r)))) : null);
+    foot.replaceChildren(go, h('p.setup-fine', {}, 'Nothing goes live or spends money until you say so.'));
   }
 
   page.setupEl = root;
   page.root.append(root);
-  window.addEventListener('popstate', onPop, true);
   if (vv) { vv.addEventListener('resize', fit); vv.addEventListener('scroll', fit); fit(); }
   root.addEventListener('focusin', () => setTimeout(keepFieldInView, 300));
-  const first = rec ? 'keys' : S.step;
-  history.replaceState(entry(first), '', location.href);
-  render(first);
+  render(rec ? 'keys' : S.step);
 }
