@@ -9,6 +9,7 @@ import { get, all, run, tx } from './db.js';
 import { fillCharacters } from './people.js';
 import { seededLook } from '../public/js/looks.js';
 import { chatState } from './cloud/chat.js';
+import { PAY_PROCESSOR } from './cloud/pay-config.js';
 import { LAWYER_ROLE, LAWYER_NAME, LAWYER_CHARACTER, HONESTY_LINE } from './legal-role.js';
 
 export { HONESTY_LINE, LAWYER_ROLE, LAWYER_NAME };
@@ -20,6 +21,8 @@ CREATE TABLE IF NOT EXISTS legal_docs (floor_id INTEGER NOT NULL, project TEXT N
   features TEXT NOT NULL DEFAULT '{}', flags TEXT NOT NULL DEFAULT '[]', regulated TEXT NOT NULL DEFAULT '[]', pages TEXT NOT NULL DEFAULT '{}',
   live_pages TEXT NOT NULL DEFAULT '', live_version INTEGER, approved_at INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project));
 `;
+// His own character, written in, so the casting call leaves it alone. Like everyone's, it names him.
+const characterFor = (name) => ({ ...LAWYER_CHARACTER, persona: `${name} is ${LAWYER_CHARACTER.persona.charAt(0).toLowerCase()}${LAWYER_CHARACTER.persona.slice(1)}`.slice(0, 240), mood: 'content', cast: true });
 export const PAGE_KEYS = ['terms', 'privacy', 'refunds'];
 export const PAGE_TITLES = { terms: 'Terms of Use', privacy: 'Privacy Policy', refunds: 'Refund Policy' };
 export const FACT_LIMITS = { legalName: 120, region: 80, contact: 200 };
@@ -51,7 +54,7 @@ export function analyze(src) {
   const has = (re) => re.test(code);
   const products = src.products || [];
   const f = {
-    payments: !!src.paymentLink || products.length > 0 || has(/\boffice\.pay\.(checkout|has|status|manage)\b|_office\/pay\b/),
+    payments: !!src.paymentLink || products.length > 0 || has(/\boffice\.pay\.\w+|_office\/pay\b/),
     subscriptions: products.some((p) => !!p.interval),
     accounts: has(/\boffice\.auth\.(signUp|logIn|user|onChange)\b/),
     saves: has(/\bOffice\.(save|load)\s*\(|\boffice\.(saves|db|shared)\.|\bOffice\.shared\./),
@@ -129,7 +132,7 @@ export function draftPages({ title, kind, features: ft, facts: given = {} }) {
   ] };
   if (ft.accounts) terms.sections.push({ h: 'Your account', p: ['Keep your password to yourself; you are responsible for what happens under your account.', `You can ask us to close your account at any time by writing to ${contact}. We may close accounts that break these terms.`] });
   if (ft.payments) {
-    const p = ['Prices are shown before you pay. Payments are taken by Stripe on its own checkout page; we never see your full card number.', 'What you buy is described where you buy it.'];
+    const p = [`Prices are shown before you pay. Payments are taken by ${PAY_PROCESSOR} on its own payment page; we never see your full card number.`, 'What you buy is described where you buy it.'];
     if (ft.subscriptions) p.push('Subscriptions renew each period until you cancel. You can cancel at any time and it stops the next renewal.');
     p.push(`Refunds are covered in our Refund Policy.`);
     terms.sections.push({ h: 'Payments', p });
@@ -151,11 +154,11 @@ export function draftPages({ title, kind, features: ft, facts: given = {} }) {
   if (ft.emailCollected) collected.push('Your email address, when you give it to us.');
   if (ft.uploads) collected.push('Files you upload.');
   if (ft.chat) collected.push('The messages you send in the site chat.');
-  if (ft.payments) collected.push('Purchase records: what you bought, when, and a Stripe customer reference. Card details are handled by Stripe, not us.');
+  if (ft.payments) collected.push(`Purchase records: what you bought, when, and a ${PAY_PROCESSOR} customer reference. Card details are handled by ${PAY_PROCESSOR}, not us.`);
   if (ft.ai) collected.push('What you type into AI features, so that an answer can be written.');
   if (ft.adScripts) collected.push('Ad scripts on this site come from an ad network that may set its own cookies and collect data under its own privacy policy.');
   const shared = [`${name} is hosted on The Office, which stores the data above for us.`];
-  if (ft.payments) shared.push('Stripe processes payments.');
+  if (ft.payments) shared.push(`${PAY_PROCESSOR} processes payments.`);
   if (ft.ai || ft.chat) shared.push(`AI model providers receive what you type into ${ft.ai && ft.chat ? 'AI features or the chat' : ft.ai ? 'AI features' : 'the chat'}, to write the reply.`);
   if (ft.mailbox) shared.push('If you email us, the mail passes through our email provider.');
   if (ft.adScripts) shared.push('The ad network that serves the ads on this site.');
@@ -168,7 +171,7 @@ export function draftPages({ title, kind, features: ft, facts: given = {} }) {
   ] };
   const pages = { terms, privacy };
   if (ft.payments) {
-    const p = [`To ask for a refund, write to ${contact} with what you bought and roughly when.`, 'We look at every request and tell you what we can do. Approved refunds go back to the card you paid with, through Stripe.'];
+    const p = [`To ask for a refund, write to ${contact} with what you bought and roughly when.`, `We look at every request and tell you what we can do. Approved refunds go back to the card you paid with, through ${PAY_PROCESSOR}.`];
     if (ft.subscriptions) p.push('Cancelling a subscription stops future renewals; it keeps working until the end of the period you paid for.');
     p.push('Nothing here takes away rights you have under the law where you live.');
     pages.refunds = { title: PAGE_TITLES.refunds, sections: [{ h: 'Refunds', p }, { h: 'Who we are', p: [`${who}, ${where}. Contact: ${contact}.`] }] };
@@ -211,7 +214,7 @@ export function installLegal(ext) {
   function dressLawyer(floorId) {
     const a = lawyerOf(floorId);
     if (!a) return;
-    run(db, 'UPDATE agents SET hired=0, character=? WHERE id=?', JSON.stringify({ ...LAWYER_CHARACTER, mood: 'content', cast: true }), a.id);
+    run(db, 'UPDATE agents SET hired=0, character=? WHERE id=?', JSON.stringify(characterFor(a.name)), a.id);
   }
   function addLawyer(floor) {
     if (lawyerOf(floor.id)) return null;
@@ -219,7 +222,7 @@ export function installLegal(ext) {
     const title = engine.models.all[LAWYER_ROLE]?.title || 'Lawyer';
     const name = taken.has(LAWYER_NAME.toLowerCase()) ? `${LAWYER_NAME} Q.` : LAWYER_NAME;
     run(db, 'INSERT INTO agents (floor_id,role,title,name,look,character,office,hired,created_at) VALUES (?,?,?,?,?,?,?,0,?)', floor.id, LAWYER_ROLE, title, name,
-      JSON.stringify(seededLook(floor.id * 19 + 11)), JSON.stringify({ ...LAWYER_CHARACTER, mood: 'content', cast: true }), `office-${LAWYER_ROLE}`, now());
+      JSON.stringify(seededLook(floor.id * 19 + 11)), JSON.stringify(characterFor(name)), `office-${LAWYER_ROLE}`, now());
     fillCharacters(db, floor.id);
     return lawyerOf(floor.id);
   }
@@ -283,7 +286,7 @@ export function installLegal(ext) {
     const r = run(db, 'INSERT INTO messages (floor_id,role,agent_id,text,created_at) VALUES (?,?,?,?,?)', floorId, 'report', a?.id ?? null, text, now());
     engine.emit(floorId, 'message', { id: Number(r.lastInsertRowid), role: 'report', agentId: a?.id ?? null, text, createdAt: now() }, { chat: true, ownerOnly: true });
   }
-  const say = (floorId, text, project) => { const a = lawyerOf(floorId); const f = get(db, 'SELECT * FROM floors WHERE id=?', floorId); if (a && f) try { engine.talk(floorId, a, engine.bossOf(f), text, { kind: 'chat', project }); } catch { /* talk is a nicety */ } };
+  const say = (floorId, text, project) => { const a = lawyerOf(floorId); const f = get(db, 'SELECT * FROM floors WHERE id=?', floorId); if (a && f) try { engine.talk(floorId, a, engine.bossOf(f), text, { kind: 'handoff', project }); } catch { /* talk is a nicety */ } };
   const ping = (floorId) => engine.emit(floorId, 'legal', {}, { ownerOnly: true, persist: false });
 
   /** Drafts or redrafts one project's pages when what's true of it has changed. Returns the doc row. */

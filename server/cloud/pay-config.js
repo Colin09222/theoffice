@@ -6,3 +6,6 @@ export function paySettings(env = process.env) {
 }
 /** Both settings are needed: without the webhook secret a lapsed subscription would never lose access, so payments stay off. */
 export const payReady = (cfg) => !!keyMode(cfg.stripeSecretKey) && !!cfg.stripeWebhookSecret;
+
+// The payment processor's name, for pages that must say truthfully who takes the money (server/legal.js).
+export const PAY_PROCESSOR = 'Stripe';
