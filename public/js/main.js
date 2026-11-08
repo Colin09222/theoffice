@@ -4,6 +4,13 @@ import { BASE, refreshMe, clear, toast, $ } from './dom.js';
 import { showLobby, hideLobby } from './lobby-ui.js';
 import { wireSounds } from './sfx.js';
 
+// A direct link to a floor names every module the floor page needs here, so a slow line fetches them together rather than discovering them one import at a time.
+const FLOOR_MODULES = ['floor-ui', 'office-scene', 'character', 'cast', 'looks', 'models', 'toon', 'layouts', 'offices', 'textures', 'life', 'labels', 'cutaway', 'framing', 'markdown', 'customise', 'builder', 'numbers-ui', 'claim', 'floor-chrome', 'portrait', 'floorcache', 'attach', 'party', 'business-ui', 'mail-ui', 'chat-ui', 'server-panel', 'pay-ui', 'legal-ui', 'launch-ui', 'setup-ui'];
+if (location.pathname.includes('/floor/')) {
+  const stamp = new URL(import.meta.url).search;
+  for (const m of FLOOR_MODULES) document.head.append(Object.assign(document.createElement('link'), { rel: 'modulepreload', href: new URL(`./${m}.js${stamp}`, import.meta.url).href }));
+}
+
 const ui = $('#ui');
 let current = null;
 
