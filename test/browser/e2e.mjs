@@ -179,14 +179,14 @@ async function run(label, opts, t, adminCode) {
   });
   await step(tag('purchase requests go to the building manager, with no way to pay from here'), async () => {
     await p.click('[data-tab=requests]');
-    await p.until('document.querySelector(".request") !== null', 'request card');
+    await p.until('document.querySelector(".request.pending") !== null', 'request card');
     await sleep(300);
     await shot('11-requests');
     const text = await p.ev('document.querySelector(".requests").textContent');
     if (!/With the building manager/.test(text) || !/can't spend money/.test(text)) throw new Error('wording');
     if (/domain/i.test(text.replace(/A domain name/g, ''))) throw new Error('promised a domain button that does not exist here');
-    await p.click('.request .btn:last-child');
-    await p.until('/Declined/.test(document.querySelector(".request").textContent)', 'declined');
+    await p.click('.request.pending .btn:last-child');  // the Lawyer's "Add a Lawyer" card can sit above the purchase
+    await p.until('/Declined/.test(document.querySelector(".requests").textContent)', 'declined');
   });
   let siteUrl = '';
   await step(tag('gallery opens a working published site inside the sandbox'), async () => {
