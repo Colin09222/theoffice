@@ -43,7 +43,17 @@ describe('what is true of a project', () => {
   test('regulated businesses are spotted', () => {
     for (const s of ['Lucky Star Casino', 'online sports betting tips', 'craft beer delivery', 'a vape shop', 'telehealth for skin', 'stock tips and crypto signals', 'a learning game for kids', 'counterfeit sneakers'])
       assert.ok(regulatedOf(s).length, s);
-    for (const s of ['a bakery in town', 'a frog who delivers mail', 'a band that plays gigs']) assert.equal(regulatedOf(s).length, 0, s);
+    for (const s of ['a bakery in town', 'a frog who delivers mail', 'a band that plays gigs', 'a collab workspace for bands', 'a lab working on robots']) assert.equal(regulatedOf(s).length, 0, s);
+  });
+  test('bloodwork and lab test sites count as health', () => {
+    for (const s of ['compare bloodwork prices', 'blood work near you', 'cheap blood tests', 'a blood-test price list', 'lab test prices', 'book your lab tests', 'lab work pricing', 'labwork costs'])
+      assert.ok(regulatedOf(s).some((r) => r.id === 'health'), s);
+  });
+  test('the draft says an app and a website', () => {
+    const says = (kind) => textOf(draftPages({ title: 'Tiny', kind, features: NONE, facts: {} }));
+    assert.ok(says('app').includes('Tiny is an app run by') && !says('app').includes('a app'));
+    assert.ok(says('site').includes('Tiny is a website run by'));
+    assert.ok(says('game').includes('Tiny is a game run by'));
   });
   test('risky copy and borrowed names are flagged', () => {
     const flags = reviewCopy({ name: 'Pokemon Pals', files: [{ path: 'index.html', content: '<h2>What our customers say</h2><p>Guaranteed results. Lose 10 lbs! Earn $5,000 a week.</p>' }] }).map((f) => f.id);

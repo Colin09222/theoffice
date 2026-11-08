@@ -75,7 +75,7 @@ export function analyze(src) {
 const REGULATED = [
   ['gambling', 'Gambling or betting', /\b(gambl\w*|casino\w*|betting|bets?\b|sportsbook|wager\w*|lotter(y|ies)|poker|slot machines?|real[- ]money (games?|prizes?))\b/i],
   ['alcohol-tobacco', 'Alcohol, tobacco or vaping', /\b(alcohol\w*|liquor|spirits shop|wine (shop|store|club|delivery)|brewery|beer (shop|delivery)|vap(e|es|ing)|tobacco|cigar\w*|cigarettes?|e-?liquid|cannabis|cbd|thc)\b/i],
-  ['health', 'Health or medical', /\b(medical|medicine|clinic\w*|doctors?|diagnos\w*|treatments?|therap(y|ies|ist)|prescriptions?|pharmac\w*|telehealth|supplements?|dental|dentist\w*|nutritionist|mental health|symptoms?|weight[- ]loss)\b/i],
+  ['health', 'Health or medical', /\b(medical|medicine|clinic\w*|doctors?|diagnos\w*|treatments?|therap(y|ies|ist)|prescriptions?|pharmac\w*|telehealth|supplements?|dental|dentist\w*|nutritionist|mental health|symptoms?|weight[- ]loss|blood[- ]?(work|tests?|testing)|lab[- ]?(work|tests?|testing))\b/i],
   ['finance', 'Financial advice or investing', /\b(invest\w*|stock tips?|stocks|trading signals?|forex|crypto\w*|bitcoin|financial advi\w*|loans?|lending|credit repair|insurance|tax advice|portfolio management)\b/i],
   ['children', 'Children\'s data', /\b(for kids|kids'?|children'?s?|under[- ]13|toddlers?|preschool\w*|pupils?|schoolchildren|parents? of young)\b/i],
   ['illegal', 'Something that may be illegal', /\b(counterfeit|fake (ids?|passports?|documents?)|replica designer|drugs? (shop|delivery|for sale)|firearms?|guns? for sale|ammunition|explosives?|hacking services?|stolen|piracy|torrent)\b/i],
@@ -127,7 +127,7 @@ export function draftPages({ title, kind, features: ft, facts: given = {} }) {
   const thing = { game: 'game', app: 'app', site: 'website' }[kind] || 'website';
   const userContent = ft.forms || ft.uploads || ft.scores || ft.chat || ft.saves;
   const terms = { title: PAGE_TITLES.terms, sections: [
-    { h: 'Who we are', p: [`${name} is a ${thing} run by ${who}, based in ${where}. You can reach us at ${contact}.`, `By using ${name} you agree to these terms. If you don't agree, please don't use it.`] },
+    { h: 'Who we are', p: [`${name} is ${/^[aeiou]/i.test(thing) ? 'an' : 'a'} ${thing} run by ${who}, based in ${where}. You can reach us at ${contact}.`, `By using ${name} you agree to these terms. If you don't agree, please don't use it.`] },
     { h: 'Using it', p: ['Use it for lawful purposes only. Don\'t try to break it, overload it, get into parts that aren\'t meant for you, or use it to harm anyone.', 'We may stop or limit access for anyone who breaks these terms.'] },
   ] };
   if (ft.accounts) terms.sections.push({ h: 'Your account', p: ['Keep your password to yourself; you are responsible for what happens under your account.', `You can ask us to close your account at any time by writing to ${contact}. We may close accounts that break these terms.`] });
