@@ -458,7 +458,7 @@ export class ModelCharacter {
     };
     this.torso = B.chest; this.head = B.head;
     // Each limb remembers its bone lengths in model units, and the joint after it even where the rig has no such child (the foot hangs off the root).
-    model.updateMatrixWorld(true);
+    this.group.updateMatrixWorld(true);  // the group's scale is part of what is measured below
     const bindW = (b) => worldP(b, new THREE.Vector3());
     const limb = (upper, lower, end) => {
       const q = worldQ(upper, new THREE.Quaternion()), qL = worldQ(lower, new THREE.Quaternion());
