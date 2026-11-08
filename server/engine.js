@@ -384,6 +384,8 @@ export class Engine {
     this.bossRead.set(floorId, newestBoss);
     // The boss's answer to the manager's own question is their word too, for the work-mode goal they picked.
     ctx.bossAnswered = !ctx.bossTurn && !!meta.answered;
+    // Woken to ask the boss for a work-mode goal: that turn asks, and hands out no work.
+    ctx.goalAsk = !ctx.bossTurn && !!meta.goalNeeded;
     // A job the team picked for itself in a work mode. A turn that reads something new from the boss is the boss's, whatever else is going on.
     ctx.autonomous = !ctx.bossTurn && !!this.modes?.running(floorId);
     meta.autonomous = ctx.autonomous;

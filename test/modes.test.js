@@ -280,8 +280,10 @@ describe('a clear goal first', () => {
       assert.equal(get(t.db, 'SELECT COUNT(*) n FROM tasks WHERE floor_id=?', f.id).n, 0, 'and no work handed out');
       let plan = (await floorState(c)).workPlan;
       assert.equal(plan.needsGoal, true); assert.equal(plan.goalAsked, true);
-      // The manager can't make up the first goal on its own turn: it comes from the boss.
+      // The manager can't make up the first goal on its own turn: it comes from the boss. And the turn that asks hands out no work.
       assert.match(await backlog(t, f, { goal: 'Something I made up' }), /comes from the boss/);
+      const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", f.id);
+      assert.match(await t.app.engine.tools.exec({ ...t.app.engine.toolCtx(f, mgr, null, ['assign_task']), bossTurn: false, goalAsk: true }, 'assign_task', JSON.stringify({ to: 'writer', title: 'Something', brief: 'Do it' })), /until the boss has given or picked a goal/);
       assert.equal((await floorState(c)).workPlan.goal, '');
       // The boss picks the second one in the chat, and the team starts on it.
       assert.equal((await c.post(`/api/floors/${c.slug}/chat`, { text: "Let's go with 2" })).status, 202);
