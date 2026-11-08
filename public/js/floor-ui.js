@@ -568,7 +568,7 @@ class FloorPage {
     if (!isPhone()) { clear(this.peekEl); return; }
     const status = this.statusLine(), last = this.latestLine();
     const chips = this.owner ? (this.state.business?.active && this.state.business.chips?.length || 0) : 0;
-    const plain = last?.text.replace(/[*_`#>\[\]]/g, '').replace(/\s+/g, ' ').trim();
+    const plain = last?.text.replace(/[*_\x60#>\[\]]/g, '').replace(/\s+/g, ' ').trim();
     this.peekEl.replaceChildren(
       h('div.rest-status', {}, h('i.rest-dot'), h('b', {}, 'Right now'), status.pct === null ? '' : h('small', {}, `${status.pct}% done`)),
       h('p.rest-line', {}, status.line),
