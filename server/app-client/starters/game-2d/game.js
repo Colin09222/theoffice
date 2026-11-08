@@ -90,7 +90,7 @@ const game = {
     });
   },
   start() {
-    if (world) end(false);
+    if (world) this.quit();
     world = { wave: 0, queue: [], spawnIn: 0, enemies: [], shots: [], eshots: [], gems: [], gemsGot: 0, meter: 0, combo: 0, comboT: 0, banner: null, picking: false,
       player: { x: W() / 2, y: H() / 2, r: 14, hp: 3, maxHp: 3, speed: 230, fireEvery: 0.32, fireT: 0, shots: 1, pierce: 0, magnet: 90, inv: 0, dashT: 0, dashCd: 0, img: sprite('player', W() / 2, H() / 2) } };
     startWave();

@@ -182,6 +182,7 @@ function settingsScreen(back) {
 }
 function applyTouch() { const show = settings.touch === 'on' || (settings.touch === 'auto' && (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window)); ui.classList.toggle('kit-has-touch', show); }
 async function startGame() {
+  if (state.scene === 'play') return;
   screen(null); state.scene = 'play'; document.body.dataset.scene = 'play'; state.score = 0; state.t = 0;
   audio.unlock(); audio.music(settings.music);
   await game.start?.();
@@ -255,7 +256,7 @@ export async function run(g) {
   const boot = screen('boot', el('h1', {}, state.title), el('div', { class: 'kit-bar' }, el('i')));
   try { await g.boot?.((p) => { const i = boot.querySelector('.kit-bar i'); if (i) i.style.width = `${Math.round(p * 100)}%`; }); } catch (e) { console.error(e); }
   const saved = await cloud.load('best', null); state.best = saved?.best || 0;
-  window.officeGame = { version: 1, state: () => ({ scene: state.scene, score: state.score, best: state.best, t: Math.round(state.t * 10) / 10, frames: state.frames, fps: state.fps, device: input.device, inputs: input.events, cloud: cloud.live ? 'live' : cloud.office ? cloud.office.mode : 'none', ...(g.state?.() || {}) }), start: startGame, pause: () => pause(true), resume: () => pause(false), menu };
+  window.officeGame = { version: 1, state: () => ({ scene: state.scene, score: state.score, best: state.best, t: Math.round(state.t * 10) / 10, frames: state.frames, fps: state.fps, device: input.device, inputs: input.events, cloud: cloud.live ? 'live' : cloud.office ? cloud.office.mode : 'none', ...(g.state?.() || {}) }), start: startGame, pause: () => pause(true), resume: () => pause(false), menu, forceOver: () => gameOver({}) };
   menu();
   requestAnimationFrame(frame);
 }
