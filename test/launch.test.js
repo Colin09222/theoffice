@@ -55,6 +55,15 @@ describe('the pre-publish checklist', () => {
   });
   const BROKEN = { 'a CDN script': '<script src="https://cdn.example.com/x.js"></script>', 'an off-site image': '<img alt="x" src="https://evil.example/x.png">', 'a form posting away': '<form action="https://evil.example/post"></form>', 'a missing local file': '<img alt="x" src="images/nope.png">', 'card fields': '<input name="cardnumber">', 'a live key': '<script>const k="sk_live_abcdefgh12345"</script>', 'a direct Stripe link': '<a href="https://buy.stripe.com/attacker">Buy</a>', 'a PayPal link': '<a href="https://paypal.me/attacker">Tip</a>' };
   for (const [name, bit] of Object.entries(BROKEN)) test(`refuses ${name}`, () => assert.ok(check(GOOD.replace('</body>', `${bit}</body>`), { paymentLink: true }).errors.length > 0, bit));
+  test('a form has to send somewhere: Office.submitForm, never the visitor\'s email app', () => {
+    const form = '<form id="f"><input name="email" type="email"><button>Sign up</button></form>';
+    assert.match(check(GOOD.replace('</body>', `${form}</body>`), { paymentLink: true }).warnings.join(), /reaches nobody/);
+    const wired = check(GOOD.replace('</body>', `${form}<script src="app.js"></script></body>`), { paymentLink: true });
+    assert.match(wired.warnings.join(), /reaches nobody/, 'a script that never sends it is no better');
+    const sent = checkSite({ files: [{ path: 'index.html', data: GOOD.replace('</body>', `${form}<script src="app.js"></script></body>`) }, { path: 'app.js', data: 'f.onsubmit = (e) => { e.preventDefault(); Office.submitForm("waitlist", {}); };' }, { path: 'images/hero.png', data: TINY }], paymentLink: true });
+    assert.doesNotMatch(sent.warnings.join(), /reaches nobody/);
+    assert.match(check(GOOD.replace('</body>', '<form action="mailto:me@example.org"><button>Go</button></form></body>'), { paymentLink: true }).errors.join(), /email app/);
+  });
   test('warns about missing metadata, and about a pay button with no link', () => {
     const r = checkSite({ files: [{ path: 'index.html', data: '<a href="_office/pay">Buy</a>' }] });
     assert.ok(r.warnings.length >= 5); assert.match(r.warnings.join(), /Payment Link/); assert.match(formatReport(r), /SHOULD FIX/);
