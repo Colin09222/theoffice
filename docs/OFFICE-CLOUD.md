@@ -67,6 +67,12 @@ Measured: 300 live players in 19 full rooms, each setting 1 KB of state and send
 `test/cloud-admin.test.js` (the CLI), and `node test/browser/cloud.mjs`: the starter game published for real in Chrome, saving, logging in,
 posting a score, and two tabs in one room.
 
+## Deploy
+Nothing new to set: no env vars, no container, no Caddy change. The tables are created on start. After deploying, check with
+`curl -s https://<label>.middistance.com/_office/cloud/ping` (`{"ok":true,"version":1}`) and open a published game in two tabs.
+Fixed on the way: `public/css/building.css` styled every `.stack`, which broke the Visitors, Sign-ups and Payment dialogs on main;
+it is now scoped to the lobby's `section.stack`.
+
 ## Not done
 No email (so no password reset or verification), no server-side code or per-collection rules beyond private/public and ownership,
 and rooms keep no state once empty. The container's `mem_limit` is still 700m in `docker-compose.yml`; the backend fits within it.
