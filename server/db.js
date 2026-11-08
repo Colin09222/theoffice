@@ -2,6 +2,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { CLOUD_SCHEMA } from './cloud/schema.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -166,6 +167,7 @@ export function openDb(dataDir) {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 4000; PRAGMA foreign_keys = OFF;');
   db.exec(SCHEMA);
+  db.exec(CLOUD_SCHEMA);
   for (const [table, cols] of Object.entries(ADDED)) {
     const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
     for (const [name, def] of Object.entries(cols)) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);

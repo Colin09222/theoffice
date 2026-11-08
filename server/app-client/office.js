@@ -100,5 +100,7 @@
       incr: function (key, by) { return call('POST', 'shared/' + encodeURIComponent(key) + '/incr', { by: by === undefined ? 1 : by }).then(function (r) { return r.value; }); },
     },
   };
+  // office.js (Office Cloud) may have loaded first: keep its connect().
+  if (window.Office && window.Office.connect) { Office.connect = window.Office.connect; Office.Error = window.Office.Error; }
   window.Office = Office;
 })();

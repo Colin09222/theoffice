@@ -21,6 +21,7 @@ import { createManagedClient } from './sessions.js';
 import { createMockSessions } from './mock-sessions.js';
 import { appLabel, appOrigin, appHostLabel, lookupLabel, appHeaders, previewCookie, previewCookieName } from './apps.js';
 import { handleData, DataError, DATA_LIMITS, clearProjectData } from './appdata.js';
+import { installCloud, SDK_JS, API_PREFIX } from './cloud/index.js';
 import { recordVisit, projectStats, formEntries, formsCsv, formCount } from './launch.js';
 import { DomainRefused } from './domains.js';
 import { installOrders } from './orders.js';
@@ -683,6 +684,9 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // Their timers run with the engine's: started by whoever starts the engine, stopped on close.
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
+  // Office Cloud: the backend each published project gets on its own origin. See docs/OFFICE-CLOUD.md.
+  const cloud = installCloud({ ...ext, ipOf, secret });
+  extensions.push(cloud);
 
   // ---- published sites ----
   const docCache = new Map();
@@ -775,9 +779,12 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   const visit = (req, f, pr, path) => { try { recordVisit(db, { floorId: f.id, project: pr.slug, path: `/${path}`, referer: req.headers.referer, ownHost: req.headers.host, ua: req.headers['user-agent'], ip: ipOf(req), secret, now: now() }); } catch (e) { log('warn', 'visit', { err: scrub(e?.message, cfg) }); } };
   // Paths the server answers itself on every project: the client library and the vendored Three.js. They win over any published file of that name.
   function sharedAsset(segs) {
-    if (segs[0] !== '_office' || segs.length !== 2) return null;
-    if (segs[1] === 'client.js') return { type: 'text/javascript; charset=utf-8', body: clientLib };
-    if (segs[1] === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
+    // At any depth, so a page in a folder can use a relative path too.
+    const [dir, name] = segs.slice(-2);
+    if (dir !== '_office' || segs.length < 2) return null;
+    if (name === 'client.js') return { type: 'text/javascript; charset=utf-8', body: clientLib };
+    if (name === 'office.js') return { type: 'text/javascript; charset=utf-8', body: SDK_JS };
+    if (name === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
     return null;
   }
 
@@ -818,6 +825,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     const welcome = !pr.private && (onOwnDomain || !!pr.indexable);
     if (welcome) delete HEAD['x-robots-tag'];
     if (segs[0] === '_data') return serveData(req, res, f, pr, label, rawUrl, HEAD);
+    if (segs[0] === '_office' && segs[1] === 'cloud') return cloud.serve(req, res, { f, pr, label, segs: segs.slice(2), rawUrl, HEAD });
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...HEAD, allow: 'GET, HEAD' }); return res.end(); }
     limit('publicSite', ipOf(req));
     if (segs[0] === '_office' && segs[1] === 'pay' && segs.length === 2) return servePay(res, pr, HEAD);
@@ -931,6 +939,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (!pathname.startsWith(`${BASE}/`)) return send(res, 404, 'Not found', { 'content-type': 'text/plain; charset=utf-8' });
       const rest = pathname.slice(BASE.length);
       if (rest === '/robots.txt') return send(res, 200, 'User-agent: *\nDisallow: /\n', { 'content-type': 'text/plain; charset=utf-8' });
+      if (rest === '/sdk/office.js' && (req.method === 'GET' || req.method === 'HEAD')) { limit('read', ip); return send(res, 200, req.method === 'HEAD' ? undefined : SDK_JS, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }); }
       if (rest.startsWith('/f/')) {
         limit('publicSite', ip);
         if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...BASE_HEADERS, 'content-security-policy': SANDBOX_CSP, allow: 'GET, HEAD' }); return res.end(); }
@@ -975,7 +984,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   // Node's requestTimeout is one number for the whole server, so it is set to the upload's and every other request is
   // held to the shorter limit here, the way Node does it: a 408 if nothing has been written yet, then the line is cut.
   const UPLOAD_URL = new RegExp(`^${BASE}/api/floors/[^/]+/attachments$`);
-  const isUpload = (req) => req.method === 'POST' && UPLOAD_URL.test(req.url.split('?')[0]);
+  const isUpload = (req) => req.method === 'POST' && (UPLOAD_URL.test(req.url.split('?')[0]) || req.url.split('?')[0] === `${API_PREFIX}files`);
   const holdTo = (req, ms) => {
     const timer = setTimeout(() => {
       if (req.complete) return;
@@ -990,6 +999,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (!isUpload(req)) holdTo(req, cfg.requestTimeoutMs);
     handle(req, res).catch(() => { try { res.destroy(); } catch { /* gone */ } });
   });
+  // Multiplayer rooms: WebSockets on a project's own origin. Everything else that asks to upgrade is refused there.
+  server.on('upgrade', (req, socket, head) => cloud.upgrade(req, socket, head));
   server.requestTimeout = Math.max(cfg.requestTimeoutMs, cfg.uploadTimeoutMs); server.headersTimeout = 15000; server.keepAliveTimeout = 5000; server.maxConnections = 1200;
   return {
     server, engine, bus, rates,
