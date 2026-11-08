@@ -1,0 +1,20 @@
+/* The boss's Servers tab (server-panel.js). Phone first: everything stacks and wraps, and nothing is wider than the screen. */
+.servers { display: flex; flex-direction: column; gap: 10px; }
+.server { display: flex; flex-direction: column; gap: 6px; }
+.server-url { word-break: break-all; font-size: 14px; }
+.server-status { flex: none; padding: 2px 9px; border-radius: 999px; font-size: 13px; font-weight: 700; color: var(--ink); background: var(--paper-2); }
+.server-status.on { background: #c9eccb; }
+.server-status.idle { background: #f4ecc6; }
+.server-status.busy { background: #cfe2ff; }
+.server-status.bad { background: #ffd5cc; }
+.server-actions { flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.server-actions .btn { min-height: 40px; }
+.server-more { border-top: 1px solid var(--line); padding-top: 6px; }
+.server-more summary { cursor: pointer; font-weight: 700; padding: 5px 0; min-height: 28px; }
+.server-log { max-height: 240px; overflow: auto; padding: 8px; margin: 4px 0 8px; border-radius: 8px; background: var(--paper-2); font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+.server-jobs, .server-env { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.server-jobs li, .server-env li { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.server-jobs small { display: block; color: var(--ink-2); }
+.server-env code { word-break: break-all; font-size: 13px; }
+.server-env-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.server-env-form input { flex: 1 1 140px; min-width: 0; min-height: 40px; }

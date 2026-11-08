@@ -3,6 +3,7 @@ import { writeFile, writeBinaryFile, readFile, listFiles, publishSnapshot, Works
 import { safeFetch, FetchBlocked } from './safefetch.js';
 import { get, all, run } from './db.js';
 import { DomainRefused, domainsConfigured } from './domains.js';
+import { serversOn } from './runner.js';
 import { ProviderError, plainProviderText, scrub } from './llm.js';
 import { sniffImage, MAX_IMAGE_BYTES } from './media.js';
 import { imageCheck } from './attachments.js';

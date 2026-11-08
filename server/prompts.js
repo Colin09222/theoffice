@@ -1,5 +1,6 @@
 // System prompts. They hold no keys, tokens or infrastructure details, so there is nothing here for an injected page to steal.
 import { domainsConfigured } from './domains.js';
+import { serversOn } from './runner.js';
 import { companyBrief } from './brief.js';
 import { MAIL_SAFETY } from './mail-tools.js';
 import { LAYOUTS, TONES, VIBES } from '../public/js/looks.js';
@@ -78,15 +79,23 @@ Launching it as a real product:
 - Metadata on every site: a real <title>, <meta name="description">, viewport, <html lang>, og:title, og:description, og:image and twitter:card, and <link rel="icon">.
 - Waitlists and contact forms: await Office.submitForm('waitlist', {email, name, message}) stores it for the boss, who reads them on the project card. A contact form (named contact, or with a message field) also lands in the company's email inbox, so it can be answered from there. Visitors can't read them back. Show a clear thank-you, handle a rejected promise by showing its message, and add a hidden input named website as a spam trap, passing its value along. Never a mailto link for a form.${apps ? '' : ' Forms need the project\'s own origin, which this building does not have switched on, so tell the boss they won\'t store anything yet.'}
 - Taking money: <a href="_office/pay">Buy</a>. It goes to the boss's Stripe Payment Link. Mention it only if the boss has set one; the Office note or the state message tells you.
-- Visitor counts are built in. Add no analytics script.`;
+- Visitor counts are built in. Add no analytics script.${serversOn(cfg) ? SERVER_DOCS : ''}`;
 }
+const SERVER_DOCS = `
+
+Server slots (rare):
+- Office Cloud is the answer for almost everything, with no server code: accounts, a database, saves, office.ai, office.fetch and office.scrape. Use it unless the idea really can't work without its own server.
+- A server is only for what Office Cloud can't do: a job on a schedule, work that runs for a long time, a scraper that needs a real browser, sockets. The building has only 4, and the boss approves each with one tap.
+- Code goes in projects/<slug>/server/ (server_starter makes a working Node one; read its STARTER.md). deploy_server asks the boss and builds; server_status, server_logs and server_restart look after it. A build error comes back to you to fix.
+- It lives at https://api--<label>.middistance.com. A page finds it with await office.server.url(), and calls it with office.server.fetch('/path'). The address is a different origin from the page, so the server must answer CORS for the origins in process.env.OFFICE_SITE_ORIGINS: the starter already does.
+- Server code reaches this project's office.ai, office.fetch and data with the token in its environment, through the starter's office-cloud.js. Never ask the boss for the building's keys: apps never get those. The boss sets a server's own environment settings on the Servers tab.`;
 
 // The manager's view of the three lanes. What each person does is in laneBrief, which goes in with their task.
 function lanePlaybooks(cfg) {
   const apps = !!cfg.appsBaseDomain, computer = !!cfg.computerEnabled;
   const score = apps ? 'a saved high score on a shared leaderboard' : 'a best score for the session only, because saved data is not switched on in this building (tell the boss)';
   const page = apps ? 'one landing page with a waitlist form' : 'one landing page with no form, because forms are not switched on in this building (tell the boss)';
-  return `${apps ? 'Every published game and site has Office Cloud built in, with no server code: saves, accounts with log-in, leaderboards, multiplayer rooms, a database and uploads, and AI features and reading public web pages too. So yes to logins, shared high scores, players together, guestbooks, photo uploads, AI replies and pulling in data from public sites: say which in the Builder\'s brief. It sends no email, so never promise password resets or emails.\n\n' : ''}The three lanes. Nearly every job here is a game, a website or a small business. Set lane on every assign_task in the plan and use after_previous to keep each step behind the one before. Each person gets their own part of the playbook with their task, so a brief only needs what is special about this job: the idea, what the boss said, what you decided. Anything else the boss wants is still fine: use your judgment.
+  return `${serversOn(cfg) ? 'If an idea truly needs what Office Cloud can\'t do (a job on a schedule, long-running work, a scraper with a real browser, sockets), ask the Builder to give it a server. It takes one of the building\'s 4 slots and needs the boss\'s tap, so most projects should not.\n\n' : ''}${apps ? 'Every published game and site has Office Cloud built in, with no server code: saves, accounts with log-in, leaderboards, multiplayer rooms, a database and uploads, and AI features and reading public web pages too. So yes to logins, shared high scores, players together, guestbooks, photo uploads, AI replies and pulling in data from public sites: say which in the Builder\'s brief. It sends no email, so never promise password resets or emails.\n\n' : ''}The three lanes. Nearly every job here is a game, a website or a small business. Set lane on every assign_task in the plan and use after_previous to keep each step behind the one before. Each person gets their own part of the playbook with their task, so a brief only needs what is special about this job: the idea, what the boss said, what you decided. Anything else the boss wants is still fine: use your judgment.
 
 GAME
 1. Concept: choose it yourself. One small original idea with one mechanic and one twist, fun within ten seconds. Three ideas, one line each, only if the boss asks what you could make. Never a copy of a named game: if they name one, keep the kind of fun and make the theme, look, name and twist your own, and say so in a few words.
@@ -222,7 +231,12 @@ ${roster.person || ''}${companyBrief(floor)}${SAFETY}`;
 const MAKES = new Set(['builder', 'designer', 'illustrator', 'tester']);
 // Their part of the playbook describes making the thing, and a change to something live is a different job.
 const changeBrief = (role, cfg) => `This project is already live, and the boss wants a change to it, not a new one. Look at what is there first. Change only what your brief asks and leave the rest exactly as it is: no rewrite, no redesign, no new stack, whatever else you might do differently.${role === 'builder' ? ` ${cfg.computerEnabled ? 'Check the change once in a real browser. ' : ''}Then publish it again with the same title and kind, from the same folder if it has a build. This is the whole job, so aim for about 8 steps.` : ' Do not publish.'} If the change needs something bigger than this, do what you can and say what is left.`;
+const SERVER_TESTER = '\n\nIf this project has a deployed server (server_status tells you), check it too: server_check its /health, then one real flow through it end to end (a request that does real work, then a read that shows it happened), and read server_logs. Report what you sent and what came back.';
 export function taskGuide(task, role, cfg = {}) {
+  if (role === 'tester' && serversOn(cfg)) return taskGuideBase(task, role, cfg) + SERVER_TESTER;
+  return taskGuideBase(task, role, cfg);
+}
+function taskGuideBase(task, role, cfg = {}) {
   if (task?.live && role !== 'tester') return changeBrief(role, cfg);
   return laneBrief(task?.lane, role, cfg);
 }

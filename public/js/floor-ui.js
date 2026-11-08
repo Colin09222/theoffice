@@ -16,6 +16,7 @@ import { journeyBar, chipsRow, startButton, renderBusiness, businessActive, busi
 import { handOver, takeHandoff } from './handoff.js';
 import { aheadState, isParked, lift, park, peekAhead, unpark } from './floorcache.js';
 import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } from './mail-ui.js';
+import { renderServers, renderServerRequests, serverTab, serversPending } from './server-panel.js';
 import { launchFlow, makerCard } from './launch-ui.js';
 import { recoveryBox } from './dom.js';
 import * as THREE from '../vendor/three/three.module.min.js';
@@ -386,10 +387,11 @@ class FloorPage {
     if (businessActive(this)) tabs.push(['business', 'Business']);
     tabs.push(['talk', 'Talk'], ['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
     if (this.owner) {
-      const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length + mailPending(this);
+      const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + serversPending(this) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length + mailPending(this);
       tabs.push(mailTab(this));  // email: the boss's own Inbox (mail-ui.js)
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
       tabs.push(['orders', 'Orders']);  // floors-plus: standing orders, after every existing tab
+      const srv = serverTab(this); if (srv) tabs.push(srv);  // server slots (server-panel.js)
     }
     if (isPhone()) tabs.push(['about', 'About']);  // on a phone the company card lives in the sheet
     return tabs;
@@ -423,6 +425,7 @@ class FloorPage {
     if (this.tab === 'orders') this.renderOrders();
     if (this.tab === 'business') renderBusiness(this);
     if (this.tab === 'inbox') renderInbox(this);
+    if (this.tab === 'servers') renderServers(this);
   }
   renderBanner() {
     const f = this.state.floor;
@@ -840,7 +843,8 @@ class FloorPage {
     const items = this.state.purchases || [];
     this.renderDomains(list);
     renderMailRequests(this, list);  // email to someone new, waiting for the boss's OK
-    if (!items.length && !(this.state.domains || []).length && !(this.state.ios || []).length && !mailPending(this)) list.append(h('p.empty', {}, this.state.domainsOn ? 'No requests. Staff can ask, but only you can say yes.' : 'No requests. Staff can ask for things here, but they can\'t buy anything.'));
+    renderServerRequests(this, list);  // a server slot, waiting for the boss's OK
+    if (!items.length && !(this.state.domains || []).length && !(this.state.ios || []).length && !mailPending(this) && !serversPending(this)) list.append(h('p.empty', {}, this.state.domainsOn ? 'No requests. Staff can ask, but only you can say yes.' : 'No requests. Staff can ask for things here, but they can\'t buy anything.'));
     for (const p of items) {
       const setStatus = async (status) => { try { await api(`/floors/${this.slug}/purchases/${p.id}`, { method: 'POST', body: { status } }); p.status = status; sfx('stamp'); this.renderTabs(); this.renderBody(); } catch (e) { toast(e.message, 'bad'); } };
       list.append(h(`article.card.request.${p.status}`, {},

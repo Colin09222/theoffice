@@ -435,7 +435,7 @@ export function installCloud(ext) {
 
   let flushTimer = null, sweepTimer = null;
   return {
-    store, rooms, powers, serve, upgrade,
+    store, rooms, powers, serve, serveServer, upgrade,
     start() {
       flushTimer = setInterval(flush, 60000); flushTimer.unref?.();
       sweepTimer = setInterval(() => { try { store.sweep(); powers.sweep(); } catch { /* next time */ } }, 3600000); sweepTimer.unref?.();

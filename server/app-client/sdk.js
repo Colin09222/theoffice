@@ -395,7 +395,7 @@
       /** A fetch to a path on that server. Rejects with code no_server when there isn't one. */
       fetch: function (path, opts) {
         return server.url().then(function (u) {
-          if (!u) throw new OfficeError('no_server', 'This project has no server running.');
+          if (!u) throw OfficeError('no_server', 'This project has no server running.');
           return fetch(u + (String(path).charAt(0) === '/' ? '' : '/') + path, opts);
         });
       },
