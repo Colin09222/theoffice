@@ -82,7 +82,7 @@ for (const size of SIZES) {
       await sleep(500);
     });
     await see('recovery code', async () => {
-      const code = await p.ev('(() => { const e = document.querySelector("[data-recovery]"); const r = e.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { shown: r.top >= 0 && r.bottom <= innerHeight, hit: !!hit && (e.contains(hit) || e === hit || !!hit.closest('.recovery, .setup-keys')) }; })()');
+      const code = await p.ev('(() => { const e = document.querySelector("[data-recovery]"); const r = e.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { shown: r.top >= 0 && r.bottom <= innerHeight, hit: !!hit && (e.contains(hit) || e === hit || !!hit.closest(".recovery, .setup-keys")) }; })()');
       if (!code.shown || !code.hit) throw new Error(`the recovery code is not on the screen ${JSON.stringify(code)}`);
     });
     await see('what are we making', async () => { await p.click('[data-setup-saved]'); await p.until('document.querySelectorAll("[data-setup-flow] [data-type]").length === 4', 'the four kinds', 8000); await sleep(300); });
