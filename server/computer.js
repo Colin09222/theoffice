@@ -274,7 +274,7 @@ export class Computer {
       charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Map(), newestEvent: 0, listFrom: 0, steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), wrapUpAt: e.cfg.sessionWrapUp && (task.lane || e.isLive(floor.id, task.project)) ? (e.isLive(floor.id, task.project) && agent.role !== 'tester' ? WRAP_UP.change : WRAP_UP[agent.role] || WRAP_UP.default) * (1 + (task.revisions || 0)) : 0, warned: false, limit: '', lastText: '', lastFeed: '',
       pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
       publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
-      ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'ask_colleague', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design')]), signal },
+      ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'ask_colleague', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design' || n === 'deploy_server' || n.startsWith('server_'))]), signal },
     };
   }
 
@@ -607,8 +607,20 @@ export class Computer {
     const e = this.engine;
     const name = computerToolName(ev.name);
     if (name === 'publish_project') { try { return this.declarePublish(st, ev.input || {}); } catch (err) { if (err instanceof WorkspaceError) return `Error: ${err.message}`; throw err; } }
+    if (name === 'deploy_server') { const problem = await this.bringBackSaved(st); if (problem) return `Error: ${problem}`; }
     const out = await e.tools.exec(st.ctx, name, JSON.stringify(ev.input ?? {}));
     return out && typeof out === 'object' ? out.text : out;
+  }
+  // deploy_server reads the floor's drive, and a computer's files only get there when saved, so the newest save comes back first. Nothing is published.
+  async bringBackSaved(st) {
+    const e = this.engine;
+    const task = get(e.db, 'SELECT session_baseline FROM tasks WHERE id=?', st.taskId);
+    await sleep(e.cfg.outputLagMs);
+    const file = (await this.client.listOutputs(st.id)).filter((f) => f.filename === 'project.tgz').sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+    if (!file) return 'nothing has been saved yet. Put the code in /workspace/project/server/, run bash /workspace/.office/save.sh, then call deploy_server again.';
+    if (file.size > MAX_ARCHIVE_BYTES) return `the saved project is over ${MAX_ARCHIVE_BYTES / 1048576} MB. Leave out large or generated files.`;
+    const free = await this.fileWork.acquire(st.floor.id, st.signal);
+    try { const r = await this.bringBack({ ...st, publish: [] }, file, task); return r.ok ? '' : r.problem; } finally { free(); }
   }
   // Files in a container can't be read from here until the turn ends, so publishing is recorded now and happens then.
   declarePublish(st, a) {

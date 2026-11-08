@@ -199,6 +199,11 @@ export const toolDefs = (names, cfg, role) => [...new Set(names)].filter((n) => 
 // On a computer the agent already has its own files, so these are its way to the office: the floor's other work, the guarded web, the boss and publishing.
 const COMPUTER_NAMES = { server_starter: 'server_starter', deploy_server: 'deploy_server', server_status: 'server_status', server_logs: 'server_logs', server_restart: 'server_restart', server_check: 'server_check', generate_image: 'generate_image', review_design: 'review_design', read_shared_file: 'read_file', list_shared_files: 'list_files', publish_project: 'publish_project', fetch_url: 'fetch_url', web_search: 'web_search', ask_boss: 'ask_boss', ask_colleague: 'ask_colleague', file_purchase_request: 'file_purchase_request' };
 export const computerToolName = (custom) => COMPUTER_NAMES[custom] || '';
+// A computer's files and the floor's drive are two places, so these two say where the code has to be.
+const COMPUTER_SERVER_WORDS = {
+  server_starter: 'On a computer it lands on the floor\'s shared drive, not in /workspace/project: read the files with read_shared_file (list_shared_files shows them) and write what you use into /workspace/project/server/.',
+  deploy_server: 'Your code must be in /workspace/project/server/ and saved first: run bash /workspace/.office/save.sh, then call this. The newest save is what gets built.',
+};
 export function COMPUTER_TOOL_DEFS(cfg, role) {
   const custom = (name, def, description) => ({ type: 'custom', name, description: description || def.function.description, input_schema: def.function.parameters });
   const out = [
@@ -212,7 +217,7 @@ export function COMPUTER_TOOL_DEFS(cfg, role) {
     custom('file_purchase_request', DEFS.file_purchase_request),
   ];
   if (cfg.webSearchKey) out.push(custom('web_search', DEFS.web_search));
-  if (serversOn(cfg) && role === 'builder') out.push(...SERVER_TOOLS.map((n) => custom(n, DEFS[n])));
+  if (serversOn(cfg) && role === 'builder') out.push(...SERVER_TOOLS.map((n) => custom(n, DEFS[n], COMPUTER_SERVER_WORDS[n] && `${DEFS[n].function.description} ${COMPUTER_SERVER_WORDS[n]}`)));
   if (serversOn(cfg) && role === 'tester') out.push(...['server_status', 'server_logs', 'server_check'].map((n) => custom(n, DEFS[n])));
   if (role !== 'tester') out.push(custom('publish_project', DEFS.publish_project, 'Mark your project to go live when your turn ends. Save with .office/save.sh after calling this. For a build, set directory to its output folder such as dist.'));
   return out;

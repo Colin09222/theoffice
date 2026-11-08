@@ -775,3 +775,30 @@ describe('a computer on a job the team picked for itself', () => {
     assert.match(brief, /picked this job itself/, 'the job says it is the team\'s own, after the brief');
   });
 });
+
+describe('a server from a computer', () => {
+  test('the server tools work on a computer, and deploy_server asks about the code the computer last saved', async () => {
+    const { fakeRunner } = await import('./fake-runner.js');
+    const fake = await fakeRunner();
+    const seen = {};
+    const code = [{ path: 'server/server.js', data: Buffer.from("require('http').createServer((q,s)=>s.end('ok')).listen(process.env.PORT)\n") }, { path: 'server/office.json', data: Buffer.from('{"start":"node server.js"}') }, { path: 'server/package.json', data: Buffer.from('{"name":"s"}') }, { path: 'index.html', data: Buffer.from('<!doctype html><title>x</title>') }];
+    const h = await start({ async onTurn(api) {
+      await api.step();
+      seen.early = await api.custom('deploy_server', { why: 'needs a job on a schedule' });
+      seen.status = await api.custom('server_status', {});
+      await api.save(code);
+      seen.deploy = await api.custom('deploy_server', { why: 'needs a job on a schedule' });
+      await api.message('Asked the boss for a server.');
+    } }, { appsBaseDomain: 'apps.example', appsScheme: 'https', runnerSocket: fake.socketPath, runnerTokenFile: fake.tokenFile, runnerTickMs: 60000 });
+    try {
+      const { id } = await go(h);
+      await h.settle(id);
+      assert.match(seen.early, /nothing has been saved/, 'it says to save first');
+      assert.doesNotMatch(seen.status, /no tool called/, 'the tool is there');
+      assert.match(seen.deploy, /boss taps yes/);
+      assert.equal(get(h.t.db, 'SELECT status FROM server_apps WHERE floor_id=? AND project=?', h.floor.id, 'game').status, 'awaiting_boss');
+      assert.ok(get(h.t.db, 'SELECT 1 x FROM files WHERE floor_id=? AND path=?', h.floor.id, 'projects/game/server/server.js'), 'the saved code came back for the build');
+      assert.equal(get(h.t.db, "SELECT COUNT(*) n FROM published_files WHERE floor_id=? AND project='game'", h.floor.id).n, 0, 'nothing went live');
+    } finally { await fake.close?.(); }
+  });
+});
