@@ -3,7 +3,6 @@
 // clone of the cached template. Anything that fails to load simply never appears, and the procedural stand-in stays.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { loadAddons } from './addons.js';
-import { popColor } from './toon.js';
 
 const BASE = `${location.pathname.startsWith('/theoffice') ? '/theoffice' : ''}/models/`;
 // The server stamps the version of the whole models folder here at start-up (server/statics.js), so these files can be cached for good.
@@ -27,7 +26,7 @@ async function fetchGLTF(path) {
 
 /** Kenney's furniture is exported unlit. Each part becomes a lit standard material named after its role, so pieces can be recoloured by role. */
 function litMaterial(src) {
-  const m = new THREE.MeshStandardMaterial({ color: popColor(src.color?.clone() || new THREE.Color('#cccccc')), roughness: 0.82, metalness: 0 });
+  const m = new THREE.MeshStandardMaterial({ color: src.color?.clone() || new THREE.Color('#cccccc'), roughness: 0.82, metalness: 0 });
   m.name = src.name;
   return m;
 }

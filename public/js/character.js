@@ -73,7 +73,7 @@ export class Character {
     this.headTop = this.creature.height * s;
     this.labelY = (this.creature.height + this.creature.labelClear) * s;
     this.fit = s;
-    this.ready = true;
+    this.ready = true; this.isModel = true;
   }
   /** Group height that puts the body on a seat whose cushion is `seatTop` high. Their feet swing free. */
   seatedY(seatTop) { return seatTop - (this.creature.bottom - 0.03) * this.fit; }

@@ -1,5 +1,6 @@
-// The cast. Everyone in the office is one of these: a soft, squishy, big-eyed little creature with a job prop, made entirely in code, so a
-// floor opens without waiting for a single model. This file is all there is to how the staff look and move: to change the cast, replace it.
+// The cast. Everyone in the office is Colon's bean (his own design): one smooth, glossy vinyl-toy body with two tiny black bead eyes, two stubby arms
+// ending in chunky sausage-finger hands, and two short legs on flat-soled feet. People differ by colour, hat, outfit and the thing they carry. All made
+// in code, so a floor opens without waiting for a single model. This file is all there is to how the staff look and move: to change the cast, replace it.
 // character.js is the interface the rooms drive, and portrait.js photographs whatever this builds.
 //
 // What a replacement has to provide:
@@ -7,83 +8,98 @@
 //   class Creature(spec, { detail }): .group, .height, .bottom, .labelClear, .mug/.phone/.paper (objects with .visible), .pose(dt, speed, b, ty, m), .celebrate(), .dispose()
 //   drawnFace(spec) -> an SVG for the lists, until the portrait comes back
 //
-// A person is ONE skinned mesh (one draw call): every part is baked into a single vertex-coloured geometry, rigidly bound to a bone.
+// A person is ONE skinned mesh (one draw call): every part is baked into a single vertex-coloured geometry bound to a bone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { PEOPLE_RAMP, outlineMaterial } from './toon.js';
 
 // ---------- who someone is ----------
 
-const VIVID = ['#ff8a1f', '#ffc91f', '#ff4f4f', '#ff4f9a', '#b95cf7', '#7a5cff', '#2f9bff', '#12c8e8', '#12d19a', '#5fd82b', '#a8e01f', '#ff6f6f'];
-const SHAPES = [
-  { w: 1.53, h: 1.93, power: 3.5, taper: 0.16, eyeGap: 0.29, eyeY: 0.29 },
-  { w: 1.78, h: 1.57, power: 4.3, eyeGap: 0.35, eyeY: 0.19 },
-  { w: 1.62, h: 1.82, power: 2.7, taper: -0.23, eyeGap: 0.29, eyeY: 0.25 },
-  { w: 1.79, h: 1.65, power: 2.5, lobe: 0.085, petals: 5, eyeGap: 0.32, eyeY: 0.22 },
-  { w: 1.75, h: 1.83, power: 3.3, taper: 0.14, eyeGap: 0.32, eyeY: 0.29 },
-  { w: 1.55, h: 2.03, power: 3.0, pinch: 0.13, lobe: 0.035, petals: 3, eyeGap: 0.29, eyeY: 0.32 },
-];
+/** The vinyl-toy range: each person gets one, for good. Colon's own pink comes first. */
+const VINYL = ['#ec1a86', '#ff5a5f', '#ff7a1a', '#ffae00', '#ffd21f', '#b6e11f', '#55d11f', '#12c46b', '#10c9a4', '#12c8e0', '#2aa8ff', '#2f6bff', '#5a55f2', '#8a4df4', '#c04bf0', '#f04fd0', '#ff7fb0', '#7cdb4a'];
 const hashOf = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
-const hsl = { h: 0, s: 0, l: 0 };
 const C = (hex) => new THREE.Color(hex);
-const mixHex = (a, b, t) => `#${C(a).lerp(C(b), t).getHexString()}`;
 const dim = (hex, f) => `#${C(hex).multiplyScalar(f).getHexString()}`;
-/** Bright enough to pop at room size, from a colour that may be anything at all (a navy suit, a black hoodie). */
-function vivid(hex) {
-  C(hex).getHSL(hsl);
-  const c = new THREE.Color().setHSL(hsl.h, Math.max(0.78, hsl.s), Math.min(0.6, Math.max(0.5, hsl.l + 0.08)));
-  return `#${c.getHexString()}`;
-}
-function bodyColour(look, h) {
-  const out = look.outfitColor || '#2f9bff';
-  C(out).getHSL(hsl);
-  // A colourful outfit picks the person's colour; a grey, black or white one leaves it to everything else about them.
-  let i = hsl.s > 0.22 ? nearestHue(hsl.h) : h % VIVID.length;
-  i = (i + ((h >> 5) % 3) - 1 + VIVID.length) % VIVID.length;
-  return VIVID[i];
-}
-function nearestHue(hue) {
-  let best = 0, gap = 2;
-  VIVID.forEach((c, i) => { C(c).getHSL(hsl); const d = Math.min(Math.abs(hsl.h - hue), 1 - Math.abs(hsl.h - hue)); if (d < gap) { gap = d; best = i; } });
-  return best;
-}
-
-/** Each job's two things: what they wear all day (visible at the desk) and what they carry around (put down when they sit). */
-export const JOBS = {
-  boss: { worn: 'crownlet', held: 'mug' }, manager: { worn: 'tie', held: 'clipboard' }, builder: { worn: 'headset', held: 'laptop' },
-  designer: { worn: 'beret', held: 'brush' }, tester: { worn: 'loupe', held: 'bug' }, lawyer: { worn: 'specs', held: 'briefcase' },
-  researcher: { worn: 'papers', held: 'book' }, writer: { worn: 'earpencil', held: 'notepad' }, analyst: { worn: 'visor', held: 'chart' },
-  marketer: { worn: 'starpin', held: 'megaphone' }, illustrator: { worn: 'splats', held: 'palette' },
-};
+const mixHex = (a, b, t) => `#${C(a).lerp(C(b), t).getHexString()}`;
+/** Body colour is the person; the suit picks a colour that stands apart from it, and the tie one that stands apart from the suit. Everything else is the same little fellow. */
+const SUITS = ['#1b2a57', '#3b3f47', '#5a1f2e', '#5a3820', '#8b9099', '#1e5737', '#b8955f', '#262a33', '#2c4f86', '#46307a'];
+const TIES = ['#e02a2a', '#f4b400', '#7a3df0', '#1a66e0', '#ff4f9a', '#f2711c', '#10a67c', '#e9ecf1'];
+const gap = (a, b) => { const x = C(a), y = C(b); return Math.hypot(x.r - y.r, x.g - y.g, x.b - y.b); };
+const apart = (list, start, from, min) => { for (let i = 0; i < list.length; i++) { const c = list[(start + i) % list.length]; if (from.every((f) => gap(c, f) >= min)) return c; } return list[start % list.length]; };
+/** Each job's hat and outfit. Today the whole office is in suits and bareheaded: change a line here and that job changes everywhere. outfit: none | tie | suit | waistcoat | hivis | labcoat. */
+export const JOBS = Object.fromEntries(['boss', 'manager', 'builder', 'designer', 'tester', 'lawyer', 'researcher', 'writer', 'analyst', 'marketer', 'illustrator'].map((r) => [r, { hat: 'none', outfit: 'suit' }]));
+/** The boss dresses themselves in the character builder, so their own look decides what they wear and whether there's a hat. */
+const OUTFIT_OF_LOOK = { labcoat: 'labcoat', overalls: 'hivis', shirt: 'tie', tee: 'none', hoodie: 'none' };
 
 /** Everything about a person that is theirs: from their own look and job, so it never changes across reloads. */
 export function specFor(look = {}, { role = '', accent = '#d9774a' } = {}) {
   const key = JSON.stringify([look.skin, look.hair, look.hairColor, look.outfit, look.outfitColor, look.hat, look.glasses, look.wear]);
-  const h = hashOf(key);
-  const shape = SHAPES[(h >> 3) % SHAPES.length];
-  const color = bodyColour(look, h), hair = look.hairColor ? mixHex(look.hairColor, vivid(look.hairColor), 0.45) : '#4a2f1d';
+  const h = hashOf(key), job = JOBS[role] || { hat: 'none', outfit: 'suit' }, boss = role === 'boss';
+  const color = VINYL[h % VINYL.length];
+  const suit = apart(SUITS, (h >>> 4) % SUITS.length, [color], 0.32);
+  const tie = apart(TIES, (h >>> 9) % TIES.length, [suit, color], 0.4);
   return {
-    ...shape, h: shape.h, id: h, role, accent, look, color, dark: dim(color, 0.66),
-    hairColor: hair, cheek: mixHex('#ff5d78', look.skin || '#f6d7bd', 0.2), phase: ((h >> 7) % 628) / 100,
-    browTilt: [0.11, 0.26, -0.18, 0.05][(h >> 11) % 4], mouthWide: 0.86 + ((h >> 13) % 5) * 0.06, eyeBig: 0.9 + ((h >> 16) % 4) * 0.09,
-    wonky: (h >> 18) % 5 === 0, job: JOBS[role] || (role ? { worn: null, held: 'mug' } : { worn: null, held: null }),
+    id: h, role, accent, look, color, suit, tie, hat: boss && look.hat && look.hat !== 'none' ? look.hat : job.hat, outfit: boss ? (OUTFIT_OF_LOOK[look.outfit] || 'suit') : job.outfit,
+    glasses: boss && look.glasses && look.glasses !== 'none' ? look.glasses : null, trousers: ((h >>> 13) % 5) < 2, phase: ((h >>> 7) % 628) / 100,
   };
+}
+
+// ---------- the bean ----------
+
+const H = 2, HH = H / 2, LEG = 0.35;
+const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const mix = (a, b, t) => a + (b - a) * t;
+/** The body's shape, everywhere, from its height (e: -1 at the bottom to 1 at the top) and the way round it (th: 0 is the front). Fuller below, narrower above, a kidney curve from the side. */
+const kidney = (e) => 0.15 * (e - 0.15) * (e - 0.15) - 0.06;
+const BW = (e) => 0.8 - 0.15 * sstep(-0.55, 0.75, e), BD = (e) => 0.63 - 0.1 * sstep(-0.4, 0.8, e);
+const round = (e) => Math.pow(Math.max(0, 1 - e * e), 0.35);
+function surf(th, e, o = new THREE.Vector3()) {
+  const f = round(e);
+  return o.set(BW(e) * f * Math.sin(th), HH * e, kidney(e) + BD(e) * f * Math.cos(th));
+}
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _d = new THREE.Vector3();
+function surfNormal(th, e, o = new THREE.Vector3()) {
+  const h = 0.008;
+  surf(th + h, e, _a); surf(th - h, e, _b); _a.sub(_b);
+  surf(th, Math.min(e + h, 0.9995), _c); surf(th, Math.max(e - h, -0.9995), _d); _c.sub(_d);
+  return o.crossVectors(_a, _c).normalize();
+}
+const EYE_E = 0.47, EYE_X = 0.235;
+const eyeAt = (() => { const th = Math.asin(EYE_X / (BW(EYE_E) * round(EYE_E))); return { th, z: surf(th, EYE_E).z }; })();
+
+const beans = new Map();
+/** One shared body per quality level: smooth normals straight from the shape, so the gloss runs round it without a seam. */
+function beanGeometry(N, R) {
+  const k = `${N}x${R}`;
+  if (beans.has(k)) return beans.get(k);
+  const pos = [], nor = [], idx = [], p = new THREE.Vector3(), n = new THREE.Vector3();
+  for (let j = 0; j <= R; j++) {
+    const phi = -Math.PI / 2 + (Math.PI * j) / R, e = j === 0 ? -1 : j === R ? 1 : Math.sin(phi);
+    for (let i = 0; i < N; i++) {
+      const th = -Math.PI + (i / N) * Math.PI * 2;
+      surf(th, e, p); pos.push(p.x, p.y, p.z);
+      if (j === 0 || j === R) n.set(0, j ? 1 : -1, 0); else surfNormal(th, e, n);
+      nor.push(n.x, n.y, n.z);
+    }
+  }
+  for (let j = 0; j < R; j++) for (let i = 0; i < N; i++) {
+    const a = j * N + i, b = j * N + ((i + 1) % N), c = (j + 1) * N + ((i + 1) % N), d = (j + 1) * N + i;
+    idx.push(a, b, c, a, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setIndex(idx);
+  beans.set(k, g);
+  return g;
 }
 
 // ---------- the parts ----------
 
 const GEO = {
-  ball: new THREE.SphereGeometry(1, 14, 10), tiny: new THREE.SphereGeometry(1, 8, 6),
-  arm: new THREE.CapsuleGeometry(1, 1, 3, 8), box: new THREE.BoxGeometry(1, 1, 1),
-  cyl: new THREE.CylinderGeometry(1, 1, 1, 12), cone: new THREE.ConeGeometry(1, 1, 10),
-  ring: new THREE.TorusGeometry(1, 0.105, 5, 22),
-  brow: new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(new THREE.Vector3(-0.16, 0, 0), new THREE.Vector3(0, 0.07, 0), new THREE.Vector3(0.16, 0, 0)), 7, 0.03, 4, false),
+  ball: new THREE.SphereGeometry(1, 16, 12), tiny: new THREE.SphereGeometry(1, 9, 7),
+  sausage: new THREE.CapsuleGeometry(1, 1, 4, 9), box: new THREE.BoxGeometry(1, 1, 1),
+  cyl: new THREE.CylinderGeometry(1, 1, 1, 18), cone: new THREE.ConeGeometry(1, 1, 12),
+  ring: new THREE.TorusGeometry(1, 0.105, 6, 22),
+  foot: new THREE.LatheGeometry([[0.001, 0], [0.18, 0], [0.215, 0.012], [0.232, 0.05], [0.218, 0.095], [0.175, 0.14], [0.14, 0.18], [0.128, 0.24]].map(([r, y]) => new THREE.Vector2(r, y)), 16),
 };
-const INK = '#2a2233', WHITE = '#fffdf3', PAPER = '#fff9e9', GOLD = '#f2b632', METAL = '#39424e', PLUM = '#5b385a';
-const smileShape = new THREE.Shape();
-smileShape.moveTo(-0.405, 0.04);
-smileShape.bezierCurveTo(-0.18, -0.005, 0.12, 0.005, 0.405, 0.07);
-smileShape.bezierCurveTo(0.37, -0.34, -0.28, -0.39, -0.405, 0.04);
-GEO.smile = new THREE.ShapeGeometry(smileShape, 7);
+const INK = '#17151c', WHITE = '#fbfaf5', PAPER = '#fff9e9', GOLD = '#f2b632', METAL = '#39424e', PLUM = '#3a2a44', TAN = '#b98b55', KHAKI = '#d8c08a';
 const box3 = new Map();
 /** A soft-edged slab (a clipboard, a laptop). Built once per size. */
 function softBox(w, h, d, r) {
@@ -99,46 +115,70 @@ function softBox(w, h, d, r) {
 const _p = new THREE.Vector3(), _s = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _n = new THREE.Vector3(), _v = new THREE.Vector3(), _nm = new THREE.Matrix3();
 const M = (x = 0, y = 0, z = 0, sx = 1, sy = sx, sz = sx, rx = 0, ry = 0, rz = 0) => new THREE.Matrix4().compose(_p.set(x, y, z), _q.setFromEuler(_e.set(rx, ry, rz)), _s.set(sx, sy, sz));
 
-/** The soft pillow of a body: a rounded outline, puffed out front and back. */
-function pillow(spec, N, M_) {
-  const pos = [], idx = [], signed = (v, p) => Math.sign(v) * Math.pow(Math.abs(v), p);
-  for (let j = 0; j <= M_; j++) {
-    const lat = -Math.PI / 2 + (Math.PI * j) / M_, radial = Math.pow(Math.max(0, Math.cos(lat)), 0.67);
-    for (let i = 0; i <= N; i++) {
-      const a = (i / N) * Math.PI * 2;
-      let x = signed(Math.cos(a), 2 / spec.power), y = signed(Math.sin(a), 2 / spec.power);
-      const lobes = 1 + (spec.lobe || 0) * Math.cos((spec.petals || 3) * a + 0.3);
-      x *= 1 + (spec.taper || 0) * y;
-      if (spec.pinch) x *= 1 - spec.pinch * Math.exp(-y * y * 7);
-      pos.push(x * spec.w * 0.5 * radial * lobes, y * spec.h * 0.5 * radial * lobes, 0.59 * Math.sin(lat));
-    }
+/** The arm: a smooth tapering tube, wider at the shoulder where it grows out of the body. Built once per range and quality. */
+const tubes = new Map();
+const ARM_R = (y) => mix(0.16, 0.114, sstep(-0.02, -0.26, y));
+function armTube(yTop, yEnd, rings, sides, grow = 1) {
+  const k = [yTop, yEnd, rings, sides, grow].join();
+  if (tubes.has(k)) return tubes.get(k);
+  const pos = [], idx = [];
+  for (let j = 0; j <= rings; j++) {
+    const y = mix(yTop, yEnd, j / rings), r = ARM_R(y) * grow;
+    for (let i = 0; i < sides; i++) { const a = (i / sides) * Math.PI * 2; pos.push(Math.sin(a) * r, y, Math.cos(a) * r); }
   }
-  for (let j = 0; j < M_; j++) for (let i = 0; i < N; i++) { const a = j * (N + 1) + i, b = a + N + 1; idx.push(a, a + 1, b, a + 1, b + 1, b); }
+  for (let j = 0; j < rings; j++) for (let i = 0; i < sides; i++) { const a = j * sides + i, b = j * sides + ((i + 1) % sides), c = (j + 1) * sides + ((i + 1) % sides), d = (j + 1) * sides + i; idx.push(a, b, c, a, c, d); }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
-  // Weld the shading across the seam and at the two poles, so the toon bands run round without a crease.
-  const n = g.attributes.normal;
-  for (let i = 0; i <= N; i++) { n.setXYZ(i, 0, 0, -1); n.setXYZ(M_ * (N + 1) + i, 0, 0, 1); }
-  for (let j = 1; j < M_; j++) { const a = j * (N + 1), b = a + N; _n.fromBufferAttribute(n, a).add(_v.fromBufferAttribute(n, b)).normalize(); n.setXYZ(a, _n.x, _n.y, _n.z); n.setXYZ(b, _n.x, _n.y, _n.z); }
+  tubes.set(k, g);
   return g;
 }
 
-/** Collects parts into one geometry, each vertex tied to the bone it rides on. */
+/** A piece of cloth fitted to the body. pt(u, v) says where on the body each corner goes as [th, e]; it stands off the surface and rolls down to nothing at its edges, so it looks padded. */
+const cloths = new Map();
+function cloth(name, pt, { nu = 28, nv = 14, off = 0.03, roll = 0.14, wrap = false } = {}, q = 1) {
+  const k = `${name}|${q}`;
+  if (cloths.has(k)) return cloths.get(k);
+  const cols = Math.max(4, Math.round(nu * q)), rows = Math.max(3, Math.round(nv * q)), pos = [], idx = [], p = new THREE.Vector3(), n = new THREE.Vector3();
+  const across = wrap ? cols : cols + 1;
+  for (let j = 0; j <= rows; j++) for (let i = 0; i < across; i++) {
+    const u = i / cols, v = j / rows, [th, e] = pt(u, v);
+    const edge = Math.min(1, ...(wrap ? [] : [u, 1 - u].map((x) => x / roll)), ...[v, 1 - v].map((x) => x / roll));
+    surf(th, e, p); surfNormal(th, e, n); p.addScaledVector(n, off * (0.25 + 0.75 * sstep(0, 1, edge)));
+    pos.push(p.x, p.y, p.z);
+  }
+  for (let j = 0; j < rows; j++) for (let i = 0; i < (wrap ? cols : cols); i++) {
+    const a = j * across + i, b = j * across + ((i + 1) % across), c = (j + 1) * across + ((i + 1) % across), d = (j + 1) * across + i;
+    idx.push(a, b, c, a, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  // Whichever way round pt() walks, the cloth faces outward.
+  const [th0, e0] = pt(0.5, 0.5), mid = Math.floor(rows / 2) * across + Math.floor(cols / 2);
+  if (surfNormal(th0, e0, n).dot(_v.fromBufferAttribute(g.attributes.normal, mid)) < 0) { for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; } g.setIndex(idx); g.computeVertexNormals(); }
+  cloths.set(k, g);
+  return g;
+}
+
+/** Collects parts into one geometry, each vertex tied to the bone (or two bones) it rides on. */
 class Rig {
-  constructor() { this.bones = []; this.pos = []; this.nor = []; this.col = []; this.idx = []; this.ski = []; this.count = 0; this.color = new THREE.Color(); }
+  constructor() { this.bones = []; this.pos = []; this.nor = []; this.col = []; this.glo = []; this.idx = []; this.ski = []; this.count = 0; this.color = new THREE.Color(); }
   bone(parent, x = 0, y = 0, z = 0) {
     const b = new THREE.Bone(); b.position.set(x, y, z); b.userData.at = new THREE.Vector3(x, y, z).add(parent ? parent.userData.at : new THREE.Vector3());
     if (parent) parent.add(b);
     b.userData.i = this.bones.length; this.bones.push(b);
     return b;
   }
-  add(bone, geo, color, m) {
+  /** `gloss` 0..1 scales the shine; `blend` is { bone, w(localPoint) }: a second bone this part leans towards, for a soft elbow. */
+  add(bone, geo, color, m, { gloss = 1, blend = null } = {}) {
     const c = this.color.set(color), p = geo.attributes.position, n = geo.attributes.normal, base = this.count, at = bone.userData.at, bi = bone.userData.i;
     _nm.getNormalMatrix(m);
     for (let i = 0; i < p.count; i++) {
-      _v.fromBufferAttribute(p, i).applyMatrix4(m).add(at); this.pos.push(_v.x, _v.y, _v.z);
+      _v.fromBufferAttribute(p, i).applyMatrix4(m);
+      const w = blend ? blend.w(_v) : 0;
+      this.ski.push(bi, blend ? blend.bone.userData.i : 0, 1 - w, w);
+      _v.add(at); this.pos.push(_v.x, _v.y, _v.z);
       _n.fromBufferAttribute(n, i).applyMatrix3(_nm).normalize(); this.nor.push(_n.x, _n.y, _n.z);
-      this.col.push(c.r, c.g, c.b); this.ski.push(bi);
+      this.col.push(c.r, c.g, c.b); this.glo.push(gloss);
     }
     if (geo.index) for (let i = 0; i < geo.index.count; i++) this.idx.push(base + geo.index.getX(i));
     else for (let i = 0; i < p.count; i++) this.idx.push(base + i);
@@ -149,8 +189,9 @@ class Rig {
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    g.setAttribute('gloss', new THREE.Float32BufferAttribute(this.glo, 1));
     const si = new Uint8Array(this.count * 4), sw = new Float32Array(this.count * 4);
-    for (let i = 0; i < this.count; i++) { si[i * 4] = this.ski[i]; sw[i * 4] = 1; }
+    for (let i = 0; i < this.count; i++) { si[i * 4] = this.ski[i * 4]; si[i * 4 + 1] = this.ski[i * 4 + 1]; sw[i * 4] = this.ski[i * 4 + 2]; sw[i * 4 + 1] = this.ski[i * 4 + 3]; }
     g.setAttribute('skinIndex', new THREE.Uint8BufferAttribute(si, 4));
     g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
     g.setIndex(this.idx);
@@ -158,205 +199,194 @@ class Rig {
   }
 }
 
-/** One material for everyone: the colour is in the vertices and the shading comes from the shared ramp. */
-export const CAST_MAT = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: PEOPLE_RAMP });
-const OUTLINE_MAT = outlineMaterial('#241b2d', 0.022);
+// ---------- the shine ----------
 
-// ---------- dressing them up ----------
-
-function hairOf(rig, body, s) {
-  const c = s.hairColor, top = s.h * 0.5, side = s.w * 0.5, ball = (x, y, z, sx, sy = sx, sz = sx, rz = 0) => rig.add(body, GEO.ball, c, M(x, y, z, sx, sy, sz, 0, 0, rz));
-  switch (s.look.hair) {
-    case 'short': for (let i = -2; i <= 2; i++) ball(i * 0.17, top - 0.03 + (i % 2 ? 0.05 : 0), 0.04, 0.16, 0.13, 0.15); break;
-    case 'side': ball(-0.22, top + 0.03, 0.2, 0.46, 0.17, 0.24, 0.32); ball(0.28, top - 0.06, -0.02, 0.26, 0.11, 0.2, -0.2); break;
-    case 'long': ball(0, top - 0.08, -0.12, 0.62, 0.2, 0.4); for (const k of [-1, 1]) ball(k * (side - 0.05), top - 0.62, -0.08, 0.22, 0.62, 0.34); break;
-    case 'bun': ball(0, top + 0.26, -0.06, 0.26); ball(0, top + 0.02, -0.06, 0.2, 0.12, 0.2); break;
-    case 'curly': for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2; ball(Math.cos(a) * 0.48, top + (i % 2) * 0.09 - 0.03, Math.sin(a) * 0.3, 0.24, 0.2, 0.22); } ball(0, top + 0.13, 0, 0.42, 0.25, 0.34); break;
-    case 'mohawk': for (let i = 0; i < 6; i++) rig.add(body, GEO.ball, c, M(0, top + 0.04 + Math.sin((i / 5) * Math.PI) * 0.16, 0.4 - i * 0.16, 0.08, 0.3, 0.12)); break;
-    case 'pigtails': ball(0, top - 0.02, -0.04, 0.5, 0.15, 0.32); for (const k of [-1, 1]) { ball(k * (side + 0.02), top - 0.42, -0.04, 0.27, 0.32, 0.27); ball(k * (side - 0.08), top - 0.14, -0.02, 0.09); } break;
-    default: break;
+/**
+ * The gloss, painted once into a small picture of a shiny ball and read by every person's surface normal: a single texture look-up, so a phone can
+ * afford it for a full room, in one draw call each. Red is how lit that side is; alpha is the white of the highlights, added on top.
+ */
+function matcap() {
+  const S = 128, data = new Uint8Array(S * S * 4);
+  const L = new THREE.Vector3(-0.32, 0.62, 0.72).normalize();
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+    const x = ((i + 0.5) / S) * 2 - 1, y = ((j + 0.5) / S) * 2 - 1, r2 = x * x + y * y, z = Math.sqrt(Math.max(0, 1 - r2));
+    const ndl = Math.max(0, x * L.x + y * L.y + z * L.z);
+    const rim = sstep(0.55, 1, r2);
+    const lit = Math.min(1, 0.6 + 0.48 * Math.pow(ndl, 0.8)) * (1 - 0.14 * rim);
+    // A big soft window highlight up and to the left, a long quiet sheen down the right flank, and a little light round the edge.
+    const big = 0.9 * Math.exp(-(((x + 0.3) ** 2) / 0.03 + ((y - 0.56) ** 2) / 0.016));
+    const soft = 0.18 * Math.exp(-(((x + 0.28) ** 2) / 0.15 + ((y - 0.5) ** 2) / 0.1));
+    const flank = 0.14 * Math.exp(-(((x - 0.62) ** 2) / 0.012 + ((y + 0.18) ** 2) / 0.1));
+    const edge = 0.03 * sstep(0.82, 1, r2);
+    const a = Math.min(1, big + soft + flank + edge);
+    const o = (j * S + i) * 4, v = Math.round(lit * 255);
+    data[o] = v; data[o + 1] = v; data[o + 2] = v; data[o + 3] = Math.round(a * 255);
   }
+  const t = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
+  t.magFilter = t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; t.needsUpdate = true;
+  return t;
 }
-/** What's worn on top of the head; the look's own hat always wins over the job's. Heights are in body units. */
-function hatOf(rig, body, s) {
-  const look = s.look, a = s.accent, top = s.h * 0.5, add = (g, c, m) => rig.add(body, g, c, m);
-  const dome = (c, y = top + 0.06, sx = 0.66, sy = 0.32) => add(GEO.ball, c, M(0, y, -0.02, sx, sy, 0.48));
-  const brim = (c, y, r, ry = 0.13, z = 0) => add(GEO.cyl, c, M(0, y, z, r, ry * 0.4, r * 0.85));
-  const clear = { cap: 0.24, beanie: 0.3, tophat: 0.9, crown: 0.46, party: 1, hardhat: 0.3, headphones: 0.15, cowboy: 0.62, wizard: 1.25, chef: 0.75, viking: 0.42, pirate: 0.42, beret: 0.32, propeller: 0.5, halo: 0.62 };
-  switch (look.hat) {
-    case 'cap': dome(a, top + 0.03, 0.64, 0.3); add(GEO.box, a, M(0, top + 0.02, 0.5, 0.56, 0.05, 0.42)); break;
-    case 'beanie': dome(a, top + 0.06, 0.66, 0.42); add(GEO.cyl, dim(a, 0.72), M(0, top - 0.08, -0.02, 0.66, 0.14, 0.5)); add(GEO.ball, WHITE, M(0, top + 0.54, 0, 0.13)); break;
-    case 'tophat': brim(INK, top + 0.08, 0.72, 0.1); add(GEO.cyl, INK, M(0, top + 0.5, 0, 0.42, 0.78, 0.36)); add(GEO.cyl, a, M(0, top + 0.2, 0, 0.43, 0.14, 0.37)); break;
-    case 'crown': add(GEO.cyl, GOLD, M(0, top + 0.13, 0, 0.42, 0.2, 0.34)); for (let i = 0; i < 5; i++) { const t = (i / 5) * Math.PI * 2; add(GEO.cone, GOLD, M(Math.cos(t) * 0.36, top + 0.36, Math.sin(t) * 0.28, 0.1, 0.32, 0.1)); } break;
-    case 'party': add(GEO.cone, a, M(0.08, top + 0.45, 0, 0.3, 0.9, 0.3, 0, 0, -0.15)); add(GEO.ball, '#fff6d8', M(0.15, top + 0.96, 0, 0.13)); break;
-    case 'hardhat': dome('#ffc21c', top + 0.03, 0.68, 0.32); brim('#ffc21c', top - 0.03, 0.8, 0.13); break;
-    case 'headphones': hatHeadset(rig, body, s, true); break;
-    case 'cowboy': brim('#a06a30', top + 0.06, 1, 0.1); add(GEO.ball, '#a06a30', M(0, top + 0.3, 0, 0.44, 0.34, 0.4)); add(GEO.cyl, a, M(0, top + 0.1, 0, 0.45, 0.12, 0.41)); break;
-    case 'wizard': brim('#4a3a99', top + 0.05, 0.72, 0.1); add(GEO.cone, '#4a3a99', M(0, top + 0.68, -0.02, 0.46, 1.2, 0.46, -0.08)); add(GEO.ball, GOLD, M(0.14, top + 0.58, 0.28, 0.08)); add(GEO.ball, GOLD, M(-0.1, top + 0.86, 0.18, 0.06)); break;
-    case 'chef': add(GEO.cyl, '#fbf7ec', M(0, top + 0.14, 0, 0.42, 0.26, 0.36)); add(GEO.ball, '#fbf7ec', M(0, top + 0.42, 0, 0.62, 0.34, 0.54)); break;
-    case 'viking': dome('#aab2ba', top + 0.05, 0.66, 0.34); add(GEO.cyl, '#7a5a38', M(0, top - 0.04, 0, 0.67, 0.12, 0.5)); for (const k of [-1, 1]) add(GEO.cone, '#f6ecd4', M(k * 0.72, top + 0.34, 0, 0.13, 0.6, 0.13, 0, 0, -k * 0.55)); break;
-    case 'pirate': add(GEO.cyl, INK, M(0, top + 0.1, 0, 0.5, 0.1, 0.36)); add(GEO.box, INK, M(0, top + 0.28, 0, 1.1, 0.4, 0.42)); add(GEO.ball, WHITE, M(0, top + 0.36, 0.2, 0.14)); break;
-    case 'beret': hatBeret(rig, body, s, a); break;
-    case 'propeller': dome(a, top + 0.03, 0.64, 0.3); add(GEO.cyl, METAL, M(0, top + 0.34, 0, 0.05, 0.22, 0.05)); add(GEO.box, '#ff4f9a', M(-0.34, top + 0.44, 0, 0.6, 0.04, 0.14)); add(GEO.box, '#2f9bff', M(0.34, top + 0.44, 0, 0.6, 0.04, 0.14)); break;
-    case 'halo': add(GEO.ring, '#ffe27a', M(0, top + 0.48, 0, 0.42, 0.42, 0.42, Math.PI / 2)); break;
+/** One material for everyone: the colour is in the vertices, the gloss in the picture above, and its strength per part in the `gloss` attribute. */
+export const CAST_MAT = new THREE.MeshMatcapMaterial({ vertexColors: true, matcap: matcap(), toneMapped: false, fog: false });
+CAST_MAT.onBeforeCompile = (sh) => {
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute float gloss;\nvarying float vGloss;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGloss = gloss;');
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying float vGloss;')
+    .replace('vec3 outgoingLight = diffuseColor.rgb * matcapColor.rgb;',
+      'float lit = matcapColor.r;\nvec3 outgoingLight = pow(max(diffuseColor.rgb, vec3(0.0)), vec3(1.0 + 1.1 * (1.0 - lit))) * mix(0.55, 1.05, lit) + vec3(matcapColor.a * vGloss);');
+};
+CAST_MAT.customProgramCacheKey = () => 'bean-gloss';
+
+
+// ---------- dressing them ----------
+
+/** How far the V of a neckline has dropped at this angle round the front. */
+const vee = (th, half) => Math.max(0, 1 - Math.abs(th) / half);
+const TOP = 0.2, HEM = -0.55, V_HALF = 0.62, V_BOTTOM = -0.1;
+
+/** The white collar and shirt front, with the knot and blade of a tie. Everyone's collar sits where the top of the bean begins. */
+function shirtAndTie(rig, body, s, q, tieEnd = -0.27) {
+  const add = (name, pt, color, o, gl = 0.5) => rig.add(body, cloth(name, pt, o, q), color, M(), { gloss: gl });
+  add('shirt', (u, v) => { const th = (u - 0.5) * 2 * (V_HALF + 0.14); return [th, mix(-0.22, TOP + 0.005 - 0.07 * vee(th, 0.55), v)]; }, WHITE, { nu: 16, nv: 10, off: 0.014, roll: 0.04 });
+  add('tie', (u, v) => { const w = mix(0.05, 0.11, Math.min(1, v / 0.78)) * (v > 0.78 ? 1 - (v - 0.78) / 0.22 : 1); return [(u - 0.5) * 2 * w, mix(TOP - 0.1, tieEnd, v)]; }, s.tie, { nu: 6, nv: 12, off: 0.028, roll: 0.12 });
+  const e = TOP - 0.07; rig.add(body, GEO.ball, s.tie, M(0, e * HH, surf(0, e).z + 0.03, 0.05, 0.042, 0.03), { gloss: 0.7 });
+}
+function suit(rig, body, s, q) {
+  shirtAndTie(rig, body, s, q);
+  const add = (name, pt, color, o, gl = 0.55) => rig.add(body, cloth(name, pt, o, q), color, M(), { gloss: gl }), lapel = mixHex(s.suit, '#ffffff', 0.1);
+  // The jacket: all the way round, with a V at the front and a hem that curves away below the buttons.
+  add('jacket', (u, v) => { const th = (u - 0.5) * Math.PI * 2; return [th, mix(HEM + 0.05 * Math.exp(-th * th * 6), mix(TOP - 0.18 * Math.sin(th) ** 2, V_BOTTOM, vee(th, V_HALF)), v)]; }, s.suit, { nu: 60, nv: 16, off: 0.04, roll: 0.06, wrap: true });
+  for (const k of [-1, 1]) {
+    // A lapel: a band folded back along each side of the V, wide at the collar and narrowing to the buttons.
+    add(`lapel${k}`, (u, v) => [k * (V_HALF * (1 - v) + u * mix(0.3, 0.12, v)), mix(TOP + 0.01, V_BOTTOM, v) - u * 0.05], lapel, { nu: 8, nv: 10, off: 0.056, roll: 0.2 });
+  }
+  // The white collar: tight round the neck in the V, with a point on each side lying over the lapels.
+  add('collar', (u, v) => { const th = (u - 0.5) * 1.5; return [th, mix(TOP - 0.03, TOP + 0.06 - 0.09 * vee(th, 0.28), v)]; }, WHITE, { nu: 18, nv: 4, off: 0.05, roll: 0.25 }, 0.65);
+  for (const k of [-1, 1]) add(`point${k}`, (u, v) => [k * mix(0.04, 0.38, u * (1 - 0.55 * v)), mix(TOP + 0.02, TOP - 0.2, v)], WHITE, { nu: 5, nv: 6, off: 0.064, roll: 0.25 }, 0.6);
+  // Buttons, down the front below the V.
+  for (const e of [V_BOTTOM - 0.08, V_BOTTOM - 0.2]) rig.add(body, GEO.tiny, mixHex(s.suit, '#000000', 0.5), M(0.05, e * HH, surf(0.08, e).z + 0.048, 0.03, 0.03, 0.016), { gloss: 0.8 });
+}
+function waistcoat(rig, body, s, q) {
+  shirtAndTie(rig, body, s, q);
+  const add = (name, pt, color, o, gl = 0.5) => rig.add(body, cloth(name, pt, o, q), color, M(), { gloss: gl });
+  add('vest', (u, v) => { const th = (u - 0.5) * Math.PI * 2; return [th, mix(-0.33 - 0.06 * vee(th, 0.5), mix(TOP - 0.03, -0.18, vee(th, 0.75)), v)]; }, s.suit, { nu: 56, nv: 14, off: 0.042, roll: 0.06, wrap: true });
+  for (const e of [-0.22, -0.32]) rig.add(body, GEO.tiny, GOLD, M(0, e, surf(0, e).z + 0.05, 0.028, 0.028, 0.014), { gloss: 0.8 });
+}
+function hivis(rig, body, s, q) {
+  const add = (name, pt, color, o) => rig.add(body, cloth(name, pt, o, q), color, M(), { gloss: 0.45 }), LIME = '#d8f53a';
+  add('hivis', (u, v) => { const th = (u - 0.5) * Math.PI * 2; return [th, mix(-0.34, mix(TOP, 0.0, vee(th, 0.5)), v)]; }, '#ff7a1a', { nu: 48, nv: 12, off: 0.04, roll: 0.07, wrap: true });
+  for (const e of [-0.1, -0.24]) add(`band${e}`, (u, v) => [(u - 0.5) * Math.PI * 2, e + v * 0.08], LIME, { nu: 40, nv: 2, off: 0.054, roll: 0.5, wrap: true });
+}
+function labcoat(rig, body, s, q) {
+  const add = (name, pt, color, o, gl = 0.5) => rig.add(body, cloth(name, pt, o, q), color, M(), { gloss: gl });
+  add('coat', (u, v) => { const th = (u - 0.5) * Math.PI * 2, k = Math.min(1, Math.max(0, (0.8 - Math.abs(th)) / 0.7)); return [th, mix(-0.7, mix(TOP, -0.7, k), v)]; }, '#f6f6f2', { nu: 56, nv: 16, off: 0.042, roll: 0.05, wrap: true });
+  for (const k of [-1, 1]) add(`pocket${k}`, (u, v) => [k * mix(0.55, 1.0, u), mix(-0.5, -0.34, v)], '#e6e6df', { nu: 6, nv: 5, off: 0.056, roll: 0.25 });
+}
+function plainTie(rig, body, s, q) {
+  shirtAndTie(rig, body, s, q, -0.48);
+}
+function trousers(rig, body, s, q) {
+  // Only what shows below the jacket: they run up under it and close round the bottom of the body.
+  rig.add(body, cloth('trousers', (u, v) => [(u - 0.5) * Math.PI * 2, mix(-0.992, HEM + 0.12, v)], { nu: 32, nv: 10, off: 0.02, roll: 0.05, wrap: true }, q), s.suit, M(), { gloss: 0.5 });
+}
+
+/** Hats sit round the top of the head: y 0 is the very top of the bean. */
+function hatOf(rig, hat, s) {
+  const a = s.accent, add = (g, c, m, gl = 0.6) => rig.add(hat, g, c, m, { gloss: gl });
+  const dome = (c, y = -0.05, sx = 0.44, sy = 0.27, sz = sx * 0.88) => add(GEO.ball, c, M(0, y, 0, sx, sy, sz));
+  const brim = (c, y, r, t = 0.05, z = 0) => add(GEO.cyl, c, M(0, y, z, r, t, r * 0.88));
+  const clear = { cap: 0.18, beanie: 0.24, tophat: 0.68, crown: 0.42, crownlet: 0.2, party: 0.72, hardhat: 0.3, headphones: 0.12, cowboy: 0.45, wizard: 0.92, chef: 0.6, viking: 0.32, pirate: 0.34, beret: 0.14, propeller: 0.4, halo: 0.55, bowler: 0.3, detective: 0.3, explorer: 0.32, visor: 0.02 };
+  switch (s.hat) {
+    case 'hardhat': dome('#ffc21c', -0.04, 0.46, 0.34); brim('#ffc21c', -0.16, 0.58, 0.05, 0.05); add(GEO.ball, '#ffd65a', M(0, 0.25, 0, 0.05, 0.03, 0.34)); break;
+    case 'tophat': brim(INK, -0.2, 0.54, 0.04); add(GEO.cyl, INK, M(0, 0.2, 0, 0.3, 0.78, 0.27)); add(GEO.cyl, a, M(0, -0.08, 0, 0.31, 0.11, 0.28)); break;
+    case 'bowler': brim(INK, -0.17, 0.54, 0.035); dome(INK, -0.06, 0.4, 0.33); add(GEO.cyl, a, M(0, -0.14, 0, 0.385, 0.05, 0.35)); break;
+    case 'beret': add(GEO.ball, PLUM, M(-0.04, -0.07, 0, 0.5, 0.14, 0.44, 0, 0, -0.18)); add(GEO.tiny, PLUM, M(-0.08, 0.07, 0, 0.04, 0.05, 0.04)); break;
+    case 'detective': brim(TAN, -0.15, 0.56, 0.04); add(GEO.cyl, TAN, M(0, 0.02, 0, 0.32, 0.3, 0.28)); dome(TAN, 0.15, 0.32, 0.1); add(GEO.cyl, '#5a3a20', M(0, -0.09, 0, 0.325, 0.08, 0.285)); break;
+    case 'explorer': dome(KHAKI, -0.03, 0.5, 0.36); brim(KHAKI, -0.2, 0.66, 0.045); add(GEO.tiny, '#c8a96e', M(0, 0.31, 0, 0.06, 0.045, 0.06)); break;
+    case 'cap': dome(a, -0.06, 0.43, 0.25); add(softBox(0.44, 0.04, 0.34, 0.03), a, M(0, -0.17, 0.42, 1, 1, 1, 0.14)); break;
+    case 'visor': add(GEO.cyl, '#16c464', M(0, -0.18, 0, 0.47, 0.06, 0.42)); add(softBox(0.56, 0.03, 0.34, 0.03), '#16c464', M(0, -0.16, 0.44, 1, 1, 1, 0.3)); break;
+    case 'crownlet': add(GEO.cyl, GOLD, M(0, 0.03, 0, 0.22, 0.1, 0.19), 0.9); for (let i = 0; i < 5; i++) { const t = (i / 5) * Math.PI * 2; add(GEO.cone, GOLD, M(Math.cos(t) * 0.18, 0.14, Math.sin(t) * 0.15, 0.06, 0.16, 0.06), 0.9); } break;
+    case 'crown': add(GEO.cyl, GOLD, M(0, 0.0, 0, 0.36, 0.16, 0.31), 0.9); for (let i = 0; i < 5; i++) { const t = (i / 5) * Math.PI * 2; add(GEO.cone, GOLD, M(Math.cos(t) * 0.31, 0.21, Math.sin(t) * 0.27, 0.09, 0.28, 0.09), 0.9); } break;
+    case 'beanie': dome(a, -0.04, 0.47, 0.36); add(GEO.cyl, dim(a, 0.72), M(0, -0.19, 0, 0.48, 0.12, 0.43)); add(GEO.ball, WHITE, M(0, 0.36, 0, 0.1)); break;
+    case 'party': add(GEO.cone, a, M(0.05, 0.28, 0, 0.26, 0.74, 0.26, 0, 0, -0.14)); add(GEO.ball, WHITE, M(0.11, 0.7, 0, 0.09)); break;
+    case 'headphones': for (let i = 0; i <= 12; i++) { const t = (Math.PI * i) / 12; add(GEO.tiny, METAL, M(Math.cos(t) * 0.5, -0.46 + Math.sin(t) * 0.5, 0, 0.055)); } for (const k of [-1, 1]) add(softBox(0.18, 0.3, 0.26, 0.08), METAL, M(k * 0.52, -0.5, 0.03)); break;
+    case 'cowboy': brim('#a06a30', -0.16, 0.78, 0.04); add(GEO.ball, '#a06a30', M(0, 0.02, 0, 0.36, 0.3, 0.32)); add(GEO.cyl, a, M(0, -0.1, 0, 0.365, 0.08, 0.325)); break;
+    case 'wizard': brim('#4a3a99', -0.18, 0.58, 0.04); add(GEO.cone, '#4a3a99', M(0, 0.36, 0, 0.36, 1.1, 0.36, -0.08)); add(GEO.ball, GOLD, M(0.1, 0.25, 0.22, 0.06)); add(GEO.ball, GOLD, M(-0.08, 0.5, 0.14, 0.05)); break;
+    case 'chef': add(GEO.cyl, '#fbf7ec', M(0, -0.04, 0, 0.36, 0.28, 0.32)); add(GEO.ball, '#fbf7ec', M(0, 0.24, 0, 0.5, 0.3, 0.44)); break;
+    case 'viking': dome('#aab2ba', -0.05, 0.46, 0.34); add(GEO.cyl, '#7a5a38', M(0, -0.19, 0, 0.47, 0.1, 0.41)); for (const k of [-1, 1]) add(GEO.cone, '#f6ecd4', M(k * 0.54, 0.12, 0, 0.1, 0.46, 0.1, 0, 0, -k * 0.55)); break;
+    case 'pirate': add(GEO.cyl, INK, M(0, -0.12, 0, 0.42, 0.08, 0.32)); add(GEO.box, INK, M(0, 0.04, 0, 0.92, 0.32, 0.34)); add(GEO.ball, WHITE, M(0, 0.1, 0.17, 0.1)); break;
+    case 'propeller': dome(a, -0.06, 0.43, 0.25); add(GEO.cyl, METAL, M(0, 0.26, 0, 0.04, 0.18, 0.04)); add(GEO.box, '#ff4f9a', M(-0.26, 0.36, 0, 0.46, 0.03, 0.11)); add(GEO.box, '#2f9bff', M(0.26, 0.36, 0, 0.46, 0.03, 0.11)); break;
+    case 'halo': add(GEO.ring, '#ffe27a', M(0, 0.42, 0, 0.32, 0.32, 0.32, Math.PI / 2), 0.9); break;
     default: return 0;
   }
-  return clear[look.hat] ?? 0.3;
+  return clear[s.hat] ?? 0.25;
 }
-function hatHeadset(rig, body, s) {
-  const top = s.h * 0.5, side = s.w * 0.5 - 0.02;
-  for (let i = 0; i <= 12; i++) { const a = (Math.PI * i) / 12; rig.add(body, GEO.ball, METAL, M(Math.cos(a) * side, 0.05 + Math.sin(a) * (top + 0.06), -0.02, 0.075)); }
-  for (const k of [-1, 1]) rig.add(body, softBox(0.3, 0.46, 0.34, 0.1), METAL, M(k * side, 0.08, 0.02));
-  rig.add(body, GEO.tiny, METAL, M(0.58, -0.32, 0.72, 0.09, 0.07, 0.08));
-  for (let i = 1; i < 5; i++) { const t = i / 5; rig.add(body, GEO.tiny, METAL, M(0.92 - 0.34 * t, -0.05 - 0.27 * t, 0.2 + 0.52 * t, 0.03)); }
-}
-function hatBeret(rig, body, s, c) {
-  const top = s.h * 0.5;
-  rig.add(body, GEO.ball, c, M(-0.12, top + 0.07, 0, 0.72, 0.18, 0.52, 0, 0, -0.18));
-  rig.add(body, GEO.tiny, c, M(-0.14, top + 0.26, 0, 0.06, 0.08, 0.06));
-}
+/** The writer's pencil, if anyone is ever given one: tucked where an ear would be. */
+const earPencil = (rig, body) => { rig.add(body, GEO.sausage, GOLD, M(0.5, 0.62, -0.08, 0.035, 0.2, 0.035, 0.7, 0, -0.5), { gloss: 0.6 }); rig.add(body, GEO.cone, '#ffdca8', M(0.42, 0.66, 0.26, 0.035, 0.09, 0.035, 2.2, 0, -0.5), { gloss: 0.3 }); };
+/** Glasses and the like sit on the beads. */
 function glassesOf(rig, body, s) {
-  const y = s.eyeY, g = s.eyeGap, glasses = s.look.glasses, ring = (x, c, r = 0.3) => rig.add(body, GEO.ring, c, M(x, y, 0.76, r, r, 0.3));
-  if (glasses === 'round') { ring(-g, PLUM); ring(g, PLUM); rig.add(body, GEO.tiny, PLUM, M(0, y + 0.03, 0.8, 0.05, 0.025, 0.025)); }
-  if (glasses === 'shades') { for (const k of [-1, 1]) rig.add(body, softBox(0.56, 0.36, 0.05, 0.1), '#14141b', M(k * g, y, 0.76)); rig.add(body, GEO.box, '#14141b', M(0, y + 0.06, 0.78, 0.14, 0.05, 0.03)); }
-  if (glasses === 'monocle') { ring(g, GOLD, 0.34); for (let i = 1; i < 6; i++) rig.add(body, GEO.tiny, GOLD, M(g + 0.26 + i * 0.015, y - 0.26 - i * 0.1, 0.72 - i * 0.02, 0.018)); }
-  if (glasses === 'eyepatch') { rig.add(body, softBox(0.48, 0.36, 0.05, 0.12), '#14141b', M(-g, y, 0.76)); rig.add(body, GEO.box, '#14141b', M(-0.05, y + 0.22, 0.73, 1.0, 0.03, 0.02, 0, 0, -0.34)); }
-}
-function wearOf(rig, body, s) {
-  const look = s.look, a = s.accent, hair = look.hair === 'none' ? '#4a2f1d' : s.hairColor, w = s.w;
-  switch (look.wear) {
-    case 'beard': rig.add(body, GEO.ball, hair, M(0, -0.52, 0.46, 0.44, 0.26, 0.2)); rig.add(body, GEO.ball, hair, M(0, -0.72, 0.42, 0.28, 0.18, 0.16)); break;
-    case 'moustache': for (const k of [-1, 1]) rig.add(body, GEO.ball, hair, M(k * 0.16, -0.08, 0.6, 0.2, 0.06, 0.06, 0, 0, k * -0.16)); break;
-    case 'scarf': rig.add(body, GEO.cyl, a, M(0, -0.5, 0, w * 0.5, 0.2, 0.62)); rig.add(body, softBox(0.2, 0.5, 0.05, 0.05), dim(a, 0.8), M(0.26, -0.8, 0.56)); break;
-    case 'bowtie': for (const k of [-1, 1]) rig.add(body, GEO.cone, a, M(k * 0.14, -0.53, 0.6, 0.15, 0.26, 0.06, 0, 0, k * Math.PI / 2)); rig.add(body, GEO.tiny, dim(a, 0.8), M(0, -0.53, 0.63, 0.06)); break;
-    case 'tie': tieOf(rig, body, a); break;
-    case 'badge': rig.add(body, softBox(0.26, 0.3, 0.03, 0.05), WHITE, M(0.42, -0.5, 0.56)); rig.add(body, softBox(0.2, 0.08, 0.02, 0.02), a, M(0.42, -0.42, 0.575)); break;
-    case 'cape': rig.add(body, softBox(w * 0.84, s.h * 0.92, 0.06, 0.1), a, M(0, -0.02, -0.64)); break;
-    case 'backpack': rig.add(body, softBox(0.72, 0.8, 0.34, 0.14), a, M(0, -0.08, -0.74)); rig.add(body, softBox(0.44, 0.32, 0.1, 0.06), dim(a, 0.72), M(0, -0.22, -0.92)); break;
-    case 'wings': for (const k of [-1, 1]) { rig.add(body, GEO.ball, WHITE, M(k * 0.74, 0.16, -0.62, 0.56, 0.36, 0.06, 0, k * 0.3, k * 0.32)); rig.add(body, GEO.ball, '#eee7d7', M(k * 0.64, -0.14, -0.6, 0.4, 0.24, 0.05, 0, k * 0.3, k * 0.14)); } break;
-    default: break;
-  }
-}
-function tieOf(rig, body, a) {
-  rig.add(body, GEO.tiny, dim(a, 0.82), M(0, -0.52, 0.595, 0.09, 0.075, 0.05));
-  const shape = new THREE.Shape(); shape.moveTo(-0.05, 0); shape.lineTo(0.05, 0); shape.lineTo(0.11, -0.34); shape.lineTo(0, -0.46); shape.lineTo(-0.11, -0.34); shape.closePath();
-  rig.add(body, new THREE.ShapeGeometry(shape, 1), a, M(0, -0.57, 0.585));
-}
-function outfitOf(rig, body, s) {
-  const a = s.accent, w = s.w, c = s.color;
-  switch (s.look.outfit) {
-    case 'suit': { const V = new THREE.Shape(); V.moveTo(-0.2, 0); V.lineTo(0.2, 0); V.lineTo(0, -0.34); V.closePath(); rig.add(body, new THREE.ShapeGeometry(V, 1), WHITE, M(0, -0.5, 0.588)); break; }
-    case 'shirt': for (const k of [-1, 1]) rig.add(body, GEO.tiny, WHITE, M(k * 0.12, -0.52, 0.58, 0.14, 0.06, 0.04, 0, 0, k * -0.5)); break;
-    case 'hoodie': rig.add(body, GEO.ball, dim(c, 0.82), M(0, -0.5, -0.5, 0.56, 0.3, 0.3)); rig.add(body, softBox(0.56, 0.2, 0.05, 0.08), dim(c, 0.82), M(0, -0.74, 0.56)); break;
-    case 'dress': rig.add(body, GEO.cyl, dim(c, 0.78), M(0, -s.h * 0.42, 0, w * 0.52, 0.14, 0.62)); break;
-    case 'labcoat': rig.add(body, softBox(w * 0.5, s.h * 0.34, 0.03, 0.08), WHITE, M(0, -0.6, 0.58)); rig.add(body, GEO.box, '#2f9bff', M(0.32, -0.5, 0.6, 0.1, 0.05, 0.015)); break;
-    case 'overalls': rig.add(body, softBox(0.62, 0.42, 0.04, 0.08), a, M(0, -0.62, 0.575)); for (const k of [-1, 1]) rig.add(body, GEO.box, a, M(k * 0.24, -0.36, 0.59, 0.06, 0.38, 0.015)); break;
-    default: break;
-  }
-}
-/** A company lanyard on everyone: this is where the floor's colours show on a person. */
-function lanyard(rig, body, s) {
-  for (let i = 0; i <= 5; i++) { const k = -1 + i * 0.4; rig.add(body, GEO.tiny, s.accent, M(k * 0.18, -0.46 - (1 - k * k) * 0.14, 0.572, 0.028)); }
-  rig.add(body, softBox(0.28, 0.32, 0.03, 0.05), WHITE, M(0, -0.78, 0.565));
-  rig.add(body, softBox(0.22, 0.09, 0.02, 0.02), s.accent, M(0, -0.7, 0.583));
-}
-/** What the job wears all day. Returns how far it rises above the head, so the name tag clears it. */
-function wornOf(rig, body, s) {
-  const top = s.h * 0.5, g = s.eyeGap, y = s.eyeY;
-  switch (s.job.worn) {
-    case 'crownlet': rig.add(body, GEO.cyl, GOLD, M(0, top + 0.08, 0, 0.3, 0.12, 0.25)); for (let i = 0; i < 5; i++) { const t = (i / 5) * Math.PI * 2; rig.add(body, GEO.cone, GOLD, M(Math.cos(t) * 0.25, top + 0.22, Math.sin(t) * 0.2, 0.07, 0.2, 0.07)); } return 0.3;
-    case 'tie': if (s.look.wear !== 'tie') tieOf(rig, body, s.accent); return 0;
-    case 'headset': hatHeadset(rig, body, s); return 0.14;
-    case 'beret': hatBeret(rig, body, s, PLUM); return 0.3;
-    case 'loupe': { const m = new THREE.Group(); rig.add(body, GEO.ring, PLUM, M(g + 0.11, y, 0.98, 0.42, 0.42, 0.42, 0, -0.09)); rig.add(body, GEO.arm, PLUM, M(g + 0.42, y - 0.54, 0.98, 0.08, 0.27, 0.08, 0, 0, 0.42)); rig.add(body, GEO.ball, GOLD, M(g + 0.57, y - 0.76, 1.0, 0.09, 0.13, 0.09)); return 0; }
-    case 'specs': if (s.look.glasses === 'none' || !s.look.glasses) { for (const k of [-1, 1]) rig.add(body, GEO.ring, PLUM, M(k * g, y, 0.76, 0.3, 0.3, 0.3)); rig.add(body, GEO.tiny, PLUM, M(0, y + 0.03, 0.8, 0.05, 0.025, 0.025)); } return 0;
-    case 'papers': for (let i = 0; i < 5; i++) rig.add(body, GEO.box, i % 2 ? WHITE : PAPER, M(i % 2 ? 0.035 : -0.03, top + 0.03 + i * 0.075, -0.03, 0.82 - i * 0.017, 0.06, 0.6, 0, (i - 2) * 0.105)); return 0.46;
-    case 'earpencil': { rig.add(body, GEO.arm, GOLD, M(0.78, top - 0.32, 0.24, 0.05, 0.3, 0.05, 0.1, 0, -0.5)); rig.add(body, GEO.cone, '#ffdca8', M(0.47, top - 0.16, 0.26, 0.05, 0.1, 0.05, 0, 0, 0.9)); return 0; }
-    case 'visor': rig.add(body, GEO.cyl, '#16c464', M(0, top - 0.15, 0, s.w * 0.5 + 0.02, 0.1, 0.64)); rig.add(body, GEO.box, '#16c464', M(0, top - 0.1, 0.62, s.w * 0.62, 0.05, 0.36, 0.35)); return 0.02;
-    case 'starpin': { const c = new THREE.Shape(); for (let i = 0; i < 10; i++) { const r = i % 2 ? 0.09 : 0.2, t = (i / 10) * Math.PI * 2 - Math.PI / 2; c[i ? 'lineTo' : 'moveTo'](Math.cos(t) * r, Math.sin(t) * r); } rig.add(body, new THREE.ShapeGeometry(c, 1), GOLD, M(0.5, -0.5, 0.592)); return 0; }
-    case 'splats': for (const [x, y2, r, c] of [[-0.45, -0.5, 0.11, '#ff4f4f'], [-0.2, -0.7, 0.08, '#2f9bff'], [0.34, -0.62, 0.12, '#ffc91f'], [0.5, -0.4, 0.07, '#12d19a'], [0.08, -0.9, 0.07, '#b95cf7']]) rig.add(body, GEO.tiny, c, M(x, y2, 0.57, r, r * 0.86, 0.012)); return 0;
-    default: return 0;
-  }
-}
-/** The thing a job carries around, on the right. Put down when they sit. */
-function heldOf(rig, bone, s) {
-  const add = (g, c, m) => rig.add(bone, g, c, m), a = s.accent;
-  switch (s.job.held) {
-    case 'clipboard': add(softBox(0.5, 0.68, 0.09, 0.06), '#315964', M()); add(softBox(0.4, 0.54, 0.02, 0.025), PAPER, M(0, -0.02, 0.06)); add(softBox(0.18, 0.08, 0.05, 0.02), GOLD, M(0, 0.3, 0.09)); for (let i = 0; i < 4; i++) add(GEO.box, '#8b9c9c', M(-0.03, 0.12 - i * 0.1, 0.075, 0.26, 0.012, 0.002)); break;
-    case 'laptop': { add(softBox(0.95, 0.07, 0.56, 0.04), '#2f3640', M(0, -0.24, 0.1)); add(softBox(0.9, 0.56, 0.06, 0.05), '#2f3640', M(0, 0.05, -0.15, 1, 1, 1, -0.2)); add(softBox(0.76, 0.42, 0.02, 0.02), '#8df5d6', M(0, 0.05, -0.11, 1, 1, 1, -0.2)); break; }
-    case 'brush': add(GEO.arm, GOLD, M(0, -0.05, 0, 0.05, 0.3, 0.05)); add(GEO.ball, WHITE, M(0, 0.34, 0, 0.07, 0.08, 0.07)); add(GEO.ball, '#caa06a', M(0, 0.5, 0, 0.09, 0.19, 0.08)); add(GEO.ball, '#12c8e8', M(0, 0.67, 0, 0.08, 0.09, 0.07)); break;
-    case 'bug': add(GEO.ball, '#ff4f4f', M(0, 0.08, 0.05, 0.2, 0.15, 0.13)); add(GEO.tiny, INK, M(0.2, 0.08, 0.08, 0.09)); for (const x of [-0.1, 0, 0.1]) for (const k of [-1, 1]) add(GEO.tiny, INK, M(x, 0.08 + k * 0.17, 0.06, 0.02, 0.09, 0.02)); break;
-    case 'briefcase': add(softBox(0.62, 0.48, 0.24, 0.07), '#5b385a', M()); add(GEO.ring, '#5b385a', M(0, 0.3, 0, 0.17, 0.11, 0.13)); add(GEO.box, GOLD, M(0, 0.03, 0.14, 0.08, 0.11, 0.035)); break;
-    case 'book': add(softBox(0.46, 0.6, 0.1, 0.05), a, M()); add(softBox(0.38, 0.52, 0.03, 0.02), PAPER, M(0.015, 0, 0.05)); break;
-    case 'notepad': add(softBox(0.44, 0.58, 0.05, 0.04), PAPER, M()); add(GEO.cyl, METAL, M(0, 0.32, 0.02, 0.2, 0.05, 0.03, 0, 0, Math.PI / 2)); for (let i = 0; i < 4; i++) add(GEO.box, '#8b9c9c', M(0, 0.14 - i * 0.13, 0.03, 0.28, 0.012, 0.002)); break;
-    case 'chart': add(softBox(0.62, 0.52, 0.05, 0.05), '#fbf7ec', M()); for (const [x, ht, c] of [[-0.18, 0.2, '#ff4f4f'], [-0.02, 0.3, '#ffc91f'], [0.14, 0.42, '#12d19a']]) add(GEO.box, c, M(x, -0.18 + ht / 2, 0.035, 0.11, ht, 0.03)); break;
-    case 'megaphone': add(GEO.cone, '#ff4f4f', M(0.24, 0, 0.16, 0.26, 0.56, 0.26, 0, 0, -Math.PI / 2)); add(GEO.cyl, METAL, M(-0.1, 0, 0.16, 0.05, 0.3, 0.05, 0, 0, Math.PI / 2)); add(GEO.ring, WHITE, M(0.48, 0, 0.16, 0.26, 0.26, 0.26, 0, Math.PI / 2)); break;
-    case 'palette': { const g = new THREE.Group(); add(GEO.ball, '#d9a36a', M(0, 0, 0, 0.4, 0.3, 0.05)); for (const [x, y2, c] of [[-0.22, 0.1, '#ff4f4f'], [0.02, 0.18, '#ffc91f'], [0.24, 0.1, '#12d19a'], [0.2, -0.1, '#2f9bff']]) add(GEO.tiny, c, M(x, y2, 0.05, 0.075, 0.075, 0.03)); break; }
-    case 'mug': add(GEO.cyl, a, M(0, 0, 0, 0.14, 0.26, 0.14)); add(GEO.ring, a, M(0.17, 0, 0, 0.09, 0.09, 0.14, 0, 0, Math.PI / 2)); add(GEO.ball, '#6b4a2e', M(0, 0.13, 0, 0.1, 0.02, 0.1)); break;
-    default: break;
-  }
+  const y = EYE_E * HH, g = EYE_X, z = eyeAt.z + 0.05, ring = (x, c, r = 0.135) => rig.add(body, GEO.ring, c, M(x, y, z, r, r, 0.3), { gloss: 0.8 });
+  if (s.glasses === 'round') { ring(-g, PLUM); ring(g, PLUM); rig.add(body, GEO.tiny, PLUM, M(0, y + 0.02, z, 0.09, 0.016, 0.016)); }
+  if (s.glasses === 'shades') { for (const k of [-1, 1]) rig.add(body, softBox(0.27, 0.17, 0.03, 0.05), '#14141b', M(k * g, y, z)); rig.add(body, GEO.box, '#14141b', M(0, y + 0.03, z, 0.16, 0.03, 0.02)); }
+  if (s.glasses === 'monocle') { ring(g, GOLD, 0.14); for (let i = 1; i < 6; i++) rig.add(body, GEO.tiny, GOLD, M(g + 0.12 + i * 0.01, y - 0.12 - i * 0.06, z - i * 0.012, 0.012)); }
+  if (s.glasses === 'eyepatch') { rig.add(body, softBox(0.24, 0.2, 0.03, 0.06), '#14141b', M(-g, y, z)); rig.add(body, GEO.box, '#14141b', M(-0.05, y + 0.1, z - 0.02, 1.0, 0.02, 0.012, 0, 0, -0.32)); }
 }
 
 // ---------- a person ----------
 
-const DETAIL = { 1: [52, 26], 0.7: [38, 18], 0.45: [28, 14] };
+const DETAIL = { 1: [44, 30], 0.7: [34, 22], 0.45: [24, 16] };
 const hide = (o) => o.scale.setScalar(1e-4);
+const SHOULDER = 0.08, HIP_X = 0.33, HIP_Y = 0.44;
 
 export class Creature {
   constructor(spec, { detail = 1 } = {}) {
     this.spec = spec;
-    const rig = new Rig();
-    const { w, h, eyeGap: g, eyeY: y, color: c, dark } = spec, restY = h * 0.5 + 0.48;
+    const rig = new Rig(), q = detail >= 1 ? 1 : detail >= 0.7 ? 0.74 : 0.52, s = spec, c = s.color, restY = LEG + HH, kinds = [-1, 1];
     const root = rig.bone(null), body = rig.bone(root, 0, restY, 0);
-    const armPivot = [-1, 1].map((side) => rig.bone(body, side * (w * 0.47), -0.05, 0.02));
-    const legPivot = [-1, 1].map((side) => rig.bone(root, side * 0.4, 0.37, 0.03));
-    const eyes = [], pupils = [], brows = [];
-    for (const side of [-1, 1]) { const e = rig.bone(body, side * g, y, 0.535); eyes.push(e); const pu = rig.bone(e); pupils.push(pu); brows.push(rig.bone(body, side * g, y + 0.48, 0.59)); }
-    const mouth = rig.bone(body, spec.id % 7 === 0 ? 0.04 : 0, -0.22, 0.593), focus = rig.bone(body, 0, -0.2, 0.594), oh = rig.bone(body, 0, -0.24, 0.594);
-    const held = rig.bone(body, 1.04 * (w / 1.75), -0.4, 0.3), paper = rig.bone(body, 0, -0.18, 0.9);
-    const mug = rig.bone(armPivot[1], 0.02, -0.52, 0.16), phone = rig.bone(armPivot[1], 0, -0.48, 0.12);
-    // Bones are posed relative to their parents from here on, and the mesh is bound at the rest pose below.
-    const [N, Mm] = DETAIL[detail] || DETAIL[0.7];
-    const bodyGeo = pillow(spec, N, Mm);
-    rig.add(body, bodyGeo, c, M());
-    bodyGeo.dispose();
+    const armPivot = kinds.map((k) => rig.bone(body, k * 0.62, SHOULDER, -0.02));
+    const fore = armPivot.map((a) => rig.bone(a, 0, -0.24, 0));
+    const hand = fore.map((f) => rig.bone(f, 0, -0.2, 0));
+    const fist = hand.map((h) => rig.bone(h, 0, -0.17, 0));
+    const thumb = hand.map((h, i) => rig.bone(h, kinds[i] * -0.1, -0.08, 0.03));
+    const legPivot = kinds.map((k) => rig.bone(root, k * HIP_X, HIP_Y, 0.03));
+    const eyes = kinds.map((k) => rig.bone(body, k * EYE_X, EYE_E * HH, eyeAt.z - 0.01));
+    const hat = rig.bone(body, 0, HH, kidney(1));
+    const paper = rig.bone(body, 0, -0.2, 0.88), mug = rig.bone(hand[1], 0, -0.1, 0.08), phone = rig.bone(hand[1], 0, -0.08, 0.1);
+
+    const [N, R] = DETAIL[detail] || DETAIL[0.7];
+    rig.add(body, beanGeometry(N, R), c, M(), { gloss: 1 });
+    const sleeved = s.outfit === 'suit' || s.outfit === 'labcoat' || s.outfit === 'waistcoat';
+    const sleeve = s.outfit === 'suit' ? s.suit : s.outfit === 'labcoat' ? '#f6f6f2' : s.outfit === 'waistcoat' ? WHITE : c;
+    const rings = Math.max(4, Math.round(8 * q)), sides = Math.max(6, Math.round(11 * q));
     for (const i of [0, 1]) {
-      rig.add(legPivot[i], GEO.arm, c, M(0, -0.08, 0, 0.12, 0.13, 0.13));
-      rig.add(legPivot[i], GEO.ball, dark, M((i ? 1 : -1) * 0.025, -0.23, 0.14, 0.235, 0.155, 0.31));
-      rig.add(armPivot[i], GEO.arm, c, M(0, -0.25, 0.035, 0.16, 0.195, 0.17));
+      const k = kinds[i];
+      // The arm: sleeve to the wrist, a white cuff, then a chunky hand of sausage fingers in the body colour.
+      rig.add(armPivot[i], GEO.ball, sleeve, M(0, 0.01, 0, 0.165, 0.165, 0.165), { gloss: sleeved ? 0.55 : 1 });
+      rig.add(armPivot[i], armTube(0.04, -0.36, rings, sides, sleeved ? 1.1 : 1), sleeve, M(), { gloss: sleeved ? 0.55 : 1, blend: { bone: fore[i], w: (p) => sstep(-0.18, -0.3, p.y) } });
+      if (s.outfit === 'suit') rig.add(fore[i], armTube(-0.34, -0.41, 2, sides, 1.16), WHITE, M(0, 0.24, 0), { gloss: 0.6 });
+      else rig.add(fore[i], armTube(-0.36, -0.42, 2, sides), sleeved ? WHITE : c, M(0, 0.24, 0), { gloss: 0.8 });
+      rig.add(hand[i], GEO.ball, c, M(0, -0.075, 0, 0.145, 0.12, 0.1));
+      // Three fat fingers fanned out, and a stubby thumb on the inside.
+      const fingers = [[-0.3, -0.105, 0.135], [0, 0, 0.145], [0.3, 0.105, 0.135]];
+      for (const [a, x, l] of fingers) rig.add(fist[i], GEO.sausage, c, M(x, -0.01 - l * 0.34, 0, 0.056, l * 0.48, 0.056, 0, 0, a));
+      rig.add(thumb[i], GEO.sausage, c, M(0, -0.06, 0, 0.052, 0.085, 0.052));
+      // A short stumpy leg, trousered or bare, on a rounded flat-soled foot.
+      rig.add(legPivot[i], GEO.sausage, s.trousers ? s.suit : c, M(0, -0.16, 0, 0.15, 0.12, 0.155), { gloss: s.trousers ? 0.55 : 1 });
+      rig.add(legPivot[i], GEO.foot, c, M(0, -HIP_Y, 0.05, 1.08, 1, 1.32));
     }
-    // A big-eyed face, a little off-kilter on some, with the wide soft mouth from the proof.
-    for (let i = 0; i < 2; i++) {
-      let ex = 0.237 * spec.eyeBig, ey = 0.285 * spec.eyeBig;
-      if (spec.wonky) { ex *= i ? 1.14 : 0.92; ey *= i ? 1.12 : 0.88; }
-      rig.add(eyes[i], GEO.ball, WHITE, M(0, 0, 0, ex, ey, 0.155));
-      rig.add(pupils[i], GEO.tiny, INK, M(0, -0.012, 0.143, 0.092 * spec.eyeBig, 0.125 * spec.eyeBig, 0.05));
-      rig.add(pupils[i], GEO.tiny, WHITE, M(-0.03, 0.03, 0.19, 0.032, 0.032, 0.012));
-      rig.add(brows[i], GEO.brow, INK, M());
-      brows[i].position.y = y + ey + 0.13;
-    }
-    for (const side of [-1, 1]) rig.add(body, GEO.tiny, spec.cheek, M(side * Math.min(0.62, w * 0.34), -0.075, 0.532, 0.122, 0.07, 0.026));
-    const mw = spec.mouthWide, mouthTilt = spec.browTilt < 0 ? -0.08 : 0.05;
-    rig.add(mouth, GEO.smile, INK, M(0, 0, 0, mw, mw * 0.92, 1, 0, 0, mouthTilt));
-    rig.add(mouth, GEO.tiny, '#ff6d7d', M(0.04 * mw, -0.21 * mw, 0.016, 0.18 * mw, 0.075 * mw, 0.022));
-    rig.add(mouth, GEO.tiny, WHITE, M(-0.06 * mw, -0.035 * mw, 0.02, 0.2 * mw, 0.05 * mw, 0.02));
-    rig.add(focus, GEO.arm, INK, M(0, 0, 0, 0.03, 0.14, 0.015, 0, 0, Math.PI / 2 + 0.1));
-    rig.add(oh, GEO.tiny, INK, M(0, 0, 0, 0.13, 0.16, 0.022));
-    rig.add(oh, GEO.tiny, '#ff6d7d', M(0.01, -0.08, 0.016, 0.08, 0.05, 0.016));
-    lanyard(rig, body, spec);
-    outfitOf(rig, body, spec);
-    wearOf(rig, body, spec);
-    hairOf(rig, body, spec);
-    let clear = hatOf(rig, body, spec);
-    if (spec.look.hat === 'none' || !spec.look.hat) clear = Math.max(clear, wornOf(rig, body, spec));
-    else if (['tie', 'loupe', 'specs', 'earpencil', 'starpin', 'splats'].includes(spec.job.worn)) wornOf(rig, body, spec);
-    glassesOf(rig, body, spec);
-    heldOf(rig, held, spec);
+    if (s.trousers) trousers(rig, body, s, q);
+    ({ suit, waistcoat, hivis, labcoat, tie: plainTie }[s.outfit] || (() => {}))(rig, body, s, q);
+    // The two tiny black bead eyes, each with its speck of light.
+    for (const e of eyes) { rig.add(e, GEO.ball, INK, M(0, 0, 0, 0.062, 0.062, 0.042), { gloss: 0.6 }); rig.add(e, GEO.tiny, '#ffffff', M(-0.019, 0.024, 0.037, 0.016, 0.016, 0.01), { gloss: 0 }); }
+    const clear = hatOf(rig, hat, s);
+    if (s.hat === 'earpencil') earPencil(rig, body);
+    if (s.glasses) glassesOf(rig, body, s);
     // What a person may pick up: shown by scaling their bone up from nothing, so they cost no extra draw calls.
-    rig.add(paper, GEO.box, PAPER, M(0, 0, 0, 0.5, 0.03, 0.64, 0.25)); rig.add(paper, GEO.box, '#b8c0cc', M(0, 0.03, -0.02, 0.32, 0.006, 0.34, 0.25));
-    rig.add(mug, GEO.cyl, spec.accent, M(0, 0, 0, 0.14, 0.26, 0.14)); rig.add(mug, GEO.ring, spec.accent, M(0.17, 0, 0, 0.09, 0.09, 0.14, 0, 0, Math.PI / 2));
-    rig.add(mug, GEO.ball, '#6b4a2e', M(0, 0.13, 0, 0.1, 0.02, 0.1));
-    rig.add(phone, softBox(0.2, 0.36, 0.04, 0.03), '#23232b', M()); rig.add(phone, softBox(0.16, 0.29, 0.012, 0.01), '#9fd8ff', M(0, 0, 0.026));
+    rig.add(paper, GEO.box, PAPER, M(0, 0, 0, 0.5, 0.03, 0.64, 0.25), { gloss: 0.3 }); rig.add(paper, GEO.box, '#b8c0cc', M(0, 0.03, -0.02, 0.32, 0.006, 0.34, 0.25), { gloss: 0.1 });
+    rig.add(mug, GEO.cyl, s.accent, M(0, 0, 0, 0.11, 0.22, 0.11)); rig.add(mug, GEO.ring, s.accent, M(0.14, 0, 0, 0.075, 0.075, 0.1, 0, 0, Math.PI / 2)); rig.add(mug, GEO.ball, '#6b4a2e', M(0, 0.11, 0, 0.09, 0.02, 0.09), { gloss: 0.2 });
+    rig.add(phone, softBox(0.16, 0.3, 0.035, 0.025), '#23232b', M()); rig.add(phone, softBox(0.13, 0.24, 0.01, 0.008), '#9fd8ff', M(0, 0, 0.022), { gloss: 0.3 });
 
     this.group = new THREE.Group();
     this.group.add(root);
@@ -368,43 +398,38 @@ export class Creature {
     this.group.add(mesh);
     mesh.bind(skeleton, new THREE.Matrix4());
     this.mesh = mesh;
-    if (detail >= 0.7) { const ol = new THREE.SkinnedMesh(geo, OUTLINE_MAT); ol.frustumCulled = false; ol.bind(skeleton, new THREE.Matrix4()); this.group.add(ol); this.outline = ol; }
     // Where the group goes, its height and how far the head reaches: all a chair and a name tag need to know.
-    this.height = h + 0.48; this.bottom = 0.48; this.labelClear = clear;
-    this.B = { root, body, armPivot, legPivot, eyes, pupils, brows, mouth, focus, oh, held, paper, mug, phone };
-    this.rest = { bodyY: restY, browY: brows.map((b) => b.position.y), browZ: brows.map(() => 0), held: held.position.clone() };
-    hide(focus); hide(oh); hide(paper); hide(mug); hide(phone);
+    this.height = H + LEG; this.bottom = LEG; this.labelClear = clear;
+    this.B = { root, body, armPivot, fore, hand, fist, thumb, legPivot, eyes, hat, paper, mug, phone };
+    this.rest = { bodyY: restY, hatY: hat.position.y, eyeX: eyes.map((e) => e.position.x), eyeY: eyes[0].position.y };
+    hide(paper); hide(mug); hide(phone);
     this.paper = { visible: false }; this.mug = { visible: false }; this.phone = { visible: false };
     this.t = (spec.id % 1000) / 37; this.step = spec.phase; this.blinkAt = 1 + (spec.id % 300) / 90;
-    this.nextFidget = 3 + (spec.id % 7); this.fidget = -1; this.fidgetT = 0; this.stumbleT = -1; this.nextStumble = 7 + ((spec.id >> 4) % 11);
-    this.hopT = -1; this.grin = 0; this.wide = 1;
+    this.nextFidget = 2 + (spec.id % 7); this.fidget = -1; this.fidgetT = 0; this.stumbleT = -1; this.nextStumble = 7 + ((spec.id >>> 4) % 11);
+    this.hopT = -1; this.wide = 1; this.shut = 0; this.hatP = 0; this.hatV = 0;
+    this.pose(0, 0, { walk: 0, sit: 0, type: 0, talk: 0, carry: 0, cheer: 0, think: 0, listen: 0, stretch: 0, sip: 0, phone: 0, pour: 0 });
   }
   /** A little jump for joy when a job is finished. */
   celebrate() { this.hopT = 0; }
   pose(dt, speed, b, ty, m) {
-    const s = this.spec, t = (this.t += dt), B = this.B, sit = Math.min(1, b.sit), walk = Math.min(1 - sit, b.walk), lean0 = m?.lean ?? 0;
+    const s = this.spec, t = (this.t += dt), B = this.B, sit = Math.min(1, b.sit), stand = 1 - sit, walk = Math.min(stand, b.walk), lean0 = m?.lean ?? 0;
     const p = t * 2.5 + s.phase, side = (i) => (i ? 1 : -1);
     // Squash and stretch breathes through everything, one wobble per person.
-    let squash = Math.sin(p) * (0.018 + 0.014 * (1 - sit)), hop = 0, tilt = Math.sin(p * 0.53) * 0.016 + lean0 * (1 - sit), pitch = 0, headTurn = Math.sin(t * 0.61 + s.phase) * 0.12 * (1 - b.type);
-    let lookX = Math.sin(t * 0.7 + s.phase) * 0.018, lookY = 0, browUp = 0, browIn = 0, eyeOpen = 1, grin = 0.6, focus = 0, oh = 0, jit = 0, sway = 0;
+    let squash = Math.sin(p) * (0.016 + 0.012 * stand), hop = 0, tilt = Math.sin(p * 0.53) * 0.016 + lean0 * stand, pitch = 0, turn = Math.sin(t * 0.61 + s.phase) * 0.1 * (1 - b.type);
+    let lookX = Math.sin(t * 0.7 + s.phase) * 0.012, lookY = 0, eyeOpen = 1, jit = 0, sway = 0, shut = 0;
     // A waddle: short quick steps, the body rocking from foot to foot and dipping on each one.
     this.step += dt * (8.2 + (m ? (m.pace - 2.6) * 2.4 : 0)) * (speed > 0.01 ? 1 : 0.3);
     const st = this.step, sw = Math.sin(st);
-    hop += Math.abs(sw) * 0.13 * walk;
-    squash += Math.cos(st * 2) * 0.05 * walk;
-    tilt += sw * 0.13 * walk * (1 + (m?.sway ?? 0) * 0.2);
-    sway = sw * 0.07 * walk;
-    pitch += 0.05 * walk;
-    grin = 0.75 * walk + grin * (1 - walk);
+    hop += Math.abs(sw) * 0.11 * walk; squash += Math.cos(st * 2) * 0.05 * walk; tilt += sw * 0.14 * walk * (1 + (m?.sway ?? 0) * 0.2); sway = sw * 0.06 * walk; pitch += 0.05 * walk;
     // A stumble now and then, on the way somewhere. Harmless, and they look very surprised about it.
     if (walk > 0.6) { this.nextStumble -= dt; if (this.nextStumble <= 0 && this.stumbleT < 0) { this.stumbleT = 0; this.nextStumble = 11 + Math.random() * 18; } }
     let stum = 0;
     if (this.stumbleT >= 0) {
       this.stumbleT += dt;
       const u = this.stumbleT / 0.55;
-      if (u >= 1) this.stumbleT = -1; else { stum = Math.sin(u * Math.PI); pitch += stum * 0.42; hop += stum * 0.12; tilt += Math.sin(u * Math.PI * 3) * 0.1 * stum; oh = Math.max(oh, stum); eyeOpen = Math.max(eyeOpen, 1 + 0.18 * stum); browUp += 0.05 * stum; }
+      if (u >= 1) this.stumbleT = -1; else { stum = Math.sin(u * Math.PI); pitch += stum * 0.42; hop += stum * 0.12; tilt += Math.sin(u * Math.PI * 3) * 0.1 * stum; eyeOpen = Math.max(eyeOpen, 1 + 0.5 * stum); }
     }
-    // The jump for joy: a crouch, up, and a squashy landing.
+    // The jump for joy: a crouch, up, and a squashy landing. In the air it's his pose: one arm up, one leg raised.
     let joy = 0;
     if (this.hopT >= 0) {
       this.hopT += dt;
@@ -414,96 +439,92 @@ export class Creature {
       else if (u < 0.76) { const a = (u - 0.22) / 0.54; hop += Math.sin(a * Math.PI) * 0.62; squash += 0.12 * Math.sin(a * Math.PI); joy = 1; }
       else { squash -= 0.14 * Math.sin(((u - 0.76) / 0.24) * Math.PI); joy = 0.7; }
     }
-    // Cheer: arms up and a hop on the spot.
+    // Cheer: the happy pose, hopping on the spot.
     hop += Math.abs(Math.sin(t * 7)) * 0.22 * b.cheer; squash += Math.cos(t * 14) * 0.05 * b.cheer; joy = Math.max(joy, b.cheer);
-    grin = Math.max(grin, joy);
-    browUp += 0.05 * joy; eyeOpen = Math.max(eyeOpen, 1 + 0.1 * joy);
-    // Now and then, when they're not busy, a little thing of their own: a wave, a wiggle, a peer around.
+    eyeOpen = Math.max(eyeOpen, 1 + 0.25 * joy);
+    // When they're not busy, something of their own: a wave, a leg in the air, a hop, hands on hips, a thumbs up or a small bow with the eyes shut.
     const free = 1 - Math.min(1, b.walk + b.type + b.talk + b.cheer + b.carry + b.stretch + b.sip + b.phone + b.pour + b.think);
-    if (free > 0.8) { this.nextFidget -= dt; if (this.nextFidget <= 0 && this.fidget < 0) { this.fidget = Math.floor(Math.random() * 3); this.fidgetT = 0; this.nextFidget = 5 + Math.random() * 9; } }
-    let wave = 0;
+    if (free > 0.8) { this.nextFidget -= dt; if (this.nextFidget <= 0 && this.fidget < 0) { this.fidget = Math.floor(Math.random() * 6); this.fidgetT = 0; this.nextFidget = 4 + Math.random() * 7; } }
+    let wave = 0, legUp = 0, hips = 0, thumbs = 0, bow = 0;
     if (this.fidget >= 0) {
       this.fidgetT += dt;
-      const u = this.fidgetT / 1.5, g = Math.sin(Math.PI * Math.min(1, u));
-      if (u >= 1) this.fidget = -1;
-      else if (this.fidget === 0) { wave = g; tilt += 0.07 * g; }
-      else if (this.fidget === 1) { tilt += Math.sin(u * Math.PI * 3) * 0.11 * g; squash += Math.sin(u * Math.PI * 4) * 0.05 * g; hop += g * 0.05; }
-      else { headTurn += Math.sin(u * Math.PI * 2) * 0.28 * g; lookX += Math.sin(u * Math.PI * 2) * 0.05 * g; }
+      const len = [1.7, 1.5, 0.9, 2.2, 1.8, 2][this.fidget], u = this.fidgetT / len, g = Math.sin(Math.PI * Math.min(1, u)), hold = Math.min(1, Math.min(u, 1 - u) * 6);
+      if (u >= 1 || free < 0.5) this.fidget = -1;
+      else if (this.fidget === 0) { wave = hold; tilt += 0.07 * g; }
+      else if (this.fidget === 1) { if (stand > 0.8) { legUp = hold; tilt += 0.1 * g * (s.id % 2 ? 1 : -1); eyeOpen = Math.max(eyeOpen, 1.12); } else wave = hold; }
+      else if (this.fidget === 2) { if (stand > 0.8) { hop += g * 0.42; squash += Math.sin(u * Math.PI * 2) * 0.1; } else lookX += Math.sin(u * Math.PI * 2) * 0.05 * g; }
+      else if (this.fidget === 3) { hips = stand > 0.8 ? hold : 0; turn += Math.sin(u * Math.PI * 2) * 0.2 * g; }
+      else if (this.fidget === 4) thumbs = hold;
+      else { bow = hold; shut = Math.max(shut, hold); }
     }
-    // Frantic at the keys: everything quivers, the brows knit, the tongue comes out to help.
+    // Frantic at the keys: everything quivers, and the eyes never leave the screen.
     const on = ty?.on ?? 0;
     if (b.type > 0.01) {
-      focus = Math.max(focus, b.type * on); pitch += 0.06 * b.type; jit = b.type * on;
+      pitch += 0.06 * b.type; jit = b.type * on;
       squash += Math.sin(t * 22 + s.phase) * 0.013 * jit; hop += Math.abs(Math.sin(t * 15 + s.phase)) * 0.018 * jit;
-      browIn += 0.09 * b.type; lookY -= 0.055 * b.type * on; lookY += 0.02 * b.type * (ty?.look ?? 0); headTurn = headTurn * (1 - b.type) + b.type * ((ty?.glance ?? 0) * 0.5 + Math.sin(t * 0.8 + s.phase) * 0.06);
+      lookY -= 0.03 * b.type * on; lookY += 0.012 * b.type * (ty?.look ?? 0); turn = turn * (1 - b.type) + b.type * ((ty?.glance ?? 0) * 0.5 + Math.sin(t * 0.8 + s.phase) * 0.06);
     }
-    // Thinking looks up and sideways with one eyebrow going; listening is wide-eyed and nodding along.
-    if (b.think > 0.01) { oh = Math.max(oh, 0.6 * b.think); lookY += 0.06 * b.think; lookX += 0.05 * b.think; browUp += 0.04 * b.think; headTurn += Math.sin(t * 0.9) * 0.08 * b.think; }
-    if (b.listen > 0.01) { browUp += 0.035 * b.listen; const nod = Math.sin(t * 1.7); pitch += (nod > 0.7 ? (nod - 0.7) * 2.4 : 0) * 0.13 * b.listen; grin = Math.max(grin, 0.7 * b.listen); }
-    if (b.sip > 0.01) { eyeOpen = Math.min(eyeOpen, 1 - 0.55 * b.sip); grin = Math.max(grin, 0.8 * b.sip); }
-    if (b.stretch > 0.01) { eyeOpen = Math.min(eyeOpen, 1 - 0.7 * b.stretch); oh = Math.max(oh, 0.9 * b.stretch); squash += 0.08 * b.stretch; }
-    if (b.pour > 0.01) { focus = Math.max(focus, 0.6 * b.pour); lookY -= 0.03 * b.pour; }
-    if (b.phone > 0.01) { lookX -= 0.03 * b.phone; browUp += 0.02 * b.phone * (0.5 + 0.5 * Math.sin(t * 3)); }
-    // Talking: the mouth goes, the brows bounce, the whole body nods along with it.
-    const flap = 0.5 + 0.5 * Math.sin(t * 12 + s.phase), talk = Math.max(b.talk, b.phone * 0.9);
-    if (talk > 0.01) { squash += Math.sin(t * 6 + s.phase) * 0.028 * talk; tilt += Math.sin(t * 3 + s.phase) * 0.05 * talk; browUp += (0.03 + 0.024 * Math.sin(t * 4)) * talk; }
-    // The arms, one weight at a time: `a` swings them forward, `o` splays them out from the body.
-    let aL = 0.35 * sit, aR = 0.35 * sit, oL = 0.25 - 0.1 * sit, oR = 0.25 - 0.1 * sit;
-    const to = (w, ta, tb, ao, bo) => { aL += (ta - aL) * w; aR += (tb - aR) * w; oL += (ao - oL) * w; oR += (bo - oR) * w; };
-    aL += -sw * 0.65 * walk; aR += sw * 0.65 * walk;
-    if (b.talk > 0.01) to(b.talk, 0.42 + Math.sin(t * 3.3) * 0.14, 1.2 + Math.sin(t * 5 + s.phase) * 0.34, 0.1, 0.55);
-    if (b.listen > 0.01) to(b.listen, 0.42, 0.42, -0.1, -0.1);
-    if (b.carry > 0.01) to(b.carry, 1.12, 1.12, -0.22, -0.22);
-    if (b.think > 0.01) to(b.think, 0.5, 1.7, 0.12, -0.52);
-    if (b.stretch > 0.01) to(b.stretch, 2.9, 2.9, 0.22, 0.22);
-    if (b.sip > 0.01) { const k = this.sip ?? 0; to(b.sip, 0.2, 1.5 + 0.55 * k, 0.2, -0.32); }
-    if (b.phone > 0.01) to(b.phone, 0.3, 2.45, 0.2, 0.42);
-    if (b.pour > 0.01) to(b.pour, 0.25, 1.05, 0.2, -0.14);
-    if (b.cheer > 0.01) to(b.cheer, 2.95 + Math.sin(t * 11) * 0.22, 2.95 - Math.sin(t * 11) * 0.22, 0.45, 0.45);
-    if (b.type > 0.01) {
-      // Hands on the keys, tapping as fast as they can go.
-      to(b.type, 0.98 + (ty?.l ?? 0) * 0.3, 0.98 + (ty?.r ?? 0) * 0.3, -0.42, -0.42);
-    }
-    if (wave > 0.01) { aR += (2.55 + Math.sin(t * 16) * 0.3 - aR) * wave; oR += (0.5 - oR) * wave; browUp += 0.04 * wave; grin = Math.max(grin, wave); }
+    if (b.think > 0.01) { lookY += 0.04 * b.think; lookX += 0.04 * b.think; turn += Math.sin(t * 0.9) * 0.08 * b.think; }
+    if (b.listen > 0.01) { const nod = Math.sin(t * 1.7); pitch += (nod > 0.7 ? (nod - 0.7) * 2.4 : 0) * 0.13 * b.listen; }
+    if (b.sip > 0.01) eyeOpen = Math.min(eyeOpen, 1 - 0.5 * b.sip);
+    if (b.stretch > 0.01) { shut = Math.max(shut, 0.9 * b.stretch); squash += 0.08 * b.stretch; }
+    if (b.pour > 0.01) lookY -= 0.02 * b.pour;
+    if (b.phone > 0.01) lookX -= 0.02 * b.phone;
+    // Talking: no mouth to do it with, so the whole body nods along and the eyes get wider on the words.
+    const talk = Math.max(b.talk, b.phone * 0.9);
+    if (talk > 0.01) { squash += Math.sin(t * 6 + s.phase) * 0.03 * talk; tilt += Math.sin(t * 3 + s.phase) * 0.05 * talk; pitch += (Math.sin(t * 6.5 + s.phase) > 0.2 ? 0.05 : 0) * talk; eyeOpen = Math.max(eyeOpen, 1 + 0.2 * talk * (0.5 + 0.5 * Math.sin(t * 9))); }
+    // The arms, one weight at a time: `a` swings them forward, `o` splays them out from the body, `e` bends the elbow forward and `n` folds the forearm in.
+    let aL = 0.12 + 0.3 * sit, aR = 0.12 + 0.3 * sit, oL = 0.18, oR = 0.18, eL = 0.25 + 0.35 * sit, eR = 0.25 + 0.35 * sit, nL = 0, nR = 0;
+    const to = (w, ta, tb, ao, bo, ea = eL, eb = eR) => { aL += (ta - aL) * w; aR += (tb - aR) * w; oL += (ao - oL) * w; oR += (bo - oR) * w; eL += (ea - eL) * w; eR += (eb - eR) * w; };
+    aL += -sw * 0.6 * walk; aR += sw * 0.6 * walk;
+    if (b.talk > 0.01) to(b.talk, 0.42 + Math.sin(t * 3.3) * 0.14, 1.1 + Math.sin(t * 5 + s.phase) * 0.34, 0.15, 0.5, 0.5, 0.7);
+    if (b.listen > 0.01) to(b.listen, 0.3, 0.3, 0.05, 0.05, 0.4, 0.4);
+    if (b.carry > 0.01) to(b.carry, 1.1, 1.1, -0.3, -0.3, 0.3, 0.3);
+    if (b.think > 0.01) to(b.think, 0.4, 1.2, 0.12, -0.3, 0.4, 1.6);
+    if (b.stretch > 0.01) to(b.stretch, 2.9, 2.9, 0.3, 0.3, 0.2, 0.2);
+    if (b.sip > 0.01) { const k = this.sip ?? 0; to(b.sip, 0.2, 1.1 + 0.3 * k, 0.2, -0.35, 0.3, 1.0 + 0.4 * k); }
+    if (b.phone > 0.01) to(b.phone, 0.3, 1.9, 0.2, 0.55, 0.3, 1.5);
+    if (b.pour > 0.01) to(b.pour, 0.25, 1.05, 0.2, -0.14, 0.3, 0.4);
+    // Hands out over the keys, tapping as fast as they can go.
+    if (b.type > 0.01) to(b.type, 1.05 + (ty?.l ?? 0) * 0.32, 1.05 + (ty?.r ?? 0) * 0.32, -0.5, -0.5, 0.55, 0.55);
+    if (b.cheer > 0.01 || joy > 0.01) { const up = s.id % 2, w = joy; if (up) to(w, 2.9 + Math.sin(t * 11) * 0.2, 0.3, 0.3, 1.2, 0.3, 0.3); else to(w, 0.3, 2.9 + Math.sin(t * 11) * 0.2, 1.2, 0.3, 0.3, 0.3); }
+    if (wave > 0.01) { const up = 2.75 + Math.sin(t * 16) * 0.28; aR += (up - aR) * wave; oR += (0.75 - oR) * wave; eR += (0.25 + Math.sin(t * 16) * 0.25 - eR) * wave; }
+    if (legUp > 0.01) { const up = s.id % 2; if (up) to(legUp, 2.7, 0.3, 0.3, 1.2, 0.3, 0.3); else to(legUp, 0.3, 2.7, 1.2, 0.3, 0.3, 0.3); }
+    if (hips > 0.01) { oL += (0.95 - oL) * hips; oR += (0.95 - oR) * hips; aL += (-0.08 - aL) * hips; aR += (-0.08 - aR) * hips; eL *= 1 - hips; eR *= 1 - hips; nL += 1.9 * hips; nR += 1.9 * hips; }
+    if (thumbs > 0.01) { aR += (1.15 - aR) * thumbs; oR += (0.28 - oR) * thumbs; eR += (0.62 - eR) * thumbs; }
+    if (bow > 0.01) to(bow, 0.5, 0.5, -0.5, -0.5, 0.55, 0.55);
     if (stum > 0.01) { aL += stum * 1.9; aR += stum * 1.7; oL += stum * 0.5; oR += stum * 0.5; }
+    pitch += bow * 0.55;
     B.armPivot[0].rotation.set(-aL, 0, -oL); B.armPivot[1].rotation.set(-aR, 0, oR);
-    // Legs: quick little steps, or dangling off the chair with the odd swing.
-    const dangle = Math.sin(t * 2.3 + s.phase) * 0.12 * sit;
-    B.legPivot[0].rotation.x = sw * 0.7 * walk - 1.3 * sit + dangle; B.legPivot[1].rotation.x = -sw * 0.7 * walk - 1.3 * sit - dangle;
-    // The whole soft body.
-    const rx = pitch, rz = tilt;
-    B.root.position.set(sway, hop, jit * Math.sin(t * 31) * 0.01); B.root.scale.set(1 - squash * 0.52, 1 + squash, 1 - squash * 0.4);
-    B.root.rotation.set(rx, 0, rz);
-    B.body.position.y = this.rest.bodyY; B.body.rotation.set(0, headTurn, 0);
-    // The held prop goes when they sit or have their hands full, and pops back.
-    const stowed = Math.max(sit, b.carry, b.phone, b.sip, b.pour, b.type);
-    const prop = stowed > 0.5 ? 0 : 1 - stowed * 2;
-    this.scaleOf(B.held, Math.max(1e-4, prop));
+    B.fore[0].rotation.set(-eL, 0, nL); B.fore[1].rotation.set(-eR, 0, -nR);
+    // Thumbs up: three fingers close into a fist, and the thumb stands up.
+    B.fist[1].scale.setScalar(1 - 0.55 * thumbs); B.fist[0].scale.setScalar(1);
+    B.thumb[1].rotation.x = -1.5 * thumbs; B.thumb[1].scale.setScalar(1 + 0.2 * thumbs);
+    // Legs: quick little steps, or stuck out off the chair with the odd swing, soles to the world.
+    const dangle = Math.sin(t * 2.3 + s.phase) * 0.12 * sit, liftL = s.id % 2 ? legUp : 0, liftR = s.id % 2 ? 0 : legUp;
+    const joyLeg = joy > 0.3 ? joy : 0;
+    B.legPivot[0].rotation.x = sw * 0.62 * walk - 1.3 * sit + dangle - 1.25 * (liftL + (s.id % 2 ? joyLeg : 0));
+    B.legPivot[1].rotation.x = -sw * 0.62 * walk - 1.3 * sit - dangle - 1.25 * (liftR + (s.id % 2 ? 0 : joyLeg));
+    B.legPivot[0].rotation.z = -0.06 * stand; B.legPivot[1].rotation.z = 0.06 * stand;
+    // The whole soft body: squash from the feet, a lean, a bit of bounce, and the head-end turning to look about.
+    B.root.position.set(sway, hop, jit * Math.sin(t * 31) * 0.01); B.root.scale.set(1 - squash * 0.5, 1 + squash, 1 - squash * 0.4);
+    B.root.rotation.set(pitch, 0, tilt);
+    B.body.position.y = this.rest.bodyY; B.body.rotation.y = turn;
+    // A hat, if they have one, gets a beat behind on the way up and comes down a beat late.
+    const h = Math.min(dt, 0.05), acc = (hop - this.hatP) * 190 - this.hatV * 13; this.hatV += acc * h; this.hatP += this.hatV * h;
+    B.hat.position.y = this.rest.hatY + Math.min(0.4, Math.max(0, this.hatP - hop)); B.hat.rotation.z = -tilt * 0.5;
     this.scaleOf(B.paper, this.paper.visible ? Math.max(1e-4, b.carry) : 1e-4);
     this.scaleOf(B.mug, this.mug.visible ? 1 : 1e-4); this.scaleOf(B.phone, this.phone.visible ? 1 : 1e-4);
-    // Sipping: the cup comes up and goes back down on its own little rhythm.
     this.sip = (this.sip ?? 0) + ((Math.sin(t * 1.4) > 0.3 ? 1 : 0) - (this.sip ?? 0)) * Math.min(1, dt * 6);
-    // Face.
+    // Eyes: a blink, a glance, wide when surprised, shut for a bow or a stretch.
     const faceE = 1 - Math.exp(-dt * 14);
-    this.grin += (grin - this.grin) * faceE;
-    if (t > this.blinkAt + 0.14) this.blinkAt = t + 3.2 + ((s.id >> 9) % 8) * 0.25 + Math.random() * 1.6;
-    const blink = t >= this.blinkAt ? Math.max(0.1, Math.abs(((t - this.blinkAt) / 0.14) * 2 - 1)) : 1;
-    this.wide += (eyeOpen - this.wide) * faceE;
+    if (t > this.blinkAt + 0.14) this.blinkAt = t + 3.2 + ((s.id >>> 9) % 8) * 0.25 + Math.random() * 1.6;
+    const blink = t >= this.blinkAt ? Math.max(0.12, Math.abs(((t - this.blinkAt) / 0.14) * 2 - 1)) : 1;
+    this.wide += (eyeOpen - this.wide) * faceE; this.shut += (shut - this.shut) * faceE;
     for (let i = 0; i < 2; i++) {
-      B.eyes[i].scale.set(this.wide > 1.05 ? this.wide : 1, Math.max(0.08, blink * this.wide), 1);
-      const pu = B.pupils[i]; pu.position.set(lookX + (s.wonky ? (i ? 0.015 : -0.02) : 0), lookY, 0); pu.scale.setScalar(stum > 0.3 ? 0.8 : 1);
-      const k = side(i);
-      B.brows[i].position.y = this.rest.browY[i] + browUp;
-      B.brows[i].rotation.z = k * (s.browTilt + browIn + (b.think > 0.2 && i ? 0.25 : 0));
-      B.brows[i].position.x = k * (s.eyeGap - browIn * 0.3);
+      B.eyes[i].scale.set(this.wide, Math.max(0.12, Math.min(blink, 1 - this.shut * 0.88) * this.wide), this.wide);
+      B.eyes[i].position.x = this.rest.eyeX[i] + lookX; B.eyes[i].position.y = this.rest.eyeY + lookY;
     }
-    // Three mouths, one showing: the wide soft smile (which opens to talk), a concentrating line and a little "oh".
-    const open = Math.max(0, 1 - Math.max(focus, oh) * 1.8);
-    const my = talk > 0.01 ? (1 - talk) * (0.52 + 0.45 * this.grin) + talk * (0.55 + 0.75 * flap) : 0.52 + 0.45 * this.grin;
-    B.mouth.scale.set(Math.max(1e-4, (1 + 0.06 * this.grin + Math.sin(t * 6) * 0.04 * talk) * open), Math.max(1e-4, my * open), 1);
-    this.scaleOf(B.focus, Math.max(1e-4, focus * (1 - oh * 0.9)));
-    B.focus.position.y = -0.2 + Math.sin(t * 10) * 0.012 * jit;
-    this.scaleOf(B.oh, Math.max(1e-4, oh * (0.8 + 0.2 * Math.sin(t * 7))));
   }
   scaleOf(b, v) { if (b.scale.x !== v) b.scale.setScalar(v); }
   dispose() { this.mesh.geometry.dispose(); this.mesh.skeleton.dispose(); this.group.removeFromParent(); }
@@ -511,13 +532,15 @@ export class Creature {
 
 const SVG = 'http://www.w3.org/2000/svg';
 const shape = (name, attrs) => { const el = document.createElementNS(SVG, name); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
-/** The drawn stand-in in the lists, until the photo is developed: the same colour, the same big eyes and the same smile as the person in the room. */
+/** The drawn stand-in in the lists, until the photo is developed: the same little fellow, the top of the bean with its dot eyes over the collar, lapels and tie. */
 export function drawnFace(spec) {
   const svg = shape('svg', { viewBox: '0 0 84 100', 'aria-hidden': 'true', class: 'portrait-drawn' });
-  svg.append(shape('rect', { x: 11, y: 18, width: 62, height: 78, rx: 28, ry: 30, fill: spec.color }));
-  svg.append(shape('ellipse', { cx: 24, cy: 58, rx: 6, ry: 4, fill: spec.cheek }), shape('ellipse', { cx: 60, cy: 58, rx: 6, ry: 4, fill: spec.cheek }));
-  for (const x of [32, 52]) { svg.append(shape('ellipse', { cx: x, cy: 45, rx: 9.5, ry: 12, fill: '#fffdf3' }), shape('ellipse', { cx: x, cy: 46, rx: 4, ry: 5.5, fill: '#2a2233' }), shape('circle', { cx: x - 1.5, cy: 43.5, r: 1.6, fill: '#fffdf3' })); }
-  svg.append(shape('path', { d: 'M28 62c3 13 26 13 30-1z', fill: '#2a2233' }), shape('path', { d: 'M33 70c5 4 15 4 20 1-4-3-16-4-20-1z', fill: '#ff6d7d' }));
+  svg.append(shape('path', { d: 'M42 14C60 14 72 30 72 54C72 88 62 100 42 100C22 100 12 88 12 54C12 30 24 14 42 14Z', fill: spec.color }));
+  svg.append(shape('path', { d: 'M12 74C14 92 22 100 42 100C62 100 70 92 72 74C60 66 52 58 42 58C32 58 24 66 12 74Z', fill: spec.suit }));
+  svg.append(shape('path', { d: 'M28 64L42 58L56 64L42 86Z', fill: '#fbfaf5' }));
+  svg.append(shape('path', { d: 'M39.5 64H44.5L46 80L42 86L38 80Z', fill: spec.tie }));
+  svg.append(shape('ellipse', { cx: 33, cy: 30, rx: 8, ry: 5, fill: '#fff', opacity: 0.45, transform: 'rotate(-24 33 30)' }));
+  for (const x of [33, 51]) svg.append(shape('circle', { cx: x, cy: 42, r: 3.4, fill: '#17151c' }), shape('circle', { cx: x - 1.1, cy: 40.8, r: 0.9, fill: '#fff' }));
   return svg;
 }
 /** Which way to look to take a good photo of them: how much of their height to frame, as a share of it. */
