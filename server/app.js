@@ -26,11 +26,13 @@ import { DomainRefused } from './domains.js';
 import { installOrders } from './orders.js';
 import { installFiller } from './filler.js';
 import { installBuilding } from './building.js';
+import { installLife } from './life.js';
 import { installHelp } from './help.js';
 import { installPurchases } from './purchases.js';
 import { budgetReport } from './budget.js';
 import { installCustomise } from './customise.js';
 import { installModes } from './modes.js';
+import { absoluteMeta } from './metaabs.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any iscolinfree.com cookie, page or API.
@@ -235,8 +237,10 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     json(res, 200, { floor, csrf: s?.csrf || null, admin: !!a, adminCsrf: a?.csrf || null, aiMode: cfg.aiMode });
   });
   GET('/api/floors', async ({ res }) => {
-    const floors = all(db, "SELECT * FROM floors WHERE status!='killed' ORDER BY number DESC").map(floorCard);
-    const taken = new Set(floors.map((f) => f.number));
+    const rows = all(db, "SELECT * FROM floors WHERE status!='killed' ORDER BY number DESC");
+    // A hidden floor is left out of the directory and the lift, but its number is still taken.
+    const floors = rows.filter((f) => !f.hidden).map(floorCard);
+    const taken = new Set(rows.map((f) => f.number));
     const reserved = new Set(all(db, 'SELECT floor_number n FROM codes WHERE claimed_at IS NULL AND floor_number IS NOT NULL').map((c) => c.n));
     let vacant = null;
     for (let n = 1; n <= cfg.towerFloors; n++) if (!taken.has(n) && !reserved.has(n)) { vacant = n; break; }
@@ -674,7 +678,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext)].filter(Boolean);
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext)].filter(Boolean);
   // Their timers run with the engine's: started by whoever starts the engine, stopped on close.
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
@@ -818,9 +822,9 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (segs[0] === '_office' && segs[1] === 'pay' && segs.length === 2) return servePay(res, pr, HEAD);
     const lib = sharedAsset(segs);
     if (lib) { res.writeHead(200, { ...HEAD, 'content-type': lib.type }); return res.end(req.method === 'HEAD' ? undefined : lib.body); }
-    let hit = publishedFile(f, pr, segs, raw.endsWith('/'));
+    let hit = publishedFile(f, pr, segs, raw.endsWith('/')), base = raw;
     // A path with no extension is a client-side route: hand it to the app's own page.
-    if (!hit && !segs.at(-1).includes('.')) hit = publishedFile(f, pr, [''], true);
+    if (!hit && !segs.at(-1).includes('.')) { hit = publishedFile(f, pr, [''], true); base = '/'; }
     // A site that wrote its own wins. These are only here so that a launch doesn't need them hand-made.
     if (!publishedFile(f, pr, segs, false) && raw === '/robots.txt') { res.writeHead(200, { ...HEAD, 'content-type': 'text/plain; charset=utf-8' }); return res.end(req.method === 'HEAD' ? undefined : welcome ? `User-agent: *\nAllow: /\nSitemap: ${cfg.appsScheme}://${ownHost}/sitemap.xml\n` : 'User-agent: *\nDisallow: /\n'); }
     if (!publishedFile(f, pr, segs, false) && raw === '/sitemap.xml' && welcome) {
@@ -833,7 +837,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     const etag = `W/"${pr.published_at}"`;
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ...HEAD, etag }); return res.end(); }
     res.writeHead(200, { ...HEAD, etag, 'content-type': hit.type });
-    res.end(req.method === 'HEAD' ? undefined : hit.body);
+    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(hit.body, `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
   }
   async function serveData(req, res, f, pr, label, rawUrl, HEAD) {
     const reply = (status, obj) => { res.writeHead(status, { ...HEAD, 'cache-control': 'no-store', 'content-type': 'application/json; charset=utf-8', ...(status === 429 ? { 'retry-after': '30' } : {}) }); res.end(JSON.stringify(obj)); };

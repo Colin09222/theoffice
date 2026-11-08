@@ -128,6 +128,23 @@ describe('isolation between floors and projects', () => {
     const text = box.map((f) => f.data.toString('latin1')).join('');
     assert.ok(!text.includes('OTHER-FLOOR-SECRET')); assert.ok(!text.includes('PRIVATE-PLAN'));
   });
+  test('a game gets real CC0 sound and art in its box, and nothing else carries the weight', async () => {
+    const { unpackTgz } = await import('../server/tarball.js');
+    const h = await start();
+    const game = h.assign();
+    h.t.db.prepare("UPDATE tasks SET lane='game' WHERE id=?").run(game.id); h.t.app.engine.kick();
+    await h.settle(game.id);
+    const box = unpackTgz(h.sessions.calls.uploads[0].buffer).files;
+    const assets = box.filter((f) => f.path.startsWith('.office/assets/')).map((f) => f.path);
+    assert.ok(assets.includes('.office/assets/sounds/ding.mp3')); assert.ok(assets.includes('.office/assets/models/Textures/colormap.png'));
+    assert.ok(assets.some((p) => /models\/character-.*\.glb$/.test(p)));
+    const readme = box.find((f) => f.path === '.office/assets/README.txt').data.toString();
+    assert.match(readme, /CC0/); assert.match(readme, /Kenney/); assert.match(readme, /Credit/);
+    assert.equal(box.find((f) => f.path === '.office/assets/sounds/ding.mp3').data.subarray(0, 3).toString('latin1'), 'ID3', 'a real mp3');
+    const site = await go(h, 'Write', { to: 'builder', project: 'site' });
+    await h.settle(site.id);
+    assert.ok(!unpackTgz(h.sessions.calls.uploads[1].buffer).files.some((f) => f.path.startsWith('.office/assets/')), 'a site box stays small');
+  });
   test('each task gets its own session and container, and floors share none', async () => {
     const h = await start();
     const c2 = await claim(h.t, 'Second Floor Co');

@@ -73,7 +73,7 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
   }
   if (!isDoc && !map.has('index.html')) errors.push('index.html is missing.');
   // Every page counts, whatever the project calls itself: a "doc" with an index.html is still a web page.
-  let pageBytes = 0;
+  let pageBytes = 0, formPage = '';
   {
     for (const f of pages) {
       pageBytes += f.data?.length ?? 0;
@@ -90,6 +90,8 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
         errors.push(`${f.path}: loads ${m[1]} from ${m[2]}. Published pages can only load from their own origin; bundle it.`);
       }
       if (/<form\b[^>]{0,600}\baction\s*=\s*["'](https?:)?\/\//i.test(h)) errors.push(`${f.path}: a form posts off-site, which the browser will block. Use Office.submitForm.`);
+      if (/<form\b[^>]{0,600}\baction\s*=\s*["']mailto:/i.test(h)) errors.push(`${f.path}: a form sends by opening the visitor's email app, which loses most of them. Use Office.submitForm.`);
+      if (/<form\b/i.test(h)) formPage ||= f.path;
       for (const m of h.matchAll(/<(?:script|img|link|source|a|iframe)\b[^>]{0,600}\b(?:src|href)\s*=\s*["']([^"'#?]+)/gi)) {
         const ref = m[1];
         if (/^(https?:|mailto:|tel:|data:|blob:|javascript:|\/\/|_office\/)/i.test(ref)) continue;
@@ -105,6 +107,10 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
       if (!/\.m?js$/i.test(f.path) || /three\.|vendor|chunk-vendors/i.test(f.path) || (f.data?.length ?? 0) > 400 * 1024) continue;
       const t = text(f.data);
       for (const [re, what] of CLAIMS.slice(0, 2)) { const m = t.match(re); if (m && !fromBoss(m[0])) flag(what, f.path, m[0]); }
+    }
+    // A sign-up that looks right and goes nowhere is the commonest broken promise on a new site.
+    if (formPage && !files.some((f) => /\.(html?|m?js)$/i.test(f.path) && (f.data?.length ?? 0) <= MAX_PAGE && /submitForm\s*\(/.test(text(f.data)))) {
+      warnings.push(`${formPage}: has a form, but nothing on the site calls Office.submitForm, so what visitors type there reaches nobody. Wire it to Office.submitForm, or drop the <form> if it only drives the page.`);
     }
     const home = map.has('index.html') ? text(map.get('index.html')).slice(0, MAX_PAGE) : '';
     const need = (ok, good, bad) => { if (isDoc) return; if (ok) passed.push(good); else warnings.push(bad); };
