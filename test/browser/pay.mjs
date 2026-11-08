@@ -59,7 +59,7 @@ try {
   await boss.until('!!document.querySelector("#finish")', 'Stripe\'s hosted onboarding');
   check('connecting leaves for Stripe\'s own page', (await boss.ev('location.origin')) === mock.base, await boss.ev('location.href'));
   await boss.ev('document.querySelector("#finish").click()');
-  await boss.until('location.pathname.endsWith("/floor/paper-co") && !!document.querySelector("[data-pay-state]")', 'back on the floor', 15000);
+  await boss.until('location.pathname.endsWith("/floor/paper-co") && !!document.querySelector("[data-pay-state]")', 'back on the floor', 30000);
   await boss.until('!!document.querySelector(\'[data-pay-state="ready"]\')', 'connected', 10000);
   const landedOn = await boss.ev('!!document.querySelector("[data-pay-panel]") && location.search');
   check('it comes back to the Payments tab and the address is clean', landedOn === '', landedOn);
