@@ -20,6 +20,7 @@ const site = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     return res.end(`<!doctype html><title>Local &amp; News</title><meta name="description" content="Today in town"><script>fetch('/ran')</script><nav><a href="/">Home</a></nav><main><h1>Bridge reopens</h1><p>${'The old bridge is open again. '.repeat(12)}</p><a href="/more">Read more</a></main>`);
   }
+  if (req.url === '/data.json') { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{"bridge":"open"}'); }
   res.writeHead(404, { 'content-type': 'text/plain' }); res.end('none');
 });
 await new Promise((r) => site.listen(0, '127.0.0.1', r));
@@ -45,6 +46,7 @@ window.read = async (url) => {
     $('links').replaceChildren(...page.links.map((l) => { const li = document.createElement('li'); li.textContent = l.url; return li; }));
   } catch (e) { $('note').textContent = e.code + ': ' + e.message; }
 };
+window.getJson = async (url) => { const r = await office.fetch(url); $('words').textContent = r.status + ' ' + r.json().bridge; };
 window.ready = true;`;
 for (const [project, files] of [['ask', { 'index.html': PAGE, 'app.js': APP }], ['other', { 'index.html': PAGE, 'app.js': 'window.ready = true;' }]]) {
   for (const [p, c] of Object.entries(files)) writeFile(t.db, floor.id, `projects/${project}/${p}`, c, null, 1e8);
@@ -72,6 +74,9 @@ try {
   check('and the cleaned words', /The old bridge is open again/.test(await p.ev('document.getElementById("words").textContent')));
   const links = await p.ev('[...document.querySelectorAll("#links li")].map((l) => l.textContent)');
   check('and its links', links.includes(`${SITE}/more`), links);
+  await p.ev(`getJson(${JSON.stringify(`${SITE}/data.json`)})`);
+  await p.until('document.getElementById("words").textContent === "200 open"', 'office.fetch and json()', 15000);
+  check('office.fetch brings back JSON the page can read', true);
   check('the site saw an honest User-Agent', hits.filter((h) => h.url === '/news').every((h) => /TheOfficeBot.*iscolinfree\.com\/theoffice/.test(h.ua)));
   check('the scraped page\'s own script never ran', !hits.some((h) => h.url === '/ran'));
 
@@ -105,7 +110,7 @@ try {
   await o.click('[data-cloud="ask"]');
   await o.until('!!document.querySelector(".modal") && document.querySelector(".modal").innerText.includes("AI requests today")', 'the Backend view', 10000);
   const text = await o.ev('document.querySelector(".modal").innerText');
-  check('the boss sees AI and web counts and what is left today', /AI requests today\s*1/.test(text) && /Quick AI left today\s*[\d,]+ of 100,000 tokens/.test(text) && /Pages read today\s*1/.test(text) && /Pages left today\s*499 of 500/.test(text), text.replace(/\s+/g, ' ').slice(0, 300));
+  check('the boss sees AI and web counts and what is left today', /AI requests today\s*1/.test(text) && /Quick AI left today\s*[\d,]+ of 100,000 tokens/.test(text) && /Pages read today\s*2/.test(text) && /Pages left today\s*498 of 500/.test(text), text.replace(/\s+/g, ' ').slice(0, 300));
   check('and no money or model names', !/\$\d|usd|claude|haiku|sonnet/i.test(text));
   await sleep(500);
   await o.shot('/tmp/cloudai-boss.jpg');
