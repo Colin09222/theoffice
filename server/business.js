@@ -712,6 +712,8 @@ export function installBusiness(ext) {
       research: { searches: (research.searches || []).slice(-8), pages: (research.pages || []).slice(-12), markets: research.markets || [], compared: research.compared || [] },
       researchTask: (() => { const t = taskRow(tasksOf(row).ideas); return t ? { status: t.status } : null; })(),
       ads, preview: !!row.project && stepIndex(row.step) >= 1,
+      // Flips once, when the Builder first saves the page: the tab is rebuilt then and the live preview shows at once, not at its next look.
+      pageReady: !!row.project && stepIndex(row.step) >= 1 && !!get(db, 'SELECT 1 FROM files WHERE floor_id=? AND path=?', f.id, `projects/${row.project}/index.html`),
       adMoney: { options: moneyOptions(), chosen: row.money_set ? row.ad_money : 0, set: !!row.money_set, ready: phase === 'money', paid: paidOn() },
       // Google Search is built: with paid ads off (the flag, no account, or stopped) it reads "off for now". Facebook & Instagram is still to come.
       channels: [{ id: 'google', label: 'Google Search', on: paidOn() }, { id: 'meta', label: 'Facebook & Instagram', on: false, soon: true }],

@@ -132,10 +132,12 @@ describe('the journey in mock mode', () => {
       assert.equal(pick.data.business.step, 'build');
       assert.deepEqual(pick.data.business.tracks.map((x) => x.label), ['Website', 'Product', 'Payments', 'Analytics']);
       assert.match(pick.data.business.tracks.find((x) => x.id === 'payments').note, /no Stripe/);
+      assert.equal(pick.data.business.pageReady, false, 'no page to preview before the Builder saves one');
       const s1 = await floorState(c);
       assert.ok(s1.messages.some((m) => m.role === 'boss' && /Let's go with Doorstep Dog Groom/.test(m.text)));
       // The live preview, while it builds.
       const pv = await until(async () => { const r = await c.get(`/api/floors/${c.slug}/business/preview`); return r.data.ready ? r.data : null; }, { what: 'a page to preview', timeout: 30000 });
+      await untilStep(c, (x) => x.pageReady, 'the floor told the page is there');
       const page = await fetch(`http://${t.host}${pv.url}`);
       assert.equal(page.status, 200);
       assert.match(page.headers.get('content-security-policy'), /^sandbox/);
