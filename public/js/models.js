@@ -3,6 +3,7 @@
 // clone of the cached template. Anything that fails to load simply never appears, and the procedural stand-in stays.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { loadAddons } from './addons.js';
+import { warmFlat } from './toon.js';
 
 const BASE = `${location.pathname.startsWith('/theoffice') ? '/theoffice' : ''}/models/`;
 // The server stamps the version of the whole models folder here at start-up (server/statics.js), so these files can be cached for good.
@@ -26,9 +27,27 @@ async function fetchGLTF(path) {
 
 /** Kenney's furniture is exported unlit. Each part becomes a lit standard material named after its role, so pieces can be recoloured by role. */
 function litMaterial(src) {
-  const m = new THREE.MeshStandardMaterial({ color: src.color?.clone() || new THREE.Color('#cccccc'), roughness: 0.82, metalness: 0 });
+  const m = new THREE.MeshStandardMaterial({ color: warmFlat(src.color || '#cccccc'), roughness: 0.82, metalness: 0 });
   m.name = src.name;
   return m;
+}
+// How much fatter each kit piece is made, in the model's own units (a room unit is 2.5 of them): thin legs and slim tops go chunky so the furniture matches the
+// toy-like staff. Things that lie on surfaces or hang on walls stay as they are.
+const PUFF = { desk: 0.028, chairDesk: 0.022, chairModernCushion: 0.02, chairRounded: 0.018, tableCross: 0.03, tableRound: 0.024, tableCoffee: 0.02, sideTable: 0.018, sideTableDrawers: 0.012, bookcaseOpen: 0.016, bookcaseOpenLow: 0.014, bookcaseClosed: 0.01, bookcaseClosedWide: 0.01, stoolBar: 0.02, loungeSofa: 0.012, loungeChair: 0.012, loungeChairRelax: 0.012, loungeDesignChair: 0.014, lampRoundFloor: 0.012, lampSquareFloor: 0.012, lampRoundTable: 0.01, coatRackStanding: 0.02, pottedPlant: 0.018, plantSmall1: 0.014, plantSmall2: 0.014, plantSmall3: 0.014, kitchenCabinet: 0.008, kitchenSink: 0.008, kitchenBar: 0.01, kitchenFridgeLarge: 0.008, trashcan: 0.01 };
+/** Pushes every corner outward along the average of the faces that meet there. Normals stay as they are, so the flat toon shading stays crisp. */
+function puffUp(root, by) {
+  root.traverse((o) => {
+    if (!o.isMesh || o.geometry.userData.puffed) return;
+    const g = o.geometry, p = g.attributes.position, n = g.attributes.normal;
+    g.userData.puffed = true;
+    if (!n) return;
+    const key = (i) => `${Math.round(p.getX(i) * 2000)},${Math.round(p.getY(i) * 2000)},${Math.round(p.getZ(i) * 2000)}`;
+    const sum = new Map();
+    for (let i = 0; i < p.count; i++) { const k = key(i); let v = sum.get(k); if (!v) sum.set(k, v = [0, 0, 0]); v[0] += n.getX(i); v[1] += n.getY(i); v[2] += n.getZ(i); }
+    for (let i = 0; i < p.count; i++) { const [x, y, z] = sum.get(key(i)); const l = Math.hypot(x, y, z) || 1; p.setXYZ(i, p.getX(i) + (x / l) * by, p.getY(i) + (y / l) * by, p.getZ(i) + (z / l) * by); }
+    p.needsUpdate = true;
+    g.computeBoundingBox(); g.computeBoundingSphere();
+  });
 }
 const furnitureCache = new Map();
 /** A furniture template: a group with lit materials, positioned so its footprint centre sits at the origin on the floor. */
@@ -37,6 +56,7 @@ export async function furniture(name) {
     furnitureCache.set(name, fetchGLTF(`furniture/${name}.glb`).then((gltf) => {
       const root = gltf.scene;
       root.updateMatrixWorld(true);
+      if (PUFF[name]) puffUp(root, PUFF[name]);
       const mats = new Map();
       root.traverse((o) => {
         if (!o.isMesh) return;
@@ -64,7 +84,7 @@ export function place(tpl, { x = 0, y = 0, z = 0, ry = 0, scale = 1, tint = null
   g.position.set(x, y, z); g.rotation.y = ry; g.scale.setScalar(scale);
   if (tint) {
     const own = new Map();
-    const re = (mt) => { if (!(mt.name in tint)) return mt; if (!own.has(mt)) { const c = mt.clone(); c.color.set(tint[mt.name]); own.set(mt, c); } return own.get(mt); };
+    const re = (mt) => { if (!(mt.name in tint)) return mt; if (!own.has(mt)) { const c = mt.clone(); c.color.copy(warmFlat(tint[mt.name])); own.set(mt, c); } return own.get(mt); };
     g.traverse((o) => { if (o.isMesh) o.material = Array.isArray(o.material) ? o.material.map(re) : re(o.material); });
   }
   return g;
