@@ -32,6 +32,8 @@ Code: `server/mail.js` (addresses, inbound, sending rules, routes), `server/mail
    MAIL_DOMAIN=middistance.com
    ```
    Restart the container. `node scripts/admin.mjs mail status` should say sending on, receiving on.
+   The gate (`/opt/bhq/server.js`, docs/DEPLOY.md) already proxies everything under `/theoffice` before its password check, so the
+   webhook needs nothing more there, as long as it passes the request body through byte for byte: the signature is over the raw body.
 6. **Check it**: write to a floor's address from your own mailbox, and watch it arrive in that boss's Inbox; reply from the Inbox and check the
    reply arrives, signed. Resend's dashboard shows every webhook delivery.
 

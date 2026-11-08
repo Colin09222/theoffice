@@ -38,6 +38,7 @@ Fill in `.env`:
 | `GLOBAL_DAILY_USD` | `25` |
 | `TASK_MAX_USD` | `3` |
 | `WEB_SEARCH_API_KEY` | Optional Brave Search key. If empty, agents have no `web_search` tool and can only `fetch_url` |
+| `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `MAIL_DOMAIN` | Optional: every company's own email. Set them up with `scripts/mail-setup.mjs`, see docs/MAIL.md. Empty, the Inbox says email is being set up and nothing sends |
 
 ## 3. Start it
 
