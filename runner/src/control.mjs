@@ -123,6 +123,7 @@ export function createControl({ cfg, docker, sys, tokens, now = Date.now, probe 
       },
       NetworkingConfig: { EndpointsConfig: { [cfg.APPS_NETWORK]: { IPAMConfig: { IPv4Address: app.ip } } } },
     };
+    if (cfg.APP_RESOLV_CONF) spec.HostConfig.Mounts.push({ Type: 'bind', Source: cfg.APP_RESOLV_CONF, Target: '/etc/resolv.conf', ReadOnly: true });
     // The label holds a hash of the spec with the secret values swapped for a version number, so a
     // changed secret or setting re-creates the container without the values ending up in a label.
     const fingerprint = JSON.stringify({ ...spec, Env: appEnv(app), secrets: app.secretsVersion ?? 0, names: secretEnv.map((e) => e.split('=')[0]) });

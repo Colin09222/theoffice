@@ -23,6 +23,9 @@ export const DEFAULTS = Object.freeze({
   APPS_IP_PREFIX: '172.30.0.', // apps get fixed addresses .10 to .250
   BUILD_NETWORK: 'office-build',
   APP_PORT: 8080,
+  // When set, this read-only file becomes the apps' /etc/resolv.conf (for runtimes that can't use
+  // Docker's embedded DNS at 127.0.0.11).
+  APP_RESOLV_CONF: null,
   APP_UID: 10001,
   HOST_PREFIX: 'api--',
   HOST_SUFFIX: '.middistance.com',
