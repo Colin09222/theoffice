@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { Character, HEAD_TOP, loadModelCharacter } from './character.js';
+import { Character, PendingCharacter, HEAD_TOP, loadModelCharacter } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
 import { getWorld, makeTower, GROUND, FLOOR_H, TOWER_W } from './lobby-scene.js';
@@ -51,12 +51,16 @@ const canvasTex = (w, h, draw, repeat) => {
   if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(...repeat); }
   return t;
 };
+let shadowCan = null;
+const shadowCanvas = (w, h) => { shadowCan ||= document.createElement('canvas'); if (shadowCan.width !== w || shadowCan.height !== h) { shadowCan.width = w; shadowCan.height = h; } return shadowCan; };
 function seeded(seed) { let s = seed; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }
 const mix = (a, b, t) => `#${new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString()}`;
 const shadeHex = (hex, f) => `#${new THREE.Color(hex).multiplyScalar(f).getHexString()}`;
 
-/** One tile of flooring, drawn once and repeated across the baked floor. */
-function floorTile(style, wall) {
+/** One tile of flooring, drawn once per finish for the whole visit and repeated across every baked floor. A tower bakes the same few over and over. */
+const tiles = new Map();
+function floorTile(style) { if (!tiles.has(style)) tiles.set(style, drawFloorTile(style)); return tiles.get(style); }
+function drawFloorTile(style) {
   const r = seeded(7);
   const c = document.createElement('canvas');
   const x = c.getContext('2d');
@@ -401,7 +405,8 @@ function buildPet(kind) {
 export class Actor {
   constructor(view, info, seat, { isBoss = false } = {}) {
     this.view = view; this.id = info.id; this.info = info; this.seat = seat; this.isBoss = isBoss;
-    this.char = new Character(info.look, { accent: view.colors.accent, scale: CHAR_SCALE });
+    // In the tower nobody sees a person before their model is in, so the procedural stand-in isn't built there.
+    this.char = view.host ? new PendingCharacter(info.look, { scale: CHAR_SCALE }) : new Character(info.look, { accent: view.colors.accent, scale: CHAR_SCALE });
     this.manner = manner(String(info.id)); this.char.setManner(this.manner);
     this.pos = new THREE.Vector3(seat.at[0], 0, seat.at[1]);
     this.group = this.char.group;
@@ -420,7 +425,7 @@ export class Actor {
     if (view.host) { this.tagOff = true; this.tag.style.visibility = 'hidden'; }  // the tower shows it once the floor is in view
     view.labels.append(this.tag);
     // The kit's model takes over from the stand-in when it lands; a failed load changes nothing.
-    loadModelCharacter(info.look, { accent: view.colors.accent }).then((mc) => this.swapChar(mc)).catch((e) => { if (!this.dead) console.warn('character model unavailable', e); });
+    Promise.resolve(view.turn()).then(() => (this.dead ? null : loadModelCharacter(info.look, { accent: view.colors.accent }))).then((mc) => mc && this.swapChar(mc)).catch((e) => { if (!this.dead) console.warn('character model unavailable', e); });
   }
   /** Same place, same pose, same props: the viewer only sees the person get a little more real. */
   swapChar(next) {
@@ -683,6 +688,17 @@ export class OfficeView {
     if (!host) this.bind();
     this.loadLooks();
   }
+  /**
+   * In the tower a floor is put together a step at a time, each step when the tower gives it a turn: one a frame, and none while the
+   * building is being ridden, so building rooms never lands in the middle of a swipe. On a floor page there is no waiting.
+   */
+  turn() { return this.host?.turn ? this.host.turn() : null; }
+  bakeSoon() {
+    if (!this.host) { this.bakeFloor(); return; }
+    if (this.bakeQueued) return;
+    this.bakeQueued = true;
+    Promise.resolve(this.turn()).then(() => { this.bakeQueued = false; if (!this.dead) this.bakeFloor(); });
+  }
   /** Normal and roughness maps only on a floor page of its own, where the room fills the screen. In the tower a floor is small and there may be several. */
   get pbr() { return !this.host && (stage.q?.density ?? 1) >= 0.6; }
   /** The real materials, a set at a time: floor and wall textures, and a panorama to light and reflect the room. All optional. */
@@ -699,7 +715,7 @@ export class OfficeView {
     const want = new Set([this.decor.floor, 'carpet', 'tile', ...[...this.offices.values()].map((o) => o.theme.floor)].filter((f) => FLOOR_TEX[f] && !this.floorSets.has(f)));
     if (!want.size) return;
     for (const f of want) this.floorSets.set(f, null);
-    Promise.all([...want].map((f) => textureSet(FLOOR_TEX[f][0], { pbr }).then((set) => { if (set) this.floorSets.set(f, set); }))).then(() => { if (!this.dead) this.bakeFloor(); });
+    Promise.all([...want].map((f) => textureSet(FLOOR_TEX[f][0], { pbr }).then((set) => { if (set) this.floorSets.set(f, set); }))).then(() => { if (!this.dead) this.bakeSoon(); });
   }
   /** The city below and the tower under our feet: the same world the lobby orbits, scaled so one tower floor is this room. */
   buildWorld() {
@@ -1090,6 +1106,7 @@ export class OfficeView {
     for (const p of L.props || []) names.push(p.m);
     const wanted = [...new Set(names)];
     const got = await Promise.all(wanted.map((n) => furniture(n)));
+    await this.turn();
     if (this.dead) return;
     const T = Object.fromEntries(wanted.map((n, i) => [n, got[i]]));
     const models = new THREE.Group(); models.userData.fromKit = true;
@@ -1226,10 +1243,15 @@ export class OfficeView {
       x.strokeStyle = 'rgba(20,16,12,.34)'; x.lineWidth = 3 * k; x.beginPath(); for (const w of wallLines(this.plan)) { x.moveTo(px(w.x0), pz(w.z0)); x.lineTo(px(w.x1), pz(w.z1)); } x.stroke();
       const rim = (x0, y0, x1, y1, a) => { const g = x.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, `rgba(20,16,12,${a})`); g.addColorStop(1, 'rgba(20,16,12,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H); };
       rim(0, 0, 0, 70 * k, 0.34); rim(0, 0, 70 * k, 0, 0.34); rim(W, 0, W - 40 * k, 0, 0.12); rim(0, H, 0, H - 40 * k, 0.12);
-      // Contact shadows under furniture, pulled slightly toward the camera side of the sun.
-      x.save(); x.shadowColor = 'rgba(15,12,10,.55)'; x.shadowBlur = 22 * k; x.shadowOffsetX = -6 * k; x.shadowOffsetY = 5 * k; x.fillStyle = 'rgba(15,12,10,.18)';
+      // Contact shadows under furniture, pulled slightly toward the camera side of the sun. Drawn an eighth the size and stretched, which
+      // blurs them for nearly nothing: a canvas shadow blur on every piece was most of the cost of a bake.
+      const sw = Math.ceil(W / 8), sh = Math.ceil(H / 8), small = shadowCanvas(sw, sh), s = small.getContext('2d');
+      s.clearRect(0, 0, sw, sh); s.filter = 'blur(1.4px)'; s.fillStyle = 'rgba(15,12,10,.5)';
+      for (const [fx, fz, fw, fd] of this.nav.footprints) s.fillRect((px(fx - fw / 2) + 4 * k) / 8, (pz(fz - fd / 2) + 4 * k) / 8, (fw * ppu - 8 * k) / 8, (fd * ppu - 8 * k) / 8);
+      s.filter = 'none';
+      x.save(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high'; x.drawImage(small, 0, 0, sw, sh, -6 * k, 5 * k, sw * 8, sh * 8); x.restore();
+      x.fillStyle = 'rgba(15,12,10,.18)';
       for (const [fx, fz, fw, fd] of this.nav.footprints) x.fillRect(px(fx - fw / 2) + 4 * k, pz(fz - fd / 2) + 4 * k, fw * ppu - 8 * k, fd * ppu - 8 * k);
-      x.restore();
     });
     tex.anisotropy = 8; tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     this.floorMat.map = tex;
@@ -1237,7 +1259,7 @@ export class OfficeView {
       const n = canvasTex(W, H, (x) => paintRooms(x, 'normal')); n.colorSpace = THREE.NoColorSpace; this.floorMat.normalMap = n; this.floorMat.normalScale.set(0.7, 0.7);
       const r = canvasTex(W, H, (x) => paintRooms(x, 'rough')); r.colorSpace = THREE.NoColorSpace; this.floorMat.roughnessMap = r; this.floorMat.roughness = 1;
     }
-    this.floorMat.needsUpdate = true;
+    this.floorMat.needsUpdate = true; this.baked = true;
     for (const t of old) if (t && t !== this.floorMat.map && t !== this.floorMat.normalMap && t !== this.floorMat.roughnessMap) t.dispose();
   }
   tint(a) { const c = new THREE.Color(this.colors.primary); return `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${a})`; }
@@ -1347,7 +1369,7 @@ export class OfficeView {
     // The rooms nobody has yet are still furnished, and say so on the door, ready for the next hire.
     const owned = new Set(this.owners.values()); let vacant = 0;
     for (const r of this.plan.rooms) if (r.kind === 'staff' && !owned.has(r.id) && !this.offices.has(r.id)) { this.nav.block(...deskRect(r.desk)); this.addOffice(r, { id: `free-${r.id}`, role: 'vacant', name: null }, { own: true }); vacant++; }
-    if (fresh.length || vacant || !this.floorMat.map) { this.rebuildOffices(); this.bakeFloor(); this.loadFloorSets(); if (this.modelsOn) this.furnishOffices(); }
+    if (fresh.length || vacant || !this.floorMat.map) { this.rebuildOffices(); this.bakeSoon(); this.loadFloorSets(); if (this.modelsOn) this.furnishOffices(); }
     const seen = new Set();
     const mgr = state.agents.find((a) => a.role === 'manager');
     if (mgr) {
@@ -1448,6 +1470,7 @@ export class OfficeView {
     const missing = [...names].filter((n) => !this.kit[n]);
     // Each piece on its own: one that fails to load is just left out.
     const got = await Promise.allSettled(missing.map((n) => furniture(n)));
+    await this.turn();
     this.furnishing--;
     missing.forEach((n, i) => { if (got[i].status === 'fulfilled') this.kit[n] = got[i].value; });
     // Whichever pass finishes builds from the offices as they are now, so a slow earlier pass can't put back an old room.

@@ -106,6 +106,16 @@ export function mergeColored(root, material, keep = () => false) {
     for (const o of list) o.removeFromParent();
     root.add(merged);
   }
+  prune(root);
+}
+
+/** The empty groups a merge leaves behind (a model's nodes, a desk's frame) cost a matrix update every frame for nothing. */
+function prune(root) {
+  const bare = (o) => (o.type === 'Group' || o.type === 'Object3D') && !o.children.length;
+  const empty = [];
+  root.traverse((o) => { if (o !== root && bare(o)) empty.push(o); });
+  // Up the chain too, as long as taking a node out leaves its parent with nothing in it either.
+  for (let o of empty) while (o && o !== root && bare(o)) { const up = o.parent; o.removeFromParent(); o = up; }
 }
 
 export function disposeMerged(root) {

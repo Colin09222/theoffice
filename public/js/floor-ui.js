@@ -12,6 +12,7 @@ import { portrait } from './portrait.js';
 import { lobbyMode } from './stack.js';
 import { muteButton, sfx } from './sfx.js';
 import { confetti, fanfare, mayParty } from './party.js';
+import { handOver, peekHandoff, takeHandoff } from './handoff.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -61,7 +62,7 @@ class FloorPage {
     this.buildShell();
     if (stage.ok) {
       this.labels = $('#labels'); clear(this.labels);
-      this.view = this.makeView();
+      this.view = this.adoptView() || this.makeView();
       stage.setView(this.view);
       wirePins(this);
     } else this.pinsEl.hidden = true;  // no room to float over
@@ -154,6 +155,40 @@ class FloorPage {
   }
 
   makeView() { return new OfficeView({ state: this.viewState(), labels: this.labels, onSmallTalk: (line) => this.addLocalTalk(line) }); }
+  /**
+   * Flown in from the 3D building: the very room the camera landed in, people mid-stride and all, brought up to date with what this
+   * viewer may see. A room that has changed since the building drew it is built afresh instead.
+   */
+  adoptView() {
+    const h = takeHandoff('in', this.slug);
+    const v = h?.view; if (!v || v.dead) return null;
+    const f = this.viewState().floor;
+    if (JSON.stringify([v.decor, v.colors, v.companyName]) !== JSON.stringify([f.decor, f.colors, f.name])) { v.destroy(); return null; }
+    v.tasks = this.state.tasks;
+    v.life.onSmallTalk = (line) => this.addLocalTalk(line);
+    for (const a of v.actors.values()) this.labels.append(a.tag);
+    v.syncAgents(this.viewState());
+    for (const a of this.state.agents) v.agentEvent(a);
+    return v;
+  }
+  /**
+   * Back to the 3D building: the room is handed back to the tower instead of being thrown away, and the frame on screen is held until
+   * the tower takes over, so the camera can fly out of it. False when the lobby will show the tower from outside, or on a page with no 3D.
+   */
+  handBack() {
+    const v = this.view;
+    if (!stage.ok || lobbyMode() !== 'building' || !v || this.dead || stage.view !== v || document.hidden) return false;
+    return new Promise((resolve) => {
+      const late = setTimeout(() => { stage.afterRender = null; resolve(false); }, 500);
+      stage.afterRender = () => {
+        clearTimeout(late);
+        stage.freezeFrame();
+        handOver('out', this.slug, { view: v, number: this.state.floor.number, state: this.state, camera: v.camera.clone(), yaw: null });
+        this.view = null;  // destroy() leaves it alone now
+        resolve(true);
+      };
+    });
+  }
   /** A panel is open or it isn't; on a phone closed means just the tabs showing at the bottom. Either way the room is told what's left for it. */
   setPanel(open) { this.panelOpen = open; this.layout(); }
   layout() {
@@ -1025,7 +1060,8 @@ export async function showFloor(root, slug) {
   }
   const fade = $('#fade');
   fade.dataset.title = `Floor ${page.state.floor.number}${page.state.floor.name ? ` · ${page.state.floor.name}` : ''}`;
-  fade.classList.add('in');
+  // Flown in from the 3D building, the room is already on screen and stays there: no doors.
+  if (!peekHandoff('in', slug)) fade.classList.add('in');
   F = page;
   page.mount();
   // The flash of light lifts once the room has its real furniture and people, so nobody watches them swap in. A slow line gets the stand-ins after a moment.

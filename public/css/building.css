@@ -245,6 +245,7 @@ body[data-lobby="building"] .hero, body[data-lobby="building"] .hints, body[data
 
 /* The 3D building: the scene shows through, the strips stay away, and every floor in view has a plaque by it that also opens it. */
 body[data-tower="3d"] #scene { visibility: visible; }
+body[data-tower="3d"] #labels { display: block; }
 body[data-tower="3d"] { background: #cfe0ec; }
 .tower-plaques { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
 .tower-plaque { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 7px; max-width: 230px; min-height: 36px; padding: 4px 12px 4px 4px; border: 0; border-radius: 999px; background: rgba(28, 23, 18, .8); color: #fff8e6; font: 700 15px/1 var(--cond); white-space: nowrap; pointer-events: auto; cursor: pointer; will-change: transform; translate: 0 -50%; box-shadow: 0 2px 10px rgba(0, 0, 0, .2); }

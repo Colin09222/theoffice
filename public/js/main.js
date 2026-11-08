@@ -3,6 +3,7 @@ import { stage } from './stage.js';
 import { BASE, refreshMe, clear, toast, $ } from './dom.js';
 import { showLobby, hideLobby } from './lobby-ui.js';
 import { wireSounds } from './sfx.js';
+import { peekHandoff } from './handoff.js';
 
 const ui = $('#ui');
 let current = null;
@@ -19,7 +20,10 @@ async function route() {
   // Stepping out of an office goes through the lift doors, the same ones that opened it.
   const fade = $('#fade');
   const leavingFloor = document.body.dataset.page === 'floor' && !path.startsWith('/floor/');
-  if (leavingFloor) { fade.dataset.title = 'The Office'; fade.classList.add('in'); await new Promise((r) => setTimeout(r, 240)); }
+  // Back to the 3D building: the room goes back into the stack and the camera flies out of it, so there are no doors to go through.
+  const flyOut = leavingFloor && path === '/' && !!(await window.__office?.handBack?.());
+  const doors = leavingFloor && !flyOut;
+  if (doors) { fade.dataset.title = 'The Office'; fade.classList.add('in'); await new Promise((r) => setTimeout(r, 240)); }
   current?.();
   current = null;
   clear(ui);
@@ -29,14 +33,15 @@ async function route() {
     if (path === '/admin') { const { showAdmin, hideAdmin } = await import('./admin-ui.js'); current = hideAdmin; await showAdmin(ui); return; }
     if (floorMatch) {
       // The doors shut straight away, so a slow line never holds up on a frozen close-up of the glass. The floor opens them when its room is ready.
-      fade.dataset.title = 'Going up'; fade.classList.add('in');
+      // Flown in from the 3D building, the room is already on screen: no doors at all.
+      if (!peekHandoff('in', floorMatch[1])) { fade.dataset.title = 'Going up'; fade.classList.add('in'); }
       const { showFloor, hideFloor } = await import('./floor-ui.js'); current = hideFloor; await showFloor(ui, floorMatch[1]);
       return;
     }
     current = hideLobby;
     await showLobby(ui);
   } finally {
-    if (leavingFloor) requestAnimationFrame(() => fade.classList.remove('in'));
+    if (doors) requestAnimationFrame(() => fade.classList.remove('in'));
     if (floorMatch && !window.__office) fade.classList.remove('in');  // no such floor: nothing else will lift it
   }
 }

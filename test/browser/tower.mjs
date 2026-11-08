@@ -13,7 +13,8 @@ const results = {};
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); if (!ok) failures++; };
 const step = async (name, fn) => { try { const d = await fn(); check(name, true, d || ''); } catch (e) { check(name, false, String(e.message).slice(0, 300)); } };
 
-const t = await boot({ mockDelayMs: 60, peopleTalk: true });
+// A slow mock line, so the staff are still at their work when the building is looked at.
+const t = await boot({ mockDelayMs: 1800, peopleTalk: true });
 const base = `http://localhost:${t.port}/theoffice`;
 const LAYOUTS = ['open', 'studio', 'garage', 'lounge', 'pods'];
 const FLOORS = ['wood', 'carpet', 'terrazzo', 'concrete', 'parquet', 'tile'];
@@ -32,7 +33,7 @@ t.db.prepare("UPDATE agents SET state='typing' WHERE id % 3 = 0").run();
 const staffN = t.db.prepare('SELECT COUNT(*) n FROM agents').get().n;
 console.log(`building: ${taken.length} companies, ${staffN} staff`);
 // Work going on, so people really move: the boss of a few floors asks for something.
-for (const n of [10, 11, 12, 14]) await owners[n].post(`/api/floors/${owners[n].slug}/chat`, { text: 'Make us a tiny game about stacking boxes, please.' }).catch(() => {});
+const work = async (list) => { for (const n of list) await owners[n].post(`/api/floors/${owners[n].slug}/chat`, { text: 'Make us a tiny game about stacking boxes, please.' }).catch(() => {}); };
 
 const b = await launch({ noAngle: true });
 /** Frame times and draw calls over `ms`, while `during` runs. */
@@ -56,7 +57,7 @@ async function profile(kind) {
   const r = results[kind] = {};
   await step(`${kind}: the lobby opens on the 3D building`, async () => {
     await p.goto(`${base}/`);
-    await p.until('document.body.dataset.page === "lobby" && !!document.querySelector(".lobby-mode")', 'lobby', 40000);
+    await p.until('document.body.dataset.page === "lobby" && !!document.querySelector(".lobby-mode") && !document.querySelector("#boot")', 'lobby', 40000);
     if (!phone) await p.click('.mode-btn[data-mode="building"]');
     await p.until('window.__tower && window.__stage.view === window.__tower && window.__tower.slots.length > 0', 'tower', 40000);
     const s = await towerState(p);
@@ -65,6 +66,7 @@ async function profile(kind) {
     return `${s.slots} floors in the stack, starting at ${s.n}`;
   });
   await step(`${kind}: the floor in the middle becomes a real room with its people`, async () => {
+    await work(phone ? [15, 16, 18] : [10, 11, 12, 14]);
     await p.ev('window.__tower.rideToFloor(12, { instant: true })');
     await p.until('(() => { const T = window.__tower; const f = T.full.get(Math.round(T.ride)); return f && f.view.root.visible && f.show >= 1 && [...f.view.actors.values()].every((a) => a.char.isModel); })()', 'real floor', 45000);
     await sleep(phone ? 6000 : 3000);
@@ -97,7 +99,7 @@ async function profile(kind) {
     await p.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: at[0], y: at[1], button: 'left', clickCount: 1 });
     await p.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at[0], y: at[1], button: 'left', clickCount: 1 });
     const flight = sample(p, 2600);
-    if (OUT) { await sleep(700); await p.shot(join(OUT, `${kind}-flying.jpg`)); }
+    if (OUT && process.env.TOWER_FLYSHOT) { await sleep(700); await p.shot(join(OUT, `${kind}-flying.jpg`)); }  // a screenshot stalls the page, so not when measuring
     r.flyIn = await flight;
     await p.until('document.body.dataset.page === "floor" && window.__office?.view && window.__stage.view === window.__office.view', 'floor page', 20000);
     const same = await p.ev('window.__office.view === window.__handed');
@@ -122,7 +124,8 @@ async function profile(kind) {
     return `back at floor ${s.n}, same room ${same}; flight ${JSON.stringify(r.flyOut)}`;
   });
   await step(`${kind}: no console errors`, async () => {
-    const errs = p.errors.filter((e) => !/favicon|ERR_ABORTED|net::ERR/.test(e));
+    // The CSP note about evaluating a string comes from every floor page on main as well (checked against origin/main), not from the tower.
+    const errs = p.errors.filter((e) => !/favicon|ERR_ABORTED|net::ERR/.test(e) && !/Evaluating a string as JavaScript violates/.test(e));
     if (errs.length) throw new Error(errs.slice(0, 4).join(' | ').slice(0, 300));
   });
   p.close();

@@ -16,7 +16,10 @@ const WS = ROOM_W / TOWER_W;            // the city's scale, the same as on a fl
 // Floor to floor: a room's walls, then air, then the next slab. Pulled apart like an exploded drawing, so a camera tilted well down sees
 // over the desks and screens into every room, people included, and the slab above still clears the back wall.
 export const FH = 10.5;
-const PITCH = 0.34;
+// The camera looks well down, as a floor page does, so people show over their desks and screens; the floors above the one in the
+// middle rise out of its way (GAP), and the stack closes up again away from it.
+const PITCH = 0.55, GAP = 9;
+const smooth01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const PLATE = TOWER_W * WS + 1.2;       // a floor's slab, as the floor page draws it
 const BASE_Y = GROUND * WS + 0.6;       // the lowest floor's room, on top of the lobby podium
 const SUN_DIR = new THREE.Vector3(0.74, 0.47, -0.32).normalize();
@@ -38,7 +41,7 @@ function patch(mat, U) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute float aSlot; uniform vec4 uFade[${FADE_N}]; uniform float uLift; uniform float uLiftFrom; varying float vFade;`)
+      .replace('#include <common>', `#include <common>\nattribute float aSlot; uniform vec4 uFade[${FADE_N}]; uniform float uLift; uniform float uLiftFrom; uniform float uRide; uniform float uGap; varying float vFade;`)
       .replace('#include <project_vertex>', `
         bool _struct = aSlot >= 999.5; float _slot = _struct ? aSlot - 1000.0 : aSlot;
         int _si = int(clamp(_slot, 0.0, ${FADE_N * 4 - 1}.0) + 0.5);
@@ -47,7 +50,7 @@ function patch(mat, U) {
         #ifdef USE_INSTANCING
           mvPosition = instanceMatrix * mvPosition;
         #endif
-        mvPosition.y += _slot > uLiftFrom ? uLift : 0.0;
+        mvPosition.y += uGap * smoothstep(0.0, 1.0, _slot - uRide) + (_slot > uLiftFrom ? uLift : 0.0);
         mvPosition = modelViewMatrix * mvPosition;
         gl_Position = projectionMatrix * mvPosition;
         if (vFade <= 0.001) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);`);
@@ -111,7 +114,7 @@ export class TowerView {
     this.env = this.world.environment(); this.scene.environment = this.env; this.scene.environmentIntensity = 0.35;
     this.podium = makeTower(0, { stub: true, env: this.env });
     this.podium.group.scale.setScalar(WS); this.scene.add(this.podium.group);
-    this.U = { uFade: { value: Array.from({ length: FADE_N }, () => new THREE.Vector4(1, 1, 1, 1)) }, uLift: { value: 0 }, uLiftFrom: { value: 1e6 } };
+    this.U = { uFade: { value: Array.from({ length: FADE_N }, () => new THREE.Vector4(1, 1, 1, 1)) }, uLift: { value: 0 }, uLiftFrom: { value: 1e6 }, uRide: { value: 0 }, uGap: { value: GAP } };
     this.mats = {
       solid: patch(new THREE.MeshStandardMaterial({ roughness: 0.86, metalness: 0 }), this.U),
       glow: patch(new THREE.MeshBasicMaterial({ toneMapped: false }), this.U),
@@ -122,7 +125,7 @@ export class TowerView {
     this.slots = []; this.byNumber = new Map(); this.staff = {}; this.rooms = {};
     this.full = new Map(); this.fade = new Float32Array(FADE_N * 4).fill(1);
     this.ride = 0; this.target = 0; this.vel = 0; this.yaw = 0.35; this.targetYaw = 0.35; this.time = 0;
-    this.radius = 1; this.w = window.innerWidth; this.h = window.innerHeight;
+    this.radius = 1; this.w = window.innerWidth; this.h = window.innerHeight; this.turns = []; this.stillFor = 0;
     this.plaques = new Map(); this.plaqueRoot = document.createElement('div'); this.plaqueRoot.className = 'tower-plaques';
     this.ray = new THREE.Raycaster(); this.box3 = new THREE.Box3(); this.v = new THREE.Vector3();
     this.setTier(stage.q || { density: 1 });
@@ -258,13 +261,16 @@ export class TowerView {
   }
   manage(dt) {
     const want = this.wanted(); const wantSet = new Set(want);
-    // Built only while the ride is calm, one floor at a time, nearest first, so building never lands in the middle of a swipe.
-    const calm = !this.drag && Math.abs(this.target - this.ride) < 0.75 && !this.flight;
-    if (calm && !this.building) { const k = want.find((x) => !this.full.has(x)); if (k !== undefined) this.buildFloor(k); }
-    const now = performance.now();
+    // Built only while the building stands still, one floor at a time, nearest first, and then a step a frame (see turn), so building a
+    // room never lands in the middle of a swipe.
+    if (this.stillFor > 0.15 && !this.building) { const k = want.find((x) => !this.full.has(x) && !(performance.now() - (this.slots[x].failed || -1e9) < 15000)); if (k !== undefined) this.buildFloor(k); }
     for (const f of this.full.values()) {
       const v = f.view;
-      if (!f.ready) f.ready = (v.loading?.settled && [...v.actors.values()].every((a) => a.char.isModel)) || now - f.born > 3500;
+      if (!f.ready) {
+        if (this.stillFor > 0) f.wait = (f.wait || 0) + dt;
+        // Shown once its floor is baked, its furniture is in and its people are the kit's models, so nobody watches them swap in.
+        f.ready = !!v.baked && !!v.loading?.settled && ([...v.actors.values()].every((a) => a.char.isModel) || f.wait > 6);
+      }
       const show = f.ready && (wantSet.has(f.slot.k) || f.pinned);
       // The real room appears at once behind its stand-in, which then dissolves; going away, the stand-in comes back first.
       f.show += (show ? 1 : -1) * dt / 0.45; f.show = Math.min(1, Math.max(0, f.show));
@@ -341,6 +347,8 @@ export class TowerView {
     on('reload', () => this.dropFloor(f));
   }
   quiet(f) { f.es?.close(); f.es = null; }
+  /** A floor's next build step, granted one a frame while the building stands still. See OfficeView.turn. */
+  turn() { return this.dead ? null : new Promise((r) => this.turns.push(r)); }
 
   // ---------- the camera ----------
 
@@ -361,6 +369,8 @@ export class TowerView {
     return { dist, i, freeW, freeH, pxPerUnit: h / (2 * dist * tanV) };
   }
   rideY(r = this.ride) { return slotY(0) + r * FH; }
+  /** How far a floor stands above its place: the gap over the floor in the middle of the screen, and a flight's lift. */
+  offsetOf(k) { return GAP * smooth01(k - this.ride) + (k > this.U.uLiftFrom.value ? this.U.uLift.value : 0); }
   placeCamera() {
     const fr = this.framing = this.frame();
     const pitch = PITCH, y = this.rideY() + 1.2;
@@ -452,7 +462,7 @@ export class TowerView {
     let best = null, bestD = Infinity;
     const c = Math.round(this.ride);
     for (let k = Math.max(0, c - 8); k <= Math.min(this.slots.length - 1, c + 8); k++) {
-      const y0 = slotY(k) - 0.6;
+      const y0 = slotY(k) + this.offsetOf(k) - 0.6;
       this.box3.min.set(-PLATE / 2, y0, -PLATE / 2); this.box3.max.set(PLATE / 2, y0 + FH, PLATE / 2);
       const hit = this.ray.ray.intersectBox(this.box3, this.v);
       if (hit) { const d = hit.distanceTo(this.ray.ray.origin); if (d < bestD) { bestD = d; best = k; } }
@@ -496,7 +506,7 @@ export class TowerView {
     if (this.plaqueKey === `${Math.round(this.ride)}`) { /* same set */ } else { this.plaqueKey = `${Math.round(this.ride)}`; this.syncPlaques(); }
     const v = this.v; const top = this.framing.i.top, bottom = this.h - this.framing.i.bottom;
     for (const p of this.plaques.values()) {
-      v.set(-ROOM_W / 2 + 0.4, slotY(p.k) + WALL_H - 0.3 + (p.k > this.U.uLiftFrom.value ? this.U.uLift.value : 0), ROOM_D / 2 - 1).project(this.camera);
+      v.set(-ROOM_W / 2 + 0.4, slotY(p.k) + this.offsetOf(p.k) + WALL_H - 0.3, ROOM_D / 2 - 1).project(this.camera);
       const x = (v.x * 0.5 + 0.5) * this.w, y = (-v.y * 0.5 + 0.5) * this.h;
       const off = v.z > 1 || y < top - 10 || y > bottom + 30 || this.flight;
       if (p.off !== off) { p.off = off; p.el.classList.toggle('off', off); }
@@ -519,7 +529,10 @@ export class TowerView {
     let f = this.full.get(s.k);
     if (!f) { this.flightPending = n; while (this.building !== null && this.building !== undefined) await new Promise((r) => setTimeout(r, 30)); if (!this.full.has(s.k)) await this.buildFloor(s.k); f = this.full.get(s.k); this.flightPending = null; }
     if (!f || this.dead) { this.onEnter?.(s.card, { seamless: false }); return; }
-    f.pinned = true; f.ready = true;
+    f.pinned = true;
+    // A floor still being put together finishes first: a flight into stand-ins would land on a room changing under the camera.
+    for (const end = performance.now() + 8000; !f.ready && !this.dead && performance.now() < end;) await new Promise((r) => setTimeout(r, 40));
+    if (this.dead || this.flight) return;
     const pose = f.view.homePose(this.w, this.h, this.pageInsets(s.card.slug));
     const to = pose.position.clone().add(new THREE.Vector3(0, slotY(s.k), 0));
     this.flight = { kind: 'in', f, t: 0, dur: reduced() ? 0.35 : 1.45, from: { pos: this.camera.position.clone(), quat: this.camera.quaternion.clone(), view: { ...this.camera.view } }, to: { pos: to, quat: pose.quaternion.clone(), view: pose.view }, pose };
@@ -540,8 +553,11 @@ export class TowerView {
     view.root.visible = true; this.fade[s.k] = 0; this.full.set(s.k, f); this.listen(f);
     const lift = 150;
     this.U.uLiftFrom.value = s.k + 0.5; this.U.uLift.value = lift;
-    for (const g of this.full.values()) if (g.slot.k > s.k) g.view.root.position.y = slotY(g.slot.k) + lift;
-    this.ride = this.target = s.k; this.targetYaw = this.yaw = h.yaw ?? this.yaw;
+    this.U.uRide.value = s.k;
+    for (const g of this.full.values()) g.view.root.position.y = slotY(g.slot.k) + this.offsetOf(g.slot.k);
+    // Out to the same spot the camera flew in from, when it came from here.
+    let spot = null; try { spot = JSON.parse(sessionStorage.getItem(SPOT_KEY) || 'null'); } catch { /* private mode */ }
+    this.ride = this.target = s.k; this.targetYaw = this.yaw = spot?.n === h.number && spot.yaw !== undefined ? spot.yaw : this.yaw;
     const from = { pos: h.camera.position.clone().add(new THREE.Vector3(0, slotY(s.k), 0)), quat: h.camera.quaternion.clone(), view: { ...h.camera.view } };
     this.placeCamera();
     this.flight = { kind: 'out', f, t: 0, dur: reduced() ? 0.35 : 1.3, from, to: null };
@@ -574,7 +590,7 @@ export class TowerView {
   }
   setLift(v) {
     this.U.uLift.value = v;
-    for (const g of this.full.values()) g.view.root.position.y = slotY(g.slot.k) + (g.slot.k > this.U.uLiftFrom.value ? v : 0);
+    for (const g of this.full.values()) g.view.root.position.y = slotY(g.slot.k) + this.offsetOf(g.slot.k);
   }
   /** The flight has landed: this frame is held on screen while the floor page takes the room, then fades into it. */
   handIn(fl) {
@@ -615,6 +631,9 @@ export class TowerView {
     this.time += dt;
     this.world.update(dt, this.time);
     this.snapWheel();
+    const moving = !!this.drag || !!this.flight || this.wheeling || Math.abs(this.target - this.ride) > 0.02;
+    this.stillFor = moving ? 0 : this.stillFor + dt;
+    if (this.turns.length && this.stillFor > 0.12) this.turns.shift()();
     if (this.flight) this.updateFlight(dt);
     else {
       // Wheel and keys ease; a flick glides further and slower, then settles on its floor.
@@ -624,6 +643,8 @@ export class TowerView {
       this.yaw += (this.targetYaw - this.yaw) * (1 - Math.exp(-dt * 6));
       this.placeCamera();
     }
+    this.U.uRide.value = this.ride;
+    if (!this.flight) for (const g of this.full.values()) g.view.root.position.y = slotY(g.slot.k) + this.offsetOf(g.slot.k);
     // The sun follows the floor in the middle, so every room in view is lit the way its floor page lights it.
     const y = this.rideY();
     this.sun.position.copy(SUN_DIR).multiplyScalar(64).add(this.v.set(0, y, 0)); this.sun.target.position.set(0, y, 0); this.sun.target.updateMatrixWorld();
@@ -642,6 +663,7 @@ export class TowerView {
   destroy() {
     this.dead = true;
     this.unbind?.();
+    for (const r of this.turns.splice(0)) r();  // whatever was waiting carries on, and finds its floor gone (or handed to a floor page)
     for (const f of [...this.full.values()]) this.dropFloor(f);
     for (const m of [...this.stand.children]) { m.removeFromParent(); m.geometry.dispose(); }
     this.mats.sign.map.dispose();

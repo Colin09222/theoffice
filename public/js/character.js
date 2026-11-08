@@ -213,6 +213,24 @@ function poseFor(b, t, dt, self) {
   return { aL, aR, zL, zR, headX, headY, headZ, swing };
 }
 
+/**
+ * Stands in for a person in the 3D building until their model has loaded, at no cost: nothing to build, draw or animate. A floor there
+ * stays hidden until every model is in, so nobody ever sees it; the procedural person is for a floor page, which shows at once.
+ */
+export class PendingCharacter {
+  constructor(look, { scale = 1 } = {}) {
+    this.group = new THREE.Group(); this.look = look; this.scale = scale; this.isModel = false;
+    this.anim = 'stand'; this.blend = Object.fromEntries(ANIMS.map((n) => [n, 0]));
+    this.paper = { visible: false }; this.mug = { visible: false }; this.phone = { visible: false };
+    this.headTop = HEAD_TOP * scale; this.labelY = HEAD_TOP * scale;
+  }
+  seatedY(seatTop) { return seatTop - 0.365 * this.scale; }
+  setAnim(name) { this.anim = name; }
+  setManner(m) { this.manner = m; }
+  update() {}
+  dispose() { this.group.removeFromParent(); }
+}
+
 export class Character {
   constructor(look, { accent = '#d9774a', scale = 1 } = {}) {
     this.group = new THREE.Group();
