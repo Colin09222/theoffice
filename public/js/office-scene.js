@@ -676,7 +676,7 @@ export class OfficeView {
     this.claims = new Map(); this.actors = new Map(); this.nav = makeNav(); this.deskSlots = []; this.plantSpots = []; this.sway = []; this.tasks = state.tasks || []; this.pins = []; this.insets = null;
     this.life = new FloorLife(this, { onSmallTalk: onSmallTalk || null });
     this.detailOn = (stage.q?.density ?? 1) >= 0.6;
-    this.tv = new THREE.Vector3();
+    this.tv = new THREE.Vector3(); this.tv2 = new THREE.Vector3();
     this.codeTex = screenTexture('code', this.colors.primary, this.colors.accent);
     this.pageTex = screenTexture('page', this.colors.primary, this.colors.accent);
     this.idleTex = screenTexture('idle', this.colors.primary, this.colors.accent);
@@ -1890,8 +1890,12 @@ export class OfficeView {
     const p = this.tv.copy(a.group.position); p.y += (a.char.labelY ?? HEAD_TOP * CHAR_SCALE) + 0.2;
     if (this.host) {
       // In the tower: the root stands at its floor's height, and a tag off the screen, or on a floor the tower has quietened, is put away.
+      const wx = a.group.position.x;
       p.add(this.root.position).project(this.camera);
-      const off = !this.tagsOn || p.z > 1 || Math.abs(p.x) > 1.25 || Math.abs(p.y) > 1.25;
+      // Hidden behind the slab of the floor above: the tower says where that slab's front edge falls on the screen (see TowerView).
+      let behind = false;
+      if (this.coverY !== undefined && p.z <= 1) { const e = this.tv2.set(wx, this.coverY, this.coverZ).project(this.camera); behind = p.y > e.y; }
+      const off = !this.tagsOn || behind || p.z > 1 || Math.abs(p.x) > 1.25 || Math.abs(p.y) > 1.25;
       if (off !== !!a.tagOff) { a.tagOff = off; a.tag.style.visibility = off ? 'hidden' : ''; }
       if (off) { a.tagX = undefined; return; }
     } else p.project(this.camera);

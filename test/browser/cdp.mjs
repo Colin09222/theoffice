@@ -31,10 +31,11 @@ async function openPage(port, { mobile = false, width = 1440, height = 900 } = {
   const ws = new WebSocket(made.webSocketDebuggerUrl);
   await new Promise((r) => ws.addEventListener('open', r, { once: true }));
   let closing = false;
-  let id = 0; const pending = new Map(); const errors = []; const failed = []; const urls = new Map(); const transfer = { total: 0, byUrl: new Map() };
+  let id = 0; const pending = new Map(); const errors = []; const failed = []; const listeners = new Map(); const urls = new Map(); const transfer = { total: 0, byUrl: new Map() };
   ws.addEventListener('message', (e) => {
     const m = JSON.parse(e.data);
     if (m.id && pending.has(m.id)) { pending.get(m.id).resolve(m); pending.delete(m.id); }
+    if (m.method && listeners.has(m.method)) for (const fn of listeners.get(m.method)) fn(m.params);
     if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text);
     if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(`console: ${m.params.args.map((a) => a.value || a.description).join(' ')}`);
     if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') errors.push(`log: ${m.params.entry.text} ${m.params.entry.url || ''}`);
@@ -65,6 +66,8 @@ async function openPage(port, { mobile = false, width = 1440, height = 900 } = {
   if (mobile) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   const page = {
     send, ev, errors, failed, transfer,
+    /** Any other DevTools event, for a test that needs one (a screencast, say). */
+    on(method, fn) { if (!listeners.has(method)) listeners.set(method, new Set()); listeners.get(method).add(fn); return () => listeners.get(method).delete(fn); },
     front() { return send('Page.bringToFront'); },
     async goto(url) { await send('Page.bringToFront'); await send('Page.navigate', { url }); await page.until('document.readyState === "complete"', 'page load'); },
     async until(expr, what = expr, timeout = 30000) {

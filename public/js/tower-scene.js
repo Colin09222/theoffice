@@ -203,9 +203,6 @@ export class TowerView {
       box.add(S + k, 0, y - 0.27, 0, PLATE - 0.04, 0.38, PLATE - 0.04, 0, '#e9dfcf');
       box.add(S + k, 0, y - 0.54, 0, PLATE + 0.26, 0.1, PLATE + 0.26, 0, '#d4c8b6');
       for (const [px, pz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box.add(S + k, px * (PLATE / 2 + 0.36), y - 0.6 + FH / 2, pz * (PLATE / 2 + 0.36), 0.72, FH, 0.72, 0, '#e2d5c1');
-      const lit = s.kind === 'company' && s.card.status === 'active';
-      // Lights in the slab overhead: warm on a working floor, off on an empty one.
-      for (const lx of [-9, 0, 9]) for (const lz of [-4, 3.5]) glow.add(S + k, lx, y + FH - 0.63, lz, 4.2, 0.04, 1.3, 0, lit ? '#ffe7bf' : s.kind === 'empty' ? '#5d5a55' : '#cfc6b4');
       const d = this.rooms[s.n]?.decor || {};
       const L = s.plan;
       const wall = s.kind === 'empty' ? '#5f5a53' : d.wall || '#e9e1d3';
@@ -525,7 +522,8 @@ export class TowerView {
     if (this.plaqueKey === `${Math.round(this.ride)}`) { /* same set */ } else { this.plaqueKey = `${Math.round(this.ride)}`; this.syncPlaques(); }
     const v = this.v; const top = this.framing.i.top, bottom = this.h - this.framing.i.bottom;
     for (const p of this.plaques.values()) {
-      v.set(-ROOM_W / 2 + 0.4, slotY(p.k) + this.offsetOf(p.k) + WALL_H - 0.3, ROOM_D / 2 - 1).project(this.camera);
+      // On the slab's open front, at its left end, where it covers nobody.
+      v.set(-PLATE / 2 + 0.6, slotY(p.k) + this.offsetOf(p.k) - 0.3, PLATE / 2).project(this.camera);
       const x = (v.x * 0.5 + 0.5) * this.w, y = (-v.y * 0.5 + 0.5) * this.h;
       const off = v.z > 1 || y < top - 10 || y > bottom + 30 || this.flight;
       if (p.off !== off) { p.off = off; p.el.classList.toggle('off', off); }
@@ -632,8 +630,14 @@ export class TowerView {
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
     const r = stage.renderer; r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true; r.toneMappingExposure = 0.92;
     document.body.append(this.plaqueRoot);
+    for (const f of this.full.values()) if (f.view.root.visible) this.listen(f);
   }
-  leave() { this.active = false; this.plaqueRoot.remove(); const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; }
+  /** Outside, or off to a floor page: the real floors stop listening while nobody can see them. */
+  leave() {
+    this.active = false; this.plaqueRoot.remove();
+    for (const f of this.full.values()) { this.quiet(f); for (const a of f.view.actors.values()) { a.tagOff = true; a.tag.style.visibility = 'hidden'; } }
+    const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true;
+  }
   resize(w, h) {
     this.w = w; this.h = h; this.camera.aspect = w / h;
     for (const f of this.full.values()) f.view.setSize(w, h);
@@ -676,6 +680,8 @@ export class TowerView {
     for (const f of this.full.values()) {
       if (!f.view.root.visible) continue;
       f.view.tagsOn = !this.flight && Math.abs(f.slot.k - c) <= (phone ? 0 : 1);
+      // Where the slab of the floor above meets the open front: a tag whose person is behind it is put away.
+      f.view.coverY = slotY(f.slot.k + 1) + this.offsetOf(f.slot.k + 1) - 0.6; f.view.coverZ = PLATE / 2;
       f.view.update(dt);
       if (f.view.tagsOn) for (const [id, a] of f.view.actors) tags.set(`${f.slot.k}:${id}`, a);
     }

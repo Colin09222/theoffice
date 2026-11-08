@@ -90,6 +90,13 @@ async function profile(kind) {
     const s = await towerState(p);
     return `at floor ${s.n} (${s.kind}), real: ${s.shown.join(',')}`;
   });
+  if (!phone) await step(`${kind}: the arrow keys ride a floor at a time`, async () => {
+    const from = await p.ev('Math.round(window.__tower.target)');
+    await p.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38, nativeVirtualKeyCode: 38 });
+    await p.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38, nativeVirtualKeyCode: 38 });
+    await p.until(`Math.abs(window.__tower.ride - ${from + 1}) < 0.02`, 'one floor up', 5000);
+    return `${from} to ${from + 1}`;
+  });
   await step(`${kind}: tapping a floor flies into it, and the floor page carries on with the same room`, async () => {
     await p.ev('window.__tower.rideToFloor(14, { instant: true })');
     await p.until('(() => { const T = window.__tower; const f = T.full.get(Math.round(T.ride)); return f && f.view.root.visible && f.show >= 1; })()', 'floor 14 real', 30000);
@@ -122,6 +129,15 @@ async function profile(kind) {
     if (s.n !== 14) throw new Error(`landed on ${s.n}`);
     if (!same && handed) throw new Error('the tower built the room again');
     return `back at floor ${s.n}, same room ${same}; flight ${JSON.stringify(r.flyOut)}`;
+  });
+  await step(`${kind}: on a struggling device the stage's lowest tier keeps only the floor in the middle real`, async () => {
+    const tier = await p.ev('window.__stage.tier');
+    await p.ev('window.__stage.setTier("low")');
+    await p.until('(() => { const T = window.__tower; return T.radius === 0 && [...T.full.values()].filter((f) => f.view.root.visible).length === 1; })()', 'one real floor', 15000);
+    const s = await towerState(p);
+    await p.ev(`window.__stage.setTier(${JSON.stringify(tier)})`);
+    await sleep(1500);
+    return `radius 0, real: ${s.shown.join(',')}`;
   });
   await step(`${kind}: no console errors`, async () => {
     // The CSP note about evaluating a string comes from every floor page on main as well (checked against origin/main), not from the tower.
