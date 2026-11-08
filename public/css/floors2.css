@@ -61,6 +61,7 @@
 .staff-text { display: flex; flex-direction: column; width: 100%; line-height: 1.05; min-width: 0; }
 .staff-text b { font: 700 16px/1.05 var(--cond); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .staff-text small { font: 600 13.5px/1.1 var(--cond); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.staff-text .staff-role { font: 700 11.5px/1.15 var(--cond); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 1px; }  /* the job above the name, as on the name tags */
 .staff-state { display: block; width: 100%; margin-top: 2px; padding: 1px 2px; border-radius: 3px; background: var(--teal-l); color: #06433f; font: 700 12.5px/1.25 var(--cond); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .staff-chip.busy .staff-state { background: var(--sun); color: var(--ink); }
 

@@ -12,6 +12,7 @@ import { officeTheme, manner, assignRooms } from './offices.js';
 import { textureSet, environmentMap, readyEnvironment, forgetEnvironment, repeating } from './textures.js';
 import { FloorLife, planProgress } from './life.js';
 import { tidyLabels } from './labels.js';
+import { cutaway, cutAmount, onWall, CUT } from './cutaway.js';
 
 stage.onRestored.add(forgetEnvironment);  // the shared panorama lived on the GPU
 
@@ -28,13 +29,17 @@ const ZOOM_MIN = 0.8, ZOOM_MAX = 3.6;
 const FLOOR_TEX = { wood: ['wood', 3.2], darkwood: ['darkwood', 3.0], parquet: ['parquet', 2.2], concrete: ['concrete', 5], tile: ['tile', 2.6], carpet: ['carpet', 2.4], terrazzo: ['terrazzo', 3.2] };
 const WALL_TEX = { paint: 'plaster', concrete: 'cast', brick: 'brick' };
 const ROLE_TITLE = { manager: 'Office Manager', researcher: 'Researcher', writer: 'Writer', builder: 'Builder', designer: 'Designer', analyst: 'Analyst', marketer: 'Marketer', tester: 'Tester', illustrator: 'Illustrator' };
+/** A person's job as their name tag and the staff list put it: the title they were hired with, else their role's. */
+export const jobTitle = (info, isBoss = false) => (isBoss ? 'Boss' : info.title || ROLE_TITLE[info.role] || (info.role ? info.role[0].toUpperCase() + info.role.slice(1) : 'Staff'));
 const ON_TABLE = new Set(['radio', 'televisionModern', 'televisionVintage', 'speakerSmall']);
 
 const box = new THREE.BoxGeometry(1, 1, 1);
 const cyl = new THREE.CylinderGeometry(1, 1, 1, 16);
 const cone = new THREE.ConeGeometry(1, 1, 12); const ico = new THREE.IcosahedronGeometry(0.5, 0);
 const sph = new THREE.SphereGeometry(0.5, 14, 10);
-const ROOM_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 });
+const ROOM_MAT = cutaway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 }), 'room');
+// The room's front and right walls: only the tower ever turns far enough round to see them, from behind (see cutaway.js).
+const FAR_MAT = cutaway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 }), 'far');
 const mats = new Map();
 /** A colour holder: every plain piece bakes into the shared vertex-coloured material, so the material object itself never draws. */
 function lam(color) { let m = mats.get(color); if (!m) { m = new THREE.MeshLambertMaterial({ color }); mats.set(color, m); } return m; }
@@ -422,8 +427,10 @@ export class Actor {
     this.tag = document.createElement('div'); this.tag.className = 'char-tag';
     this.tag.dataset.side = view.actors.size % 2 ? 'left' : 'right';  // bubbles alternate sides, so a huddle stays readable
     this.nameEl = document.createElement('span'); this.nameEl.className = 'char-name'; this.nameEl.textContent = info.name;
+    // What they do, small on the line above their name, so a glance says who is who.
+    this.roleEl = document.createElement('span'); this.roleEl.className = 'char-role'; this.roleEl.textContent = jobTitle(info, isBoss);
     this.bubble = document.createElement('span'); this.bubble.className = 'char-bubble'; this.bubble.hidden = true;
-    this.tag.append(this.bubble, this.nameEl);
+    this.tag.append(this.bubble, this.roleEl, this.nameEl);
     if (view.host) { this.tagOff = true; this.tag.style.visibility = 'hidden'; }  // the tower shows it once the floor is in view
     view.labels.append(this.tag);
     // The kit's model takes over from the stand-in when it lands; a failed load changes nothing.
@@ -939,6 +946,7 @@ export class OfficeView {
       R.add(this.pet.group); this.petPath = []; this.petWait = 3;
     }
     mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT); mergeColored(legacy, ROOM_MAT);
+    this.buildFarWalls(); this.cutWalls();
     this.loading = { settled: false };
     this.loadModels().catch((e) => { console.warn('furniture models unavailable, keeping the stand-ins', e); }).finally(() => { this.loading.settled = true; });
   }
@@ -946,6 +954,58 @@ export class OfficeView {
    * The walls that make the rooms. Every pane on a floor goes into one mesh, so ten glass rooms cost one draw call, and the frames bake
    * in with the rest of the room. Door frames get a post each side and a beam over the gap; a screen is waist high and solid.
    */
+  /**
+   * The front and right walls, which a floor page never shows. In the tower, seen from behind, they close the room while the back and left
+   * ones are cut away (cutaway.js): painted like the others, with the same windows on the city. Nothing draws them until then.
+   */
+  buildFarWalls() {
+    const g = new THREE.Group(), L = this.plan, wall = this.decor.wall, trim = mix(wall, '#ffffff', 0.55), frame = '#2f343d';
+    const fz = ROOM_D / 2 + 0.15, fx = ROOM_W / 2 + 0.15, o = { cast: false, recv: false };
+    let at = -ROOM_W / 2;
+    for (const [a, b] of L.windows) {
+      if (a > at) piece(g, wall, a - at, WALL_H, 0.3, (at + a) / 2, 0, fz, o);
+      piece(g, wall, b - a, 1.0, 0.3, (a + b) / 2, 0, fz, o); piece(g, wall, b - a, 0.36, 0.3, (a + b) / 2, WALL_H - 0.36, fz, o);
+      piece(g, frame, b - a + 0.1, 0.08, 0.36, (a + b) / 2, 0.96, fz, o); piece(g, frame, b - a + 0.1, 0.08, 0.36, (a + b) / 2, WALL_H - 0.4, fz, o);
+      for (let mx = a; mx <= b + 0.01; mx += (b - a) / 4) piece(g, frame, 0.07, WALL_H - 1.36, 0.14, mx, 1, fz, o);
+      at = b;
+    }
+    if (at < ROOM_W / 2) piece(g, wall, ROOM_W / 2 - at, WALL_H, 0.3, (at + ROOM_W / 2) / 2, 0, fz, o);
+    piece(g, wall, 0.3, WALL_H, ROOM_D + 0.6, fx, 0, 0, o);
+    piece(g, trim, ROOM_W + 0.3, 0.22, 0.42, 0, WALL_H - 0.22, fz - 0.09, o); piece(g, trim, 0.42, 0.22, ROOM_D + 0.3, fx - 0.09, WALL_H - 0.22, 0, o);
+    mergeColored(g, FAR_MAT);
+    g.userData.keep = true; g.visible = !!this.host;
+    this.root.add(g); this.farWalls = g;
+  }
+  /**
+   * The cut goes into everything that stands in the back and left walls or hangs on them: geometry merged in the room's own space keeps its
+   * sill, anything placed on a wall goes with it. The room's shared material has it already; people and pets are never cut.
+   */
+  cutWalls() {
+    const R = this.root; R.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(R.matrixWorld).invert(), m = new THREE.Matrix4(), b = new THREE.Box3();
+    const skip = new Set([...this.actors.values()].map((a) => a.group)); if (this.pet) skip.add(this.pet.group); if (this.farWalls) skip.add(this.farWalls);
+    const shared = new Set(mats.values());
+    const walk = (o) => {
+      if (skip.has(o)) return;
+      if (o.isMesh && !o.isSkinnedMesh && !o.isInstancedMesh) {
+        const list = Array.isArray(o.material) ? o.material : [o.material];
+        if (!list.every((x) => x.userData.cut)) {
+          m.multiplyMatrices(inv, o.matrixWorld);
+          const own = m.elements.every((v, i) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-5);  // merged in the room's own space
+          if (own) list.forEach((x) => cutaway(x, 'room'));
+          else {
+            if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+            if (onWall(b.copy(o.geometry.boundingBox).applyMatrix4(m))) {
+              const mine = (x) => (x.userData.cut ? x : cutaway(shared.has(x) ? x.clone() : x, 'mount'));
+              o.material = Array.isArray(o.material) ? o.material.map(mine) : mine(o.material);
+            }
+          }
+        }
+      }
+      for (const c of o.children) walk(c);
+    };
+    walk(R);
+  }
   buildWalls(room, env) {
     const { primary, accent } = this.colors; const L = this.plan;
     const GH = 3.1, frame = L.frame || '#454852';
@@ -1179,6 +1239,7 @@ export class OfficeView {
     this.deskInto = (into, x, z, chairColor, ry) => { const keep = target; target = into; desk(x, z, chairColor, false, ry); target = keep; };
     mergeColored(models, ROOM_MAT);
     this.root.add(models);
+    this.cutWalls();
     this.root.remove(this.legacy);
     for (const a of this.actors.values()) if (a.seated) a.sitDown();
     this.modelsOn = true;
@@ -1681,11 +1742,14 @@ export class OfficeView {
   }
   enter() {
     const r = stage.renderer;
+    CUT.uCutOn.value = 0;  // a floor page's walls stand as they always have
     r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true;  // the stage redraws it every other frame
     r.toneMappingExposure = 0.92;
     const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WORLD_SCALE); w.group.position.set(0, this.worldLift, 0);
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
   }
+  /** Nothing moving but the people: the stage may draw every other frame. */
+  idle() { return !this.host && this.intro >= 1 && !this.pts?.size && Math.abs(this.targetZoom - this.zoom) < 1e-3 && Math.abs(this.targetYaw - this.yaw) < 1e-3 && this.pan.distanceTo(this.targetPan) < 1e-3; }
   leave() { const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; r.toneMappingExposure = 0.84; }
   setTier(q) {
     this.detailOn = q.density >= 0.6;
@@ -1844,6 +1908,8 @@ export class OfficeView {
     this.pageTex.offset.y = (this.time * 0.05) % 1;
     if (this.arcadeScreen) this.arcadeScreen.material.color.setHSL((this.time * 0.1) % 1, 0.7, 0.62);
     this.winMat.opacity = 0.3 + drift * 0.04;
+    // In the tower the front and right walls are drawn only while the camera is round behind the room (see cutaway.js).
+    if (this.farWalls) { const c = this.camera.position, [cb, cl] = this.host ? cutAmount(c.x, c.z) : [0, 0]; this.farWalls.visible = cb > 0.001 || cl > 0.001; }
     for (let i = 0; i < this.sway.length; i++) { const c = this.sway[i]; c.rotation.z = Math.sin(this.time * 0.9 + i * 2) * 0.035; c.rotation.x = Math.cos(this.time * 0.7 + i) * 0.025; }
     const sec = Math.floor(Date.now() / 1000);
     if (sec !== this.clockSec) { this.clockSec = sec; this.drawClock(this.clockTex.image.getContext('2d')); this.clockTex.needsUpdate = true; }
@@ -1892,11 +1958,11 @@ export class OfficeView {
     const p = this.tv.copy(a.group.position); p.y += (a.char.labelY ?? HEAD_TOP * CHAR_SCALE) + 0.2;
     if (this.host) {
       // In the tower: the root stands at its floor's height, and a tag off the screen, or on a floor the tower has quietened, is put away.
-      const wx = a.group.position.x;
+      const wx = a.group.position.x, wz = a.group.position.z;
       p.add(this.root.position).project(this.camera);
-      // Hidden behind the slab of the floor above: the tower says where that slab's front edge falls on the screen (see TowerView).
+      // Hidden behind the slab of the floor above: the tower says where that slab's edge facing the camera falls on the screen (see TowerView).
       let behind = false;
-      if (this.coverY !== undefined && p.z <= 1) { const e = this.tv2.set(wx, this.coverY, this.coverZ).project(this.camera); behind = p.y > e.y; }
+      if (this.coverY !== undefined && p.z <= 1) { const [nx, nz] = this.coverN || [0, 1], D = this.coverD; const e = this.tv2.set(nx ? nx * D : wx, this.coverY, nz ? nz * D : wz).project(this.camera); behind = p.y > e.y; }
       const off = !this.tagsOn || behind || p.z > 1 || Math.abs(p.x) > 1.25 || Math.abs(p.y) > 1.25;
       if (off !== !!a.tagOff) { a.tagOff = off; a.tag.style.visibility = off ? 'hidden' : ''; }
       if (off) { a.tagX = undefined; return; }

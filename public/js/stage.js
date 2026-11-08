@@ -122,7 +122,7 @@ class Post {
 }
 
 class Stage {
-  constructor() { this.view = null; this.last = 0; this.ok = false; this.frameMs = 16; this.slowFor = 0; this.fps = 0; this.time = 0; this.tier = 'high'; this.frame = 0; this.graceUntil = 0; this.lost = false; this.losses = 0; this.onLost = new Set(); this.onRestored = new Set(); this.notice = null; }
+  constructor() { this.steps = []; this.view = null; this.last = 0; this.ok = false; this.frameMs = 16; this.slowFor = 0; this.fps = 0; this.time = 0; this.tier = 'high'; this.frame = 0; this.graceUntil = 0; this.lost = false; this.losses = 0; this.onLost = new Set(); this.onRestored = new Set(); this.notice = null; }
   init(canvas) {
     this.canvas = canvas;
     // No WebGL2 at all (a very old device, or one that has blocked it): everything but the 3D still works, over a painted city.
@@ -143,8 +143,10 @@ class Stage {
     window.addEventListener('orientationchange', () => setTimeout(() => this.resize(true), 250));
     canvas.addEventListener('webglcontextlost', (e) => this.contextLost(e));
     canvas.addEventListener('webglcontextrestored', () => this.contextRestored());
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { this.last = performance.now(); this.graceUntil = this.last + 1500; this.loop(); } });
-    this.last = performance.now();
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { this.last = this.lastTick = performance.now(); this.graceUntil = this.last + 1500; this.loop(); } });
+    // Any touch, wheel or key keeps the full frame rate; a page left alone drops to every other frame (see loop).
+    for (const ev of ['pointerdown', 'pointermove', 'wheel', 'keydown']) window.addEventListener(ev, () => this.wake(), { passive: true, capture: true });
+    this.last = this.lastTick = performance.now(); this.lastInput = this.last;
     this.loop();
     return true;
   }
@@ -285,30 +287,40 @@ class Stage {
     const tick = (now) => {
       if (document.hidden || this.lost || !this.ok) { this.running = false; return; }
       requestAnimationFrame(tick);
-      if (this.paused) { this.last = now; this.frame++; return; }  // plain DOM covers the scene: nothing drawn, but a wait for frames still ends
+      if (this.paused) { this.last = this.lastTick = now; this.frame++; return; }  // plain DOM covers the scene: nothing drawn, but a wait for frames still ends
+      // How long frames take is measured tick to tick, so the idle half rate below never reads as a slow device.
+      const gap = Math.min(Math.max(0, now - this.lastTick), 100); this.lastTick = now;
+      this.frameMs += (gap - this.frameMs) * 0.05;
+      this.fps = 1000 / this.frameMs;
+      // Nobody has touched anything for a while and nothing is moving but the people at their desks: every other frame is drawn, which
+      // halves the battery a page left open costs and still looks alive.
+      this.idle = now - this.lastInput > 6000 && !!this.view?.idle?.();
+      if (this.idle && (this.frame & 1) && this.frameMs < 24) { this.frame++; return; }
       const real = Math.max(0, now - this.last); this.last = now;
       const dt = Math.min(real / 1000, 0.1);
       this.time += dt; this.frame++;
-      this.frameMs += (dt * 1000 - this.frameMs) * 0.05;
-      this.fps = 1000 / this.frameMs;
-      this.adapt(dt, now);
+      this.adapt(Math.min(gap / 1000, 0.1), now);
       this.renderOnce(dt);
     };
     requestAnimationFrame(tick);
   }
+  wake() { this.lastInput = performance.now(); }
   // A device that keeps missing 30fps first loses occlusion, then pixels, then shadows and post. Each step is permanent for the visit, so
   // nothing flickers between looks. It goes by time, not frames: at 8fps, counting frames would mean twenty seconds of slideshow per step.
   adapt(dt, now) {
     if (this.forced || now < this.graceUntil) return;  // ?q= means someone wants to see exactly that tier
     // A desktop should hold well above 30. A phone is fine at 30: 37ms, not 33, because an iPhone in Low Power Mode caps at a steady 30fps, and that should cost it nothing.
-    if (this.frameMs > (this.mobile ? 37 : 24)) this.slowFor += dt; else this.slowFor = Math.max(0, this.slowFor - dt);
+    if (this.frameMs > (this.mobile ? 36 : 24)) this.slowFor += dt; else this.slowFor = Math.max(0, this.slowFor - dt);
     // Far too slow to bother stepping: the lightest look straight away.
-    if (this.frameMs > 70 && this.slowFor > 2 && this.tier !== 'low' && !this.forced) { this.slowFor = 0; this.graceUntil = now + 2000; this.setAO('off'); this.setTier('low'); return; }
-    if (this.slowFor < 3) return;
+    if (this.frameMs > 70 && this.slowFor > 2 && this.tier !== 'low' && !this.forced) { this.slowFor = 0; this.graceUntil = now + 2000; this.setAO('off'); this.setTier('low'); this.steps.push('low'); return; }
+    if (this.slowFor < 2) return;
     this.slowFor = 0; this.graceUntil = now + 1500;
-    if (this.q.ao !== 'off') { this.setAO(AO_STEPS[AO_STEPS.indexOf(this.q.ao) + 1]); return; }
-    if (this.dprCap > 1) { this.dprCap = Math.max(1, this.dprCap - 0.35); this.resize(true); return; }
+    // Under about 28fps for two seconds: a whole tier down at once (fewer real floors in the tower, fewer pixels, no occlusion or shadows).
+    if (this.frameMs > 36 && this.tier !== 'low') { const t = this.tier === 'high' ? 'mid' : 'low'; this.setTier(t); if (t === 'low') this.setAO('off'); this.steps.push(t); return; }
+    if (this.q.ao !== 'off') { this.setAO(AO_STEPS[AO_STEPS.indexOf(this.q.ao) + 1]); this.steps.push(`ao-${this.q.ao}`); return; }
+    if (this.dprCap > 1) { this.dprCap = Math.max(1, this.dprCap - 0.35); this.resize(true); this.steps.push(`dpr-${this.dprCap.toFixed(2)}`); return; }
     if (this.tier === 'high') this.setTier('mid'); else if (this.tier === 'mid') this.setTier('low');
+    this.steps.push(this.tier);
   }
   setAO(level) {
     this.q.ao = level;
