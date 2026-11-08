@@ -219,11 +219,18 @@ export function installBusiness(ext) {
     patch(floor.id, { tasks: JSON.stringify({ ...tasksOf(activeRow(floor.id)), ideas: id }), rounds: (activeRow(floor.id).rounds || 0) + 1 });
     return id;
   }
-  function start(floor, { wish = '', by = 'boss' } = {}) {
+  function start(floor, { wish = '', by = 'boss', company = '' } = {}) {
     if (!on) throw new BusinessError(404, 'off', 'Business mode is not switched on in this building.');
     if (floor.status !== 'active') throw new BusinessError(423, 'closed', 'This floor is closed.');
     const was = rowOf(floor.id);
     if (was?.status === 'active') return { already: true };
+    // Setup's company name, for a floor without one: saved through the manager's own set_company before the team starts.
+    const called = floor.name ? '' : plain(company, 60);
+    if (called) {
+      if (called.length < 2) throw new BusinessError(400, 'company', 'A company name needs at least 2 characters.');
+      try { engine.company.setCompany(floor, { name: called, what_it_does: plain(wish, 200) }); } catch (e) { throw new BusinessError(400, 'company', String(e.message).slice(0, 160)); }
+      floor = get(db, 'SELECT * FROM floors WHERE id=?', floor.id);
+    }
     const t = now();
     run(db, 'INSERT OR REPLACE INTO business_journeys (floor_id,status,step,wish,started_at,updated_at) VALUES (?,?,?,?,?,?)', floor.id, 'active', 'idea', plain(wish, 300), t, t);
     try { assignIdeas(floor, rowOf(floor.id), { wish }); } catch (e) {
@@ -834,7 +841,7 @@ export function installBusiness(ext) {
   POST('/api/floors/:slug/business/start', async ({ req, res, p, ip }) => {
     const f = requireOwner(req, p.slug); limit('mutate', ip);
     const b = await readJson(req, 2048);
-    const r = wrap(() => start(f, { wish: b.wish, by: 'boss' }));
+    const r = wrap(() => start(f, { wish: b.wish, by: 'boss', company: b.company }));
     if (r.started) engine.bossMessage(f, plain(b.wish, 300) ? `Find me a business idea and build it: ${plain(b.wish, 300)}` : 'Find me a business idea and build it.');
     json(res, 200, { business: view(f, { owner: true }) });
   });

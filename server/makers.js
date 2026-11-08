@@ -327,6 +327,9 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     if (live && OPEN.has(live.stage)) throw new WorkspaceError(`the team is still making ${live.title}`);
     const title = clip(input.name || input.title, 40) || config.types[type].label;
     const pitch = clip(input.pitch, 400) || title;
+    // Setup's company name, for a floor without one: refused here, so a bad one starts nothing, and saved below, before the job.
+    const company = floor.name ? '' : clip(input.company, 60);
+    if (company && company.length < 2) throw new WorkspaceError('a company name needs at least 2 characters');
     const goal = clip(input.goal, 200) || config.types[type].goal;
     const plan = (Array.isArray(input.plan) ? input.plan : config.types[type].plan).map((x) => clip(x, 120)).filter(Boolean).slice(0, 8);
     const ideaId = clip(input.idea, 30);
@@ -339,7 +342,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     const role = DOC_ROLE[type];
     for (const r of [role, 'builder', 'tester']) ensure(floor, r);
     // A floor with no company yet gets one named after what it's making. The boss can rename it under Customise.
-    if (!floor.name && engine.company?.setCompany) { try { engine.company.setCompany(floor, { name: title, what_it_does: pitch.slice(0, 200) }); floor = get(db, 'SELECT * FROM floors WHERE id=?', floor.id); } catch { /* the name is a nicety */ } }
+    if (!floor.name && engine.company?.setCompany) { try { engine.company.setCompany(floor, { name: company || title, what_it_does: pitch.slice(0, 200) }); floor = get(db, 'SELECT * FROM floors WHERE id=?', floor.id); } catch (e) { if (company) throw e; /* otherwise the name is a nicety */ } }
     const t = now();
     const id = Number(run(db, 'INSERT INTO maker_jobs (floor_id,project,type,title,pitch,goal,plan,starter,stage,pass,depth,state,started_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       floor.id, project, type, title, pitch, goal, JSON.stringify(plan), starter, 'doc', 0, depth, JSON.stringify({ fails: 0, best: {}, bugs: [], launchable: false, lastPassing: -1, mechanics: known?.mechanics || null, object: known?.object || null }), t, t).lastInsertRowid);

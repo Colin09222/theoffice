@@ -97,7 +97,7 @@ try {
       await p.until('!!document.querySelector("[data-make-new]")', 'Make something new, once the job is ready', 60000);
       await p.click('[data-make-new]');
       await p.until('document.querySelectorAll("[data-launcher] [data-type]").length === 4', 'the launcher again', 8000);
-      check(`${label}: a launched floor can open the launcher again`, !(await p.ev('!!document.querySelector("[data-maker]")')));
+      check(`${label}: a launched floor can open the launcher again, full screen`, await p.ev('!!document.querySelector(".setup")'));
       await p.click('[data-launcher-back]');
       await p.until('!!document.querySelector("[data-maker]") && !document.querySelector("[data-launcher]")', 'back to the maker card', 8000);
       check(`${label}: Back returns to the maker card`, true);

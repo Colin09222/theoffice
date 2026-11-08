@@ -26,7 +26,7 @@ export async function launch({ args = [], noAngle = false } = {}) {
   };
 }
 
-async function openPage(port, { mobile = false, width = 1440, height = 900 } = {}) {
+async function openPage(port, { mobile = false, width = 1440, height = 900, phone = null } = {}) {
   const made = await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json();
   const ws = new WebSocket(made.webSocketDebuggerUrl);
   await new Promise((r) => ws.addEventListener('open', r, { once: true }));
@@ -62,8 +62,10 @@ async function openPage(port, { mobile = false, width = 1440, height = 900 } = {
     return r.result?.result?.value;
   };
   await send('Page.enable'); await send('Runtime.enable'); await send('Log.enable'); await send('Network.enable');
-  await send('Emulation.setDeviceMetricsOverride', mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobile: true } : { width, height, deviceScaleFactor: 1, mobile: false });
-  if (mobile) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  // `phone` is a real-phone profile for the mobile suite: its own size, a phone's user agent and a touch screen.
+  await send('Emulation.setDeviceMetricsOverride', phone ? { width: phone.width, height: phone.height, deviceScaleFactor: 2, mobile: true } : mobile ? { width: 390, height: 844, deviceScaleFactor: 2, mobile: true } : { width, height, deviceScaleFactor: 1, mobile: false });
+  if (mobile || phone) await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  if (phone) await send('Emulation.setUserAgentOverride', { userAgent: phone.ua || 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36', platform: 'Linux armv8l' });
   const page = {
     send, ev, errors, failed, transfer,
     /** Any other DevTools event, for a test that needs one (a screencast, say). */
@@ -84,9 +86,12 @@ async function openPage(port, { mobile = false, width = 1440, height = 900 } = {
     async click(selector) {
       // On a slow machine a sheet or dialog can still be sliding into place, and the click would land on whatever is there by then. Wait for it to come to rest first.
       await page.until(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return true; return !document.getAnimations().some((a) => a.playState === 'running' && a.effect?.getComputedTiming?.().iterations !== Infinity && a.effect?.target?.contains?.(el)); })()`, `${selector} to come to rest`, 6000).catch(() => {});
+      // A phone folds some controls away: a tab behind More, the staff under Team, the room's buttons behind a full sheet. Get to them the way a person would.
+      await ev(`(() => { const o = window.__office; if (!o) return; const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return; const hidden = !el.getBoundingClientRect().width; if (el.matches('.tab.overflow, [data-more-action]') && !o.moreOpen) o.setMore(true); else if (o.phoneLayout && el.matches('.staff-chip') && hidden) o.setTab('work'); else if (o.phoneLayout && el.closest('.controls, .floor-top, .floor-scrubber') && document.body.dataset.sheet === 'full') { o.panel.style.transition = 'none'; o.setSheet('half'); o.panel.getBoundingClientRect(); requestAnimationFrame(() => requestAnimationFrame(() => { o.panel.style.transition = ''; })); } })()`);
+      await page.until('(() => { const t = document.querySelector(".floor-panel")?.getBoundingClientRect().top ?? 0; const same = window.__sheetTop === t; window.__sheetTop = t; return same; })()', 'the sheet to stop moving', 9000).catch(() => {});
       const box = await page.until(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({ block: 'center', inline: 'nearest' }); const r = el.getBoundingClientRect(); if (!r.width || !r.height) return null; return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`, `element ${selector}`);
       const top = await ev(`(() => { const t = document.elementFromPoint(${box.x}, ${box.y}); const el = document.querySelector(${JSON.stringify(selector)}); return !!t && (t === el || el.contains(t) || t.contains(el)); })()`);
-      if (!top) throw new Error(`${selector} is covered by ${await ev(`(() => { const t = document.elementFromPoint(${box.x}, ${box.y}); return t ? t.tagName + '.' + t.className : 'nothing'; })()`)} at ${Math.round(box.x)},${Math.round(box.y)}`);
+      if (!top) throw new Error(`${selector} is covered by ${await ev(`(() => { const t = document.elementFromPoint(${box.x}, ${box.y}); return (t ? t.tagName + '.' + t.className : 'nothing') + ' [sheet ' + (document.body.dataset.sheet || '-') + ', panel top ' + Math.round(document.querySelector('.floor-panel')?.getBoundingClientRect().top ?? -1) + ']'; })()`)} at ${Math.round(box.x)},${Math.round(box.y)}`);
       await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
       await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', clickCount: 1 });
       await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x, y: box.y, button: 'left', clickCount: 1 });
