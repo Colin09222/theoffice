@@ -3,7 +3,7 @@ import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { boot, claim, floorState, until, Client } from './helpers.js';
 import { get, all } from '../server/db.js';
-import { ideaCards, surprise, fromWords, parseReport, decide, loadMakersConfig, starterFiles, buildBrief, testBrief, MAKER_TYPES } from '../server/makers.js';
+import { ideaCards, companyCards, surprise, fromWords, parseReport, decide, loadMakersConfig, starterFiles, buildBrief, testBrief, MAKER_TYPES } from '../server/makers.js';
 import { checkSite } from '../server/launch-check.js';
 
 const CFG = loadMakersConfig();
@@ -34,6 +34,34 @@ describe('ideas', () => {
     const own = fromWords('game', 'a frog who delivers mail across a flying 3d swamp');
     assert.equal(own.name, 'Frog Delivers Mail'); assert.equal(own.starter, 'game-3d'); assert.match(own.pitch, /frog/);
     assert.equal(fromWords('game', 'tiny knights on a chessboard').starter, 'game-2d');
+  });
+});
+
+describe('ideas fit the company', () => {
+  const studio = { name: 'Neon Hive', identity: JSON.stringify({ about: 'a small studio that makes arcade games' }) };
+  const made = [{ slug: 'neon-hive', title: 'Neon Hive', description: 'Defend a glowing hive from wasps.', kind: 'game', private: 0 }];
+  test('a game studio asking for a website is offered a site for its game, not a band or a bakery', () => {
+    for (const seed of [0, 1, 2, 3, 4]) {
+      const cards = ideaCards('website', { floor: studio, projects: made, seed, rotate: seed });
+      assert.equal(cards.length, 3);
+      assert.ok(cards.every((c) => !['band', 'bakery', 'event', 'walker', 'repair'].includes(c.id)), cards.map((c) => c.id).join(','));
+      assert.ok(cards.every((c) => /Neon Hive/.test(c.title) || /Neon Hive/.test(c.pitch)));
+    }
+    const first = ideaCards('website', { floor: studio, projects: made, seed: 7 })[0];
+    assert.equal(first.title, 'Neon Hive site'); assert.equal(first.starter, 'website'); assert.match(first.pitch, /Defend a glowing hive/);
+    const sur = surprise('website', { floor: studio, projects: made, seed: 3 });
+    assert.match(sur.title, /Neon Hive/);
+  });
+  test('an app and a game use the name and what it makes too', () => {
+    const apps = ideaCards('app', { floor: studio, projects: made, seed: 1 });
+    assert.ok(apps.every((c) => /Neon Hive/.test(c.title) || /Neon Hive/.test(c.pitch)));
+    const games = ideaCards('game', { floor: { name: 'Corner Clinic', identity: JSON.stringify({ about: 'a family dental clinic' }) }, projects: [], seed: 2 });
+    assert.ok(games.some((c) => c.title === 'Corner Clinic: the game'));
+    assert.ok(games.some((c) => c.starter === 'game-3d') && games.some((c) => c.starter === 'game-2d'));
+  });
+  test('a brand-new floor still gets the bank ideas', () => {
+    assert.equal(companyCards('website', { floor: { name: '' }, projects: [] }).length, 0);
+    assert.equal(ideaCards('website', { floor: { name: '' }, seed: 1 }).length, 3);
   });
 });
 

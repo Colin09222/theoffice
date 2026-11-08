@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { get, all, run, tx } from './db.js';
 import { writeFile, readFile, slugify, slugPattern, floorBytes, goesLive, WorkspaceError } from './workspace.js';
 import { runCheck, saveCheck, gateProblem } from './launch.js';
+import { checkLive } from './live-check.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = JSON.parse(readFileSync(join(ROOT, 'config/makers.json'), 'utf8'));
@@ -34,21 +35,71 @@ export function cardFor(type, idea, cfg = CONFIG) {
     goal: t.goal, plan: [...t.plan], ...(idea.mechanics ? { mechanics: [...idea.mechanics] } : {}),
   };
 }
-/** Three cards, best fit to what the company already is first, then a seeded shuffle so "more ideas" shows different ones. Games mix 2D and 3D. */
-export function ideaCards(type, { floor = null, seed = 0, cfg = CONFIG } = {}) {
+/**
+ * Cards made from this company's own facts: its name, what it does and what it has already made, so a game studio asking for a website
+ * is offered a site for its game. Empty for a brand-new floor. No model call: the Builder gets the facts through the pitch.
+ */
+export function companyCards(type, { floor = null, projects = [], cfg = CONFIG } = {}) {
+  const name = clip(floor?.name, 30);
+  const about = clip((parse(floor?.identity || '{}', {}) || {}).about, 140) || clip(floor?.tagline, 100);
+  const made = projects.filter((p) => p.title && !p.private).slice(0, 2);
+  const out = [], seen = new Set();
+  const add = (id, title, pitch, extra = {}) => {
+    const t = clip(title, 40); if (!t || seen.has(t.toLowerCase())) return;
+    seen.add(t.toLowerCase());
+    out.push({ type, id, title: t, name: t, pitch: clip(pitch, 400), starter: extra.starter || starterFor(type, pitch), goal: cfg.types[type].goal, plan: [...cfg.types[type].plan], ...(extra.mechanics ? { mechanics: extra.mechanics } : {}), ...(extra.ownProject ? { ownProject: true } : {}) });
+  };
+  const noun = (p) => (p.kind === 'game' ? 'game' : p.kind === 'app' ? 'app' : 'project');
+  const about_ = (p) => (p.description ? `: ${clip(p.description, 160)}` : '');
+  const made2 = made.map((p) => p.title).join(' and ');
+  if (type === 'website') {
+    for (const p of made) add(`site-${p.slug}`, `${p.title} site`, `The official site for ${p.title}, ${name && name !== p.title ? `${name}'s ` : 'our '}${noun(p)}${about_(p)}. What it is, why it's worth a look, and one big button to ${p.kind === 'game' ? 'play it' : 'try it'}. Only real facts, nothing invented.`, { ownProject: true });
+    if (name) {
+      add('site-company', `${name} site`, `A home for ${name}${about ? `: ${about}` : ''}. What it makes${made2 ? ` (${made2})` : ''}, and a way to get in touch.`);
+      add('site-news', `${name} updates`, `A simple updates page for ${name}: what's new${made2 ? ` with ${made2}` : ''}, what's next, and a form to hear about it first. No invented dates or numbers.`);
+      add('site-press', `${name} press kit`, `A one-page press kit for ${name}${about ? `: ${about}` : ''}. The short story, what it has made${made2 ? ` (${made2})` : ''}, and how to get in touch.`);
+    }
+  } else if (type === 'app') {
+    for (const p of made) add(`app-${p.slug}`, `${p.title} fan hub`, `A signed-in home for people who love ${p.title}${about_(p)}: post a tip or screenshot, see what others posted, and come back to your own.`, { ownProject: true });
+    if (name) {
+      add('app-members', `${name} members`, `A members app for ${name}${about ? `: ${about}` : ''}. Sign up, keep your own list of what you've tried, and get a note of what's new.`);
+      add('app-feedback', `${name} feedback`, `Let ${name}'s people post ideas and bugs${made2 ? ` about ${made2}` : ''}, vote on them, and see what got done.`);
+    }
+  } else if (type === 'game') {
+    if (name && about) add('game-company', `${name}: the game`, `A small arcade game about what ${name} does: ${about}. Quick runs, saves and a shared leaderboard, in ${name}'s own style.`, { starter: 'game-2d', mechanics: ['one action everyone understands in a second', 'something that speeds up or fights back', 'upgrades between runs'] });
+    for (const p of made) if (p.kind !== 'game') add(`game-${p.slug}`, `${p.title}: the game`, `A small game built around ${p.title}${about_(p)}. Quick runs, real saves and a shared leaderboard.`, { starter: 'game-2d', mechanics: ['one action everyone understands in a second', 'something that speeds up or fights back', 'upgrades between runs'] });
+  }
+  return out;
+}
+/** Three cards: this company's own first, then the idea bank by best fit, with a seeded shuffle so "more ideas" shows different ones. Games mix 2D and 3D. */
+export function ideaCards(type, { floor = null, seed = 0, cfg = CONFIG, projects = [], rotate = 0 } = {}) {
+  const own = companyCards(type, { floor, projects, cfg });
   const bank = cfg.ideas[type] || [];
   const want = identityWords(floor);
   const r = rng(seed + 7);
   const scored = bank.map((idea) => ({ idea, score: idea.tags.filter((t) => want.has(t)).length * 10 + r() }));
   scored.sort((a, b) => b.score - a.score);
-  const pick = scored.slice(0, 3).map((s) => s.idea);
-  if (type === 'game' && !pick.some((i) => i.starter === 'game-3d')) { const three = scored.find((s) => s.idea.starter === 'game-3d'); if (three) pick[2] = three.idea; }
-  if (type === 'game' && !pick.some((i) => i.starter === 'game-2d')) { const two = scored.find((s) => s.idea.starter === 'game-2d'); if (two) pick[2] = two.idea; }
-  return pick.map((i) => cardFor(type, i, cfg));
+  const asCard = (s) => cardFor(type, s.idea, cfg);
+  const matched = scored.filter((s) => s.idea.tags.some((t) => want.has(t))).map(asCard);
+  // "More ideas" walks through this company's own cards, and a company with its own only gets bank ideas that fit it: never a bakery for a game studio.
+  const rotated = own.map((_, i) => own[(i + rotate) % own.length]);
+  const rest = own.length && type !== 'game' ? matched : scored.map(asCard);
+  // The company's own projects first, then a good match from the bank, addressed to it, then its other cards.
+  const name = clip(floor?.name, 30);
+  const addressed = (c) => (name && type !== 'game' ? { ...c, pitch: clip(`For ${name}: ${c.pitch}`, 400) } : c);
+  const ordered = [...rotated.filter((c) => c.ownProject), ...matched.slice(0, 1).map(addressed), ...rotated.filter((c) => !c.ownProject), ...rest.map((c) => (own.length ? addressed(c) : c)), ...scored.map(asCard)];
+  const seen = new Set(), pick = [];
+  for (const c of ordered) if (pick.length < 3 && !seen.has(c.id)) { seen.add(c.id); pick.push(c); }
+  if (type === 'game' && !pick.some((c) => c.starter === 'game-3d')) { const three = scored.find((s) => s.idea.starter === 'game-3d'); if (three) pick[2] = asCard(three); }
+  if (type === 'game' && !pick.some((c) => c.starter === 'game-2d')) { const two = scored.find((s) => s.idea.starter === 'game-2d'); if (two) pick[2] = asCard(two); }
+  return pick.map(({ ownProject, ...c }) => c);
 }
-export function surprise(type, { seed = Date.now(), cfg = CONFIG } = {}) {
+export function surprise(type, { seed = Date.now(), cfg = CONFIG, floor = null, projects = [] } = {}) {
+  const own = companyCards(type, { floor, projects, cfg });
   const bank = cfg.ideas[type] || [];
-  return cardFor(type, bank[Math.floor(rng(seed)() * bank.length)] || bank[0], cfg);
+  const pool = own.length && type !== 'game' ? own : [...own, ...bank.map((i) => cardFor(type, i, cfg))];
+  const { ownProject, ...card } = pool[Math.floor(rng(seed)() * pool.length)] || cardFor(type, bank[0], cfg);
+  return card;
 }
 export const starterFor = (type, text = '') => (type === 'game' ? (/\b(3d|three|first[- ]person|fly|flying|drive|driving|planet|race|racing|island|glide)\b/i.test(text) ? 'game-3d' : 'game-2d') : type === 'app' ? 'app' : type === 'website' ? 'website' : '');
 /** The boss's own words: a name made from them, the type's goal and plan, and the words themselves as the pitch. */
@@ -232,8 +283,9 @@ CREATE TABLE IF NOT EXISTS maker_snapshots (job_id INTEGER NOT NULL, path TEXT N
 `;
 const OPEN = new Set(['doc', 'build', 'test']);
 
-export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG }) {
+export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG, liveCheck = checkLive }) {
   db.exec(SCHEMA);
+  let stopped = false; const timers = new Set();
   const jobOf = (floorId) => get(db, 'SELECT * FROM maker_jobs WHERE floor_id=? ORDER BY id DESC LIMIT 1', floorId);
   const stateOf = (j) => parse(j.state, {}) || {};
   const save = (j, fields, statePatch) => {
@@ -257,6 +309,9 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     return r.id;
   }
   function queuePass(floor, j, pass, extra) {
+    // What the live link check found goes on the next list the Builder sees, whichever pass that is.
+    const live = stateOf(j).liveBugs || [];
+    if (live.length) extra = { ...extra, bugs: [...live, ...(extra?.bugs || []).filter((b) => !live.some((x) => x.text === b.text))] };
     const fix = !!extra?.fix;
     const b = queue(floor, j, 'build', pass, buildBrief(j, pass, extra, config), 'builder', [], fix);
     queue(floor, j, 'test', pass, testBrief(j, pass, { computer: computerOn('tester'), recheck: fix ? (extra.bugs || []).filter((x) => x.severity === 'major' || x.severity === 'blocker') : [] }, config), 'tester', [b], fix);
@@ -345,7 +400,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     save(j, { stage: 'ready' }, { why });
     if (j.launched_at) {
       if (!passing) { say(floor, `The last pass on ${j.title} didn't pass the Tester, so the live version stays the one that did.`); return; }
-      try { const url = await publishTested(floor, j); say(floor, `**${j.title} got better and the Tester passed it**, so the live version is updated: ${url}`); } catch (e) { say(floor, `The newest ${j.title} passed the Tester but didn't go live: ${clip(e.message, 300)}`); }
+      try { const url = await publishTested(floor, j); say(floor, `**${j.title} got better and the Tester passed it**, so the live version is updated: ${url}`); checkSoon(floor.id, j.id); } catch (e) { say(floor, `The newest ${j.title} passed the Tester but didn't go live: ${clip(e.message, 300)}`); }
       return;
     }
     say(floor, `**${j.title} passed the Tester${st.lastPassing > 0 ? ` after ${st.lastPassing} depth pass${st.lastPassing === 1 ? '' : 'es'}` : ''}** (${why}). Tap **Launch** on the maker card to put it live and get a link to share.`);
@@ -383,6 +438,38 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     return true;
   }
 
+  // ---- the automatic check on the live link, right after Launch and after every live update ----
+  const checkSoon = (floorId, jobId) => { const t = setTimeout(() => { timers.delete(t); checkLiveLink(floorId, jobId).catch(() => {}); }, cfg.liveCheckDelayMs ?? 1500); t.unref?.(); timers.add(t); };
+  const MAX_LIVE_FIXES = 2;
+  async function checkLiveLink(floorId, jobId) {
+    const before = get(db, 'SELECT * FROM maker_jobs WHERE id=?', jobId);
+    const floor = get(db, 'SELECT * FROM floors WHERE id=?', floorId);
+    if (stopped || !before?.launched_at || !floor || floor.status !== 'active') return;
+    const url = engine.liveUrl(floor, before.project);
+    // No project origin (a dev server with no apps domain): the live page exists, but Office Cloud doesn't run there. The Tester's null stands.
+    if (!/^https?:/.test(url)) { save(before, {}, { liveCheck: { ok: null, why: 'this server has no project addresses', at: now() } }); return; }
+    const files = all(db, 'SELECT path,content FROM published_files WHERE floor_id=? AND project=?', floorId, before.project).map((f) => ({ path: f.path, data: f.content }));
+    let r;
+    try { r = await liveCheck({ url, type: before.type, files }); } catch (e) { r = { ok: null, why: clip(e.message, 160) }; }
+    if (stopped) return;
+    const j = get(db, 'SELECT * FROM maker_jobs WHERE id=?', jobId);
+    if (!j) return;
+    if (r.ok === true) { save(j, {}, { liveCheck: { ok: true, checked: r.checked || [], at: now() }, liveBugs: [], liveFixes: 0 }); return; }
+    if (r.ok === null || r.ok === undefined) { save(j, {}, { liveCheck: { ok: null, why: clip(r.why, 200), at: now() } }); return; }
+    // A real failure is a major bug for the team, with the same two-try limit a fix pass has.
+    const bug = { severity: 'major', text: `The live link check failed: ${clip(r.problem, 260)}` };
+    const st = stateOf(j);
+    const rounds = st.liveFixes || 0;
+    save(j, {}, { liveCheck: { ok: false, problem: clip(r.problem, 260), at: now() }, liveBugs: [bug] });
+    if (OPEN.has(j.stage) || j.stage === 'asking') return; // the pass under way (or the boss's answer) picks it up from liveBugs
+    if (rounds >= MAX_LIVE_FIXES) { say(floor, `**${j.title}'s live link still has a problem after two fixes:** ${clip(r.problem, 260)}\nThe live version stays up. Want the team to keep at it? Just say so.`); return; }
+    try {
+      save(j, {}, { liveFixes: rounds + 1, fixing: true });
+      queuePass(floor, j, j.pass, { bugs: [bug], unmet: st.unmet || [], fix: true });
+      say(floor, `**The live check on ${j.title} found a problem,** so the team is on it now: ${clip(r.problem, 260)}`);
+    } catch (e) { ask(floor, j, `the fix for a live problem couldn't start (${clip(e.message, 160)})`); }
+  }
+
   /** anyway: the boss's explicit choice after the team couldn't fix a serious bug. Without it, an open serious bug holds Launch. */
   async function launch(floor, { anyway = false } = {}) {
     const j = jobOf(floor.id);
@@ -394,6 +481,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     const url = await publishTested(floor, j);
     const flaws = held && !st.snapshotClean ? (st.snapshotFlaws || []) : [];
     save(j, { launched_at: j.launched_at || now(), ...(j.stage === 'asking' ? { stage: 'ready' } : {}) }, flaws.length ? { launchedWith: flaws.slice(0, 6) } : {});
+    checkSoon(floor.id, j.id);
     const share = shareUrl(floor, j);
     engine.feed?.(floor.id, null, `${j.title} launched`, j.project);
     say(floor, `**${j.title} is live:** ${share}\n${flaws.length ? `It went out with a known serious bug, your call: ${clip(flaws[0].text, 200)}\n` : ''}Share that link. Want it on its own .com? Ask me and I'll find one; you approve before anything is bought.`);
@@ -443,6 +531,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
         id: j.id, type: j.type, title: j.title, pitch: j.pitch, goal: j.goal, plan: parse(j.plan, []), project: j.project, stage: j.stage, pass: j.pass, depth: j.depth,
         launchable: !!st.launchable && !heldNow, launched: !!j.launched_at, url: j.launched_at ? shareUrl(floor, j) : '', steps, running,
         held: heldNow && (running || j.stage === 'asking') ? { bugs: st.held.slice(0, 3).map((b) => b.text), tries: st.fixTries || 0, fixing: running } : null,
+        liveCheck: j.launched_at && st.liveCheck && st.liveCheck.ok !== null ? { ok: st.liveCheck.ok, problem: st.liveCheck.ok ? '' : (st.liveCheck.problem || '') } : null,
         launchedWith: st.launchedWith?.length ? st.launchedWith.map((b) => b.text) : null,
         report: st.lastReport || null, asking: j.stage === 'asking' ? { why: st.asked || '', canLaunch: !!st.launchable && !j.launched_at, held: heldNow, flaws: heldNow && !st.snapshotClean ? (st.snapshotFlaws || []).slice(0, 3).map((b) => b.text) : [] } : null,
       },
@@ -450,12 +539,14 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
   }
   /** True until the boss launches: until then a maker project goes live only through Launch, never by the manager's hand. After it, edits publish as usual. */
   const holds = (floorId, slug) => !!get(db, "SELECT 1 x FROM maker_jobs WHERE floor_id=? AND project=? AND launched_at IS NULL AND stage!='stopped'", floorId, slug);
-  return { holds, start, afterTask, launch, decideAsk, view, ideaCards: (type, floor, seed) => ideaCards(type, { floor, seed, cfg: config }), surprise: (type, seed) => surprise(type, { seed, cfg: config }), fromWords: (type, text) => fromWords(type, text, config), jobOf };
+  const projectsOf = (floorId) => all(db, 'SELECT slug,title,description,kind,private FROM projects WHERE floor_id=? ORDER BY COALESCE(published_at,0) DESC, created_at DESC LIMIT 5', floorId);
+  const stop = () => { stopped = true; for (const t of timers) clearTimeout(t); timers.clear(); };
+  return { holds, start, afterTask, launch, decideAsk, view, stop, checkLiveLink,  ideaCards: (type, floor, seed, rotate = 0) => ideaCards(type, { floor, seed, rotate, cfg: config, projects: projectsOf(floor.id) }), surprise: (type, seed, floor) => surprise(type, { seed, cfg: config, floor, projects: floor ? projectsOf(floor.id) : [] }), fromWords: (type, text) => fromWords(type, text, config), jobOf };
 }
 
 export function installMakers(ext) {
   const { db, cfg, engine, now, hooks, GET, POST, json, readJson, limit, requireOwner, HttpError } = ext;
-  const makers = createMakers({ db, cfg, engine, now });
+  const makers = createMakers({ db, cfg, engine, now, ...(cfg.liveCheckFn ? { liveCheck: cfg.liveCheckFn } : {}) });
   engine.makers = makers;
   const wrap = async (fn) => { try { return await fn(); } catch (e) { if (e instanceof WorkspaceError || e?.name === 'ToolError') throw new HttpError(400, 'maker', e.message); throw e; } };
   hooks.snapshot.push((f, viewer, out) => { if (viewer?.owner) out.makers = makers.view(f); });
@@ -465,7 +556,7 @@ export function installMakers(ext) {
     const type = q.get('type');
     if (!MAKER_TYPES.includes(type)) throw new HttpError(400, 'type', 'pick a game, an app, a website or a business');
     const seed = Math.abs(Number(q.get('seed')) | 0);
-    json(res, 200, { type, cards: makers.ideaCards(type, f, seed + f.id * 31), surprise: makers.surprise(type, seed + f.id * 31 + 1 + Math.floor(now() / 1000)) });
+    json(res, 200, { type, cards: makers.ideaCards(type, f, seed + f.id * 31, seed), surprise: makers.surprise(type, seed + f.id * 31 + 1 + Math.floor(now() / 1000), f) });
   });
   POST('/api/floors/:slug/makers/words', async ({ req, res, p, ip }) => {
     requireOwner(req, p.slug); limit('mutate', ip);
@@ -493,5 +584,5 @@ export function installMakers(ext) {
     const v = await wrap(() => makers.decideAsk(f, String(b.choice || '')));
     json(res, 200, { makers: v });
   });
-  return { stop() {} };
+  return { stop() { makers.stop(); } };
 }

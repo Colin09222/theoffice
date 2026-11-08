@@ -102,6 +102,7 @@ export function makerCard(page) {
     box.replaceChildren(...[
       h('div.maker-head', {}, h('b', {}, job.title), h('span', {}, building ? (job.launched ? 'Live, and getting better' : 'Team is building') : job.stage === 'ready' ? (job.launched ? 'Live' : 'Ready to launch') : job.stage === 'asking' ? 'Needs you' : '')),
       steps, job.report ? h('p.maker-report', {}, `Last test: ${job.report.verdict === 'pass' ? 'passed' : 'not yet'}${job.report.summary ? `, ${job.report.summary}` : ''}`) : null,
+      job.liveCheck ? h('p.maker-report', { 'data-live-check': job.liveCheck.ok ? 'ok' : 'failed' }, job.liveCheck.ok ? (job.type === 'website' ? 'Checked on the live link.' : 'Saves and leaderboard checked on the live link.') : `The live link check found a problem: ${job.liveCheck.problem}`) : null,
       asking, held, launch, job.launchedWith?.length ? h('p.maker-warn', { 'data-launched-with': '' }, `Live with a known serious bug: ${job.launchedWith[0]}`) : null, link, another].filter(Boolean));
   };
   async function decide(choice) { try { const r = await api(`/floors/${page.slug}/makers/decide`, { method: 'POST', body: { choice } }); render(r.makers.job); } catch (e) { toast(e.message, 'bad'); } }
