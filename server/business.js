@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { get, all, run, tx } from './db.js';
 import { slugify, readFile, floorBytes, mimeOf } from './workspace.js';
-import { googleAdsFromConfig, planCampaign, createCampaign, campaignId, campaignStats, checkSearchAd, monthStartMs, accountInfo, AdsError, HARD_MAX_USD, LIMITS } from './googleads.js';
+import { googleAdsFromConfig, planCampaign, createCampaign, campaignId, campaignStats, checkSearchAd, monthStartMs, accountInfo, AdsError, HARD_MAX_USD, LIMITS, usd, pauseTrouble } from './googleads.js';
 import { createMockGoogleAds } from './googleads-mock.js';
 
 const CONFIG = JSON.parse(readFileSync(new URL('../config/business.json', import.meta.url), 'utf8'));
@@ -24,12 +24,19 @@ const AD_COLUMNS = {
   tag: "TEXT NOT NULL DEFAULT ''", campaign: "TEXT NOT NULL DEFAULT ''", budget_rn: "TEXT NOT NULL DEFAULT ''", starts_at: 'INTEGER', ends_at: 'INTEGER',
   spent_micros: 'INTEGER NOT NULL DEFAULT 0', impressions: 'INTEGER NOT NULL DEFAULT 0', clicks: 'INTEGER NOT NULL DEFAULT 0', synced_at: 'INTEGER',
   note: "TEXT NOT NULL DEFAULT ''", updated_at: 'INTEGER',
+  // When this campaign's going over its approved amount was raised by the watchdog, or seen by the admin's "ads resume".
+  over_at: 'INTEGER',
 };
 /** The building's stop: set by the admin's pause-all or by the watchdog finding a campaign over its amount or the month over the cap. While it
  * is set no new paid campaign starts, whatever ADS_PAID_ENABLED says, until the admin runs "ads resume". */
 export const adsStopped = (db) => get(db, 'SELECT reason, at FROM ad_stop WHERE id=1') || null;
 export const stopAds = (db, reason, at = Date.now()) => run(db, 'INSERT INTO ad_stop (id, reason, at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET reason=excluded.reason, at=excluded.at', String(reason).slice(0, 300), at);
-export const resumeAds = (db) => run(db, 'DELETE FROM ad_stop WHERE id=1').changes > 0;
+/** Lifts the stop. The admin has looked, so every campaign known to be over its amount counts as seen: the watchdog won't stop everything again
+ * for one that stays off. */
+export const resumeAds = (db, at = Date.now()) => {
+  run(db, 'UPDATE ad_spend SET over_at=? WHERE over_at IS NULL AND spent_micros > amount * 1000000', at);
+  return run(db, 'DELETE FROM ad_stop WHERE id=1').changes > 0;
+};
 /** The ad requests table, with its Google columns. The watchdog and the admin script open it too. */
 export function ensureAdSpend(db) {
   db.exec(SCHEMA);
@@ -584,6 +591,21 @@ export function installBusiness(ext) {
       } else if (r) closeSpend(r, 'failed', why, `Google didn't take the ad (${plain(why, 160)}). Nothing was spent. Tell the boss plainly in a line; once it's fixed you can file it again with request_ad_spend if they want.`);
     } finally { settingUp.delete(id); }
   }
+  /** A campaign over its approved amount stops every Office campaign at once, as the watchdog does, and nothing new starts until the admin's
+   * "ads resume". The stop goes on first, so a set-up under way can't switch anything on, and it holds even if Google can't be reached; the
+   * watchdog still raises the alarm on its next run. */
+  async function haltAll(over) {
+    stopAds(db, `server spend check: ${over.map((r) => `campaign ${campaignId(r.campaign)} cost ${usd(r.spent_micros)} of its ${usd(r.amount * 1e6)}`).join('; ')}`, now());
+    const rows = all(db, "SELECT * FROM ad_spend WHERE status IN ('running','approved')");
+    const camps = [...new Set(rows.map((r) => r.campaign).filter(Boolean))];
+    const trouble = camps.length ? pauseTrouble(await gads.setStatus(camps, 'PAUSED')) : '';
+    const overIds = new Set(over.map((r) => r.id));
+    for (const r of rows) {
+      run(db, "UPDATE ad_spend SET status='paused', note=?, updated_at=? WHERE id=? AND status IN ('running','approved')", overIds.has(r.id) ? 'Stopped: it cost more than was approved' : 'Stopped early by the building’s spend check. Nothing more will be spent', now(), r.id);
+      changed(r.floor_id);
+    }
+    log('warn', 'ad campaign over its amount: every Office campaign paused, new ones held until ads resume', { requests: [...overIds], paused: camps.length, trouble });
+  }
   /** Every minute or so: picks up a set-up a restart cut short, pauses and closes campaigns past their end, and reads views, clicks and cost. */
   let adsBusy = false, lastAds = 0, lastSync = 0;
   async function adsTick({ force = false } = {}) {
@@ -603,20 +625,18 @@ export function installBusiness(ext) {
       if (on.length && (force || now() - lastSync >= cfg.adsSyncMs)) {
         lastSync = now();
         const stats = await campaignStats(gads, on.map((r) => campaignId(r.campaign)));
+        const over = [];
         for (const r of on) {
           const s = stats.get(campaignId(r.campaign));
           if (!s) continue;
           run(db, 'UPDATE ad_spend SET spent_micros=?, impressions=?, clicks=?, synced_at=? WHERE id=?', s.costMicros, s.impressions, s.clicks, now(), r.id);
           // Stopped here but on at Google (switched on by hand, or a pause that never landed): off again, watchdog or not.
           if (r.status === 'paused' && s.status === 'ENABLED') { await gads.setStatus([r.campaign], 'PAUSED'); log('warn', 'stopped ad campaign was on at Google, paused again', { request: r.id }); }
-          // Belt and braces with the watchdog: one that has cost more than its approved amount stops at once.
-          if (r.status === 'running' && s.costMicros > r.amount * 1e6) {
-            await gads.setStatus([r.campaign], 'PAUSED');
-            run(db, "UPDATE ad_spend SET status='paused', note=?, updated_at=? WHERE id=?", 'Stopped: it cost more than was approved', now(), r.id);
-            log('warn', 'ad campaign over its amount, paused', { request: r.id, campaign: campaignId(r.campaign) });
-          }
+          // Belt and braces with the watchdog: one that has cost more than its approved amount stops every Office campaign at once.
+          if (r.status === 'running' && s.costMicros > r.amount * 1e6) over.push({ ...r, spent_micros: s.costMicros });
           if (s.impressions !== r.impressions || s.clicks !== r.clicks) changed(r.floor_id);
         }
+        if (over.length) await haltAll(over);
       }
     } catch (e) { log('error', 'ads', { err: plain(e?.message || e, 200) }); } finally { adsBusy = false; }
   }
