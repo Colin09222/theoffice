@@ -16,6 +16,9 @@ describe('which projects can have a short label', () => {
     for (const bad of ['www', 'api', 'mail', 'admin', 'status', 'ab', 'a--b', 'api--x', 'xn--abc', 'ns1', 'autodiscover']) assert.equal(shortLabelFor(bad), null, bad);
     assert.ok(RESERVED_LABELS.has('www'));
   });
+  test('the names the email records live on can never be a project\'s label', () => {
+    for (const l of ['send', 'rsend']) { assert.ok(RESERVED_LABELS.has(l), l); assert.equal(shortLabelFor(l), null, l); }
+  });
 });
 
 describe('on a project origin', () => {

@@ -40,7 +40,28 @@
 .mail-pick input { width: 20px; height: 20px; flex: none; }
 .mail-trust { gap: 8px; font-size: 15px; }
 .mail-approve-subject { font-weight: 800; }
+.mail-domains { display: flex; flex-direction: column; gap: 8px; }
+.mail-domain { background: var(--white); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; border-left: 4px solid var(--sun); }
+.mail-domain.verified { border-left-color: var(--teal); }
+.mail-domain.failed, .mail-domain.conflict { border-left-color: var(--tomato); }
+.mail-domain-top { align-items: center; gap: 8px; flex-wrap: wrap; }
+.mail-domain-name { display: flex; align-items: center; gap: 6px; font: 700 16px/1.2 var(--mono); min-width: 0; overflow-wrap: anywhere; }
+.mail-domain-name svg { width: 18px; height: 18px; flex: none; }
+.mail-domain-pill { font: 700 13px var(--cond); text-transform: uppercase; letter-spacing: .03em; background: var(--paper-2); border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+.mail-domain.verified .mail-domain-pill { background: var(--teal); color: #fff; }
+.mail-domain-line { margin: 0; font-size: 15px; line-height: 1.4; }
+.mail-dns-list { display: flex; flex-direction: column; gap: 6px; }
+.mail-dns { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; background: var(--paper-2); border-radius: 8px; padding: 7px 9px; }
+.mail-dns-kind { font: 700 13px var(--cond); text-transform: uppercase; white-space: nowrap; }
+.mail-dns-name { font: 700 14px var(--mono); overflow-wrap: anywhere; min-width: 0; }
+.mail-dns-ok { color: var(--teal); font-weight: 700; }
+.mail-dns-value { grid-column: 1 / -1; font: 13px/1.35 var(--mono); overflow-wrap: anywhere; min-width: 0; }
+.mail-domain-from { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 15px; }
+.mail-domain-from select { flex: 1; min-width: 0; max-width: 100%; }
+.mail-domain-actions { gap: 8px; flex-wrap: wrap; }
+.mail-domain-add { align-self: flex-start; }
 @media (max-width: 760px) {
+  .mail-domain-actions .btn.small, .mail-domain-add { min-height: 40px; }
   .mail { padding: 9px; gap: 8px; }
   .mail-frame { height: 46vh; min-height: 260px; }
   .mail-bar .btn.small { min-height: 40px; }

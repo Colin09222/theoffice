@@ -1,11 +1,11 @@
 # Email: every company's own address
 
-Every company in The Office gets `<company-slug>@middistance.com`. The boss reads, answers and writes mail in the floor's **Inbox** tab; the staff
+Every company in The Office gets `<company-slug>@middistance.com`, and moves to its own domain once it has one (see below). The boss reads, answers and writes mail in the floor's **Inbox** tab; the staff
 use `mail_inbox`, `mail_read`, `mail_reply` and `mail_send`. Sending and receiving go through [Resend](https://resend.com). Visitors never see any of it.
 
 Code: `server/mail.js` (addresses, inbound, sending rules, routes), `server/mail-provider.js` (Resend REST client and Svix signature check),
-`server/mail-mock.js` (a faithful stand-in for Resend, used by every test), `server/mail-sanitize.js`, `server/mail-tools.js`, `server/mail-config.js`,
-`public/js/mail-ui.js`, `public/css/mail.css`, `scripts/mail-setup.mjs`, and `mail` in `scripts/admin.mjs`. Tests: `test/mail.test.js`, `npm run e2e:mail`.
+`server/mail-domains.js` (a company's own domain), `server/mail-mock.js` (a faithful stand-in for Resend, used by every test), `server/mail-sanitize.js`, `server/mail-tools.js`, `server/mail-config.js`,
+`public/js/mail-ui.js`, `public/css/mail.css`, `scripts/mail-setup.mjs`, and `mail` in `scripts/admin.mjs`. Tests: `test/mail.test.js`, `test/mail-domains.test.js`, `npm run e2e:mail`, `npm run e2e:mail-domain`.
 
 ## Live setup (once, after deploy)
 
@@ -39,6 +39,28 @@ Code: `server/mail.js` (addresses, inbound, sending rules, routes), `server/mail
 
 Until the key is set, the Inbox is there, shows the address and says "Email is being set up"; nothing sends and the webhook answers 503.
 
+## A company's own domain
+
+A company with a domain of its own sends from it: `hello@theirdomain.com` by default, and the boss can pick `team`, `contact`, `support` or `info`
+instead (the old name keeps receiving). The visible sender is the company's name either way. Code: `server/mail-domains.js`.
+
+- **Bought through The Office** (`domain_orders` status `live`): set up by itself on the next mail tick. The domain is created in Resend with sending
+  and receiving on, its records are added to the zone in the building's Namecheap account, and Resend is asked to verify. The write always reads the
+  zone first, keeps every record that is there (`mergeHosts`), adds what's missing, turns on custom MX (`EmailType=MX`) and checks by reading it back.
+  A domain that already gets email (a foreign MX at the apex, or real forwarding rules) is left exactly as it is: status `conflict`, nothing written.
+- **Held elsewhere**, typed in by the boss: the Inbox card shows the records to add and a **Check again** button. A domain that's on Namecheap but not
+  on its DNS is treated the same way.
+- **Status** (Inbox card): `creating`, `dns`, `verifying`, `records`, `verified`, plus `conflict`, `full`, `failed`. Until `verified`, the company sends from
+  `<slug>@middistance.com`, and that address keeps receiving for good. If the provider ever refuses to send from the domain, that email goes from
+  `middistance.com` instead and the domain is looked at again.
+- **Receiving** routes by the full recipient address, on any of the company's domains (and `<slug>@middistance.com`), so mail can arrive while sending
+  is still being confirmed. Anything to an address nobody holds is dropped and counted.
+- **Limit**: `MAIL_MAX_DOMAINS` (default 3, Resend's free plan, counting `middistance.com`) places in all, one per company by default (`MAIL_FLOOR_DOMAINS`).
+  When it's full the boss hears it kindly once, the company stays on `middistance.com` and moves over by itself when a place opens, and the admin gets an alert
+  (`mail status`, `domains_full`). A domain that's stopped, never finished after a week, or on a floor that's gone gives its place back. Raise the limit once the
+  Resend plan allows more.
+- `send` and `rsend` are reserved labels (`RESERVED_LABELS`), because those names carry the mail records on `middistance.com`.
+
 ## Settings
 
 | Variable | Default | What |
@@ -46,6 +68,8 @@ Until the key is set, the Inbox is there, shows the address and says "Email is b
 | `RESEND_API_KEY` | (none) | Full-access key. Without it nothing sends and nothing is fetched. |
 | `RESEND_WEBHOOK_SECRET` | (none) | The webhook's `whsec_` secret. Without it the webhook refuses everything. |
 | `MAIL_DOMAIN` | `middistance.com` | The domain every company's address is on. |
+| `MAIL_MAX_DOMAINS` | 3 | Domains in all, counting `MAIL_DOMAIN`. |
+| `MAIL_FLOOR_DOMAINS` | 1 | Domains one company can use for email at a time. |
 | `MAIL_FLOOR_DAILY` | 20 | Emails one floor may send a day (UTC). |
 | `MAIL_BUILDING_DAILY` | 80 | Emails the whole building may send a day. Resend's free plan is about 100 a day **including received mail**. |
 | `MAIL_MAX_RECIPIENTS` | 5 | People on one email (to and cc together). There is no bcc and no lists. |

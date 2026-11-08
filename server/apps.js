@@ -14,7 +14,7 @@ const reservedPrefix = (l) => RESERVED_PREFIXES.some((x) => l.startsWith(x));
 const usable = (l) => l.length <= 63 && LABEL.test(l) && l.slice(2, 4) !== '--' && !reservedPrefix(l);
 
 // The short address a launched project gets when it's free: just the project's name. Never a name a service on the domain could need.
-export const RESERVED_LABELS = new Set(('www www1 www2 api api2 mail email smtp imap pop pop3 ftp sftp ssh webmail mx mx1 mx2 ns ns1 ns2 ns3 ns4 dns vpn cpanel whm root admin administrator app apps cdn static assets media img images files upload uploads download downloads status health monitor metrics '
+export const RESERVED_LABELS = new Set(('www www1 www2 api api2 mail email smtp imap pop pop3 ftp sftp ssh webmail mx mx1 mx2 send rsend ns ns1 ns2 ns3 ns4 dns vpn cpanel whm root admin administrator app apps cdn static assets media img images files upload uploads download downloads status health monitor metrics '
   + 'blog docs doc help support contact about privacy terms legal security abuse postmaster hostmaster webmaster autoconfig autodiscover dkim dmarc spf test staging dev demo preview beta sandbox console dashboard '
   + 'login signin signup account accounts auth oauth sso billing pay payment payments shop store '
   + 'office theoffice middistance iscolinfree fakebusiness localhost example').split(' '));
