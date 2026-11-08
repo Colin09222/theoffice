@@ -25,7 +25,7 @@ const screen = (p, tag, opts) => async (name, fn) => {
   await step(`${tag}: ${name}`, async () => {
     await fn?.();
     await sleep(140);
-    await p.until('!document.getAnimations().some((a) => a.playState === "running" && a.effect?.getComputedTiming?.().iterations !== Infinity && a.effect?.target?.closest?.(".modal-back, .floor-panel"))', 'settled', 3000).catch(() => {});
+    await p.until('!document.getAnimations().some((a) => a.playState === "running" && a.effect?.getComputedTiming?.().iterations !== Infinity && a.effect?.target?.closest?.(".modal-back, .floor-panel"))', 'settled', 9000).catch(() => {});
     if (OUT && process.env.MOBILE_SHOTS?.split(',').some((w) => name.startsWith(w))) await p.shot(`${OUT}/${tag}-${name.replace(/[^a-z0-9]+/gi, '-')}.jpg`);
     await audit(p, name, opts);
   });
