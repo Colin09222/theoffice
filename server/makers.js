@@ -198,7 +198,8 @@ function walk(dir, base = '') {
   }
   return out;
 }
-export const starterFiles = (name) => (name && /^[a-z0-9-]+$/.test(name) ? walk(join(STARTERS_DIR, name)) : []);
+// The game starters share the kit (screens, input, audio, saves, juice); each game adds its own index.html and game.js.
+export const starterFiles = (name) => (name && /^[a-z0-9-]+$/.test(name) ? [...(name.startsWith('game-') ? walk(join(STARTERS_DIR, 'game-kit')) : []), ...walk(join(STARTERS_DIR, name))] : []);
 
 // ---- the server side ----
 const SCHEMA = `
