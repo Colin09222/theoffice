@@ -27,15 +27,19 @@ described in [ADS.md](ADS.md).
   - 2 vertical video ads of 6–10 s with captions (`google/gemini-omni-1.2-flash` on OpenRouter, falling back to a screen recording of
     the real site made on the Builder's computer);
   - the ad words;
-  - a campaign plan (goal, who, where, an A-versus-B test);
+  - a campaign plan (goal, who, where, an A-versus-B test). Where is always Google Search: paid ads run there only, for now;
   - the Google search ad: 3–15 headlines, 2–4 descriptions and 3–10 keywords.
 
-  The boss then picks the ad money: $0 "just for fun" (the default), or $5, $10 or $25 when paid ads are on.
+  The picture and video ads are still made, for sharing. The boss then picks the ad money: $0 "just for fun" (the default), or $5, $10
+  or $25 when paid ads are on.
 - **4. Launch.**
   - With $0, the ads go up on the floor and on the live site to share, plus the launch report.
   - With an amount, the manager files an AD SPEND request for the boss's one-click approval. It then runs as a Google search ad
     ([ADS.md](ADS.md)).
-  - Facebook & Instagram show as "coming soon".
+- **Where paid ads run: Google only, for now.** In the Customers and Launch steps a switch plate shows Google Search ads, lit, with
+  "Facebook & Instagram ads: coming soon" taped over beside it. That one is a disabled button, read out in exactly those words. While paid
+  ads are off, the Google plate is taped "coming soon" too, and during a building-wide stop it reads "off for now". The manager's notes say the
+  same, so a boss who asks about Instagram hears that it isn't here yet.
 
 **Money.** No figure is shown on a floor except the boss's own choice of ad money on their own slip. Visitors see the steps, the
 lamps and the launched ads, never an amount.

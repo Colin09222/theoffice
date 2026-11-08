@@ -93,6 +93,8 @@ try {
     for (const w of ['Goal', 'Who', 'Where', 'Google Search', 'Keywords', 'mobile dog grooming', 'Sponsored', 'A vs B']) if (!plan.includes(w)) throw new Error(`plan has no ${w}`);
     const plates = await p.ev('[...document.querySelectorAll("[data-ad-where] .plate")].map((x) => x.dataset.channel + (x.classList.contains("on") ? "+on" : "") + (x.disabled ? "+off" : "") + ":" + x.textContent).join(" | ")');
     if (!/^google\+on:Google Search ads \| meta\+off:Facebook & Instagram adscoming soon$/.test(plates)) throw new Error(plates);
+    const said = await p.ev('document.querySelector("[data-ad-where] [data-channel=meta]").getAttribute("aria-label")');
+    if (said !== 'Facebook & Instagram ads: coming soon') throw new Error(`the plate reads "${said}"`);
     const coins = await p.ev('[...document.querySelectorAll(".coin")].map((x) => x.textContent + (x.classList.contains("on") ? "*" : "")).join(" ")');
     if (coins !== '$0just for fun* $5 $10 $25') throw new Error(coins);
     if (!/Launch for free/.test(await p.ev('document.querySelector("[data-launch]").textContent'))) throw new Error('launch label');
@@ -113,7 +115,7 @@ try {
     if (!/Ends[A-Z][a-z]{2}, /.test(slip2) || !/Seen 0 times, 0 clicks/.test(slip2)) throw new Error(slip2.slice(0, 300));
     const camps = [...t.app.engine.business.ads.mock.campaigns.values()];
     if (camps.length !== 1 || camps[0].status !== 'ENABLED') throw new Error(JSON.stringify(camps.map((x) => x.status)));
-    if (!await p.ev('!!document.querySelector("[data-ad-where] [data-channel=meta][disabled]")')) throw new Error('no coming-soon plate at launch');
+    if (await p.ev('document.querySelector("[data-ad-where] [data-channel=meta][disabled]")?.getAttribute("aria-label")') !== 'Facebook & Instagram ads: coming soon') throw new Error('no coming-soon plate at launch');
     await p.until('document.querySelectorAll(".journey-slot .journey-steps li.done").length === 4', 'all four steps done', 30000);
     await p.ev('document.querySelector("[data-ad-spend]").scrollIntoView({ block: "start" })');
     await shot(p, 'business-4-desktop-launch.jpg');
