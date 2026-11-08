@@ -32,7 +32,7 @@ const usage = () => {
     '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick',
     '  node scripts/admin.mjs ads list [--json]        paid Google ads: approved against spent per campaign (Google\'s own figures), and this month against the cap',
     '  node scripts/admin.mjs ads pause-all            emergency stop: pause every enabled campaign in the Google Ads account now; no new paid campaign starts until ads resume',
-    '  node scripts/admin.mjs ads resume               lift the stop left by pause-all or by the watchdog (paused campaigns stay paused)'].join('\n'));
+    '  node scripts/admin.mjs ads resume               lift the stop left by pause-all, the watchdog or the server\'s spend check, once you\'ve looked (paused campaigns stay paused)'].join('\n'));
   process.exit(1);
 };
 if (!cmd) usage();
