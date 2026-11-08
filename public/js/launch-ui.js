@@ -7,7 +7,7 @@ const TYPE_ICON = { game: 'play', app: 'lightning', website: 'globe', business: 
 const FALLBACK_TYPES = [['game', 'Game', 'A real game with levels, enemies and upgrades'], ['app', 'App / SaaS', 'A signed-in web app with real accounts and data'], ['website', 'Website', 'A fast, good-looking site with real words'], ['business', 'Business', 'Research, a plan and a landing page, step by step']];
 
 /** The whole flow, for a floor with nothing on it yet. */
-export function launchFlow(page) {
+export function launchFlow(page, { onBack = null } = {}) {
   const root = h('div.launcher', { role: 'group', 'aria-label': 'Start something', 'data-launcher': '' });
   const types = page.state.makers?.types?.map((t) => [t.id, t.label, t.blurb]) || FALLBACK_TYPES;
   // Each step starts at its question, so a phone shows the choices rather than the middle of the last list.
@@ -19,7 +19,7 @@ export function launchFlow(page) {
       h('h3.launch-q', {}, 'What are we making?'),
       h('div.launch-types', {}, ...types.map(([id, label, blurb]) => h('button.launch-type', { type: 'button', 'data-type': id, onclick: () => pickIdea(id, label) }, icon(TYPE_ICON[id] || 'sparkle'), h('b', {}, label), h('span', {}, blurb)))),
       h('p.fineprint', {}, 'Your team designs it, builds it, plays it in a real browser and fixes it. You launch it with one tap. Nobody here can post, run ads or spend money, and email to anyone new waits for your OK, so they will tell you what only you can do.'),
-      setup ? null : h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => page.openCustomise?.('vibe') }, 'First, make this office yours'));
+      onBack ? h('button.link', { type: 'button', 'data-launcher-back': '', onclick: onBack }, 'Back') : setup ? null : h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => page.openCustomise?.('vibe') }, 'First, make this office yours'));
   }
   async function pickIdea(type, label, seed = 0) {
     const cards = h('div.launch-cards', {}, h('p.launch-loading', {}, 'Thinking of ideas...'));
@@ -85,10 +85,12 @@ export function makerCard(page) {
       h('button.btn', { type: 'button', 'data-retry': '', onclick: () => decide('retry') }, 'Try again'),
       job.asking.canLaunch && !job.launched ? h('button.btn.primary', { type: 'button', onclick: () => launch?.click() }, 'Launch what works') : null,
       h('button.btn.ghost', { type: 'button', onclick: () => decide('stop') }, 'Stop')) : null;
+    // Once this one is out in the world, the same three taps start the next thing. Back returns to this card.
+    const another = job.stage === 'ready' && job.launched ? h('button.link.maker-new', { type: 'button', 'data-make-new': '', onclick: () => { const flow = launchFlow(page, { onBack: () => { flow.replaceWith(box); page.lanesEl = box; } }); page.lanesEl = flow; box.replaceWith(flow); } }, 'Make something new') : null;
     box.replaceChildren(...[
       h('div.maker-head', {}, h('b', {}, job.title), h('span', {}, building ? 'Team is building' : job.stage === 'ready' ? (job.launched ? 'Live' : 'Ready to launch') : job.stage === 'asking' ? 'Needs you' : '')),
       steps, job.report ? h('p.maker-report', {}, `Last test: ${job.report.verdict === 'pass' ? 'passed' : 'not yet'}${job.report.summary ? `, ${job.report.summary}` : ''}`) : null,
-      asking, launch, link].filter(Boolean));
+      asking, launch, link, another].filter(Boolean));
   };
   async function decide(choice) { try { const r = await api(`/floors/${page.slug}/makers/decide`, { method: 'POST', body: { choice } }); render(r.makers.job); } catch (e) { toast(e.message, 'bad'); } }
   async function share(url) {
