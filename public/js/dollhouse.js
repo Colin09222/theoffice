@@ -242,6 +242,8 @@ export class Room {
     this.budget.up++;
     this.saying = { p, until: now + Math.min(7000, Math.max(3800, 2400 + text.length * 50)) };
   }
+  /** Off the screen: whatever was being said is left unsaid, so the bubbles left up are only ones someone can see. */
+  quiet() { if (this.saying) this.hush(); }
   hush() {
     const { p } = this.saying;
     p.say.classList.remove('up');

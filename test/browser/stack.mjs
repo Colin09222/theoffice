@@ -8,7 +8,9 @@ import { boot, claim } from '../helpers.js';
 const OUT = process.env.STACK_SHOTS || ''; if (OUT) mkdirSync(OUT, { recursive: true });
 let failures = 0;
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); if (!ok) failures++; };
-const step = async (name, fn) => { try { const d = await fn(); check(name, true, d || ''); } catch (e) { check(name, false, String(e.message).slice(0, 300)); } };
+const step = async (name, fn) => {
+  try { const d = await fn(); if (/^SKIP/.test(d || '')) console.log(`SKIP ${name} (${d.slice(6)})`); else check(name, true, d || ''); } catch (e) { check(name, false, String(e.message).slice(0, 300)); }
+};
 const t = await boot({ mockDelayMs: 40, peopleTalk: false });
 const base = `http://localhost:${t.port}/theoffice`;
 await claim(t, 'Alpha Soup', { floor: 3 });
@@ -63,6 +65,9 @@ try {
     if (o.n7 !== 'Beta Bakes' || !/Quiet right now|at work now/.test(o.s7) || o.n12 !== 'New company moving in' || o.n5 || !/To let/.test(o.n4) || o.floors !== 39 || o.scene !== 'hidden') throw new Error(s);
   });
   await step('rooms near the screen are built and their staff are in them; far ones are not built', async () => {
+    // Every bubble that comes up from here on is noted, so one that came and went while something else was being checked still counts.
+    await p.ev(`(() => { window.__said = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.classList?.contains('up')) window.__said.push(m.target.closest('.dh-floor').dataset.floor + ':' + m.target.textContent); })
+      .observe(document.querySelector('.tower'), { subtree: true, attributes: true, attributeFilter: ['class'] }); })()`);
     await p.ev('document.querySelector(".dh-floor[data-floor=\\"7\\"]").scrollIntoView({ block: "center" })');
     await p.until('document.querySelectorAll(\'.dh-floor[data-floor="7"] .dh-person\').length >= 4', 'staff on 7', 12000);
     const o = JSON.parse(await p.ev(`JSON.stringify({ rooms: document.querySelectorAll('.dh-room').length, floors: document.querySelectorAll('.dh-floor').length,
@@ -75,8 +80,10 @@ try {
   await step('a meeting fills the table, the busy ones type, and a line comes up as a bubble', async () => {
     await p.until(`!!document.querySelector('.dh-floor[data-floor="7"] .dh-board.on') && document.querySelectorAll('.dh-floor[data-floor="7"] .dh-person[data-at="seat"]').length >= 2
       && !!document.querySelector('.dh-floor[data-floor="7"] .dh-person[data-at="head"]')`, 'meeting round the table', 15000);
-    const said = await p.until(`[...document.querySelectorAll('.dh-floor[data-floor="7"] .dh-say.up')].map((e) => e.textContent).join('|')`, 'bubble on 7', 15000);
+    const said = await p.until(`window.__said.filter((s) => s.startsWith('7:')).join('|')`, 'bubble on 7', 15000);
     if (!/bread prices/.test(said)) throw new Error(`said ${said}`);
+    const up = await p.ev('document.querySelectorAll(".dh-say.up").length');
+    if (up > 3) throw new Error(`${up} bubbles up at once`);
     const leak = await p.ev('document.body.textContent.includes("Nobody should ever read this")');
     if (leak) throw new Error('the hidden floor\'s line reached the lobby');
   });
@@ -161,7 +168,7 @@ try {
     await m.goto(`${base}/?q=low`);
     await m.until('document.body.dataset.page === "lobby" && document.body.dataset.lobby === "building" && document.querySelectorAll(".dh-floor").length > 10', 'phone tower');
     await m.until('!document.querySelector(".boot-bar") || getComputedStyle(document.querySelector(".boot-bar").closest("div") || document.body).visibility === "hidden" || !document.querySelector(".boot-bar").offsetParent', 'curtain up', 8000).catch(() => {});
-    await personIn(m, 9);
+    await personIn(m, 30);  // it opens on the top floor with anyone in it
   });
   await step('phone: a finger scrolls it, and the frames stay smooth on a slow phone', async () => {
     await m.send('Emulation.setCPUThrottlingRate', { rate: 4 });
@@ -204,8 +211,13 @@ try {
     await m.until('window.__office?.state?.floor?.number === 7 && location.pathname.includes("/floor/")', 'phone floor 7');
     await lift(m);
     await sleep(800);
+    // A flick has to be quick. Where the floor's 3D room renders in software (a headless machine with no GPU) each touch event can take
+    // seconds to go through, so the gesture is timed in the page, and a run that couldn't make a flick says so instead of failing on it.
+    await m.ev('(() => { window.__touch = {}; addEventListener("pointerdown", () => { window.__touch.down = performance.now(); }, { capture: true, once: true }); addEventListener("pointerup", () => { window.__touch.up = performance.now(); }, { capture: true, once: true }); })()');
     await m.drag(200, 560, 205, 330, true);
-    await m.until('window.__office?.state?.floor?.number === 9 && location.pathname.includes("/floor/")', 'flick up to 9', 10000);
+    const took = await m.until('window.__touch.up && Math.round(window.__touch.up - window.__touch.down)', 'the flick to land', 60000);
+    if (took >= 700) return `SKIP: a flick took ${took}ms to reach the page here, too slow to count as one`;
+    await m.until('window.__office?.state?.floor?.number === 9 && location.pathname.includes("/floor/")', `flick up to 9 (${took}ms)`, 10000);
     await lift(m);
   });
   await step('phone: Back to building finds its spot again', async () => {

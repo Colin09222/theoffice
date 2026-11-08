@@ -72,13 +72,15 @@ export function buildStack({ onEnter }) {
   const shells = new Map(), live = new Set(), budget = { up: 0, max: 3 };
   const life = { floors: {}, ts: 0 }, heard = new Map();
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let data = null, staff = {}, staffSig = {}, shown = false, restored = false, dead = false;
+  let data = null, staff = {}, staffSig = {}, staffReady = false, shown = false, restored = false, dead = false;
   let width = 0, k = 1, max = 6;
 
   // ---- rooms near the screen are built, far ones taken down, and only the ones on it think ----
   const measure = () => { const phone = isPhone(); k = phone ? 1 : 1.15; max = phone ? 6 : 8; width = Math.max(0, list.clientWidth - 2 * (phone ? 8 : 12)); };
+  const nearby = new Set();
+  // A room waits for the staff list, so it's built once with its people in it rather than empty and then again.
   const build = (sh) => {
-    if (sh.room || !width) return;
+    if (sh.room || !width || (sh.card && !staffReady)) return;
     if (!sh.card) {
       sh.room = { el: h('span.dh-room.dark', { 'aria-hidden': 'true' }, h('span.dh-wall'), h('span.dh-floorband'), h('span.dh-window.off', {}, h('i')), h('span.dh-sign', {}, 'To let')), think() {}, destroy() { this.el.remove(); } };
       sh.el.prepend(sh.room.el);
@@ -92,19 +94,21 @@ export function buildStack({ onEnter }) {
     if (sh.el.classList.contains('live')) { live.add(sh.room); run(); }
   };
   const unbuild = (sh) => { if (!sh.room) return; live.delete(sh.room); sh.room.destroy(); sh.room = null; };
-  const near = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting) build(e.target.__shell); }, { root: scroller, rootMargin: '100% 0px' });
+  const near = new IntersectionObserver((es) => {
+    for (const e of es) { const sh = e.target.__shell; if (e.isIntersecting) { nearby.add(sh); build(sh); } else nearby.delete(sh); }
+  }, { root: scroller, rootMargin: '100% 0px' });
   const far = new IntersectionObserver((es) => { for (const e of es) if (!e.isIntersecting) unbuild(e.target.__shell); }, { root: scroller, rootMargin: '250% 0px' });
   const seen = new IntersectionObserver((es) => {
     for (const e of es) {
       const sh = e.target.__shell;
       sh.el.classList.toggle('live', e.isIntersecting);
       if (!sh.room?.people) continue;
-      if (e.isIntersecting) live.add(sh.room); else live.delete(sh.room);
+      if (e.isIntersecting) live.add(sh.room); else { live.delete(sh.room); sh.room.quiet(); }
     }
     run();
   }, { root: scroller });
   const watch = (sh) => { sh.el.__shell = sh; near.observe(sh.el); far.observe(sh.el); seen.observe(sh.el); };
-  const forget = (sh) => { near.unobserve(sh.el); far.unobserve(sh.el); seen.unobserve(sh.el); unbuild(sh); sh.el.remove(); };
+  const forget = (sh) => { nearby.delete(sh); near.unobserve(sh.el); far.unobserve(sh.el); seen.unobserve(sh.el); unbuild(sh); sh.el.remove(); };
 
   let timer = 0;
   const tick = () => { const now = performance.now(); for (const r of live) r.think(now); };
@@ -148,14 +152,16 @@ export function buildStack({ onEnter }) {
   };
 
   // ---- the people: who works where (now and then), and what they're up to (every few seconds) ----
+  const ready = () => { if (staffReady || dead) return; staffReady = true; for (const sh of nearby) build(sh); run(); };
   const loadStaff = async () => {
     const d = await api('/building/staff').catch(() => null);
-    if (!d?.floors || dead) return;
+    if (dead) return;
+    if (!d?.floors) { ready(); return; }  // rooms without their people, rather than no rooms; the next try fills them
     staff = d.floors; staffSig = {};
     for (const [n, crew] of Object.entries(staff)) staffSig[n] = crew.map((p) => `${p.id}:${p.name}:${p.title}:${JSON.stringify(p.look)}`).join('|');
     // A hire, a leaver or a new look: that room is drawn again. Everyone else carries on.
     for (const sh of shells.values()) if (sh.room?.people && sh.staffSig !== (staffSig[sh.n] || '')) { unbuild(sh); build(sh); }
-    run();
+    ready(); run();
   };
   const loadLife = async () => {
     const d = await api('/building/life').catch(() => null);
@@ -168,6 +174,7 @@ export function buildStack({ onEnter }) {
   const feed = (sh, now, fresh) => {
     const f = life.floors[sh.n] || { busy: [], talk: [], meeting: null };
     const room = sh.room;
+    if (!room.people.length) return;
     room.setBusy(new Set(f.busy), now);
     const left = f.meeting ? MEETING_MS - (life.ts - f.meeting.at) : 0;
     room.setMeeting(left > 0 ? { at: f.meeting.at, ids: f.meeting.ids, left } : null, now);
@@ -288,8 +295,9 @@ export function buildStack({ onEnter }) {
     const d = drag; drag = null;
     scroller.classList.remove('dragging');
     if (d.moved) {
-      const [t0, y0] = d.trail[0], dt = e.timeStamp - t0;
-      const v = dt > 0 && e.timeStamp - d.trail[d.trail.length - 1][0] < 60 ? -(e.clientY - y0) / dt : 0;
+      // How fast it was going over the last tenth of a second, unless the hand had already stopped before letting go.
+      const [t0, y0] = d.trail[0], [t1, y1] = d.trail[d.trail.length - 1];
+      const v = t1 > t0 && e.timeStamp - t1 < 120 ? -(y1 - y0) / (t1 - t0) : 0;
       if (Math.abs(v) > 0.25) flingFrom(Math.max(-6, Math.min(6, v)));
     }
     setTimeout(() => { dragged = false; }, 0);
