@@ -68,7 +68,7 @@ export const readFile = (db, floorId, path) => get(db, 'SELECT path,content,size
 export const listFiles = (db, floorId, prefix = '') => all(db, 'SELECT path,size,updated_at,agent_id FROM files WHERE floor_id=? ORDER BY path', floorId).filter((f) => f.path.startsWith(prefix));
 
 // Working papers stay on the shared drive. They were written for the staff, so they never go live with the project.
-export const goesLive = (relPath) => !/^notes\//.test(relPath) && relPath !== 'TEST-REPORT.md';
+export const goesLive = (relPath) => !/^notes\//.test(relPath) && relPath !== 'TEST-REPORT.md' && relPath !== 'STARTER.md';
 
 /** Snapshot projects/<slug>/ (or one directory inside it, such as a build's dist/) into the published set. Quota is re-checked and the swap is atomic. */
 const SERVER_MARKERS = new Set(['server/package.json', 'server/office.json', 'server/server.js', 'server/index.js', 'server/app.js']);
