@@ -4,6 +4,9 @@ import { loadConfig, loadModels } from '../server/config.js';
 import { openDb, all, get, run } from '../server/db.js';
 import { issueCode } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
+import { createStore } from '../server/cloud/store.js';
+import { slugPattern } from '../server/workspace.js';
+import { writeFileSync } from 'node:fs';
 import { helpListing, helpListingText, answerHelp, declineHelp, HelpError, HELP_LIMITS, newFence } from '../server/help.js';
 import { budgetReport, budgetReportText } from '../server/budget.js';
 import { purchaseListing, purchaseListingText, decidePurchase, PurchaseError } from '../server/purchases.js';
@@ -16,6 +19,9 @@ const usage = () => {
     '  node scripts/admin.mjs code [--floor N]       issue a one-time office code',
     '  node scripts/admin.mjs floors                 list floors',
     '  node scripts/admin.mjs floors hide|show --floor N   hide floor N from the lobby, directory and lift, or show it again. It still opens by its own link',
+    '  node scripts/admin.mjs backend usage [--json]   every project\'s Office Cloud backend: accounts, documents, saves, scores, files and storage. Counts only',
+    '  node scripts/admin.mjs backend export --floor N --project SLUG [--files] [--out FILE]   everything one project keeps, as JSON. Accounts leave without their passwords',
+    '  node scripts/admin.mjs backend wipe --floor N --project SLUG --yes   delete everything one project keeps: accounts, documents, saves, scores and files',
     '  node scripts/admin.mjs filler list            list filler (demo) companies and removed ones',
     '  node scripts/admin.mjs filler seed            seed the filler companies, bringing back any that were removed',
     '  node scripts/admin.mjs filler remove --floor N  remove the filler company on floor N (stays removed)',
@@ -56,6 +62,31 @@ if (cmd === 'code') {
   const fence = newFence();
   console.log(`${fence.notice}\n`);
   for (const f of all(db, 'SELECT number,slug,name,status,filler,hidden FROM floors ORDER BY number')) console.log(`${String(f.number).padStart(3)}  ${f.status.padEnd(10)} ${fence.wrap('floor', `${f.slug}: ${f.name}`)}${f.filler ? '  [filler]' : ''}${f.hidden ? '  [hidden]' : ''}`);
+} else if (cmd === 'backend') {
+  // Office Cloud, the backend published projects use. Counts, an export, or a wipe. Run it in the container, beside the live database.
+  const store = createStore(db);
+  const projectArg = () => {
+    const i = rest.indexOf('--project'); const p = i >= 0 ? String(rest[i + 1] || '') : '';
+    if (!slugPattern.test(p)) die('--project must be a project slug, such as space-game');
+    return p;
+  };
+  const floorRow = () => { const n = floorArg(); const f = get(db, 'SELECT * FROM floors WHERE number=?', n); if (!f) die(`There is no company on floor ${n}.`); return f; };
+  const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
+  if (rest[0] === 'usage') {
+    const rows = store.projects().map((x) => ({ floor: get(db, 'SELECT number FROM floors WHERE id=?', x.floor_id)?.number ?? null, project: x.project, ...store.summary(x.floor_id, x.project) }));
+    if (rest.includes('--json')) console.log(JSON.stringify(rows, null, 2));
+    else if (!rows.length) console.log('No project has used Office Cloud yet.');
+    else for (const r of rows) console.log(`floor ${r.floor ?? '(closed)'} ${r.project}: ${r.users} accounts, ${r.docs} documents in ${r.collections} collections, ${r.saves} saves, ${r.scores} scores on ${r.boards} boards, ${r.files} files; data ${kb(r.bytes)} of ${kb(r.limits.bytes)}, files ${kb(r.fileBytes)} of ${kb(r.limits.fileBytes)}; ${r.requestsToday} requests today`);
+  } else if (rest[0] === 'export') {
+    const f = floorRow(); const p = projectArg();
+    const out = JSON.stringify(store.exportProject(f.id, p, { withFiles: rest.includes('--files') }), null, 2);
+    const i = rest.indexOf('--out');
+    if (i >= 0 && rest[i + 1]) { writeFileSync(rest[i + 1], out, { mode: 0o600 }); console.log(`Wrote ${rest[i + 1]} (${kb(Buffer.byteLength(out))}).`); } else console.log(out);
+  } else if (rest[0] === 'wipe') {
+    const f = floorRow(); const p = projectArg();
+    if (!rest.includes('--yes')) die(`This deletes every account, document, save, score and file of ${p} on floor ${f.number}. Add --yes to do it.`);
+    console.log(`Wiped ${p} on floor ${f.number}: ${store.wipeProject(f.id, p)} rows removed. Anyone in one of its rooms right now stays until they leave; their accounts are gone.`);
+  } else usage();
 } else if (cmd === 'filler') {
   // These work on the database file alone. A running server notices a removal on its next tick.
   const sub = rest[0];

@@ -1003,7 +1003,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   server.on('upgrade', (req, socket, head) => cloud.upgrade(req, socket, head));
   server.requestTimeout = Math.max(cfg.requestTimeoutMs, cfg.uploadTimeoutMs); server.headersTimeout = 15000; server.keepAliveTimeout = 5000; server.maxConnections = 1200;
   return {
-    server, engine, bus, rates,
+    server, engine, bus, rates, cloud,
     /** Brotli every asset ahead of the first visitor. Called by the real entry point only, so tests don't pay for it. */
     warmStatics: () => warmBrotli(statics),
     async close() {

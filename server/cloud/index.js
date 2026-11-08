@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { get, all } from '../db.js';
 import * as A from '../auth.js';
 import { appHostLabel, appLabel, lookupLabel, appOrigin, previewCookieName } from '../apps.js';
-import { createStore, CloudError, PLAYER, guestKey, userKey, KEY } from './store.js';
+import { createStore, CloudError, PLAYER, guestKey, userKey } from './store.js';
+import { slugPattern } from '../workspace.js';
 import { Rooms, roomNameOk } from './rooms.js';
 import { upgradeKey, handshake } from './ws.js';
 
@@ -362,7 +363,7 @@ export function installCloud(ext) {
     requireAdmin(req);
     const body = await ext.readJson(req, 1024);
     const f = floorBySlug(String(body.floor || ''));
-    if (typeof body.project !== 'string' || !KEY.test(body.project)) throw new HttpError(400, 'bad_project');
+    if (typeof body.project !== 'string' || !slugPattern.test(body.project)) throw new HttpError(400, 'bad_project');
     rooms.closeProject(`${f.id}:${body.project}`);
     json(res, 200, { ok: true, removed: store.wipeProject(f.id, body.project) });
   });

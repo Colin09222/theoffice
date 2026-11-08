@@ -77,7 +77,7 @@ describe('each person\'s part', () => {
     assert.equal(laneBrief('', 'writer', FULL), ''); assert.equal(laneBrief('game', 'writer', FULL), ''); assert.equal(laneBrief('nonsense', 'builder', FULL), '');
   });
   test('the staff get the concrete steps', () => {
-    assert.match(laneBrief('game', 'builder', FULL), /Office\.submitScore/); assert.match(laneBrief('game', 'builder', FULL), /Keyboard and touch/); assert.match(laneBrief('game', 'builder', FULL), /do not publish: the Tester plays it next/);
+    assert.match(laneBrief('game', 'builder', FULL), /office\.leaderboard\.submit/); assert.match(laneBrief('game', 'builder', FULL), /Keyboard and touch/); assert.match(laneBrief('game', 'builder', FULL), /do not publish: the Tester plays it next/);
     assert.match(laneBrief('game', 'tester', FULL), /press real keys/); assert.match(laneBrief('game', 'tester', FULL), /PASS/); assert.match(laneBrief('game', 'tester', FULL), /Do not publish/);
     assert.match(laneBrief('website', 'designer', FULL), /a name and a hex value/); assert.match(laneBrief('website', 'builder', FULL), /call review_design/); assert.match(laneBrief('website', 'writer', FULL), /No placeholder text/);
     assert.match(laneBrief('business', 'researcher', FULL), /at least three named competitors/); assert.match(laneBrief('business', 'researcher', FULL), /source URL/);
@@ -85,7 +85,7 @@ describe('each person\'s part', () => {
     assert.match(laneBrief('business', 'builder', FULL), /Office\.submitForm/); assert.match(laneBrief('business', 'builder', FULL), /Never promise an automatic email/); assert.match(laneBrief('business', 'builder', FULL), /not open yet/);
   });
   test('and with features off they are told so, rather than building something that can\'t work', () => {
-    assert.match(laneBrief('game', 'builder', BARE), /session only/); assert.doesNotMatch(laneBrief('game', 'builder', BARE), /submitScore/); assert.match(laneBrief('game', 'builder', BARE), /has not been played/);
+    assert.match(laneBrief('game', 'builder', BARE), /session only/); assert.doesNotMatch(laneBrief('game', 'builder', BARE), /submitScore|office\.leaderboard/); assert.match(laneBrief('game', 'builder', BARE), /has not been played/);
     assert.match(laneBrief('game', 'tester', BARE), /You have no browser here/);
     assert.match(laneBrief('business', 'builder', BARE), /no form/); assert.doesNotMatch(laneBrief('business', 'builder', BARE), /submitForm/);
     assert.doesNotMatch(laneBrief('website', 'builder', BARE), /review_design/);

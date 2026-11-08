@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Star Catch: an Office Cloud example</title>
+<meta name="description" content="Catch falling stars, keep your best score, climb the board and see who else is playing.">
+<!-- Office Cloud: saves, accounts, a leaderboard and a multiplayer room, with no server code. See ../../OFFICE-CLOUD.md -->
+<script src="_office/office.js"></script>
+<style>
+  :root { --ink: #f4f1ff; --sky: #14122b; --gold: #ffcf4a; --mint: #6ff2c5; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 30% 0%, #2b2361, var(--sky) 60%); color: var(--ink); font: 16px/1.45 system-ui, sans-serif; display: grid; place-items: center; }
+  main { width: min(960px, 100%); padding: 16px; display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) 280px; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  h1 { margin: 0 0 6px; font-size: 1.6rem; letter-spacing: .02em; }
+  canvas { width: 100%; aspect-ratio: 1; background: #0c0b1d; border-radius: 14px; touch-action: none; display: block; }
+  .bar { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  .bar b { color: var(--gold); }
+  button, input { font: inherit; border-radius: 10px; border: 1px solid #4a438a; padding: 8px 12px; background: #221e4a; color: var(--ink); }
+  button { cursor: pointer; background: var(--gold); color: #1a1530; border: 0; font-weight: 700; }
+  button.quiet { background: transparent; color: var(--ink); border: 1px solid #4a438a; font-weight: 400; }
+  aside section { background: #1d1a3d; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; }
+  aside h2 { font-size: 1rem; margin: 0 0 8px; color: var(--mint); }
+  ol, ul { margin: 0; padding-left: 1.3em; }
+  form { display: grid; gap: 8px; }
+  .msg { color: #ff9d9d; min-height: 1.2em; margin: 4px 0 0; font-size: .9rem; }
+  .small { font-size: .85rem; opacity: .8; }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>Star Catch</h1>
+    <p class="small">Tap the stars before they fade. Rounds last 20 seconds.</p>
+    <canvas id="sky" width="480" height="480" aria-label="The night sky, with stars to catch"></canvas>
+    <div class="bar">
+      <button id="start" type="button">Start</button>
+      <span>Score <b id="score">0</b></span><span>Best <b id="best">0</b></span><span>Rounds <b id="played">0</b></span><span>Time <b id="time">20</b></span>
+    </div>
+    <p id="last" class="small" aria-live="polite"></p>
+  </div>
+  <aside>
+    <section>
+      <h2>You</h2>
+      <p id="who">Playing as a guest</p>
+      <form id="auth">
+        <input id="user" name="username" autocomplete="username" placeholder="Username" required minlength="3" maxlength="24">
+        <input id="pass" name="password" type="password" autocomplete="current-password" placeholder="Password (8+ characters)" required minlength="8">
+        <div class="bar"><button type="submit" value="login">Log in</button><button class="quiet" type="submit" value="signup">Sign up</button></div>
+        <p class="small">There's no password reset yet, so keep your password safe.</p>
+        <p id="msg" class="msg" role="alert"></p>
+      </form>
+      <button id="logout" class="quiet" type="button" hidden>Log out</button>
+      <label class="small">Name on the board as a guest <input id="name" maxlength="24" value="Guest"></label>
+    </section>
+    <section><h2>Top catchers</h2><ol id="board"></ol><p id="rank" class="small"></p></section>
+    <section><h2>In the sky now</h2><ul id="players"></ul></section>
+  </aside>
+</main>
+<script>
+  const office = Office.connect();
+  const $ = (id) => document.getElementById(id);
+  const sky = $('sky'), ctx = sky.getContext('2d');
+  const ROUND = 20000;
+  let score = 0, best = 0, played = 0, playing = false, endsAt = 0, star = null;
+  const shown = () => (office.auth.user ? office.auth.user.name : $('name').value.trim() || 'Guest');
+
+  // ---- saves and the board ----
+  function render() { $('score').textContent = score; $('best').textContent = best; $('played').textContent = played; }
+  async function loadSave() {
+    const s = await office.saves.get('progress', { best: 0, played: 0 });
+    best = s.best; played = s.played; render();
+  }
+  async function showBoard() {
+    try {
+      const { entries, me } = await office.leaderboard.top('stars', { limit: 5 });
+      $('board').replaceChildren(...entries.map((e) => { const li = document.createElement('li'); li.textContent = `${e.name}: ${e.score}${e.you ? ' (you)' : ''}`; return li; }));
+      $('rank').textContent = me ? `You're number ${me.rank}.` : 'Play a round to get on the board.';
+    } catch (err) { $('rank').textContent = err.message; }
+  }
+
+  // ---- accounts ----
+  function showUser(u) { $('who').textContent = u ? `Logged in as ${u.name}` : 'Playing as a guest'; $('auth').hidden = !!u; $('logout').hidden = !u; }
+  office.auth.onChange((u) => { showUser(u); loadSave(); showBoard(); });
+  $('auth').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const signup = e.submitter && e.submitter.value === 'signup';
+    try {
+      if (signup) await office.auth.signUp({ username: $('user').value, password: $('pass').value });
+      else await office.auth.logIn({ login: $('user').value, password: $('pass').value });
+      $('msg').textContent = ''; $('pass').value = '';
+    } catch (err) { $('msg').textContent = err.message; }
+  });
+  $('logout').addEventListener('click', () => office.auth.logOut());
+
+  // ---- the room: who else is here, where their cursor is, and the last catch ----
+  const room = office.rooms.join('sky', { name: shown(), presence: { x: -1, y: -1, score: 0 } });
+  function listPlayers() {
+    $('players').replaceChildren(...room.members.map((m) => { const li = document.createElement('li'); li.textContent = `${m.name}${m.you ? ' (you)' : ''}: ${(m.presence && m.presence.score) || 0}`; return li; }));
+  }
+  room.on('ready', listPlayers).on('join', listPlayers).on('leave', listPlayers).on('presence', listPlayers);
+  room.on('state', (key, value) => { if (key === 'last' && value) $('last').textContent = `${value} just caught a star.`; });
+  let lastMove = 0;
+  sky.addEventListener('pointermove', (e) => {
+    const t = performance.now(); if (t - lastMove < 120) return; lastMove = t;
+    const r = sky.getBoundingClientRect();
+    room.setPresence({ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, score });
+  });
+
+  // ---- the game ----
+  function newStar() { star = { x: 40 + Math.random() * 400, y: 40 + Math.random() * 400, born: performance.now() }; }
+  function start() { if (playing) return; score = 0; playing = true; endsAt = performance.now() + ROUND; newStar(); render(); }
+  function catchStar() {
+    score++; render(); newStar();
+    room.set('last', shown());
+    room.setPresence({ ...(room.me && room.me.presence), score });
+  }
+  async function end() {
+    playing = false; played++; best = Math.max(best, score); render();
+    await office.saves.set('progress', { best, played });
+    try { await office.leaderboard.submit('stars', score, { name: shown() }); } catch (err) { $('rank').textContent = err.message; }
+    showBoard();
+  }
+  function draw(now) {
+    ctx.clearRect(0, 0, 480, 480);
+    for (const m of room.members) {
+      if (m.you || !m.presence || m.presence.x < 0) continue;
+      ctx.fillStyle = '#6ff2c5'; ctx.beginPath(); ctx.arc(m.presence.x * 480, m.presence.y * 480, 5, 0, 7); ctx.fill();
+    }
+    if (playing) {
+      const life = 1 - (now - star.born) / 1600;
+      if (life <= 0) newStar();
+      ctx.fillStyle = `rgba(255, 207, 74, ${Math.max(0.2, life)})`; ctx.beginPath(); ctx.arc(star.x, star.y, 18, 0, 7); ctx.fill();
+      const left = Math.max(0, endsAt - now); $('time').textContent = Math.ceil(left / 1000);
+      if (!left) end();
+    }
+    requestAnimationFrame(draw);
+  }
+  sky.addEventListener('pointerdown', (e) => {
+    if (!playing) return start();
+    const r = sky.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * 480, y = ((e.clientY - r.top) / r.height) * 480;
+    if (Math.hypot(x - star.x, y - star.y) < 30) catchStar();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === ' ' && !playing) { e.preventDefault(); start(); } });
+  $('start').addEventListener('click', start);
+
+  // Handy for automated checks: catch the current star, or finish the round now.
+  window.game = { start, catchStar: () => playing && catchStar(), end: () => { if (playing) { endsAt = 0; } }, state: () => ({ score, best, played, playing }) };
+
+  showUser(office.auth.user);
+  office.ready.then(() => { loadSave(); showBoard(); });
+  requestAnimationFrame(draw);
+</script>
+</body>
+</html>

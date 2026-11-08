@@ -346,7 +346,26 @@
       },
     };
 
-    self.auth = auth; self.db = { collection: collection }; self.saves = saves; self.leaderboard = leaderboard; self.rooms = rooms; self.files = files; self.forms = forms;
+    // ---- values every visitor shares, such as a counter (the same store the older client uses) ----
+    var data = function (method, key, body) {
+      return fetch('/_data/v1/shared/' + key, { method: method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined, credentials: 'same-origin', cache: 'no-store' })
+        .then(function (r) {
+          if ((r.headers.get('content-type') || '').indexOf('application/json') !== 0) { if (self.mode === 'unknown') local(); throw OfficeError('local', 'There is no Office server here.'); }
+          return r.json().then(function (j) { if (r.ok) return j; throw OfficeError(j.error, j.message, r.status); });
+        }, function () { throw OfficeError('offline', 'Can\'t reach the server.'); });
+    };
+    var sharedKey = function (k) { return 'office.cloud.shared.' + k; };
+    var shared = {
+      /** Anyone using the site can change these, so never keep anything private here or treat it as proof. */
+      get: function (key, fallback) { return either(function () { return data('GET', enc(key)).then(function (r) { return r.value; }, function (e) { if (e.status === 404) return fallback; throw e; }); }, function () { return parse(store.get(sharedKey(key)), fallback); }); },
+      set: function (key, value) { return either(function () { return data('PUT', enc(key), { value: value }).then(function () { return true; }); }, function () { store.set(sharedKey(key), JSON.stringify(value)); return true; }); },
+      incr: function (key, by) {
+        by = by === undefined ? 1 : by;
+        return either(function () { return data('POST', enc(key) + '/incr', { by: by }).then(function (r) { return r.value; }); }, function () { var n = (parse(store.get(sharedKey(key)), 0) || 0) + by; store.set(sharedKey(key), JSON.stringify(n)); return n; });
+      },
+    };
+
+    self.auth = auth; self.db = { collection: collection }; self.saves = saves; self.leaderboard = leaderboard; self.rooms = rooms; self.files = files; self.forms = forms; self.shared = shared;
     /** Settles once the stored login has been checked with the server (or there is none). */
     self.ready = pinged.then(function (there) { return there ? auth.refresh() : user; }).then(function () { return self; }, function () { return self; });
     return self;
@@ -355,4 +374,6 @@
   window.Office = window.Office || {};
   window.Office.connect = connect;
   window.Office.Error = OfficeError;
+  // The form call the launch checklist and older pages know, so a page needs only this one script.
+  if (!window.Office.submitForm) window.Office.submitForm = function (form, fields) { return connect().forms.submit(form, fields); };
 })();

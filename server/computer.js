@@ -60,6 +60,9 @@ console.log(formatReport(r));
 process.exitCode = r.errors.length || r.claims.length ? 1 : 0;
 `;
 const CLIENT_JS = readFileSync(join(ROOT, 'server/app-client/office.js'));
+// Office Cloud: the browser library, its guide, and a starter game that uses it (saves, an account, a leaderboard, a shared room).
+const CLOUD_FILES = [['office.js', 'sdk.js'], ['OFFICE-CLOUD.md', 'OFFICE-CLOUD.md'], ['examples/cloud-game/index.html', 'examples/cloud-game.html']]
+  .map(([to, from]) => ({ path: `.office/${to}`, data: readFileSync(join(ROOT, 'server/app-client', from)) }));
 const THREE_JS = readFileSync(join(ROOT, 'public/vendor/three/three.module.min.js'));
 // Real sound and art for a game, so it has more than beeps and shapes: the CC0 Kenney packs the office itself uses (public/models/NOTICE.txt). Games only, to keep every other box small.
 export const GAME_ASSETS = (() => {
@@ -350,6 +353,7 @@ export class Computer {
       const box = packTgz([
         { path: '.office/save.sh', data: Buffer.from(SAVE_SH), mode: 0o755 },
         { path: '.office/client.js', data: CLIENT_JS },
+        ...CLOUD_FILES,
         { path: '.office/launch-check.mjs', data: Buffer.from(LAUNCH_CHECK) },
         { path: '.office/three.module.min.js', data: THREE_JS },
         ...(task.lane === 'game' ? GAME_ASSETS : []),
