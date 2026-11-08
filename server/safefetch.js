@@ -128,6 +128,13 @@ export function htmlToText(html) {
     .replace(/[ \t\r\f]+/g, ' ').replace(/\n[ \n]*\n */g, '\n\n').trim();
 }
 
+/** Text in the charset the server named, or UTF-8. A page in Latin-1 or Shift_JIS comes out readable, and a label nobody knows falls back to UTF-8. */
+function decodeBody(buf, contentType) {
+  const label = /charset\s*=\s*"?([\w.:-]{1,40})/i.exec(String(contentType || ''))?.[1];
+  if (label && !/^utf-?8$/i.test(label)) { try { return new TextDecoder(label).decode(buf); } catch { /* unknown label */ } }
+  return buf.toString('utf8');
+}
+
 function once(url, opts) {
   return new Promise((resolve, reject) => {
     const mod = url.protocol === 'https:' ? https : http;
@@ -135,7 +142,7 @@ function once(url, opts) {
     const finish = (fn, v) => { if (!settled) { settled = true; clearTimeout(timer); fn(v); } };
     const req = mod.request(url, {
       method: 'GET', lookup: guardedLookup(opts.isBlocked, opts.resolver), agent: false,
-      headers: { 'user-agent': 'TheOfficeBot/1.0', accept: 'text/html,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1', 'accept-encoding': 'identity' },
+      headers: { 'user-agent': opts.userAgent || 'TheOfficeBot/1.0', accept: 'text/html,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1', 'accept-encoding': 'identity' },
     }, (res) => {
       const remote = res.socket?.remoteAddress;
       if (remote && opts.isBlocked(remote)) { res.destroy(); return finish(reject, new FetchBlocked('connected to a private address')); }
@@ -144,16 +151,17 @@ function once(url, opts) {
         return finish(resolve, { redirect: res.headers.location, status: res.statusCode });
       }
       const type = String(res.headers['content-type'] || '').split(';')[0].trim();
-      if (type && !TEXTY.test(type)) { res.destroy(); return finish(reject, new FetchBlocked(`refused non-text content (${type.slice(0, 60)})`)); }
+      if (opts.types ? !opts.types.test(type) : type && !TEXTY.test(type)) { res.destroy(); return finish(reject, new FetchBlocked(`refused non-text content (${type.slice(0, 60)})`)); }
       const enc = String(res.headers['content-encoding'] || 'identity').toLowerCase();
       if (enc !== 'identity') { res.destroy(); return finish(reject, new FetchBlocked('refused compressed response')); }
       const chunks = []; let size = 0; let truncated = false;
+      const body = () => decodeBody(Buffer.concat(chunks), opts.keepHtml ? res.headers['content-type'] : '');
       res.on('data', (c) => {
         const room = opts.maxBytes - size;
-        if (c.length > room) { if (room > 0) chunks.push(c.subarray(0, room)); size = opts.maxBytes; truncated = true; res.destroy(); finish(resolve, { status: res.statusCode, type, body: Buffer.concat(chunks).toString('utf8'), truncated }); return; }
+        if (c.length > room) { if (room > 0) chunks.push(c.subarray(0, room)); size = opts.maxBytes; truncated = true; res.destroy(); finish(resolve, { status: res.statusCode, type, body: body(), truncated }); return; }
         chunks.push(c); size += c.length;
       });
-      res.on('end', () => finish(resolve, { status: res.statusCode, type, body: Buffer.concat(chunks).toString('utf8'), truncated }));
+      res.on('end', () => finish(resolve, { status: res.statusCode, type, body: body(), truncated }));
       res.on('error', (e) => finish(reject, e));
     });
     const timer = setTimeout(() => { req.destroy(); finish(reject, new FetchBlocked('timed out')); }, opts.remainingMs());
@@ -162,8 +170,12 @@ function once(url, opts) {
   });
 }
 
-/** Fetch a URL safely. Test hooks (isBlocked, resolver) are code-level only; nothing in the environment can reach them. */
-export async function safeFetch(raw, { maxBytes = 512 * 1024, timeoutMs = 12000, maxRedirects = 4, denyHosts = [], isBlocked = isBlockedIp, resolver = dns.lookup, allowAnyPort = false } = {}) {
+/**
+ * Fetch a URL safely. Test hooks (isBlocked, resolver) are code-level only; nothing in the environment can reach them.
+ * userAgent names who is asking. keepHtml returns the page as it came instead of as plain text. types, a pattern, is the only content that gets through, a
+ * response with no type included. beforeHop(url, hop) runs before each request, redirects included, and can throw to stop it (robots.txt, politeness).
+ */
+export async function safeFetch(raw, { maxBytes = 512 * 1024, timeoutMs = 12000, maxRedirects = 4, denyHosts = [], isBlocked = isBlockedIp, resolver = dns.lookup, allowAnyPort = false, userAgent, keepHtml = false, types, beforeHop } = {}) {
   const deadline = Date.now() + timeoutMs;
   let current = String(raw);
   for (let hop = 0; hop <= maxRedirects; hop++) {
@@ -171,10 +183,11 @@ export async function safeFetch(raw, { maxBytes = 512 * 1024, timeoutMs = 12000,
     if (allowAnyPort) { u = new URL(current); if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new FetchBlocked('only http and https are allowed'); if (net.isIP(u.hostname.replace(/^\[|\]$/g, '')) && isBlocked(u.hostname.replace(/^\[|\]$/g, ''))) throw new FetchBlocked('that address is private'); }
     else u = checkUrl(current, { denyHosts }).url;
     const remainingMs = () => Math.max(1, deadline - Date.now());
+    if (beforeHop) await beforeHop(u, hop);
     if (remainingMs() <= 1) throw new FetchBlocked('timed out');
-    const r = await once(u, { maxBytes, isBlocked, resolver, remainingMs });
+    const r = await once(u, { maxBytes, isBlocked, resolver, remainingMs, userAgent, types, keepHtml });
     if (r.redirect) { current = new URL(r.redirect, u).href; continue; }
-    const text = /html/i.test(r.type) ? htmlToText(r.body) : r.body;
+    const text = !keepHtml && /html/i.test(r.type) ? htmlToText(r.body) : r.body;
     return { url: u.href, status: r.status, type: r.type, text, truncated: r.truncated };
   }
   throw new FetchBlocked('too many redirects');

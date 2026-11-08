@@ -341,6 +341,13 @@ export function createMockClient(cfg) {
   return {
     failed,
     async chat({ messages, onToken, onToolCall, signal, pricing, meta }) {
+      // A published app asking through office.ai. No staff, no tools: a stand-in reply that shows what it was asked.
+      if (meta?.kind === 'app_ai') {
+        await sleep(Math.min(cfg.mockDelayMs, 20), signal);
+        const content = `Mock AI reply to: ${String(messages.filter((m) => m.role === 'user').at(-1)?.content ?? '').slice(0, 300)}`;
+        const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
+        return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
+      }
       if (meta?.kind === 'talk') {
         await sleep(cfg.mockDelayMs, signal);
         const content = talkStep(meta);

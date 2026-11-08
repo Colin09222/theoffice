@@ -22,6 +22,11 @@
       "completion": 12
     }
   },
+  "appAi": {
+    "_comment": "The models behind office.ai for published apps. 'fast' is the default; 'smart' has a much smaller daily allowance. These names never reach the browser, which only says fast or smart.",
+    "fast": "claude-haiku-5-5",
+    "smart": "claude-sonnet-5-5"
+  },
   "autonomous": {
     "_comment": "Jobs the team picks for itself in a work mode (Set hours or Nonstop). Every Claude role runs on this, computer sessions included. keepOwnModel: roles whose own call stays on their own model, like the Tester's review on another lab's model; their computer still moves.",
     "provider": "anthropic",

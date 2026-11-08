@@ -7,6 +7,7 @@ import { mailSettings } from './mail-config.js';
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const num = (v, d) => { const n = Number(v); return v !== undefined && v !== '' && Number.isFinite(n) ? n : d; };
+const numbersOnly = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== '' && Number.isFinite(Number(v))).map(([k, v]) => [k, Number(v)]));
 // A spending cap of "off" means no cap.
 const cap = (v, d) => (v === 'off' ? Infinity : num(v, d));
 // A lifetime limit can't go below nothing, and a typo falls back to the default rather than to no limit at all.
@@ -68,6 +69,12 @@ export function loadConfig(env = process.env, overrides = {}) {
     requestTimeoutMs: 30000,
     uploadTimeoutMs: 120000,
     fetchDenyHosts: (env.FETCH_DENY_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+    // What published apps may do through Office Cloud: call AI and fetch public pages. Both on unless switched off here. See docs/OFFICE-CLOUD.md.
+    officeAiEnabled: !/^(0|false|no|off)$/i.test(String(env.OFFICE_AI_ENABLED ?? '').trim()),
+    officeFetchEnabled: !/^(0|false|no|off)$/i.test(String(env.OFFICE_FETCH_ENABLED ?? '').trim()),
+    // The defaults are in server/cloud/powers.js; a setting here replaces one. The building's daily ceiling is for the admin's eyes only.
+    cloudAiLimits: numbersOnly({ maxTokens: env.OFFICE_AI_MAX_TOKENS, dayFast: env.OFFICE_AI_DAY_FAST, daySmart: env.OFFICE_AI_DAY_SMART, buildingDayUsd: env.OFFICE_AI_BUILDING_DAY_USD }),
+    cloudFetchLimits: numbersOnly({ dayProject: env.OFFICE_FETCH_DAY, hostDelayMs: env.OFFICE_FETCH_HOST_DELAY_MS, cacheTtlMs: env.OFFICE_FETCH_CACHE_MS }),
     // A real computer for the Builder and Tester: Claude Managed Agents, one Anthropic-hosted container per task. Off until the deploy turns it on.
     computerEnabled: env.COMPUTER_ENABLED === '1',
     sessionMaxUsd: cap(env.SESSION_MAX_USD, Infinity),  // platform budget per session when set; otherwise a session is promised a slice at a time, as below
@@ -159,7 +166,7 @@ export function loadModels(path = resolve(ROOT, 'config/models.json')) {
   const priced = (x) => (x && !x.pricing && prices[x.model] ? { ...x, pricing: prices[x.model] } : x);
   const each = (group) => Object.fromEntries(Object.entries(group || {}).map(([k, r]) => [k, priced(r)]));
   const roles = each(m.roles), hireable = each(m.hireable);
-  return { roles, hireable, all: { ...roles, ...hireable }, tools: each(m.tools), prices, autonomous: m.autonomous || null };
+  return { roles, hireable, all: { ...roles, ...hireable }, tools: each(m.tools), prices, autonomous: m.autonomous || null, appAi: m.appAi || null };
 }
 
 /**

@@ -94,7 +94,7 @@ export function toolCallsOf(msg) {
 export function createAnthropicClient(cfg) {
   const client = new Anthropic({ apiKey: cfg.anthropicKey, maxRetries: 0, ...(cfg.anthropicBase ? { baseURL: cfg.anthropicBase } : {}) });
   return {
-    async chat({ model, effort, messages, tools, maxTokens, onToken, onToolCall, signal, pricing }) {
+    async chat({ model, effort, messages, tools, maxTokens, onToken, onToolCall, signal, pricing, thinking, fallbacks }) {
       if (!cfg.anthropicKey) throw new ProviderError('No Claude API key is configured on the server.', { status: 401 });
       const ctl = new AbortController();
       const onAbort = () => ctl.abort(signal.reason);
@@ -105,7 +105,7 @@ export function createAnthropicClient(cfg) {
       let streamed = 0;
       const converted = toAnthropic(messages, tools);
       try {
-        const stream = client.beta.messages.stream(buildRequest({ model, effort, maxTokens, system: converted.system, messages: converted.messages, tools: converted.tools }), { signal: ctl.signal });
+        const stream = client.beta.messages.stream(buildRequest({ model, effort, maxTokens, system: converted.system, messages: converted.messages, tools: converted.tools, ...(thinking ? { thinking } : {}), ...(fallbacks === false ? { fallbacks } : {}) }), { signal: ctl.signal });
         for await (const ev of stream) {
           bump();
           if (ev.type === 'content_block_start' && ev.content_block.type === 'tool_use') onToolCall?.(ev.content_block.name);

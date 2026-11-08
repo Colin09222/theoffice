@@ -3,7 +3,7 @@
 // Sizes are counted as rows change, in cloud_usage, so a quota check never has to add up a whole project.
 import { createHash, randomBytes } from 'node:crypto';
 import { get, all, run, tx } from '../db.js';
-import { CLOUD_TABLES as TABLES } from './schema.js';
+import { CLOUD_TABLES as TABLES, CLOUD_POWER_TABLES } from './schema.js';
 
 export const CLOUD_LIMITS = {
   dataBytes: 20 * 1024 * 1024, fileBytes: 50 * 1024 * 1024, totalBytes: 8 * 1024 * 1024 * 1024,
@@ -492,7 +492,7 @@ export function createStore(db, limits = {}, now = Date.now) {
       return n;
     });
   }
-  const wipeFloor = (f) => tx(db, () => { for (const t of TABLES) run(db, `DELETE FROM ${t} WHERE floor_id=?`, f); });
+  const wipeFloor = (f) => tx(db, () => { for (const t of [...TABLES, ...CLOUD_POWER_TABLES]) run(db, `DELETE FROM ${t} WHERE floor_id=?`, f); });
   /** Recounts a project from its rows, for the admin to check the running totals against. */
   function recount(f, p) {
     const n = (sql) => get(db, sql, f, p).n;
