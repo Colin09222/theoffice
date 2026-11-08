@@ -603,6 +603,8 @@ export function installBusiness(ext) {
           const s = stats.get(campaignId(r.campaign));
           if (!s) continue;
           run(db, 'UPDATE ad_spend SET spent_micros=?, impressions=?, clicks=?, synced_at=? WHERE id=?', s.costMicros, s.impressions, s.clicks, now(), r.id);
+          // Stopped here but on at Google (switched on by hand, or a pause that never landed): off again, watchdog or not.
+          if (r.status === 'paused' && s.status === 'ENABLED') { await gads.setStatus([r.campaign], 'PAUSED'); log('warn', 'stopped ad campaign was on at Google, paused again', { request: r.id }); }
           // Belt and braces with the watchdog: one that has cost more than its approved amount stops at once.
           if (r.status === 'running' && s.costMicros > r.amount * 1e6) {
             await gads.setStatus([r.campaign], 'PAUSED');
@@ -711,7 +713,7 @@ export function installBusiness(ext) {
       researchTask: (() => { const t = taskRow(tasksOf(row).ideas); return t ? { status: t.status } : null; })(),
       ads, preview: !!row.project && stepIndex(row.step) >= 1,
       adMoney: { options: moneyOptions(), chosen: row.money_set ? row.ad_money : 0, set: !!row.money_set, ready: phase === 'money', paid: paidOn() },
-      channels: [{ id: 'google', label: 'Google Search', on: paidOn() }, { id: 'meta', label: 'Facebook & Instagram', on: false, soon: true }],
+      channels: [{ id: 'google', label: 'Google Search', on: paidOn(), soon: !cfg.adsPaidEnabled || !gads }, { id: 'meta', label: 'Facebook & Instagram', on: false, soon: true }],
       adSpend: adSpendView(f.id),
     };
   }

@@ -141,8 +141,14 @@ function previewEl(page, b) {
   const box = h('section.biz-preview', { 'data-preview': '' }, h('div.preview-head', {}, h('b', {}, 'Live preview'), h('small', {}, 'Updates as the team saves')), empty);
   const show = (url) => { if (!url) return; empty.replaceWith(frame); frame.src = url; box.append(h('a.preview-open', { href: url, target: '_blank', rel: 'noopener noreferrer' }, 'Open it full size')); };
   const c = page.bizPreview;
+  // The tab isn't rebuilt while the journey stands still, and a builder can save the page long before a lamp changes, so it asks again every
+  // few seconds until the page is there, for as long as this box is on screen.
+  let tries = 0;
+  const look = () => api(`/floors/${page.slug}/business/preview`).then((r) => {
+    if (r.url) { page.bizPreview = { url: r.url, project: b.project, at: Date.now() }; show(r.url); } else if (++tries < 200 && (box.isConnected || tries === 1)) setTimeout(look, 3000);
+  }).catch(() => { if (++tries < 200 && box.isConnected) setTimeout(look, 6000); });
   if (c?.url && c.project === b.project && Date.now() - c.at < PREVIEW_MS) show(c.url);
-  else api(`/floors/${page.slug}/business/preview`).then((r) => { if (r.url) { page.bizPreview = { url: r.url, project: b.project, at: Date.now() }; show(r.url); } }).catch(() => {});
+  else look();
   return box;
 }
 
@@ -189,9 +195,9 @@ function whereEl(b) {
   const ch = b.channels || [];
   if (!ch.length) return null;
   return h('div.ad-where', { role: 'radiogroup', 'aria-label': 'Where paid ads run', 'data-ad-where': '' }, ...ch.map((c) => {
-    const soon = c.soon || !c.on;
-    return h(`button.plate${c.on ? '.on' : ''}${soon ? '.soon' : ''}`, { type: 'button', role: 'radio', 'aria-checked': String(!!c.on), 'aria-disabled': String(soon), disabled: soon, 'data-channel': c.id },
-      h('i.plate-lamp', { 'aria-hidden': 'true' }), h('b', {}, `${c.label} ads`), soon ? h('span.tape', {}, 'coming soon') : null);
+    const off = !c.on;
+    return h(`button.plate${c.on ? '.on' : ''}${off ? '.soon' : ''}`, { type: 'button', role: 'radio', 'aria-checked': String(!!c.on), 'aria-disabled': String(off), disabled: off, 'data-channel': c.id },
+      h('i.plate-lamp', { 'aria-hidden': 'true' }), h('b', {}, `${c.label} ads`), off ? h('span.tape', {}, c.soon ? 'coming soon' : 'off for now') : null);
   }));
 }
 function moneyEl(page, b) {
