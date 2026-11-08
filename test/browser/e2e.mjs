@@ -94,7 +94,7 @@ async function run(label, opts, t, adminCode) {
     })()`);
     if (info.names.join() !== 'Game,Website,Business') throw new Error(`names: ${info.names}`);
     if (!/Tap one below|our first job/.test(info.welcome)) throw new Error(`welcome: ${info.welcome}`);
-    if (!/Nobody here can send email, post, run ads or spend money/.test(info.note)) throw new Error(`note: ${info.note}`);
+    if (!/Nobody here can post, run ads or spend money, and email to anyone new waits for your OK/.test(info.note)) throw new Error(`note: ${info.note}`);
     for (const b of info.boxes) if (b.h < 44 || !b.inPanel || !b.clearOfInput) throw new Error(`a button is badly placed: ${JSON.stringify(b)}`);
     await sleep(200);
     await p.shot(join(OUT, `lanes-new-floor-${label}.jpg`));

@@ -13,6 +13,7 @@ import { lobbyMode } from './stack.js';
 import { muteButton, sfx } from './sfx.js';
 import { confetti, fanfare, mayParty } from './party.js';
 import { journeyBar, chipsRow, startButton, renderBusiness, businessActive, businessUnchanged } from './business-ui.js';
+import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } from './mail-ui.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -322,7 +323,8 @@ class FloorPage {
     if (businessActive(this)) tabs.push(['business', 'Business']);
     tabs.push(['talk', 'Talk'], ['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
     if (this.owner) {
-      const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length;
+      const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length + mailPending(this);
+      tabs.push(mailTab(this));  // email: the boss's own Inbox (mail-ui.js)
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
       tabs.push(['orders', 'Orders']);  // floors-plus: standing orders, after every existing tab
     }
@@ -332,8 +334,8 @@ class FloorPage {
   renderTabs() {
     clear(this.tabsEl);
     for (const [id, label] of this.tabsFor()) {
-      const m = id === 'requests' && label.match(/\d+/);
-      this.tabsEl.append(h(`button.tab${this.tab === id ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(this.tab === id), 'data-tab': id, onclick: () => this.setTab(id) }, tabIcon(id), m ? 'Requests' : label, m ? h('i.tab-count', {}, ` ${m[0]}`) : null));
+      const m = (id === 'requests' || id === 'inbox') && label.match(/\d+/);
+      this.tabsEl.append(h(`button.tab${this.tab === id ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(this.tab === id), 'data-tab': id, onclick: () => this.setTab(id) }, tabIcon(id), m ? label.replace(/\s*\d+$/, '') : label, m ? h('i.tab-count', {}, ` ${m[0]}`) : null));
       if (id === 'requests' && this.pinEls?.requests) { this.pinEls.requests.badge.hidden = !m; this.pinEls.requests.badge.textContent = m ? m[0] : ''; }
     }
   }
@@ -357,6 +359,7 @@ class FloorPage {
     if (this.tab === 'requests') this.renderRequests();
     if (this.tab === 'orders') this.renderOrders();
     if (this.tab === 'business') renderBusiness(this);
+    if (this.tab === 'inbox') renderInbox(this);
   }
   renderBanner() {
     const f = this.state.floor;
@@ -428,7 +431,7 @@ class FloorPage {
     return h('div.lanes', { role: 'group', 'aria-label': 'What should we start on?' },
       this.state.floor.setup ? h('div.setup-note', { 'data-setup': '' }, h('b', {}, 'No forms, no paperwork.'), h('span', {}, `Just tell ${this.manager?.name || 'your manager'} what you want to make. They'll name the company and get everyone moving.`)) : null,
       ...buttons,
-      h('p.fineprint', {}, 'Your staff research, write, build and publish. Nobody here can send email, post, run ads or spend money, so they will tell you what only you can do.'),
+      h('p.fineprint', {}, 'Your staff research, write, build and publish, and answer the company\'s email. Nobody here can post, run ads or spend money, and email to anyone new waits for your OK, so they will tell you what only you can do.'),
       this.state.floor.setup ? null : h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => this.openCustomise('vibe') }, 'First, make this office yours'));
   }
   dropLanes() { this.lanesEl?.remove(); this.lanesEl = null; }
@@ -740,7 +743,8 @@ class FloorPage {
     const list = h('div.requests');
     const items = this.state.purchases || [];
     this.renderDomains(list);
-    if (!items.length && !(this.state.domains || []).length && !(this.state.ios || []).length) list.append(h('p.empty', {}, this.state.domainsOn ? 'No requests. Staff can ask, but only you can say yes.' : 'No requests. Staff can ask for things here, but they can\'t buy anything.'));
+    renderMailRequests(this, list);  // email to someone new, waiting for the boss's OK
+    if (!items.length && !(this.state.domains || []).length && !(this.state.ios || []).length && !mailPending(this)) list.append(h('p.empty', {}, this.state.domainsOn ? 'No requests. Staff can ask, but only you can say yes.' : 'No requests. Staff can ask for things here, but they can\'t buy anything.'));
     for (const p of items) {
       const setStatus = async (status) => { try { await api(`/floors/${this.slug}/purchases/${p.id}`, { method: 'POST', body: { status } }); p.status = status; sfx('stamp'); this.renderTabs(); this.renderBody(); } catch (e) { toast(e.message, 'bad'); } };
       list.append(h(`article.card.request.${p.status}`, {},
@@ -925,6 +929,7 @@ class FloorPage {
     let lastWaiting = (this.state.domains || []).filter((d) => d.status === 'awaiting_boss').length;
     on('domain', async () => { await this.reload(); const n = (this.state.domains || []).filter((d) => d.status === 'awaiting_boss').length; if (n > lastWaiting) toast('A domain is waiting for your OK under Requests'); lastWaiting = n; });
     on('hired', () => this.reload());
+    on('mail', (d) => onMailEvent(this, d));
     on('reload', () => this.reload());
     on('floor', (d) => {
       if (d.status === 'gone') { toast('This floor has been closed.'); window.officeGo('/'); return; }

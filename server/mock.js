@@ -30,7 +30,7 @@ const EVIL = `<!doctype html><title>probe</title><h1 id="r">probe</h1><script>le
 const LANE_OPENERS = {
   game: 'A game! Three small ideas, boss:\n\n1. **Pigeon Post:** dodge the wind.\n2. **Night Bakery:** catch falling buns.\n3. **Tiny Tide:** outrun the sea.\n\nPick one, or tell me to choose.',
   website: 'A website! Two quick questions, boss: what is it for, and what should a visitor do when they get there?',
-  business: 'A small business! What is the idea, and who is it for? If you have none yet I can suggest three. Nobody here can send email, post, run ads or spend money, so you will get research, a plan and a page, plus a list of what only you can do.',
+  business: 'A small business! What is the idea, and who is it for? If you have none yet I can suggest three. Nobody here can post, run ads or spend money, and email to anyone new waits for your OK, so you will get research, a plan and a page, plus a list of what only you can do.',
 };
 
 // The cheap model: what people say to each other, written from the facts it was handed, and always in the JSON the real one is asked for.

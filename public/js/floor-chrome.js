@@ -5,7 +5,7 @@ import { h, api, clear, put, toast, BASE } from './dom.js';
 import { icon } from './icons.js';
 import { portrait } from './portrait.js';
 
-const TAB_ICONS = { chat: 'phone-call', talk: 'chats-teardrop', work: 'notebook', tasks: 'push-pin', projects: 'archive', requests: 'receipt', orders: 'calendar-check', about: 'identification-badge', business: 'briefcase' };
+const TAB_ICONS = { chat: 'phone-call', talk: 'chats-teardrop', work: 'notebook', tasks: 'push-pin', projects: 'archive', requests: 'receipt', inbox: 'envelope-simple', orders: 'calendar-check', about: 'identification-badge', business: 'briefcase' };
 export const tabIcon = (tab) => icon(TAB_ICONS[tab] || 'file-text');
 
 export { portrait };
