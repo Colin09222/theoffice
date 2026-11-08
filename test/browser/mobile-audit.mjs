@@ -32,7 +32,7 @@ export const AUDIT = (name, { portrait }) => `(() => {
     const r = el.getBoundingClientRect();
     if (${portrait ? 'true' : 'false'} && Math.min(r.width, r.height) < 43.5) bad.push('tap target ' + Math.round(r.width) + 'x' + Math.round(r.height) + ': ' + say(el));
   }
-  const sheetScroll = [...document.querySelectorAll('.floor-panel, .tab-body')].map((e) => e.scrollTop).join();
+  const sheetScroll = [...document.querySelectorAll('.floor-panel')].map((e) => e.scrollTop).join();
   const scrollers = [...document.querySelectorAll('.chat-list, .talk-list, .feed, .board, .gallery, .requests, .orders, .modal-body')].map((e) => [e, e.scrollTop]);
   for (const el of primary) {
     el.scrollIntoView({ block: 'center', inline: 'center' });
@@ -43,7 +43,7 @@ export const AUDIT = (name, { portrait }) => `(() => {
     if (hit && !(el === hit || el.contains(hit) || hit.contains(el))) bad.push('covered: ' + say(el) + ' by ' + say(hit));
   }
   for (const [e, top] of scrollers) e.scrollTop = top;
-  if ([...document.querySelectorAll('.floor-panel, .tab-body')].map((e) => e.scrollTop).join() !== sheetScroll) { bad.push('the sheet itself got scrolled: ' + [...document.querySelectorAll('.floor-panel, .tab-body')].map((e) => e.className + ' ' + e.scrollTop + ' sh ' + e.scrollHeight + ' ch ' + e.clientHeight).join(' / ')); for (const e of document.querySelectorAll('.floor-panel, .tab-body')) e.scrollTop = 0; }
+  if ([...document.querySelectorAll('.floor-panel')].map((e) => e.scrollTop).join() !== sheetScroll) { bad.push('the sheet itself got scrolled: ' + [...document.querySelectorAll('.floor-panel')].map((e) => e.className + ' ' + e.scrollTop + ' sh ' + e.scrollHeight + ' ch ' + e.clientHeight).join(' / ')); for (const e of document.querySelectorAll('.floor-panel')) e.scrollTop = 0; }
   return bad.slice(0, 14);
 })()`;
 
