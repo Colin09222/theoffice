@@ -9,6 +9,7 @@ import { renderCard, buildScrubber, buildPins, wirePins, tabIcon } from './floor
 import { icon } from './icons.js';
 import { attachTray, attachmentEl, ACCEPT } from './attach.js';
 import { portrait } from './portrait.js';
+import { lobbyMode } from './stack.js';
 import { muteButton, sfx } from './sfx.js';
 import { confetti, fanfare, mayParty } from './party.js';
 import { journeyBar, chipsRow, startButton, renderBusiness, businessActive, businessUnchanged } from './business-ui.js';
@@ -144,7 +145,7 @@ class FloorPage {
     document.body.append(this.pinsEl);  // under the people's labels, so a pin never hides what someone is saying
     this.root.append(
       h('header.floor-top', {},
-        h('div.plaque-top', {}, h('button.btn.chrome.back', { type: 'button', 'aria-label': 'Back to the lobby', onclick: () => window.officeGo('/') }, icon('elevator'), h('span', {}, 'Lobby')), muteButton()),
+        h('div.plaque-top', {}, h('button.btn.chrome.back', { type: 'button', 'aria-label': lobbyMode() === 'building' ? 'Back to building' : 'Back to the lobby', onclick: () => window.officeGo('/') }, icon('elevator'), h('span', {}, lobbyMode() === 'building' ? 'Back to building' : 'Lobby')), muteButton()),
         h('div.floor-title', {}, h('span.floor-num', {}, `Floor ${s.floor.number}`), this.logoEl, this.titleEl, this.tagEl),
         h('div.floor-meta', {}, this.statusEl, this.hoursEl = h('div.hours-sign', { 'data-hours': '' }, h('b'), h('small'))),
         this.cardEl),
@@ -1014,6 +1015,7 @@ class FloorPage {
     if (this.onResize) window.removeEventListener('resize', this.onResize);
     window.removeEventListener('office:agent-tap', this.tapAgent);
     this.unwireTaps?.();
+    this.unwireLift?.();
     delete document.body.dataset.sheet;
     this.pinsEl?.remove();
     this.markSeen?.();

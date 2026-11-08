@@ -190,6 +190,7 @@ class Stage {
     this.view?.resize?.(w, h);
   }
   setView(view) {
+    this.paused = false;
     this.view?.leave?.();
     this.view = view;
     this.renderer.shadowMap.enabled = false;
@@ -238,6 +239,7 @@ class Stage {
     const tick = (now) => {
       if (document.hidden || this.lost || !this.ok) { this.running = false; return; }
       requestAnimationFrame(tick);
+      if (this.paused) { this.last = now; this.frame++; return; }  // plain DOM covers the scene: nothing drawn, but a wait for frames still ends
       const real = Math.max(0, now - this.last); this.last = now;
       const dt = Math.min(real / 1000, 0.1);
       this.time += dt; this.frame++;

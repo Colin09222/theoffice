@@ -21,6 +21,20 @@ export function installBuilding(ext) {
   const { db, engine, now, GET, json, send, floorBySlug, HttpError, BASE, PRIVATE_TEXT, viewEvent } = ext;
   const privateLine = PRIVATE_TEXT.toLowerCase();
 
+  // ---- the stack ----
+  // Everyone in the building, floor by floor, for the stacked cutaway in the lobby: name, look and whether they're at it. All of it
+  // is on each floor's own page already. Hidden floors and closed ones stay out.
+  GET('/api/building/staff', async ({ res }) => {
+    const rows = all(db, `SELECT f.number, a.name, a.role, a.look, a.state FROM agents a JOIN floors f ON f.id = a.floor_id
+      WHERE f.status = 'active' AND f.hidden = 0 ORDER BY f.number DESC, a.id`);
+    const floors = {};
+    for (const r of rows) {
+      let look = null; try { look = JSON.parse(r.look); } catch { /* a drawn face in the defaults */ }
+      (floors[r.number] ||= []).push({ name: r.name, role: r.role, look, busy: r.state !== 'idle' });
+    }
+    json(res, 200, { floors, ts: now() });
+  });
+
   // ---- the ticker ----
   // One scan of the newest events is cached briefly. Each cached line keeps the facts needed to re-check it later,
   // so a project made private a moment ago is never served, whatever the clock says.

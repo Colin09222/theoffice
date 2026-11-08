@@ -49,8 +49,9 @@ async function shareFloor(page) {
 /** The lift panel: a lit display, up and down, and one lit button for every floor that's open. */
 export function buildScrubber(page) {
   const here = page.state.floor.number;
-  const up = h('button.scrub-btn', { type: 'button', 'aria-label': 'Floor above', 'data-scrub': 'up' }, icon('caret-up'));
-  const down = h('button.scrub-btn', { type: 'button', 'aria-label': 'Floor below', 'data-scrub': 'down' }, icon('caret-down'));
+  const upTo = h('b.scrub-to'), downTo = h('b.scrub-to');
+  const up = h('button.scrub-btn', { type: 'button', 'aria-label': 'Floor above', 'data-scrub': 'up', disabled: true }, icon('caret-up'), upTo);
+  const down = h('button.scrub-btn', { type: 'button', 'aria-label': 'Floor below', 'data-scrub': 'down', disabled: true }, icon('caret-down'), downTo);
   const track = h('div.scrub-track', { role: 'list' });
   const name = h('span.scrub-name', {}, `Floor ${here} · ${page.state.floor.name || 'Moving in'}`);
   const el = h('nav.floor-scrubber', { 'aria-label': 'The lift: other floors' }, h('span.lift-display', { 'aria-hidden': 'true' }, String(here)), up, track, down, name);
@@ -60,8 +61,9 @@ export function buildScrubber(page) {
     const list = d.floors.filter((f) => f.status === 'active').sort((a, b) => b.number - a.number);
     const go = (f) => { if (f) window.officeGo(`/floor/${f.slug}`); };
     const above = [...list].reverse().find((f) => f.number > here), below = list.find((f) => f.number < here);
-    const wire = (btn, f, word) => { btn.disabled = !f; btn.title = f ? `${word}: floor ${f.number}, ${f.name || 'moving in'}` : `No open floor ${word.toLowerCase()}`; btn.onclick = () => go(f); };
-    wire(up, above, 'Up'); wire(down, below, 'Down');
+    const wire = (btn, to, f, word) => { btn.disabled = !f; to.textContent = f ? String(f.number) : ''; btn.title = f ? `${word}: floor ${f.number}, ${f.name || 'moving in'}` : `No open floor ${word.toLowerCase()}`; btn.setAttribute('aria-label', f ? `${word} to floor ${f.number}` : `No open floor ${word.toLowerCase()}`); btn.onclick = () => go(f); };
+    wire(up, upTo, above, 'Up'); wire(down, downTo, below, 'Down');
+    page.liftGo = (dir) => go(dir > 0 ? above : below);
     clear(track);
     let lit = null;
     for (const f of list) {
@@ -73,7 +75,32 @@ export function buildScrubber(page) {
     page.floorList = list;
   };
   load();
+  wireLiftKeys(page, el);
   return el;
+}
+
+/** The lift without aiming for it: PageUp and PageDown on a keyboard, and a quick upward or downward flick on a phone, over the room or
+ *  the lift panel. A slow drag still moves the room; only a fast, mostly vertical flick changes floor. */
+function wireLiftKeys(page, panel) {
+  const typing = (t) => t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+  const onKey = (e) => {
+    if (page.dead || e.altKey || e.ctrlKey || e.metaKey || typing(document.activeElement)) return;
+    if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); page.liftGo?.(e.key === 'PageUp' ? 1 : -1); }
+  };
+  let start = null;
+  const onDown = (e) => {
+    const t = e.target;
+    const free = t.id === 'scene' || panel.contains(t) || !t.closest('button, a, input, textarea, select, .floor-panel, .floor-top, .controls, .modal-back');
+    start = e.pointerType === 'touch' && e.isPrimary && free ? { x: e.clientX, y: e.clientY, at: performance.now() } : null;
+  };
+  const onUp = (e) => {
+    if (!start || page.dead || !e.isPrimary) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y, ms = performance.now() - start.at; start = null;
+    if (ms < 700 && Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 2.2) page.liftGo?.(dy < 0 ? 1 : -1);
+  };
+  window.addEventListener('keydown', onKey);
+  window.addEventListener('pointerdown', onDown, true); window.addEventListener('pointerup', onUp, true);
+  page.unwireLift = () => { window.removeEventListener('keydown', onKey); window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('pointerup', onUp, true); };
 }
 
 /** The map pins over the rooms. Each one is a shortcut to a panel tab and floats where that tab's work happens. */

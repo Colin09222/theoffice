@@ -243,9 +243,10 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const floors = rows.filter((f) => !f.hidden).map(floorCard);
     const taken = new Set(rows.map((f) => f.number));
     const reserved = new Set(all(db, 'SELECT floor_number n FROM codes WHERE claimed_at IS NULL AND floor_number IS NOT NULL').map((c) => c.n));
-    let vacant = null;
-    for (let n = 1; n <= cfg.towerFloors; n++) if (!taken.has(n) && !reserved.has(n)) { vacant = n; break; }
-    json(res, 200, { floors, towerFloors: cfg.towerFloors, vacant, globalPause: engine.globalPaused() });
+    // The floors that really are to let: a hidden floor's number and one a code is holding are neither listed nor offered.
+    const toLet = [];
+    for (let n = 1; n <= cfg.towerFloors; n++) if (!taken.has(n) && !reserved.has(n)) toLet.push(n);
+    json(res, 200, { floors, towerFloors: cfg.towerFloors, vacant: toLet[0] ?? null, toLet, globalPause: engine.globalPaused() });
   });
   POST('/api/claim/check', async ({ req, res, ip }) => {
     limit('code', ip);
