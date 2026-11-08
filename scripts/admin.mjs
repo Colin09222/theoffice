@@ -2,6 +2,7 @@
 // Building-manager CLI. The plaintext code goes to this terminal only; the database stores its hash and nothing logs it.
 import { loadConfig, loadModels } from '../server/config.js';
 import { openDb, all, get, run } from '../server/db.js';
+import { payMode } from '../server/cloud/pay.js';
 import { issueCode, createSession, sha256 } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
 import { createStore } from '../server/cloud/store.js';
@@ -37,6 +38,8 @@ const usage = () => {
     '  node scripts/admin.mjs cloud ai status [PROJECT] [--floor N] [--json]   published apps\' AI: what is on, requests today and what is left. PROJECT is a subdomain label, or a slug with --floor',
     '  node scripts/admin.mjs cloud ai pause|resume PROJECT|--all [--floor N]   stop or restart AI for one project, or for the whole building',
     '  node scripts/admin.mjs cloud fetch status|pause|resume ...   the same, for fetching and scraping web pages',
+    '  node scripts/admin.mjs pay status <floor>       a floor\'s Stripe account as the building sees it: connected, what is missing, product and order counts. No sales figures',
+    '  node scripts/admin.mjs pay disconnect <floor>   stop new sales on a floor. Its Stripe account stays the boss\'s own, and their existing customers are theirs to manage',
     '  node scripts/admin.mjs filler list            list filler (demo) companies and removed ones',
     '  node scripts/admin.mjs filler seed            seed the filler companies, bringing back any that were removed',
     '  node scripts/admin.mjs filler remove --floor N  remove the filler company on floor N (stays removed)',
@@ -120,6 +123,29 @@ if (cmd === 'code') {
     if (!rest.includes('--yes')) die(`This deletes every account, document, save, score and file of ${p} on floor ${f.number}. Add --yes to do it.`);
     console.log(`Wiped ${p} on floor ${f.number}: ${store.wipeProject(f.id, p)} rows removed. Anyone in one of its rooms right now stays until they leave; their accounts are gone.`);
   } else usage();
+} else if (cmd === 'pay') {
+  // A floor's Stripe account as the building sees it, and a stop for new sales. Database only: no Stripe key or call, and no sales figures.
+  const [sub, target] = rest;
+  if ((sub !== 'status' && sub !== 'disconnect') || !target) usage();
+  const f = get(db, 'SELECT id, number, slug, name FROM floors WHERE number=? OR slug=?', Number(target) || -1, target);
+  if (!f) die(`There is no company on floor ${target}.`);
+  const accounts = all(db, 'SELECT * FROM pay_accounts WHERE floor_id=? ORDER BY livemode DESC', f.id);
+  if (sub === 'status') {
+    console.log(`Floor ${f.number} (${f.slug}). The building's Stripe mode: ${payMode(db) || 'off, no Stripe key yet'}.`);
+    if (!accounts.length) console.log('No Stripe account connected.');
+    for (const a of accounts) {
+      const missing = JSON.parse(a.missing || '[]');
+      console.log(`${a.livemode ? 'LIVE' : 'TEST'} ${a.account}: ${a.disconnected_at ? 'disconnected' : a.charges_enabled ? 'taking payments' : a.details_submitted ? 'waiting on Stripe' : 'onboarding'}, payouts ${a.payouts_enabled ? 'on' : 'off'}, ${missing.length} field${missing.length === 1 ? '' : 's'} still due${missing.length ? ` (${missing.slice(0, 6).join(', ')}${missing.length > 6 ? ', ...' : ''})` : ''}.`);
+      const products = get(db, "SELECT COUNT(*) n FROM pay_products WHERE floor_id=? AND livemode=? AND status='live'", f.id, a.livemode).n;
+      const waiting = get(db, "SELECT COUNT(*) n FROM pay_products WHERE floor_id=? AND livemode=? AND status='proposed'", f.id, a.livemode).n;
+      const orders = get(db, "SELECT COUNT(*) n FROM pay_orders WHERE floor_id=? AND livemode=? AND status!='open'", f.id, a.livemode).n;
+      console.log(`  ${products} on sale, ${waiting} waiting for the boss, ${orders} orders.`);
+    }
+  } else {
+    const n = run(db, 'UPDATE pay_accounts SET disconnected_at=COALESCE(disconnected_at,?), updated_at=? WHERE floor_id=?', Date.now(), Date.now(), f.id).changes;
+    if (!n) die(`Floor ${f.number} has no connected Stripe account.`);
+    console.log(`Floor ${f.number} can no longer start new sales. Its Stripe account stays the boss's own: any subscriptions keep billing there until the boss cancels them in Stripe, and webhooks still keep access correct. The boss can reconnect from the Payments tab.`);
+  }
 } else if (cmd === 'cloud' && (rest[0] === 'ai' || rest[0] === 'fetch')) {
   // AI and web fetching for published apps. Works on the database file alone: a running server sees a pause on its next call. Counts only.
   const [kind, sub] = rest;

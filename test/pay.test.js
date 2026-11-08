@@ -9,6 +9,12 @@ import { startMockStripe } from '../server/cloud/pay-mock.js';
 import { signStripe, verifyStripeSignature, keyMode, formEncode, hideKeys } from '../server/cloud/pay-provider.js';
 import { salesSummary, payHas, payMode } from '../server/cloud/pay.js';
 import { toolsForRole, toolDefs } from '../server/tools.js';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { openDb } from '../server/db.js';
 
 const signUp = async (t, host, name, player = P1) => {
   const r = await cloud(t, host, 'POST', 'auth/signup', { body: { username: name, password: 'correct horse', email: `${name}@example.com` }, player });
@@ -699,5 +705,68 @@ describe('checkout creation is rate limited', () => {
     for (let i = 0; i < 4; i++) { const r = await pay(t, shop, 'checkout', u.session, { product: 'pro' }); codes.push(r.status); }
     assert.deepEqual(codes.slice(0, 2), [200, 200]);
     assert.ok(codes.slice(2).every((c) => c === 429), String(codes));
+  });
+});
+
+// The child process needs the mock's event loop free, so it runs through a worker-free async spawn.
+const spawnAsync = (fn, ...args) => new Promise((resolve) => { import('node:child_process').then(({ spawn }) => {
+  const c = spawn(process.execPath, [join(fileURLToPath(new URL('..', import.meta.url)), 'scripts/pay-setup.mjs'), ...args], { env: fn.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '', stderr = '';
+  c.stdout.on('data', (d) => { stdout += d; }); c.stderr.on('data', (d) => { stderr += d; });
+  c.on('close', (status) => resolve({ status, stdout, stderr }));
+}); });
+
+describe('the admin and setup scripts', () => {
+  const ROOT = fileURLToPath(new URL('..', import.meta.url));
+  const scriptEnv = (extra) => ({ ...process.env, AI_MODE: 'mock', ...extra });
+  const cli = (dir, ...args) => { try { return { code: 0, out: execFileSync(process.execPath, [join(ROOT, 'scripts/admin.mjs'), ...args], { env: scriptEnv({ DATA_DIR: dir }), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }; } catch (e) { return { code: e.status, out: `${e.stdout}${e.stderr}` }; } };
+  test('pay status and pay disconnect work on the database, without a key and without sales figures', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pay-admin-'));
+    const db = openDb(dir);
+    run(db, "INSERT INTO floors (slug,number,name,colors,boss,decor,recovery_hash,created_at) VALUES ('gadget-co',7,'Gadget Co','{}','{}','{}','x',1)");
+    const F = get(db, "SELECT id FROM floors WHERE slug='gadget-co'").id;
+    run(db, "INSERT INTO pay_accounts (floor_id,livemode,account,charges_enabled,payouts_enabled,details_submitted,missing,created_at,updated_at) VALUES (?,1,'acct_live',1,1,1,'[\"external_account\"]',1,1)", F);
+    run(db, "INSERT INTO pay_products (floor_id,project,livemode,key,name,amount_cents,currency,status,created_at,updated_at) VALUES (?,'x',1,'pro','Pro',900,'usd','live',1,1)", F);
+    run(db, "INSERT INTO pay_sales (order_id,floor_id,livemode,ref,amount_cents,currency,day,created_at) VALUES (1,?,1,'cs_x',12345,'usd','2026-01-01',1)", F);
+    db.close();
+    const st = cli(dir, 'pay', 'status', '7');
+    assert.equal(st.code, 0, st.out);
+    assert.match(st.out, /Floor 7/); assert.match(st.out, /LIVE acct_live: taking payments/); assert.match(st.out, /external_account/); assert.match(st.out, /1 on sale/);
+    assert.ok(!/12345|123\.45/.test(st.out), 'no sales figures');
+    assert.match(cli(dir, 'pay', 'status', 'gadget-co').out, /LIVE acct_live/);
+    assert.notEqual(cli(dir, 'pay', 'status', '99').code, 0);
+    const d = cli(dir, 'pay', 'disconnect', '7');
+    assert.equal(d.code, 0, d.out); assert.match(d.out, /can no longer start new sales/);
+    assert.match(cli(dir, 'pay', 'status', '7').out, /disconnected/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+  test('pay-setup makes a Connect endpoint, writes the signing secret mode 600, and prints neither secret nor key', async () => {
+    const mock = await startMockStripe();
+    const dir = mkdtempSync(join(tmpdir(), 'pay-setup-'));
+    const file = join(dir, 'whsec.txt');
+    const run1 = { env: scriptEnv({ STRIPE_SECRET_KEY: mock.apiKey, STRIPE_API_BASE: mock.base }) };
+    const done = await spawnAsync(run1, file, '--endpoint', 'https://iscolinfree.com/theoffice/api/pay/webhook');
+    assert.equal(done.status, 0, done.stderr);
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.equal(readFileSync(file, 'utf8').trim(), mock.secret);
+    assert.ok(!done.stdout.includes(mock.secret) && !done.stdout.includes(mock.apiKey) && !done.stderr.includes(mock.secret) && !done.stderr.includes(mock.apiKey));
+    assert.match(done.stdout, /Connect webhook endpoint/);
+    assert.equal(mock.state.endpoints.length, 1);
+    const ep = mock.state.endpoints[0];
+    assert.equal(ep.application, 'ca_mock'); assert.equal(ep.api_version, '2026-10-28.endive'); assert.equal(ep.url, 'https://iscolinfree.com/theoffice/api/pay/webhook');
+    assert.ok(ep.enabled_events.includes('checkout.session.completed') && ep.enabled_events.includes('customer.subscription.deleted') && ep.enabled_events.includes('account.updated'));
+    assert.equal(mock.state.requests.filter((r) => r.path === '/v1/webhook_endpoints' && r.method === 'POST').length, 1);
+    const twice = await spawnAsync(run1, file);
+    assert.equal(twice.status, 0, twice.stderr); assert.match(twice.stdout, /already exists/);
+    assert.equal(mock.state.endpoints.length, 1);
+    const noFile = await spawnAsync(run1, join(dir, 'other.txt'));
+    assert.notEqual(noFile.status, 0); assert.match(noFile.stderr, /--rotate/);
+    const rotated = await spawnAsync(run1, join(dir, 'other.txt'), '--rotate');
+    assert.equal(rotated.status, 0, rotated.stderr);
+    assert.equal(mock.state.endpoints.length, 1, 'the old endpoint is gone');
+    const noKey = spawnSync(process.execPath, [join(ROOT, 'scripts/pay-setup.mjs'), file], { env: scriptEnv({ STRIPE_SECRET_KEY: '' }), encoding: 'utf8' });
+    assert.notEqual(noKey.status, 0); assert.match(noKey.stderr, /STRIPE_SECRET_KEY/);
+    rmSync(dir, { recursive: true, force: true });
+    await mock.close();
   });
 });
