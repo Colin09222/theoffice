@@ -108,7 +108,7 @@ const DEFS = {
   ask_buddehbot: fn('ask_buddehbot', 'Ask buddehbot, the building owner\'s assistant, for guidance when you or your staff are truly blocked and the boss can\'t settle it. Don\'t wait for the answer: carry on with anything else you can do. Your own words only: no pasted pages, files or private details.', { question: S(`What you need to know, up to ${HELP_LIMITS.question} characters`), what_was_tried: S(`What you already tried, up to ${HELP_LIMITS.tried} characters`) }),
   // Business mode: the guided Idea, Build, Customers, Launch journey (server/business.js). Picking, ad money and approving are the boss's own buttons, never a tool.
   start_business: fn('start_business', 'Start Business mode when the boss asks you to find them a business idea and build it: the researcher finds 2 or 3 ideas with real research, the boss picks one, the team builds it in four tracks, makes the ads, and launches. Use it only because the boss asked.', {
-    wish: S('What the boss said they want, if anything: a field, a budget of time, a kind of customer'),
+    wish: S('What the boss said they want, if anything: a field, how much time they have, a kind of customer'),
   }, []),
   business_action: fn('business_action', 'In Business mode, do what the boss just asked: more_ideas (they want different idea cards), pick (they named a card: idea is its number, from 1), redo_ads (they want the ads changed: say how in notes), skip_ads (launch without ads for now). Use it only because the boss asked.', {
     action: { type: 'string', enum: ['more_ideas', 'pick', 'redo_ads', 'skip_ads'] }, idea: { type: 'integer', description: 'For pick: the card number, from 1' }, notes: S('What the boss wants instead, in their words'),

@@ -3,7 +3,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { boot, claim, Client, adminClient, floorState, until } from './helpers.js';
-import { checkIdeas, checkAdSpend, figuresIn, unbacked, budgetOk, urlKey, loadBusinessConfig } from '../server/business.js';
+import { checkIdeas, checkAdSpend, figuresIn, unbacked, moneyOk, urlKey, loadBusinessConfig } from '../server/business.js';
 import { purchaseListing, decidePurchase } from '../server/purchases.js';
 import { get, all } from '../server/db.js';
 
@@ -67,17 +67,17 @@ describe('idea cards: shape and honesty', () => {
 describe('ad spend: limits and amounts', () => {
   const cfg = loadBusinessConfig();
   test('the choices are $0, $5, $10 and $25, and nothing above $25 is ever a choice', () => {
-    assert.deepEqual(cfg.budgets, [0, 5, 10, 25]);
+    assert.deepEqual(cfg.adMoney, [0, 5, 10, 25]);
     assert.equal(cfg.adMaxUsd, 25);
-    for (const a of [0, 5, 10, 25]) assert.equal(budgetOk(a), true);
-    for (const a of [1, 26, 50, 100, -5, 2.5, NaN]) assert.equal(budgetOk(a), false, String(a));
-    assert.equal(budgetOk(50, { ...cfg, budgets: [0, 50] }), false, 'a config typo cannot lift the cap');
+    for (const a of [0, 5, 10, 25]) assert.equal(moneyOk(a), true);
+    for (const a of [1, 26, 50, 100, -5, 2.5, NaN]) assert.equal(moneyOk(a), false, String(a));
+    assert.equal(moneyOk(50, { ...cfg, adMoney: [0, 50] }), false, 'a config typo cannot lift the cap');
   });
   test('a request is exactly the boss\'s choice, never above $25, and one live campaign per floor', () => {
     assert.equal(checkAdSpend({ amount: 10, chosen: 10 }), null);
     assert.match(checkAdSpend({ amount: 0, chosen: 0 }), /for free/);
     assert.match(checkAdSpend({ amount: 25, chosen: 10 }), /exactly what the boss chose/);
-    assert.match(checkAdSpend({ amount: 30, chosen: 30, cfg: { ...cfg, budgets: [0, 30] } }), /exactly what the boss chose/, 'over the cap even if configured');
+    assert.match(checkAdSpend({ amount: 30, chosen: 30, cfg: { ...cfg, adMoney: [0, 30] } }), /exactly what the boss chose/, 'over the cap even if configured');
     assert.match(checkAdSpend({ amount: 7, chosen: 7 }), /exactly/);
     assert.match(checkAdSpend({ amount: 5, chosen: 5, live: true }), /One at a time/);
     for (const amount of [0, 5, 10, 25, 30, 7]) assert.doesNotMatch(String(checkAdSpend({ amount, chosen: 5 })), /\$|25/, 'a refusal never names a limit to the bot');
@@ -96,7 +96,7 @@ async function toBudget(t, c) {
   await toIdeas(t, c);
   const p = await c.post(`/api/floors/${c.slug}/business/pick`, { idea: 0 });
   assert.equal(p.status, 200, JSON.stringify(p.data));
-  return untilStep(c, (b) => b.phase === 'budget', 'the ads');
+  return untilStep(c, (b) => b.phase === 'money', 'the ads');
 }
 
 describe('the journey in mock mode', () => {
@@ -132,7 +132,7 @@ describe('the journey in mock mode', () => {
       assert.match(await page.text(), /<html/i);
       assert.equal((await fetch(`http://${t.host}${pv.url.replace(/~w(\d+)\.[^/]+/, '~w$1.AAAAAAAAAAAAAAAAAAAAAAAAAAA')}`)).status, 404, 'a forged preview link finds nothing');
       assert.equal((await visitor.get(`/api/floors/${c.slug}/business/preview`)).status, 401);
-      const budget = await untilStep(c, (b) => b.phase === 'budget', 'the ads');
+      const budget = await untilStep(c, (b) => b.phase === 'money', 'the ads');
       assert.ok(budget.tracks.every((x) => x.lamp === 'done' && x.done === x.total), JSON.stringify(budget.tracks));
       assert.equal(budget.step, 'customers');
       assert.equal(budget.ads.pictures.length, 2);
@@ -140,7 +140,7 @@ describe('the journey in mock mode', () => {
       assert.ok(budget.ads.videos.every((v) => v.captions), 'every video has its captions');
       assert.equal(budget.ads.plan.where[0], 'Facebook');
       assert.ok(budget.ads.plan.test.a && budget.ads.plan.test.b);
-      assert.deepEqual(budget.budget, { options: [0, 5, 10, 25], chosen: 0, set: false, ready: true });
+      assert.deepEqual(budget.adMoney, { options: [0, 5, 10, 25], chosen: 0, set: false, ready: true });
       assert.ok(budget.chips.includes('Skip ads for now') && budget.chips.includes('Change the ads'));
       const vtt = await c.raw('GET', `/api/floors/${c.slug}/business/file/video-1.vtt`);
       assert.match(await vtt.text(), /^WEBVTT[\s\S]*Grooming that comes to you/);
@@ -152,10 +152,10 @@ describe('the journey in mock mode', () => {
       const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
       assert.equal(get(t.db, "SELECT COUNT(*) n FROM ledger WHERE floor_id=? AND kind='video'", fid).n, 2);
       // More than $25, or an amount that isn't a choice, is refused.
-      assert.equal((await c.post(`/api/floors/${c.slug}/business/launch`, { budget: 50 })).status, 400);
-      assert.equal((await c.post(`/api/floors/${c.slug}/business/launch`, { budget: 7 })).status, 400);
-      assert.equal((await visitor.post(`/api/floors/${c.slug}/business/launch`, { budget: 10 })).status, 401);
-      const go = await c.post(`/api/floors/${c.slug}/business/launch`, { budget: 10 });
+      assert.equal((await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 50 })).status, 400);
+      assert.equal((await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 7 })).status, 400);
+      assert.equal((await visitor.post(`/api/floors/${c.slug}/business/launch`, { amount: 10 })).status, 401);
+      const go = await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 10 });
       assert.equal(go.status, 200, JSON.stringify(go.data));
       const asked = await untilStep(c, (b) => b.adSpend?.status === 'awaiting_boss', 'the AD SPEND request');
       assert.equal(asked.adSpend.amount, 10);
@@ -189,7 +189,7 @@ describe('the journey in mock mode', () => {
       // Visitors see the step header, the lamps and the launched ads, and never an amount.
       const v = (await floorState(visitor, c.slug)).business;
       assert.equal(v.launched, true);
-      assert.equal(v.adSpend, undefined); assert.equal(v.budget, undefined);
+      assert.equal(v.adSpend, undefined); assert.equal(v.adMoney, undefined);
       assert.equal(v.ads.pictures.length, 2);
       assert.doesNotMatch(JSON.stringify(v), /\$\d|"amount"|budget/);
       assert.equal((await visitor.raw('GET', `/api/floors/${c.slug}/business/file/ad-1.png`)).status, 200, 'launched ads are shareable');
@@ -201,11 +201,11 @@ describe('the journey in mock mode', () => {
     try {
       const c = await claim(t);
       await toBudget(t, c);
-      const go = await c.post(`/api/floors/${c.slug}/business/launch`, { budget: 0 });
+      const go = await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 0 });
       assert.equal(go.status, 200, JSON.stringify(go.data));
       const done = await untilStep(c, (b) => b.launched, 'the launch report');
       assert.equal(done.adSpend, null);
-      assert.equal(done.budget.chosen, 0);
+      assert.equal(done.adMoney.chosen, 0);
       const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
       assert.equal(get(t.db, 'SELECT COUNT(*) n FROM ad_spend WHERE floor_id=?', fid).n, 0);
       assert.equal(get(t.db, 'SELECT COUNT(*) n FROM purchases WHERE floor_id=?', fid).n, 0);
@@ -254,7 +254,7 @@ describe('the journey in mock mode', () => {
     try {
       const c = await claim(t);
       await toBudget(t, c);
-      await c.post(`/api/floors/${c.slug}/business/launch`, { budget: 5 });
+      await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 5 });
       const asked = await untilStep(c, (b) => b.adSpend?.status === 'awaiting_boss', 'the request');
       const no = await c.post(`/api/floors/${c.slug}/business/ad-spend/${asked.adSpend.id}`, { answer: 'decline' });
       assert.equal(no.data.business.adSpend.status, 'declined');
@@ -284,7 +284,7 @@ describe('the journey in mock mode', () => {
       await c.post(`/api/floors/${c.slug}/chat`, { text: 'Find me a business idea and build it: [videofail]' });
       await untilStep(c, (b) => b.phase === 'pick', 'cards');
       await c.post(`/api/floors/${c.slug}/business/pick`, { idea: 1 });
-      const b = await untilStep(c, (x) => x.phase === 'budget', 'the ads without videos');
+      const b = await untilStep(c, (x) => x.phase === 'money', 'the ads without videos');
       assert.equal(b.ads.videos.length, 0);
       assert.match(b.ads.videoFailed, /502|upstream/);
       assert.equal(b.ads.pictures.length, 2);

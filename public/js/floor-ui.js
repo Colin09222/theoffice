@@ -11,6 +11,7 @@ import { attachTray, attachmentEl, ACCEPT } from './attach.js';
 import { portrait } from './portrait.js';
 import { muteButton, sfx } from './sfx.js';
 import { confetti, fanfare, mayParty } from './party.js';
+import { journeyBar, chipsRow, startButton, renderBusiness, businessActive } from './business-ui.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -51,8 +52,9 @@ class FloorPage {
     document.body.dataset.page = 'floor';
     const s = this.state;
     this.tab = this.canSeeChat ? 'chat' : 'talk';
+    if (new URLSearchParams(location.search).get('ad') && businessActive(this)) { this.tab = 'business'; this.panelOpen = true; }
     // The boss arrives at the chat with the manager. A visitor arrives at the room, with the panel a tap away.
-    this.panelOpen = this.owner;
+    this.panelOpen = this.panelOpen || this.owner;
     this.localTalk = [];
     this.tapAgent = (e) => { const id = typeof e.detail === 'string' ? e.detail : e.detail?.id; const a = this.state.agents.find((x) => x.id === id); if (a) this.openAgent(a); };
     window.addEventListener('office:agent-tap', this.tapAgent);
@@ -136,6 +138,7 @@ class FloorPage {
     this.cardEl = h('div.card-more');
     this.logoEl = h('span.card-logo', { 'aria-hidden': 'true' });
     this.pillEl = h('button.talk-pill', { type: 'button', 'data-talk-pill': '', onclick: () => this.setTab(this.canSeeChat ? 'chat' : 'talk') });
+    this.journeyEl = h('div.journey-slot', { 'data-journey-slot': '' });
     this.pinsEl = buildPins(this);
     this.scrubberEl = buildScrubber(this);
     document.body.append(this.pinsEl);  // under the people's labels, so a pin never hides what someone is saying
@@ -146,6 +149,7 @@ class FloorPage {
         h('div.floor-meta', {}, this.statusEl, this.hoursEl = h('div.hours-sign', { 'data-hours': '' }, h('b'), h('small'))),
         this.cardEl),
       this.controlsEl,
+      this.journeyEl,
       this.pillEl,
       this.scrubberEl,
       panel,
@@ -173,11 +177,11 @@ class FloorPage {
     if (!this.view) return;
     if (phone) {
       const sheet = this.panelOpen ? h * 0.54 : 104;  // not measured: mid-slide the panel is still its old height
-      this.view.setInsets({ left: 0, right: 0, top: 58, bottom: sheet + 44 });
+      this.view.setInsets({ left: 0, right: 0, top: businessActive(this) ? 112 : 58, bottom: sheet + 44 });
     } else {
       const card = this.root.querySelector('.floor-top').getBoundingClientRect();
       const taken = this.panelOpen ? w - this.panel.getBoundingClientRect().left : w - this.scrubberEl.getBoundingClientRect().left;
-      this.view.setInsets({ left: Math.min(w * 0.3, card.right + 6), right: Math.min(w * 0.42, taken + 6), top: 20, bottom: 56 });
+      this.view.setInsets({ left: Math.min(w * 0.3, card.right + 6), right: Math.min(w * 0.42, taken + 6), top: businessActive(this) ? 92 : 20, bottom: 56 });
     }
   }
   /** Drag the sheet's handle on a phone: up opens it, down closes it. A plain tap is handled by the click. */
@@ -193,7 +197,15 @@ class FloorPage {
   }
 
   renderAll() {
-    this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody(); renderCard(this);
+    this.renderJourney(); this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody(); renderCard(this);
+  }
+  /** Business mode's four steps, over the room. The room makes space for them. */
+  renderJourney() {
+    const bar = journeyBar(this);
+    this.journeyEl.replaceChildren(...(bar ? [bar] : []));
+    const was = document.body.dataset.business;
+    document.body.dataset.business = bar ? 'on' : '';
+    if (!!was !== !!bar) this.layout();
   }
   /** The boss's own time zone, for set hours, until they pick one under Customise. */
   learnZone() {
@@ -231,7 +243,7 @@ class FloorPage {
       this.controlsEl.append(pause,
         h('button.btn.chrome', { type: 'button', onclick: () => this.confirmStop() }, icon('stop'), 'Stop all'),
         h('button.btn.chrome', { type: 'button', onclick: () => this.openRedirect() }, icon('arrow-bend-up-right'), 'Redirect'),
-        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'));
+        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'), startButton(this));
     } else {
       put(this.controlsEl,
         h('span.visitor-note', {}, f.filler ? 'A demo company: scripted and fictional. Watch all you like.' : 'You\'re visiting. Watch all you like.'),
@@ -306,6 +318,7 @@ class FloorPage {
     const s = this.state;
     const tabs = [];
     if (this.canSeeChat) tabs.push(['chat', this.owner ? 'Manager' : 'Chat']);
+    if (businessActive(this)) tabs.push(['business', 'Business']);
     tabs.push(['talk', 'Talk'], ['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
     if (this.owner) {
       const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length;
@@ -341,6 +354,7 @@ class FloorPage {
     if (this.tab === 'projects') this.renderProjects();
     if (this.tab === 'requests') this.renderRequests();
     if (this.tab === 'orders') this.renderOrders();
+    if (this.tab === 'business') renderBusiness(this);
   }
   renderBanner() {
     const f = this.state.floor;
@@ -394,6 +408,8 @@ class FloorPage {
       drop.ondragover = (e) => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); drop.classList.add('dropping'); } };
       drop.ondragleave = (e) => { if (e.target === drop) drop.classList.remove('dropping'); };
       drop.ondrop = (e) => { drop.classList.remove('dropping'); if (e.dataTransfer?.files?.length) { e.preventDefault(); tray.add([...e.dataTransfer.files]); } };
+      const chips = chipsRow(this, { stay: true });
+      if (chips) this.bodyEl.append(h('div.chat-chips', {}, chips));
       this.bodyEl.append(tray.el, form);
     } else {
       this.bodyEl.append(h('p.readonly-note', {}, 'Only the boss of this floor can talk to the manager.'));
@@ -872,6 +888,8 @@ class FloorPage {
     // Work modes: the sign, the hours and the plan.
     on('work_mode', () => this.reload());
     on('work_plan', () => { if (this.owner) this.reload(); });
+    on('business', () => this.reload());
+    on('ad_spend', () => { if (this.owner) this.reload(); });
     on('help_state', (d) => {
       this.state.helpWaiting = d.waiting;
       // A small touch: the manager picks up the phone. The boss's page reloads for the words, and a visitor only ever has the count.
@@ -950,7 +968,8 @@ class FloorPage {
       if (rebuild && stage.ok) this.rebuildScene();
       else { if (hired) this.view?.syncAgents(this.viewState()); for (const a of next.agents) this.view?.agentEvent(a); }
       this.view?.updateBoard(next.tasks);
-      this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody(); renderCard(this);
+      this.renderJourney(); this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody(); renderCard(this);
+      if (this.tab === 'business' && !businessActive(this)) this.setTab(this.canSeeChat ? 'chat' : 'talk');
       const again = this.bodyEl.querySelector('textarea, input');
       if (again && draft) again.value = draft;
       if (again && focused) again.focus();

@@ -124,10 +124,10 @@ function businessManager(meta, boss) {
   // At launch it goes by where things stand, not by which note came last: a turn already running can swallow the note.
   if (b.step === 'launch' && !b.reported && !fresh) {
     const calls = [];
-    if (b.budget > 0 && !b.adSpend) calls.push(call('request_ad_spend', { amount: b.budget, audience: 'Dog owners nearby who work from home', ads: ['ad-1.png', 'video-1.mp4'] }));
+    if (b.adMoney > 0 && !b.adSpend) calls.push(call('request_ad_spend', { amount: b.adMoney, audience: 'Dog owners nearby who work from home', ads: ['ad-1.png', 'video-1.mp4'] }));
     calls.push(call('launch_report', { project: b.project, headline: 'It is live.', next_steps: 'Share the ads and the link with ten people who have this problem.' }));
     if (meta.step < calls.length) return { toolCalls: [calls[meta.step]] };
-    return { content: b.budget > 0 && !b.adSpend ? 'The ad request is on the floor for your one click, boss. After that it is queued for the building manager.' : 'We are live, boss. The ads are on the floor to share.' };
+    return { content: b.adMoney > 0 && !b.adSpend ? 'The ad request is on the floor for your one click, boss. After that it is queued for the building manager.' : 'We are live, boss. The ads are on the floor to share.' };
   }
   if (b.note && !fresh) {
     return { content: 'Business mode, boss: the team is on the next step. Ask me anything.' };

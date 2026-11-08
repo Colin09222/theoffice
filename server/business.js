@@ -16,7 +16,7 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS business_journeys (
   floor_id INTEGER PRIMARY KEY, status TEXT NOT NULL DEFAULT 'active', step TEXT NOT NULL DEFAULT 'idea', wish TEXT NOT NULL DEFAULT '',
   project TEXT NOT NULL DEFAULT '', ideas TEXT NOT NULL DEFAULT '[]', research TEXT NOT NULL DEFAULT '{}', picked INTEGER NOT NULL DEFAULT -1,
-  tasks TEXT NOT NULL DEFAULT '{}', ads TEXT NOT NULL DEFAULT '{}', budget INTEGER NOT NULL DEFAULT 0, budget_set INTEGER NOT NULL DEFAULT 0,
+  tasks TEXT NOT NULL DEFAULT '{}', ads TEXT NOT NULL DEFAULT '{}', ad_money INTEGER NOT NULL DEFAULT 0, money_set INTEGER NOT NULL DEFAULT 0,
   ads_skipped INTEGER NOT NULL DEFAULT 0, rounds INTEGER NOT NULL DEFAULT 0, noted TEXT NOT NULL DEFAULT '', started_at INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL DEFAULT 0, launched_at INTEGER
 );
@@ -95,11 +95,11 @@ export function checkIdeas(input, { cfg = CONFIG, unseen = () => new Set() } = {
 export function checkAdSpend({ amount, chosen, live = false, cfg = CONFIG }) {
   const a = Number(amount);
   if (!Number.isFinite(a) || a <= 0) return 'an ad spend request needs the amount the boss chose. With no ad money, the ads go up on the floor for free and there is nothing to request';
-  if (a > cfg.adMaxUsd || !cfg.budgets.includes(a) || a !== Number(chosen)) return 'the amount has to be exactly what the boss chose for ads. Nothing was filed';
+  if (a > cfg.adMaxUsd || !cfg.adMoney.includes(a) || a !== Number(chosen)) return 'the amount has to be exactly what the boss chose for ads. Nothing was filed';
   if (live) return 'this floor already has a campaign going. One at a time: nothing was filed';
   return null;
 }
-export const budgetOk = (amount, cfg = CONFIG) => Number.isInteger(amount) && cfg.budgets.includes(amount) && amount <= cfg.adMaxUsd;
+export const moneyOk = (amount, cfg = CONFIG) => Number.isInteger(amount) && cfg.adMoney.includes(amount) && amount <= cfg.adMaxUsd;
 
 // ---- the journey's shape ----
 const stepIndex = (id) => CONFIG.steps.findIndex((s) => s.id === id);
@@ -291,7 +291,7 @@ export function installBusiness(ext) {
     ids.ads = give(floor, 'ads', { to: writer, title: 'Write the ads and make the videos', brief: briefs.ads, project: row.project }, plan);
     delete ids.fallback;
     const ads = notes ? { ...adsOf(row), plan: null, videoFailed: '' } : {};
-    patch(floor.id, { step: 'customers', tasks: JSON.stringify(ids), ads: JSON.stringify(ads), budget_set: 0 });
+    patch(floor.id, { step: 'customers', tasks: JSON.stringify(ids), ads: JSON.stringify(ads), money_set: 0 });
     tellManager(floor, `customers.${ids.ads}`, `${notes ? 'the boss wants the ads changed, and the team is remaking them.' : `the build is done: "${idea.name}" is live at ${engine.liveUrl(floor, row.project)}.`} Step 3 of 4, Customers: the team is making ${CONFIG.ads.pictures} picture ads, ${CONFIG.ads.videos} short vertical video ads with captions, the ad words and a campaign plan. When they're ready the boss chooses the ad money on the floor: nothing ("just for fun", the default) or a small amount they pick. In two or three lines, tell the boss what's happening.`);
     changed(floor.id);
   }
@@ -392,9 +392,9 @@ export function installBusiness(ext) {
     if (stepIndex(row.step) < stepIndex('customers')) throw new BusinessError(409, 'not_yet', 'The ads come after the build.');
     if (row.step === 'launch') throw new BusinessError(409, 'launched', 'This one has already launched.');
     const a = skip ? 0 : Number(amount ?? 0);
-    if (!budgetOk(a)) throw new BusinessError(400, 'bad_amount', 'Choose one of the ad amounts shown.');
+    if (!moneyOk(a)) throw new BusinessError(400, 'bad_amount', 'Choose one of the ad amounts shown.');
     if (!skip && !adsReady(row)) throw new BusinessError(409, 'not_ready', 'The ads are still being made.');
-    patch(floor.id, { step: 'launch', budget: a, budget_set: 1, ads_skipped: skip ? 1 : 0 });
+    patch(floor.id, { step: 'launch', ad_money: a, money_set: 1, ads_skipped: skip ? 1 : 0 });
     const n = publishAds(floor, activeRow(floor.id));
     const url = engine.liveUrl(floor, row.project);
     const report = `give the boss the launch report for ${row.project} with launch_report.`;
@@ -410,7 +410,7 @@ export function installBusiness(ext) {
     const row = activeRow(c.floor.id);
     if (!row || row.step !== 'launch') throw new BusinessError(409, 'not_now', 'an ad spend request comes after the boss chooses ad money at launch');
     const live = !!get(db, `SELECT 1 x FROM ad_spend WHERE floor_id=? AND status IN (${LIVE_SPEND.map(() => '?').join(',')})`, c.floor.id, ...LIVE_SPEND);
-    const problem = checkAdSpend({ amount: a?.amount, chosen: row.budget_set ? row.budget : 0, live });
+    const problem = checkAdSpend({ amount: a?.amount, chosen: row.money_set ? row.ad_money : 0, live });
     if (problem) throw new BusinessError(400, 'refused', problem);
     const files = adFiles(c.floor.id, row.project);
     const known = new Set([...files.pictures, ...files.videos].map((f) => f.name));
@@ -494,14 +494,14 @@ export function installBusiness(ext) {
   function phaseOf(floor, row, tracks) {
     if (row.step === 'idea') return parse(row.ideas, []).length ? 'pick' : 'researching';
     if (row.step === 'build') return 'building';
-    if (row.step === 'customers') return adsReady(row) ? 'budget' : 'making';
+    if (row.step === 'customers') return adsReady(row) ? 'money' : 'making';
     return row.launched_at ? 'launched' : 'launching';
   }
   function progressOf(row, phase, tracks) {
     if (row.step === 'idea') return phase === 'pick' ? 20 : 8;
     if (row.step === 'build') { const d = tracks.reduce((n, t) => n + t.done, 0), all2 = tracks.reduce((n, t) => n + t.total, 0) || 1; return Math.round(25 + 25 * d / all2); }
     if (row.step === 'customers') {
-      if (phase === 'budget') return 72;
+      if (phase === 'money') return 72;
       const f = adFiles(row.floor_id, row.project); const want = CONFIG.ads.pictures + CONFIG.ads.videos + 1;
       return Math.round(50 + 20 * Math.min(want, Math.min(f.pictures.length, CONFIG.ads.pictures) + Math.min(f.videos.length, CONFIG.ads.videos) + (adsOf(row).plan ? 1 : 0)) / want);
     }
@@ -510,8 +510,8 @@ export function installBusiness(ext) {
   function chipsFor(row, phase) {
     if (row.step === 'idea') return CONFIG.chips[phase === 'pick' ? 'idea.pick' : 'idea.researching'];
     if (row.step === 'build') return CONFIG.chips.build.filter((c) => engine.domains?.enabled || !/\.com/.test(c));
-    if (row.step === 'customers') return CONFIG.chips[phase === 'budget' ? 'customers.budget' : 'customers.making'];
-    return CONFIG.chips[row.budget > 0 ? 'launch.paid' : 'launch.free'];
+    if (row.step === 'customers') return CONFIG.chips[phase === 'money' ? 'customers.money' : 'customers.making'];
+    return CONFIG.chips[row.ad_money > 0 ? 'launch.paid' : 'launch.free'];
   }
   function view(f, viewer) {
     const row = rowOf(f.id);
@@ -541,7 +541,7 @@ export function installBusiness(ext) {
       research: { searches: (research.searches || []).slice(-8), pages: (research.pages || []).slice(-12), markets: research.markets || [], compared: research.compared || [] },
       researchTask: (() => { const t = taskRow(tasksOf(row).ideas); return t ? { status: t.status } : null; })(),
       ads, preview: !!row.project && stepIndex(row.step) >= 1,
-      budget: { options: CONFIG.budgets, chosen: row.budget_set ? row.budget : 0, set: !!row.budget_set, ready: phase === 'budget' },
+      adMoney: { options: CONFIG.adMoney, chosen: row.money_set ? row.ad_money : 0, set: !!row.money_set, ready: phase === 'money' },
       adSpend: adSpendView(f.id),
     };
   }
@@ -558,7 +558,7 @@ export function installBusiness(ext) {
       ideas ? `Idea cards: ${ideas}.` : 'Idea cards: the researcher is still looking.',
       v.picked >= 0 ? `Picked: ${v.title}, project slug ${v.project}${v.liveUrl ? `, live at ${v.liveUrl}` : ''}. Tracks: ${tracks}.` : '',
       v.step === 'customers' || v.step === 'launch' ? `Ads: ${v.ads.pictures.length} pictures, ${v.ads.videos.length} videos${v.ads.plan ? `, words and plan saved (headline "${v.ads.plan.headline}")` : ''}${v.ads.videoFailed ? `; the AI video failed (${v.ads.videoFailed})` : ''}.` : '',
-      v.step === 'launch' ? `Ad money: ${v.ads.skipped ? 'skipped for now' : v.budget.chosen ? `${v.budget.chosen}, the boss's own choice` : 'none, just for fun'}.${s ? ` Ad request #${s.id}: ${s.label.toLowerCase()}.` : ''}` : '',
+      v.step === 'launch' ? `Ad money: ${v.ads.skipped ? 'skipped for now' : v.adMoney.chosen ? `${v.adMoney.chosen}, the boss's own choice` : 'none, just for fun'}.${s ? ` Ad request #${s.id}: ${s.label.toLowerCase()}.` : ''}` : '',
       'The boss picks ideas, chooses ad money and approves requests with buttons on the floor; you explain, answer anything, and keep the team on it. Their suggestions appear as chips, so never list options for them to choose from.'].filter(Boolean).join(' ');
   }
   function brief(floorId) {
@@ -566,7 +566,7 @@ export function installBusiness(ext) {
     if (!row) return null;
     const floor = get(db, 'SELECT * FROM floors WHERE id=?', floorId);
     const v = view(floor, { owner: true });
-    return { step: v.step, phase: v.phase, project: v.project, ideas: v.ideas.length, budget: v.budget.chosen, adSpend: v.adSpend?.status || '', reported: !!project(floorId, row.project)?.launch_report };
+    return { step: v.step, phase: v.phase, project: v.project, ideas: v.ideas.length, adMoney: v.adMoney.chosen, adSpend: v.adSpend?.status || '', reported: !!project(floorId, row.project)?.launch_report };
   }
   /** Extra tools for this run, on a floor that has Business mode on. The manager can always start it. */
   function toolsFor(floorId, role, task) {
@@ -599,7 +599,7 @@ export function installBusiness(ext) {
       if (tracks.every((t) => t.done === t.total)) startCustomers(floor, row);
     } else if (row.step === 'customers' && adsReady(row)) {
       const idea = parse(row.ideas, [])[row.picked];
-      tellManager(floor, `customers.budget.${tasksOf(row).ads}`, `the ads for "${idea?.name}" are ready on the floor: pictures, videos and the plan. The boss now chooses the ad money with the buttons on the floor; nothing ("just for fun") is the default, and only they can choose an amount. In two or three lines, say what you'd test first and why, from the plan. Don't name any amounts.`);
+      tellManager(floor, `customers.money.${tasksOf(row).ads}`, `the ads for "${idea?.name}" are ready on the floor: pictures, videos and the plan. The boss now chooses the ad money with the buttons on the floor; nothing ("just for fun") is the default, and only they can choose an amount. In two or three lines, say what you'd test first and why, from the plan. Don't name any amounts.`);
     } else if (row.step === 'launch') {
       publishAds(floor, row);
       if (!row.launched_at && project(floor.id, row.project)?.launch_report) { patch(floor.id, { launched_at: now() }); log('info', 'business launched', { floorId: floor.id }); }
@@ -646,7 +646,7 @@ export function installBusiness(ext) {
   POST('/api/floors/:slug/business/launch', async ({ req, res, p, ip }) => {
     const f = requireOwner(req, p.slug); limit('mutate', ip);
     const b = await readJson(req, 1024);
-    wrap(() => launch(f, b.budget, { skip: b.skip === true, by: 'boss' }));
+    wrap(() => launch(f, b.amount, { skip: b.skip === true, by: 'boss' }));
     json(res, 200, { business: view(f, { owner: true }) });
   });
   POST('/api/floors/:slug/business/ad-spend/:id', async ({ req, res, p, ip }) => {

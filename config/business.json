@@ -28,7 +28,7 @@
     ] }
   ],
   "ads": { "pictures": 2, "videos": 2 },
-  "budgets": [0, 5, 10, 25],
+  "adMoney": [0, 5, 10, 25],
   "adMaxUsd": 25,
   "video": { "model": "google/gemini-omni-1.2-flash", "size": "720x1280", "aspect": "9:16", "minSeconds": 6, "maxSeconds": 10, "defaultSeconds": 6, "audio": false, "pollMs": 5000, "timeoutMs": 420000, "usdPerSecond": 0.0695, "perTask": 2, "perFloorDay": 6 },
   "chips": {
@@ -36,7 +36,7 @@
     "idea.pick": ["Why this idea?", "Show me other ideas", "Which one would you pick?"],
     "build": ["Show me the site so far", "Find me a .com", "What's left to do?"],
     "customers.making": ["Who are the ads for?", "What will the videos show?", "Skip ads for now"],
-    "customers.budget": ["Change the ads", "Skip ads for now", "Why these people?", "What does $0 mean?"],
+    "customers.money": ["Change the ads", "Skip ads for now", "Why these people?", "Should I pay for ads?"],
     "launch.free": ["How do I share the ads?", "How do I get my first customer?", "What should we do next?"],
     "launch.paid": ["What happens next with the ad?", "How do I share the ads?", "What should we do next?"]
   }
