@@ -5,13 +5,19 @@
 // "sent" that the registrar's list never settled. Uncertain keeps the name blocked until the building manager has looked, so a second create can't follow it.
 // "sent" is written BEFORE the create call, so a crash or a timeout can never lead to a second create: only the registrar's own list can settle it.
 import { get, all, run, tx } from './db.js';
-import { createNamecheapClient, NamecheapError } from './namecheap.js';
+import { createNamecheapClient, NamecheapError, mergeHosts, sameRecord, zoneName } from './namecheap.js';
 
 const DAY = (ms) => new Date(ms).toISOString().slice(0, 10);
 const OPEN_REQUESTS = 5, REQUEST_TTL_MS = 7 * 86400000, UNCERTAIN_GRACE_MS = 15 * 60000, MAX_DNS_TRIES = 12, PRICE_TTL_MS = 10 * 60000, CHECKS_PER_HOUR = 60;
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 // Registered in the owner's name, so a name that invites a trademark complaint lands on the owner.
 const MARKS = /(google|gmail|youtube|apple|icloud|iphone|facebook|instagram|whatsapp|microsoft|windows|amazon|paypal|stripe|netflix|tiktok|openai|chatgpt|anthropic|claude|visa|mastercard|coinbase|binance|namecheap)/;
+
+// Website records: these may sit on @ and www, and take the place of the parking page's forwards there, never of anything else.
+const SITE_TYPES = new Set(['A', 'AAAA', 'CNAME', 'ALIAS', 'URL', 'URL301', 'FRAME']);
+// Names that are Resend's own (see mail-domains.js): a record of the same type there is an old copy, and a re-added domain has a new key.
+const MAIL_NAMES = new Set(['send', 'rsend', 'resend._domainkey']);
+const EMAIL_OK = new Set(['', 'NONE', 'NOSERVICE', 'FWD', 'MX']);
 
 export class DomainRefused extends Error {}
 
@@ -49,6 +55,49 @@ export function createDomainBroker({ db, cfg, engine, client }) {
     run(db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floorId);
     engine.kick();
   };
+
+  // ---- the zone: one change at a time per domain, always from a fresh read ----
+  const zoneQueue = new Map();
+  function withZone(domain, fn) {
+    const go = (zoneQueue.get(domain) || Promise.resolve()).then(fn, fn);
+    const tail = go.then(() => {}, () => {});
+    zoneQueue.set(domain, tail);
+    tail.then(() => { if (zoneQueue.get(domain) === tail) zoneQueue.delete(domain); });
+    return go;
+  }
+  /** The site's records, without disturbing anything else on the zone. */
+  const writeSite = (domain, records) => withZone(domain, async () => {
+    const zone = await nc.getHosts(domain);
+    return nc.setHosts(domain, mergeHosts(zone.hosts, records, (a, old) => SITE_TYPES.has(old.type)), { emailType: zone.emailType || undefined });
+  });
+  /**
+   * Email's records for a domain in this account. Reads the zone, adds what is missing, keeps everything else, and writes it back with custom MX on.
+   * Answers done, elsewhere (not on Namecheap's DNS, so the boss adds them by hand), conflict (the domain already gets email somewhere else: nothing was written),
+   * or unconfirmed (written, but the zone that came back didn't match, and a second write didn't fix it).
+   */
+  function addMailRecords(domain, additions) {
+    if (!nc) return Promise.resolve({ result: 'elsewhere' });
+    return withZone(domain, async () => {
+      let zone;
+      try { zone = await nc.getHosts(domain); } catch (e) { if (e?.number === 2030288) return { result: 'elsewhere' }; throw e; }
+      if (!zone.ourDns) return { result: 'elsewhere' };
+      const foreignMx = zone.hosts.filter((h) => h.type === 'MX' && zoneName(h.host) === '@' && !additions.some((a) => sameRecord(a, h)));
+      if (foreignMx.length || !EMAIL_OK.has(zone.emailType)) return { result: 'conflict' };
+      if (zone.emailType === 'FWD' && (await nc.emailForwards(domain)).length) return { result: 'conflict' };
+      const extra = zone.hosts.some((h) => zoneName(h.host) === '_dmarc' && h.type === 'TXT') ? [] : [{ host: '_dmarc', type: 'TXT', address: 'v=DMARC1; p=none;', ttl: 300 }];
+      const merged = mergeHosts(zone.hosts, [...additions, ...extra], (a, old) => MAIL_NAMES.has(zoneName(a.host)) && old.type === a.type);
+      if (!(await nc.setHosts(domain, merged, { emailType: 'MX' }))) throw new NamecheapError('api');
+      // Read it back: everything that was there, and everything new, has to be on the zone now.
+      for (let tries = 0; tries < 2; tries++) {
+        const after = await nc.getHosts(domain);
+        const missing = merged.filter((m) => !after.hosts.some((h) => sameRecord(h, m)));
+        if (!missing.length && after.emailType === 'MX') return { result: 'done' };
+        if (tries === 0) await nc.setHosts(domain, merged, { emailType: 'MX' });
+        else { engine.log('error', 'mail dns did not stick', { domain, missing: missing.length }); return { result: 'unconfirmed' }; }
+      }
+      return { result: 'unconfirmed' };
+    });
+  }
 
   async function priceOf(tld, fresh) {
     const hit = prices.get(tld);
@@ -250,9 +299,9 @@ export function createDomainBroker({ db, cfg, engine, client }) {
     if (cfg.serverIp6) records.push({ host: '@', type: 'AAAA', address: cfg.serverIp6 }, { host: 'www', type: 'AAAA', address: cfg.serverIp6 });
     try {
       let ok = false;
-      try { ok = await nc.setHosts(o.domain, records); } catch (e) {
+      try { ok = await writeSite(o.domain, records); } catch (e) {
         // A brand-new name may not be on Namecheap's own nameservers yet.
-        if (e?.number === 2030288) { await nc.setDefaultDns(o.domain); ok = await nc.setHosts(o.domain, records); } else throw e;
+        if (e?.number === 2030288) { await nc.setDefaultDns(o.domain); ok = await writeSite(o.domain, records); } else throw e;
       }
       if (!ok) throw new NamecheapError('api');
       set(id, { status: 'live', dns_ok: 1, note: '' });
@@ -330,7 +379,7 @@ export function createDomainBroker({ db, cfg, engine, client }) {
   // ---- views: never the registrant, never a credential ----
   const view = (o) => ({ id: o.id, domain: o.domain, project: o.project, why: o.why, status: o.status, priceUsd: o.quoted_usd, chargedUsd: o.charged_usd, note: o.note, createdAt: o.created_at, boughtAt: o.bought_at });
   return {
-    enabled, check, request, approve, decline, attach, recover, reconcile, view, resolve, dropRequests,
+    enabled, check, request, approve, decline, attach, recover, reconcile, view, resolve, dropRequests, addMailRecords,
     forFloor: (floorId) => all(db, 'SELECT * FROM domain_orders WHERE floor_id=? ORDER BY id DESC LIMIT 30', floorId).map(view),
     adminList: () => all(db, 'SELECT o.*, f.name floor FROM domain_orders o LEFT JOIN floors f ON f.id=o.floor_id ORDER BY o.id DESC LIMIT 200').map((o) => ({ ...view(o), floor: o.floor || '(closed)', orderId: o.order_id, transactionId: o.txn_id, privacy: !!o.privacy, estimated: !!o.charged_estimated })),
     /** The live domain for a Host header, apex or www. */

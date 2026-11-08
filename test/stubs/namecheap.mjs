@@ -9,7 +9,7 @@ export const CONTACT_SECRETS = ['Registrantson', '1 Private Lane', 'Hiddenville'
 
 export async function startNamecheapStub({ host = '127.0.0.1' } = {}) {
   const state = {
-    balance: 100, price: { com: 11.28, xyz: 2.5, io: 60 }, premium: new Set(), taken: new Set(), owned: new Set(), hosts: new Map(), creates: [], calls: [], icann: 0.18,
+    balance: 100, price: { com: 11.28, xyz: 2.5, io: 60 }, premium: new Set(), taken: new Set(), owned: new Set(), hosts: new Map(), emailType: new Map(), notOurDns: new Set(), forwards: new Map(), creates: [], calls: [], icann: 0.18,
     // Tests set these: failNext[command] = {number, text} | 'timeout' | 'garbage' | 'html' | 'charged-then-timeout' (the registrar took the money, the answer was lost)
     failNext: {}, failAlways: {}, chargedAmount: null, whoisguard: true, registeredFalse: false, delayMs: 0,
   };
@@ -63,10 +63,22 @@ export async function startNamecheapStub({ host = '127.0.0.1' } = {}) {
         }
         case 'namecheap.domains.dns.setDefault':
           return send(wrap(command, `<DomainDNSSetDefaultResult Domain="${p.SLD}.${p.TLD}" Updated="true"/>`));
+        case 'namecheap.domains.dns.getEmailForwarding':
+          return send(wrap(command, `<DomainDNSGetEmailForwardingResult Domain="${p.DomainName}">${(state.forwards.get(p.DomainName) || []).map((f) => `<Forward mailbox="${f.mailbox}">${f.to}</Forward>`).join('')}</DomainDNSGetEmailForwardingResult>`));
+        case 'namecheap.domains.dns.getHosts': {
+          const d = `${p.SLD}.${p.TLD}`;
+          // A brand-new name starts on Namecheap's parking page, as the real one does.
+          if (!state.hosts.has(d) && state.owned.has(d)) state.hosts.set(d, [{ host: '@', type: 'URL', address: `http://www.${d}/?from=@`, ttl: '1800' }, { host: 'www', type: 'CNAME', address: 'parkingpage.namecheap.com.', ttl: '1800' }]);
+          const list = (state.hosts.get(d) || []).map((h, i) => `<host HostId="${500 + i}" Name="${h.host}" Type="${h.type}" Address="${String(h.address).replaceAll('&', '&amp;').replaceAll('"', '&quot;')}" MXPref="${h.mxPref ?? 10}" TTL="${h.ttl ?? 300}"${h.flag !== undefined ? ` Flag="${h.flag}"` : ''}${h.tag ? ` Tag="${h.tag}"` : ''} IsActive="true" IsDDNSEnabled="false"/>`).join('');
+          return send(wrap(command, `<DomainDNSGetHostsResult Domain="${d}" EmailType="${state.emailType.get(d) || 'FWD'}" IsUsingOurDNS="${state.notOurDns.has(d) ? 'false' : 'true'}">${state.notOurDns.has(d) ? '' : list}</DomainDNSGetHostsResult>`));
+        }
         case 'namecheap.domains.dns.setHosts': {
           const d = `${p.SLD}.${p.TLD}`; const rec = [];
-          for (let i = 1; p[`HostName${i}`]; i++) rec.push({ host: p[`HostName${i}`], type: p[`RecordType${i}`], address: p[`Address${i}`] });
+          if (state.notOurDns.has(d)) return send(fail(2030288, 'Domain is not using Namecheap DNS'));
+          for (let i = 1; p[`HostName${i}`]; i++) { rec.push({ host: p[`HostName${i}`], type: p[`RecordType${i}`], address: p[`Address${i}`], ttl: p[`TTL${i}`], mxPref: p[`MXPref${i}`], ...(p[`Flag${i}`] !== undefined ? { flag: p[`Flag${i}`] } : {}), ...(p[`Tag${i}`] ? { tag: p[`Tag${i}`] } : {}) }); }
           state.hosts.set(d, rec);
+          if (p.EmailType) state.emailType.set(d, p.EmailType);
+          state.lastSetHosts = p;
           return send(wrap(command, `<DomainDNSSetHostsResult Domain="${d}" IsSuccess="true"/>`));
         }
         default: return send(fail(1010999, 'unknown command'));

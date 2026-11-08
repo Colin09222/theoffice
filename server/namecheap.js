@@ -65,6 +65,19 @@ const SAFE_TEXT = {
 // "Error in refunding funds" means money may have moved, so it must never read as a clean refusal.
 const isLowFunds = (t) => /insufficient|not enough (funds|balance)|low balance|add funds/i.test(t) && !/refund/i.test(t);
 
+// ---- the zone ----
+// setHosts replaces every record a domain has, so nothing may ever write a list it did not first read. '@' and '' are both the apex.
+const bareHost = (v) => String(v ?? '').trim().toLowerCase().replace(/\.$/, '');
+export const zoneName = (h) => bareHost(h) || '@';
+export const sameRecord = (a, b) => zoneName(a.host) === zoneName(b.host) && a.type === b.type && (a.type === 'TXT' ? String(a.address).trim() === String(b.address).trim() : bareHost(a.address) === bareHost(b.address));
+/** Everything that is there stays, unless `replaces(added, existing)` says the new one takes its place (asked only about records on the same name). */
+export function mergeHosts(existing, additions, replaces = () => false) {
+  const kept = existing.filter((h) => !additions.some((a) => zoneName(a.host) === zoneName(h.host) && !sameRecord(a, h) && replaces(a, h)));
+  const out = kept.slice();
+  for (const a of additions) if (!out.some((h) => sameRecord(h, a))) out.push(a);
+  return out;
+}
+
 export function createNamecheapClient(cfg, { request } = {}) {
   const base = new URL(cfg.namecheapBase);
   // The key is only ever sent over TLS. Plain http is for a stub on this machine, nothing else.
@@ -155,12 +168,34 @@ export function createNamecheapClient(cfg, { request } = {}) {
       const r = await call('namecheap.domains.getList', { ListType: 'ALL', SearchTerm: domain, PageSize: '100' });
       return children(child(r, 'DomainGetListResult'), 'Domain').find((d) => String(d.attrs.Name).toLowerCase() === domain) ? true : false;
     },
-    async setHosts(domain, records) {
+    /** A domain's whole zone as it stands: the only safe start for a change, since setHosts replaces everything. */
+    async getHosts(domain) {
+      const dot = domain.indexOf('.');
+      const r = await call('namecheap.domains.dns.getHosts', { SLD: domain.slice(0, dot), TLD: domain.slice(dot + 1) });
+      const res = child(r, 'DomainDNSGetHostsResult');
+      if (!res) throw new NamecheapError('network');
+      return { domain: String(res.attrs.Domain ?? domain).toLowerCase(), emailType: String(res.attrs.EmailType ?? '').toUpperCase(), ourDns: yes(res.attrs.IsUsingOurDNS),
+        hosts: children(res, 'host').map((h) => ({ host: zoneName(h.attrs.Name), type: String(h.attrs.Type ?? '').toUpperCase(), address: h.attrs.Address ?? '', ttl: Number(h.attrs.TTL) || 1800, mxPref: h.attrs.MXPref === undefined ? undefined : Number(h.attrs.MXPref), flag: h.attrs.Flag, tag: h.attrs.Tag })) };
+    },
+    /** Writes the zone. `records` is the complete list: what isn't in it is gone. Custom MX records only work with emailType 'MX'. */
+    async setHosts(domain, records, { emailType } = {}) {
       const dot = domain.indexOf('.');
       const params = { SLD: domain.slice(0, dot), TLD: domain.slice(dot + 1) };
-      records.forEach((h, i) => { const n = i + 1; params[`HostName${n}`] = h.host; params[`RecordType${n}`] = h.type; params[`Address${n}`] = h.address; params[`TTL${n}`] = String(h.ttl ?? 300); });
+      if (emailType) params.EmailType = emailType;
+      records.forEach((h, i) => {
+        const n = i + 1;
+        params[`HostName${n}`] = h.host; params[`RecordType${n}`] = h.type; params[`Address${n}`] = h.address; params[`TTL${n}`] = String(h.ttl ?? 300);
+        if (h.mxPref !== undefined && h.mxPref !== null) params[`MXPref${n}`] = String(h.mxPref);
+        if (h.flag !== undefined && h.flag !== null) params[`Flag${n}`] = String(h.flag);
+        if (h.tag) params[`Tag${n}`] = String(h.tag);
+      });
       const r = await call('namecheap.domains.dns.setHosts', params, { timeoutMs: 60000 });
       return yes(child(r, 'DomainDNSSetHostsResult')?.attrs.IsSuccess);
+    },
+    /** Forwarding rules set up on the domain (the mail setting FWD). Real ones mean mail is already in use there. */
+    async emailForwards(domain) {
+      const r = await call('namecheap.domains.dns.getEmailForwarding', { DomainName: domain });
+      return children(child(r, 'DomainDNSGetEmailForwardingResult'), 'Forward').map((f) => ({ mailbox: f.attrs.mailbox ?? f.attrs.Mailbox ?? '', to: (f.text || '').trim() }));
     },
     async setDefaultDns(domain) {
       const dot = domain.indexOf('.');
