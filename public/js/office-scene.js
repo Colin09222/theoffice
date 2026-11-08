@@ -9,9 +9,11 @@ import { getWorld, makeTower, GROUND, FLOOR_H, TOWER_W } from './lobby-scene.js'
 import { furniture, place } from './models.js';
 import { planFor, makeNav, planBlocks, seatOf, deskRect, hasSofa, wallLines, doorways, roomAt, roomOfKind, roomCentre, officeSlots, seatSpot, ROOM_W, ROOM_D, WALL_H } from './layouts.js';
 import { officeTheme, manner, assignRooms } from './offices.js';
-import { textureSet, environmentMap, repeating } from './textures.js';
+import { textureSet, environmentMap, readyEnvironment, forgetEnvironment, repeating } from './textures.js';
 import { FloorLife, planProgress } from './life.js';
 import { tidyLabels } from './labels.js';
+
+stage.onRestored.add(forgetEnvironment);  // the shared panorama lived on the GPU
 
 const FS = 2.5;  // Kenney's furniture kit is about 0.4 of our room units; a desk comes out 0.96 high
 const STAGE = { thinking: 'Thinking', typing: 'Writing', browsing: 'On the web', reading: 'Reading', talking: 'Talking', queued: 'Waiting' };
@@ -699,12 +701,13 @@ export class OfficeView {
     this.bakeQueued = true;
     Promise.resolve(this.turn()).then(() => { this.bakeQueued = false; if (!this.dead) this.bakeFloor(); });
   }
-  /** Normal and roughness maps only on a floor page of its own, where the room fills the screen. In the tower a floor is small and there may be several. */
-  get pbr() { return !this.host && (stage.q?.density ?? 1) >= 0.6; }
+  /** Normal and roughness maps where the tier allows; in the tower, where there are several floors at once, only on a desktop's top tier. */
+  get pbr() { return (stage.q?.density ?? 1) >= (this.host ? 1 : 0.6); }
   /** The real materials, a set at a time: floor and wall textures, and a panorama to light and reflect the room. All optional. */
   loadLooks() {
     const pbr = this.pbr;
-    if (pbr && stage.renderer && !this.envRT) environmentMap(stage.renderer).then((rt) => { if (!rt) return; if (this.dead) { rt.dispose(); return; } this.envRT?.dispose(); this.envRT = rt; this.scene.environment = rt.texture; this.scene.environmentIntensity = 0.5; }).catch(() => {});
+    // The panorama is shared (see textures.js), so it is never this view's to dispose. In the tower it lights the tower's scene instead.
+    if (pbr && stage.renderer && !this.host) environmentMap(stage.renderer).then((rt) => { if (rt && !this.dead) { this.scene.environment = rt.texture; this.scene.environmentIntensity = 0.5; } });
     const style = this.decor.wallMat || 'paint';
     if (WALL_TEX[style]) textureSet(WALL_TEX[style], { pbr }).then((set) => { if (set && !this.dead) this.skinWalls(style, set); });
     this.loadFloorSets();
@@ -1718,9 +1721,13 @@ export class OfficeView {
       this.insets = { ...pose.insets }; this.insetNow = { ...pose.insets };
     }
     this.buildWorld(); this.bind();
-    // The walls and the floor again with their normal and roughness maps, and the floor baked at full size, once the frame rate can spare it.
-    this.floorSets.clear(); this.loadLooks();
-    setTimeout(() => { if (!this.dead && !this.host) this.bakeFloor(); }, 700);
+    // The same light the tower gave it. Its materials are already the floor page's own, so nothing reloads or bakes again under the camera.
+    this.pageLight();
+  }
+  /** The light a floor page gives its room: the shared panorama, where the tier has it. Set before the tower compiles the floor page's shaders. */
+  pageLight() {
+    const env = readyEnvironment();
+    if (env && (stage.q?.density ?? 1) >= 0.6) { this.scene.environment = env.texture; this.scene.environmentIntensity = 0.5; }
   }
   /** The other way: a floor page's view goes back into the tower without being rebuilt. The tower places the root and owns the camera. */
   demote(host) {
@@ -1740,7 +1747,7 @@ export class OfficeView {
     this.root.removeFromParent();
     for (const root of [this.room, this.detail, this.legacy, this.models, this.officeStatic, this.officeDetail, this.officeLegacy, this.officeModels, this.stub?.group, this.pet?.group].filter(Boolean)) this.disposeTree(root);
     this.glassGeo?.dispose(); this.glassMat?.dispose();
-    this.envRT?.dispose(); this.ring?.geometry.dispose(); this.ring?.material.dispose();
+    this.ring?.geometry.dispose(); this.ring?.material.dispose();
     if (this.signMesh2) { this.signMesh2.geometry.dispose(); this.signMesh2.material.map.dispose(); this.signMesh2.material.dispose(); }
     for (const t of [this.floorMat.normalMap, this.floorMat.roughnessMap]) t?.dispose();
     for (const k of ['normalMap', 'roughnessMap']) this.wallSkin?.material[k]?.dispose();

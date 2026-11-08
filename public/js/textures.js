@@ -29,15 +29,27 @@ export async function textureSet(name, { pbr = true } = {}) {
   const [base, extra] = await Promise.all([pack(name), pbr ? pack(`${name}-pbr`) : null]);
   return base ? { ...base, ...(extra || {}) } : null;
 }
-/** The room's reflections and soft light, from a small CC0 panorama. Null if it doesn't load. */
-export async function environmentMap(renderer) {
-  const p = await pack('env', { imageOrientation: 'flipY' });
-  if (!p?.env) return null;
-  const tex = new THREE.Texture(p.env); tex.mapping = THREE.EquirectangularReflectionMapping; tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
-  const pm = new THREE.PMREMGenerator(renderer); const rt = pm.fromEquirectangular(tex);
-  tex.dispose(); pm.dispose();
-  return rt;
+/**
+ * The room's reflections and soft light, from a small CC0 panorama. Null if it doesn't load. Made once per visit and shared by every floor
+ * page and the 3D building, so a room carried between them keeps exactly its light, and nobody pays for it twice.
+ */
+let envJob = null, envDone = null;
+export function environmentMap(renderer) {
+  envJob ||= (async () => {
+    const p = await pack('env', { imageOrientation: 'flipY' });
+    if (!p?.env) return null;
+    const tex = new THREE.Texture(p.env); tex.mapping = THREE.EquirectangularReflectionMapping; tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
+    const pm = new THREE.PMREMGenerator(renderer); const rt = pm.fromEquirectangular(tex);
+    tex.dispose(); pm.dispose();
+    envDone = rt;
+    return rt;
+  })().catch(() => null);
+  return envJob;
 }
+/** The shared panorama if it is ready, or null. */
+export const readyEnvironment = () => envDone;
+/** The GPU lost it with the context: the next caller makes it again. */
+export function forgetEnvironment() { envJob = null; envDone = null; }
 /** A repeating texture from a bitmap, for the walls. */
 export function repeating(bitmap, { color = false, repeat = 1 } = {}) {
   const t = new THREE.Texture(bitmap); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat, repeat); t.anisotropy = 4;

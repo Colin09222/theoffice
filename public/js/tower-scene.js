@@ -11,6 +11,7 @@ import { OfficeView } from './office-scene.js';
 import { planFor, seatOf, seatSpot, ROOM_W, ROOM_D, WALL_H } from './layouts.js';
 import { tidyLabels } from './labels.js';
 import { handOver, takeHandoff } from './handoff.js';
+import { environmentMap } from './textures.js';
 
 const WS = ROOM_W / TOWER_W;            // the city's scale, the same as on a floor page
 // Floor to floor: a room's walls, then air, then the next slab. Pulled apart like an exploded drawing, so a camera tilted well down sees
@@ -109,9 +110,17 @@ export class TowerView {
     this.camera = new THREE.PerspectiveCamera(24, 1, 1, 3800);
     this.scene.add(new THREE.HemisphereLight('#cfe0f6', '#c4a98a', 1.1));
     this.sun = new THREE.DirectionalLight('#ffdcb4', 2.6); this.scene.add(this.sun, this.sun.target);
+    // The floor page's sun casts shadows, which gives every material there a shadowed version of its shader. Here the sun has a shadow
+    // map too, drawn once and never again (nothing in the tower casts), so the tower compiles exactly the floor page's shaders and a
+    // room handed over doesn't stall on new ones. The real shadows come in on the floor page, under the cross-fade.
+    this.staticShadows = true;
+    // Its shadow camera looks at a sliver of empty air by the sun, so even that one drawing holds nothing: every surface reads as lit.
+    Object.assign(this.sun.shadow.camera, { left: -0.01, right: 0.01, top: 0.01, bottom: -0.01, near: 0.1, far: 0.2 }); this.sun.shadow.camera.updateProjectionMatrix();
     const fill = new THREE.DirectionalLight('#bcd2f5', 0.55); fill.position.set(-17, 13, 23); this.scene.add(fill); this.fill = fill;
     this.world = getWorld();
     this.env = this.world.environment(); this.scene.environment = this.env; this.scene.environmentIntensity = 0.35;
+    // The room's own panorama where a floor page would use it, so a room carried between the two keeps its light.
+    if ((stage.q?.density ?? 1) >= 0.6 && stage.renderer) environmentMap(stage.renderer).then((rt) => { if (rt && !this.dead) { this.scene.environment = rt.texture; this.scene.environmentIntensity = 0.5; } });
     this.podium = makeTower(0, { stub: true, env: this.env });
     this.podium.group.scale.setScalar(WS); this.scene.add(this.podium.group);
     this.U = { uFade: { value: Array.from({ length: FADE_N }, () => new THREE.Vector4(1, 1, 1, 1)) }, uLift: { value: 0 }, uLiftFrom: { value: 1e6 }, uRide: { value: 0 }, uGap: { value: GAP } };
@@ -269,7 +278,9 @@ export class TowerView {
       if (!f.ready) {
         if (this.stillFor > 0) f.wait = (f.wait || 0) + dt;
         // Shown once its floor is baked, its furniture is in and its people are the kit's models, so nobody watches them swap in.
-        f.ready = !!v.baked && !!v.loading?.settled && ([...v.actors.values()].every((a) => a.char.isModel) || f.wait > 6);
+        const built = !!v.baked && !!v.loading?.settled && ([...v.actors.values()].every((a) => a.char.isModel) || f.wait > 6);
+        // Its shaders are compiled off to the side before it is shown, so its first frame on screen doesn't stall on them.
+        if (built && !f.compiling) f.compiling = this.compileFloor(f).then(() => { f.ready = true; });
       }
       const show = f.ready && (wantSet.has(f.slot.k) || f.pinned);
       // The real room appears at once behind its stand-in, which then dissolves; going away, the stand-in comes back first.
@@ -347,6 +358,14 @@ export class TowerView {
     on('reload', () => this.dropFloor(f));
   }
   quiet(f) { f.es?.close(); f.es = null; }
+  compileFloor(f) {
+    const r = stage.renderer, root = f.view.root;
+    if (!r?.compileAsync) return Promise.resolve();
+    const was = root.visible; root.visible = true;  // compile only looks at what is visible, and only at the moment it is called
+    let job;
+    try { job = r.compileAsync(root, this.camera, this.scene); } catch { job = Promise.resolve(); } finally { root.visible = was; }
+    return Promise.race([job.catch(() => {}), new Promise((res) => setTimeout(res, 2000))]);
+  }
   /** A floor's next build step, granted one a frame while the building stands still. See OfficeView.turn. */
   turn() { return this.dead ? null : new Promise((r) => this.turns.push(r)); }
 
@@ -593,8 +612,9 @@ export class TowerView {
     for (const g of this.full.values()) g.view.root.position.y = slotY(g.slot.k) + this.offsetOf(g.slot.k);
   }
   /** The flight has landed: this frame is held on screen while the floor page takes the room, then fades into it. */
-  handIn(fl) {
+  async handIn(fl) {
     const f = fl.f, card = f.slot.card;
+    if (this.dead) return;
     stage.afterRender = () => {
       stage.freezeFrame();
       this.quiet(f); this.full.delete(f.slot.k);
@@ -610,10 +630,10 @@ export class TowerView {
     this.active = true;
     const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WS); w.group.position.set(0, 0, 0);
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
-    const r = stage.renderer; r.shadowMap.enabled = false; r.toneMappingExposure = 0.92;
+    const r = stage.renderer; r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true; r.toneMappingExposure = 0.92;
     document.body.append(this.plaqueRoot);
   }
-  leave() { this.active = false; this.plaqueRoot.remove(); }
+  leave() { this.active = false; this.plaqueRoot.remove(); const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; }
   resize(w, h) {
     this.w = w; this.h = h; this.camera.aspect = w / h;
     for (const f of this.full.values()) f.view.setSize(w, h);
@@ -623,6 +643,9 @@ export class TowerView {
   setTier(q) {
     const phone = this.w <= 760;
     this.radius = q.post === false || (q.density ?? 1) < 0.6 ? 0 : phone || (q.density ?? 1) < 1 ? 1 : 2;
+    this.sun.castShadow = (q.shadow || 0) > 0;
+    if (this.sun.castShadow) { this.sun.shadow.mapSize.set(q.shadow, q.shadow); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null; }
+    if (this.active) { const r = stage.renderer; r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.needsUpdate = true; }
     this.world?.setDetail((q.density ?? 1) >= 0.6);
     for (const f of this.full.values()) f.view.setTier(q);
   }
