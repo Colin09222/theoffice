@@ -646,7 +646,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const v = biz(() => engine.business.videoTarget(c, a));
       const prompt = `${v.prompt || 'A short, bright, vertical advert that shows the idea in use.'} Vertical 9:16, ${v.seconds} seconds, smooth simple motion, no on-screen text, no logos, no real people or brands.`;
       outbound(c, prompt, 'video description');
-      const estimate = (engine.media.video?.usdPerSecond || 0.1) * v.seconds;
+      const vc = engine.media.video || {};
+      const estimate = Math.max(vc.usdPerSecond || 0.1, vc.fallback?.usdPerSecond || 0) * v.seconds;  // room for the fallback model's price too
       roomFor(c, estimate, 'openrouter');
       c.say('typing', `Filming ${v.name}`, `is making a video ad: ${v.name}`, { project: v.project });
       let vid;

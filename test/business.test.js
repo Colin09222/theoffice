@@ -9,6 +9,7 @@ import { get, all, run } from '../server/db.js';
 import { pauseAll } from '../server/ads-guard.js';
 import { resumeAds } from '../server/business.js';
 import { campaignId } from '../server/googleads.js';
+import { createMedia } from '../server/media.js';
 
 const SEEN = ['https://example.com/a', 'https://example.org/b', 'https://example.net/c'];
 const seenOnly = (urls) => new Set(urls.map(urlKey).filter((k) => !SEEN.map(urlKey).includes(k)));
@@ -131,10 +132,12 @@ describe('the journey in mock mode', () => {
       assert.equal(pick.data.business.step, 'build');
       assert.deepEqual(pick.data.business.tracks.map((x) => x.label), ['Website', 'Product', 'Payments', 'Analytics']);
       assert.match(pick.data.business.tracks.find((x) => x.id === 'payments').note, /no Stripe/);
+      assert.equal(pick.data.business.pageReady, false, 'no page to preview before the Builder saves one');
       const s1 = await floorState(c);
       assert.ok(s1.messages.some((m) => m.role === 'boss' && /Let's go with Doorstep Dog Groom/.test(m.text)));
       // The live preview, while it builds.
       const pv = await until(async () => { const r = await c.get(`/api/floors/${c.slug}/business/preview`); return r.data.ready ? r.data : null; }, { what: 'a page to preview', timeout: 30000 });
+      await untilStep(c, (x) => x.pageReady, 'the floor told the page is there');
       const page = await fetch(`http://${t.host}${pv.url}`);
       assert.equal(page.status, 200);
       assert.match(page.headers.get('content-security-policy'), /^sandbox/);
@@ -225,6 +228,12 @@ describe('the journey in mock mode', () => {
       await adsOf(t).tick({ force: true });
       assert.equal(camp.status, 'PAUSED');
       assert.equal((await biz(c)).adSpend.status, 'paused');
+      // Stopped here but switched back on at Google (by hand in the Ads console, or a pause that never landed): the next sync pauses it again.
+      camp.status = 'ENABLED';
+      await adsOf(t).tick({ force: true });
+      assert.equal(camp.status, 'PAUSED', 'paused again at Google');
+      assert.equal(get(t.db, 'SELECT status FROM ad_spend WHERE id=?', asked.adSpend.id).status, 'paused', 'and still stopped here');
+      assert.ok(t.logs.some((l) => /paused again/.test(l)), 'with a warning in the log');
       run(t.db, 'UPDATE ad_spend SET ends_at=? WHERE id=?', Date.now() - 1000, asked.adSpend.id);
       await adsOf(t).tick({ force: true });
       const over = await untilStep(c, (b) => b.adSpend?.status === 'ended', 'the end of the campaign');
@@ -250,7 +259,7 @@ describe('the journey in mock mode', () => {
       // Paid ads are off unless ADS_PAID_ENABLED is set: then only the free path exists.
       assert.deepEqual(ready.adMoney.options, [0]);
       assert.equal(ready.adMoney.paid, false);
-      assert.deepEqual(ready.channels.map((x) => [x.id, x.on]), [['google', false], ['meta', false]]);
+      assert.deepEqual(ready.channels.map((x) => [x.id, x.on, !!x.soon]), [['google', false, false], ['meta', false, true]], 'Google off for now, Facebook and Instagram coming soon');
       assert.match(t.app.engine.business.stateLine(t.db.prepare('SELECT id FROM floors WHERE slug=?').get(c.slug).id), /Paid ads aren’t switched on in this building yet, so it launches free/, 'the manager knows only the free path is open');
       const paid = await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 5 });
       assert.equal(paid.status, 400);
@@ -400,5 +409,42 @@ describe('the journey in mock mode', () => {
       assert.match(b.ads.videoFailed, /502|upstream/);
       assert.equal(b.ads.pictures.length, 2);
     } finally { await t.close(); }
+  });
+});
+
+// The real video client against a stand-in for OpenRouter's /videos jobs: what it asks for, the fallback model, and what it says when both fail.
+describe('video ads through OpenRouter', () => {
+  const MP4 = Buffer.from('AAAAHGZ0eXBpc29tAAACAGlzb21pc28ybXA0MQAAAAhmcmVl', 'base64');
+  const fakeRouter = (outcomes) => {
+    const asked = []; let n = 0;
+    const httpFetch = async (url, opts) => {
+      const path = new URL(url).pathname.replace(/^\/api\/v1/, '');
+      if (opts.method === 'POST') { const body = JSON.parse(opts.body); asked.push(body); return new Response(JSON.stringify({ id: `job${++n}`, status: 'pending' }), { status: 202 }); }
+      const id = path.split('/')[2];
+      if (path.endsWith('/content')) return new Response(MP4, { status: 200, headers: { 'content-type': 'video/mp4' } });
+      const o = outcomes[Number(id.slice(3)) - 1];
+      return new Response(JSON.stringify(o === 'ok' ? { id, status: 'completed', usage: { cost: 0.61 } } : { id, status: 'failed', error: o }), { status: 200 });
+    };
+    return { asked, httpFetch };
+  };
+  const video = { ...loadBusinessConfig().video, pollMs: 5 };
+  const media = (httpFetch) => createMedia({ cfg: { openrouterKey: 'K', openrouterBase: 'https://openrouter.ai/api/v1' }, tools: { image: { model: 'i' }, video }, httpFetch });
+
+  test('it asks for sound (Gemini Omni refuses a video without), and a job that fails upstream gets one go on the fallback model', async () => {
+    const r = fakeRouter(['Video generation failed', 'ok']);
+    const v = await media(r.httpFetch).generateVideo({ prompt: 'a paper boat', seconds: 6 });
+    assert.deepEqual(r.asked.map((x) => x.model), ['google/gemini-omni-1.2-flash', 'google/gemini-omni-1.1-flash']);
+    assert.ok(r.asked.every((x) => x.generate_audio === true && x.duration === 6 && x.size === '720x1280'));
+    assert.equal(v.model, 'google/gemini-omni-1.1-flash');
+    assert.equal(v.mime, 'video/mp4');
+    assert.equal(v.usage.cost, 0.61);
+  });
+  test('the configured model is used when it works, and when both fail the provider\'s own words come back', async () => {
+    const ok = fakeRouter(['ok']);
+    assert.equal((await media(ok.httpFetch).generateVideo({ prompt: 'p', seconds: 6 })).model, 'google/gemini-omni-1.2-flash');
+    assert.equal(ok.asked.length, 1);
+    const bad = fakeRouter(['Video generation failed', 'Video generation failed']);
+    await assert.rejects(media(bad.httpFetch).generateVideo({ prompt: 'p', seconds: 6 }), /the job failed: Video generation failed/);
+    assert.equal(bad.asked.length, 2, 'one try each, no more');
   });
 });

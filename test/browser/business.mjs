@@ -2,7 +2,7 @@
 // header lights up over the room, the research desk and the idea cards show, a card is picked, the four track lamps and the live preview follow,
 // the ads, the campaign plan and the ad money come next, and launching with ad money gives a request slip that the boss approves with one click
 // and that becomes a Google search campaign (against the mocked Google Ads API: nothing reaches Google), with Facebook and Instagram shown as
-// coming soon. A visitor sees the steps and the launched ads and never the money. BUSINESS_SHOTS=dir saves six pictures.
+// coming soon. A visitor sees the steps and the launched ads and never the money. BUSINESS_SHOTS=dir saves nine pictures.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { launch, sleep } from './cdp.mjs';
@@ -25,7 +25,16 @@ const enter = async (p, c, slug) => {
   await p.goto(`${base}/floor/${slug || c.slug}?q=low`);
   await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
 };
-const shot = async (p, name) => { if (OUT) { await sleep(500); await p.shot(join(OUT, name)); } };
+// Before every picture: no bare "null" or "undefined" left on the page by a missing piece of the UI (one sat under the floor's controls).
+const STRAY = `(() => { const out = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) if (/^\\s*(null|undefined|NaN|\\[object Object\\])\\s*$/.test(n.nodeValue)) out.push(\`\${n.parentElement?.className || n.parentElement?.tagName}: \${n.nodeValue.trim()}\`);
+  return out.slice(0, 4).join(' | '); })()`;
+const shot = async (p, name) => {
+  await sleep(OUT ? 500 : 200);
+  const stray = await p.ev(STRAY);
+  check(`${name}: no stray null or undefined text on the page`, !stray, stray);
+  if (OUT) await p.shot(join(OUT, name));
+};
 const inView = (sel) => `(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.left >= -1 && r.right <= innerWidth + 1 && r.top >= -1 && r.bottom <= innerHeight + 1; })()`;
 const noSideScroll = '(document.documentElement.scrollWidth <= innerWidth + 1)';
 
@@ -107,8 +116,12 @@ try {
     const coins = await p.ev('[...document.querySelectorAll(".coin")].map((x) => x.textContent + (x.classList.contains("on") ? "*" : "")).join(" ")');
     if (coins !== '$0just for fun* $5 $10 $25') throw new Error(coins);
     if (!/Launch for free/.test(await p.ev('document.querySelector("[data-launch]").textContent'))) throw new Error('launch label');
-    await p.ev('document.querySelector("[data-plan]").scrollIntoView({ block: "start" })');
+    // Every ad picture is a real picture, decoded at its own size: never one pixel of colour stretched over the slot.
+    await p.until('[...document.querySelectorAll(".ad.picture img")].every((i) => i.complete && i.naturalWidth >= 64)', 'the ad pictures drawn');
+    await p.ev('document.querySelector(".ad-wall").scrollIntoView({ block: "start" })');
     await shot(p, 'business-3-desktop-ads.jpg');
+    await p.ev('document.querySelector("[data-ad-where]").scrollIntoView({ block: "center" })');
+    await shot(p, 'business-3b-desktop-money.jpg');
   });
 
   await step('desktop: launching with $10 files an AD SPEND slip; one click approves it and it runs as a Google search ad', async () => {
@@ -146,7 +159,7 @@ try {
     vb.close();
   });
 
-  await step('phone: the step header fits, the idea cards and chips show in the sheet, and picking lights the tracks', async () => {
+  await step('phone: the step header fits, the idea cards and chips show in the sheet, picking lights the tracks, and the ads and the money follow', async () => {
     const mb = await launch();
     const m = await mb.newPage({ mobile: true, width: 390, height: 844 });
     await enter(m, phoneBoss);
@@ -168,6 +181,16 @@ try {
     if (!twoUp) throw new Error('tracks do not sit two by two');
     if (!await m.ev(noSideScroll)) throw new Error('the page scrolls sideways');
     await shot(m, 'business-6-phone-tracks.jpg');
+    // On to the ads: the pictures, then where paid ads run (Facebook & Instagram coming soon) and the ad money, $0 to start with.
+    await m.until('!!document.querySelector("[data-money-box] [data-launch]:not([disabled])")', 'the ads are ready', 60000);
+    await m.until('[...document.querySelectorAll(".ad.picture img")].every((i) => i.complete && i.naturalWidth >= 64)', 'the ad pictures drawn');
+    if (!/Facebook & Instagram adscoming soon/.test(await m.ev('document.querySelector("[data-ad-where] [data-channel=meta]").textContent'))) throw new Error('no coming-soon plate');
+    if (await m.ev('document.querySelector(".coin.on")?.textContent') !== '$0just for fun') throw new Error('$0 is not the choice to start with');
+    if (!await m.ev(noSideScroll)) throw new Error('the page scrolls sideways');
+    await m.ev('document.querySelector(".ad-wall").scrollIntoView({ block: "start" })');
+    await shot(m, 'business-7-phone-ads.jpg');
+    await m.ev('document.querySelector("[data-ad-where]").scrollIntoView({ block: "center" })');
+    await shot(m, 'business-8-phone-money.jpg');
     mb.close();
   });
 

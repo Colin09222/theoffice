@@ -55,18 +55,23 @@ describe('the campaign an approved request becomes', () => {
     for (const finalUrl of ['', 'http://doorstep.example/', 'https://localhost/x', '/theoffice/f/a/b/', 'javascript:alert(1)']) assert.throws(() => plan({ finalUrl }), /live site/, finalUrl);
     assert.ok(plan({ amountUsd: 5, cpcCeilingUsd: 40 }).cpcCeilingMicros <= 2e6, 'a click never bids over $2');
   });
-  test('7 days at most from now, at any hour, even a few minutes before midnight', () => {
-    for (const at of ['2026-11-07 23:55:00', '2026-11-08 00:00:30', '2026-03-07 23:58:00', '2026-12-31 12:00:00']) {
+  test('always 7 whole days, the length Google took for a total budget, at any hour, even a few minutes before midnight', () => {
+    const cases = { '2026-11-07 23:55:00': ['2026-11-08', '2026-11-14'], '2026-11-08 00:00:30': ['2026-11-08', '2026-11-14'],
+      '2026-03-07 23:58:00': ['2026-03-08', '2026-03-14'], '2026-12-31 12:00:00': ['2026-12-31', '2027-01-06'], '2026-11-01 09:00:00': ['2026-11-01', '2026-11-07'] };
+    for (const [at, [from, to]] of Object.entries(cases)) {
       const now = zonedMs(...at.split(' '), TZ);
-      const p = plan({ now, days: 30 });
-      assert.ok(p.endsAt - now <= MAX_DAYS * DAY, `${at}: ends ${p.endText}`);
-      assert.ok(p.days >= 4 && p.endsAt - p.startsAt >= 4 * DAY - 1000, `${at}: long enough for a total budget (${p.startText} to ${p.endText})`);
+      const p = plan({ now, days: 2 });
+      assert.equal(p.days, 7, at);
+      assert.equal(`${p.startText} ${p.endText}`, `${from} 00:00:00 ${to} 23:59:59`, `${at}: day 1 at midnight to day 7 at 23:59:59, whatever days is asked for`);
+      assert.ok(p.startsAt - now < DAY && p.endsAt - now <= MAX_DAYS * DAY + 15 * 60000, `${at}: from now, 7 days at most (and the last minutes of a late night)`);
     }
   });
   test('the search ad\'s words are checked the way Google checks them', () => {
     assert.equal(checkSearchAd(WORDS).ok, true);
     const bad = (over) => checkSearchAd({ ...WORDS, ...over }).problems.join('; ');
     assert.match(bad({ headlines: ['Dog grooming that comes right to your door', ...WORDS.headlines.slice(1)] }), /characters; 30 at most/);
+    assert.match(bad({ headlines: ['犬のトリミングを自宅で簡単に予約できます', ...WORDS.headlines.slice(1)] }), /is 40 characters; 30 at most/, 'a wide character counts as two, as Google counts it');
+    assert.equal(checkSearchAd({ ...WORDS, headlines: ['犬のトリミング自宅で', ...WORDS.headlines.slice(1)] }).ok, true, '10 wide characters are 20');
     assert.match(bad({ headlines: ['Book Today!', ...WORDS.headlines.slice(1)] }), /exclamation mark/);
     assert.match(bad({ descriptions: ['x'.repeat(91), 'Fine.'] }), /90 at most/);
     assert.match(bad({ keywords: ['dogs', 'grooming'] }), /3 to 10 different keywords/);
