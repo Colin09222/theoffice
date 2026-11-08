@@ -13,6 +13,8 @@ through one script. The staff's full reference is `server/app-client/OFFICE-CLOU
 `office.auth`, `office.db`, `office.saves`, `office.leaderboard`, `office.rooms`, `office.files`, `office.ai`, `office.fetch`, `office.scrape` (plus `office.shared` and `office.forms`,
 which sit on the older `/_data/v1` store). The same file is at `/theoffice/sdk/office.js` on the main site for reference.
 
+Server code is a separate, rare thing: see `docs/OFFICE-RUNNER.md`. A page finds its project's server with `office.server.url()`.
+
 ## Where it lives
 - Every project origin (`<label>.middistance.com` and any domain bought for it) answers `/_office/cloud/...` itself, so the page's own
   CSP (`connect-src 'self'`, now with the same host's `wss:` spelled out) already allows it. The project is whichever one the Host names.
