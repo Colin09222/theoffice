@@ -86,6 +86,7 @@ export class Character {
     ease(this, wantFor(this.anim, speed, this.paper.visible, this.inChair), dt);
     this.mug.visible = b.sip > 0.2 || b.pour > 0.2;
     this.phone.visible = b.phone > 0.2;
+    this.creature.audience = this.audience;
     this.creature.pose(dt, speed, b, typing(this, dt, b.type), this.manner);
   }
   dispose() { this.creature.dispose(); }

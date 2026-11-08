@@ -411,7 +411,7 @@ export class Creature {
     this.paper = { visible: false }; this.mug = { visible: false }; this.phone = { visible: false };
     this.t = (spec.id % 1000) / 37; this.step = spec.phase; this.blinkAt = 1 + (spec.id % 300) / 90;
     this.nextFidget = 2 + (spec.id % 7); this.fidget = -1; this.fidgetT = 0; this.stumbleT = -1; this.nextStumble = 7 + ((spec.id >>> 4) % 11);
-    this.hopT = -1; this.wide = 1; this.shut = 0; this.hatP = 0; this.hatV = 0;
+    this.hopT = -1; this.wide = 1; this.shut = 0; this.hatP = 0; this.hatV = 0; this.peekT = -1; this.nextPeek = 3 + (spec.id % 9); this.audience = null;
     this.pose(0, 0, { walk: 0, sit: 0, type: 0, talk: 0, carry: 0, cheer: 0, think: 0, listen: 0, stretch: 0, sip: 0, phone: 0, pour: 0 });
   }
   /** A little jump for joy when a job is finished. */
@@ -462,6 +462,13 @@ export class Creature {
       else if (this.fidget === 4) thumbs = hold;
       else { bow = hold; shut = Math.max(shut, hold); }
     }
+    // Seated with their back to us, every so often they swivel right round in the chair to see who's watching, eyes wide, and go back to it.
+    let peek = 0;
+    if (sit > 0.6 && this.audience != null) {
+      this.nextPeek -= dt;
+      if (this.nextPeek <= 0 && this.peekT < 0) { this.peekT = 0; this.nextPeek = 7 + Math.random() * 15; }
+    }
+    if (this.peekT >= 0) { this.peekT += dt; const u = this.peekT / 2.6; if (u >= 1) this.peekT = -1; else peek = Math.min(1, Math.min(u, 1 - u) * 5); }
     // Frantic at the keys: everything quivers, and the eyes never leave the screen.
     const on = ty?.on ?? 0;
     if (b.type > 0.01) {
@@ -469,6 +476,7 @@ export class Creature {
       squash += Math.sin(t * 22 + s.phase) * 0.013 * jit; hop += Math.abs(Math.sin(t * 15 + s.phase)) * 0.018 * jit;
       lookY -= 0.03 * b.type * on; lookY += 0.012 * b.type * (ty?.look ?? 0); turn = turn * (1 - b.type) + b.type * ((ty?.glance ?? 0) * 0.5 + Math.sin(t * 0.8 + s.phase) * 0.06);
     }
+    if (peek > 0.01) { const aim = Math.atan2(Math.sin(this.audience), Math.cos(this.audience)); turn += (Math.max(-2.7, Math.min(2.7, aim)) - turn) * peek; eyeOpen = Math.max(eyeOpen, 1 + 0.22 * peek); pitch -= 0.04 * peek; lookY += 0.015 * peek; }
     if (b.think > 0.01) { lookY += 0.04 * b.think; lookX += 0.04 * b.think; turn += Math.sin(t * 0.9) * 0.08 * b.think; }
     if (b.listen > 0.01) { const nod = Math.sin(t * 1.7); pitch += (nod > 0.7 ? (nod - 0.7) * 2.4 : 0) * 0.13 * b.listen; }
     if (b.sip > 0.01) eyeOpen = Math.min(eyeOpen, 1 - 0.5 * b.sip);

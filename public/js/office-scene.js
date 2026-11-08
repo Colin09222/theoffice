@@ -637,6 +637,8 @@ export class Actor {
     // Outside set hours the staff have gone home: their desks stay, they don't. Checked every frame, so a new hire or a fresh model follows too.
     const home = !!this.view.closed && !this.isBoss;
     if (g.visible === home) { g.visible = !home; this.shadow.visible = !home; this.tag.hidden = home; }
+    // Which way round the camera is from where this person is facing, for when they turn to look at whoever's watching.
+    { const c = this.view.camera.position; this.char.audience = Math.atan2(c.x - this.group.position.x, c.z - this.group.position.z) - this.group.rotation.y; }
     this.char.update(dt, moving);
   }
 }
