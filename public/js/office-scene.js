@@ -785,6 +785,11 @@ export class OfficeView {
     // The terrace is part of the company too: planters along the rail in its colours and somewhere to sit outside. A timber deck follows in loadLooks.
     // On a floor page the terrace is quieter than the room, so the eye stays on the people. In the tower it is part of the outside and keeps its colours.
     const hush = (c) => (this.host ? c : mix(c, '#c9baa4', 0.55));
+    // On a floor page a wide dark stage hides whatever is outside the slab (the podium under floor 1, the roofs below), fading out at its rim so the city still shows from far back.
+    if (!this.host) {
+      const fade = new THREE.Mesh(new THREE.CircleGeometry(78, 48), new THREE.MeshBasicMaterial({ map: canvasTex(256, 256, (x, w, h) => { const g = x.createRadialGradient(128, 128, 0, 128, 128, 128); g.addColorStop(0, 'rgba(46,39,51,1)'); g.addColorStop(0.72, 'rgba(46,39,51,1)'); g.addColorStop(1, 'rgba(46,39,51,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }), transparent: true, depthWrite: false, fog: false }));
+      fade.rotation.x = -Math.PI / 2; fade.position.y = -0.7; fade.renderOrder = -1; fade.userData.keep = true; terrace.add(fade);
+    }
     if (this.host) for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
       const x = i * 6.4 + (sz < 0 ? 1.4 : 0), z = sz * (plate / 2 - 0.85);
       out(hush(mix(primary, '#cfc4b0', 0.62)), 1.9, 0.55, 0.85, x, 0, z);
