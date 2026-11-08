@@ -228,7 +228,7 @@ if (!ONLY || ONLY === 'plans') {
         const v = window.__office.view; const bad = [];
         for (const a of v.actors.values()) {
           const c = a.char; c.update(0.2, 0); a.group.updateMatrixWorld(true);
-          const hip = new T.Vector3(), foot = new T.Vector3(0, -0.14, 0); c.legL.getWorldPosition(hip); c.legL.localToWorld(foot);
+          const hip = new T.Vector3(), foot = new T.Vector3(); c.limbs.legL.upper.getWorldPosition(hip); c.limbs.legL.lower.getWorldPosition(foot);  // the thigh, hip to knee
           const f = a.seat.face; const fx = Math.sin(f), fz = Math.cos(f);
           const legs = (foot.x - hip.x) * fx + (foot.z - hip.z) * fz;
           if (!a.seated || legs <= 0) bad.push(a.info.name + ' seated=' + a.seated + ' legs=' + legs.toFixed(3));
