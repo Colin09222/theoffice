@@ -24,8 +24,10 @@ Constants in `server/googleads.js`, so no setting can lift them:
   It counts whole dollars only.
 - **Dates.** v26 wants whole days: a start at `00:00:00` and an end at `23:59:59`.
   - The campaign starts today, or tomorrow in a day's last 15 minutes.
-  - It runs 4 to 7 days and always ends within **7 days** of the approval.
-  - Google refuses a total budget over fewer than 4 days.
+  - It runs **7 whole days**, always: day 1 at `00:00:00` to day 7 at `23:59:59` (from now, a little under 7 days; from a late-night
+    approval, 7 days and a few minutes).
+  - Google refused the same total budget over 2 days (`UNKNOWN` on `end_date_time`) and took it over 7, on a live campaign
+    (2026-11-07). Validate-only requests refused 3 days. So there is no setting for the length.
 - **Network.** Google Search only: `targetSearchNetwork` (search partners) and `targetContentNetwork` (display) are off.
 - **Bidding.** Maximize Clicks (`targetSpend`) with a ceiling on each click: `AD_CPC_CEILING_USD`, default $0.50, never over $2, and never
   over the amount itself.
@@ -39,7 +41,6 @@ Constants in `server/googleads.js`, so no setting can lift them:
 | `ADS_PAID_ENABLED` | off | `1` turns paid ads on. Off means the floor offers only $0, and nothing new starts. Campaigns already running keep running to their end within their approved totals; use `ads pause-all` to stop them. |
 | `AD_MONTHLY_CAP_USD` | 50 | The building's limit for the calendar month (account time zone). Admin only, never shown on a floor. |
 | `AD_CPC_CEILING_USD` | 0.50 | The most one click may cost (at most $2). |
-| `AD_CAMPAIGN_DAYS` | 7 | Run length, kept between 4 and 7. |
 | `GOOGLE_ADS_CUSTOMER_ID` | | The ad account, digits only. |
 | `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN` | | OAuth. The server buys an access token from the refresh token and keeps it in memory only. |
 | `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | | Optional. Sent only if set (v26 works without the developer token). |

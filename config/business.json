@@ -31,7 +31,7 @@
   "adMoney": [0, 5, 10, 25],
   "adMaxUsd": 25,
   "google": { "_comment": "Where paid Google search ads show: geo target constants (2840 is the United States) and the language constant (1000 is English).", "geo": [2840], "language": 1000 },
-  "video": { "model": "google/gemini-omni-1.2-flash", "size": "720x1280", "aspect": "9:16", "minSeconds": 6, "maxSeconds": 10, "defaultSeconds": 6, "audio": false, "pollMs": 5000, "timeoutMs": 420000, "usdPerSecond": 0.0695, "perTask": 2, "perFloorDay": 6 },
+  "video": { "_comment": "Gemini Omni 1.2 always makes sound (asking for none is refused). When a 1.2 job fails at the provider, 1.1 gets one go; past both, the ad is a screen recording with captions. Prices are per second at 720p.", "model": "google/gemini-omni-1.2-flash", "size": "720x1280", "aspect": "9:16", "minSeconds": 6, "maxSeconds": 10, "defaultSeconds": 6, "audio": true, "pollMs": 5000, "timeoutMs": 420000, "usdPerSecond": 0.0695, "fallback": { "model": "google/gemini-omni-1.1-flash", "usdPerSecond": 0.1014 }, "perTask": 2, "perFloorDay": 6 },
   "chips": {
     "idea.researching": ["What makes a good idea?", "I already have an idea", "How does this work?"],
     "idea.pick": ["Why this idea?", "Show me other ideas", "Which one would you pick?"],
