@@ -319,6 +319,29 @@ describe('office.ai', () => {
     } finally { await s.t.close(); }
   });
 
+  test('a call that runs out of time is cut off and charged what it held', async () => {
+    const m = fakeModel((a) => new Promise((resolve, reject) => { a.signal.addEventListener('abort', () => reject(a.signal.reason), { once: true }); }));
+    const s = await setup({ cloudAiLimits: { timeoutMs: 30 } }, { llm: m });
+    try {
+      const r = await s.ai({ prompt: 'a' });
+      assert.equal(r.status, 503); assert.equal(r.json.error, 'ai_unavailable'); CLEAN(r.text);
+      const rows = ledger(s.t, s.floor.id);
+      assert.equal(rows.length, 1); assert.ok(rows[0].cost_usd > 0);
+      assert.equal(get(s.t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0);
+    } finally { await s.t.close(); }
+  });
+
+  test('a floor or global daily cap, when one is set, stops app AI too', async () => {
+    const m = fakeModel(() => reply('ok', 10, 10, 0.01));
+    const s = await setup({ floorDailyUsd: 0.005 }, { llm: m });
+    try {
+      assert.equal((await s.ai({ prompt: 'a' })).status, 200);
+      const r = await s.ai({ prompt: 'a' });
+      assert.equal(r.status, 503); assert.equal(r.json.error, 'ai_resting');
+      assert.equal(m.calls.length, 1);
+    } finally { await s.t.close(); }
+  });
+
   test('a reply cut off at the token limit says so, and a refusal comes back as a refusal', async () => {
     const m = fakeModel((a, n) => (n === 1 ? { content: 'half a sen', toolCalls: [], finish: 'max_tokens', usage: { prompt: 5, completion: 5, cost: 0, real: true } } : { content: 'I can\'t help with that one.', toolCalls: [], finish: 'refusal', usage: { prompt: 5, completion: 5, cost: 0, real: true } }));
     const s = await setup({}, { llm: m });
@@ -608,6 +631,10 @@ describe('office.fetch and office.scrape', () => {
       assert.equal((await cloud(s.t, s.host, 'POST', 'scrape', { body: { url: w.url('/a') }, origin: null })).status, 403);
       assert.equal(pageHits(w, '/a'), 0);
     } finally { await s.t.close(); await w.close(); }
+  });
+
+  test('the private list doesn\'t catch public addresses by accident', () => {
+    for (const ip of ['8.8.8.8', '11.0.0.1', '172.15.255.255', '172.32.0.1', '192.167.1.1', '192.169.0.1', '169.253.0.1', '2606:4700:4700::1111']) assert.equal(isBlockedIp(ip), false, ip);
   });
 
   describe('private and internal addresses', () => {

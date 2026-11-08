@@ -16,6 +16,7 @@
     "e2e:attach": "node test/browser/attach.mjs",
     "e2e:modes": "node test/browser/modes.mjs",
     "e2e:cloud": "node test/browser/cloud.mjs",
+    "e2e:cloud-powers": "node test/browser/cloud-powers.mjs",
     "e2e:mail": "node test/browser/mail.mjs",
     "validate-models": "node scripts/validate-models.mjs"
   },

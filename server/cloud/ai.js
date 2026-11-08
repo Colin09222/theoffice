@@ -75,15 +75,17 @@ export function createAppAi({ db, models, engine, llm, log, powers, gate }) {
       });
       try {
         let r;
+        const signal = AbortSignal.timeout(L.timeoutMs);
         try {
           r = await llm.chat({
             provider: PROVIDER, model, effort: 'low', maxTokens, tools: [], thinking: 'off', fallbacks: false, pricing: price,
             messages: [...(q.system ? [{ role: 'system', content: q.system }] : []), ...q.turns],
-            signal: AbortSignal.timeout(L.timeoutMs), meta: { kind: 'app_ai' },
+            signal, meta: { kind: 'app_ai' },
           });
         } catch (e) {
-          // Whatever the model wrote before it broke was still paid for, so it goes down too.
-          if (e?.streamedChars > 0) {
+          // Whatever the model wrote before it broke was still paid for, so it goes down too. A call cut off by the clock may have written all it was promised.
+          if (signal.aborted) charge(est, maxTokens, worst);
+          else if (e?.streamedChars > 0) {
             const written = Math.ceil(e.streamedChars / 4);
             charge(est, written, (est * price.prompt + written * price.completion) / 1e6);
           }

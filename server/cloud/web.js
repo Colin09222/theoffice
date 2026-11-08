@@ -34,15 +34,26 @@ function friendly(e) {
   return UNREACHABLE();
 }
 
+/** Remembers what was used most recently, within a total size. Everything put in here came from a stranger, so it can't be left to grow. */
+function lru(maxBytes, maxEntries) {
+  const map = new Map();
+  let bytes = 0;
+  const drop = (k) => { const e = map.get(k); if (e) { bytes -= e.size; map.delete(k); } };
+  return {
+    get(k) { const e = map.get(k); if (e) { map.delete(k); map.set(k, e); } return e; },
+    set(k, e) { drop(k); map.set(k, e); bytes += e.size; while ((bytes > maxBytes || map.size > maxEntries) && map.size) drop(map.keys().next().value); },
+    delete: drop,
+  };
+}
+
 export function createWebFetcher({ db, cfg, powers, gate, net = {}, now = Date.now, log = () => {} }) {
   const L = powers.WEB;
-  const cache = new Map();      // url -> {url, status, type, body, truncated, expires, size}, oldest first
-  const robots = new Map();     // origin -> {rules, delay, unreachable, expires}, oldest first
+  const cache = lru(L.cacheBytes, Infinity);               // url -> {url, status, type, body, truncated, expires, size}
+  const robots = lru(L.robotsBytes, L.robotsHosts);        // origin -> {rules, delay, unreachable, expires, size}
   const robotsPending = new Map();
   const pending = new Map();    // url -> the fetch already running for it
   const slots = new Map();      // host -> when its next visit may start
   const running = new Map();    // project -> pages being fetched now
-  let cachedBytes = 0;
 
   function denyHosts() {
     const d = [...(cfg.fetchDenyHosts || [])];
@@ -65,10 +76,6 @@ export function createWebFetcher({ db, cfg, powers, gate, net = {}, now = Date.n
 
   // ---- robots.txt ----
   const originOf = (u) => `${u.protocol}//${u.host}`;
-  function remember(map, key, value, cap) {
-    map.delete(key); map.set(key, value);
-    if (map.size > cap) map.delete(map.keys().next().value);
-  }
   async function loadRobots(origin) {
     let entry;
     try {
@@ -81,7 +88,8 @@ export function createWebFetcher({ db, cfg, powers, gate, net = {}, now = Date.n
       if (e instanceof FetchBlocked && /non-text/.test(e.message)) entry = { rules: [], delay: null, expires: now() + L.robotsTtlMs };
       else entry = { unreachable: true, expires: now() + L.robotsRetryMs };
     }
-    remember(robots, origin, entry, L.robotsHosts);
+    entry.size = (entry.rules || []).reduce((n, r) => n + r.weight + 64, 256);
+    robots.set(origin, entry);
     return entry;
   }
   function robotsFor(origin) {
@@ -121,10 +129,7 @@ export function createWebFetcher({ db, cfg, powers, gate, net = {}, now = Date.n
       // A server error is short-lived, and it's worth asking again.
       if (r.status < 500 && L.cacheTtlMs > 0 && entry.size <= L.maxBytes) {
         entry.expires = now() + L.cacheTtlMs;
-        const old = cache.get(u.href); if (old) cachedBytes -= old.size;
-        remember(cache, u.href, entry, Infinity);
-        cachedBytes += entry.size;
-        while (cachedBytes > L.cacheBytes && cache.size) { const k = cache.keys().next().value; cachedBytes -= cache.get(k).size; cache.delete(k); }
+        cache.set(u.href, entry);
       }
       return entry;
     } finally {
@@ -135,8 +140,7 @@ export function createWebFetcher({ db, cfg, powers, gate, net = {}, now = Date.n
   function fromCache(key) {
     const e = cache.get(key);
     if (!e) return null;
-    if (e.expires <= now()) { cache.delete(key); cachedBytes -= e.size; return null; }
-    remember(cache, key, e, Infinity);
+    if (e.expires <= now()) { cache.delete(key); return null; }
     return e;
   }
 

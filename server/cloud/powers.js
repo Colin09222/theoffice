@@ -9,7 +9,7 @@ export const AI_DEFAULTS = {
 };
 export const FETCH_DEFAULTS = {
   dayProject: 500, hostDelayMs: 1000, maxWaitMs: 4000, maxBytes: 512 * 1024, timeoutMs: 15000, maxRedirects: 4, urlChars: 2048,
-  cacheTtlMs: 300000, cacheBytes: 24 * 1048576, robotsTtlMs: 3600000, robotsRetryMs: 60000, robotsHosts: 2000, robotsMaxBytes: 512 * 1024, robotsTimeoutMs: 8000,
+  cacheTtlMs: 300000, cacheBytes: 24 * 1048576, robotsTtlMs: 3600000, robotsRetryMs: 60000, robotsHosts: 2000, robotsBytes: 8 * 1048576, robotsMaxBytes: 512 * 1024, robotsTimeoutMs: 8000,
   maxDelayMs: 30000, textChars: 64000, links: 200, metas: 64,
 };
 const COLUMNS = { ai: { off: 'ai_off', paused: 'ai_paused' }, fetch: { off: 'fetch_off', paused: 'fetch_paused' } };
