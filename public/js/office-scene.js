@@ -694,9 +694,10 @@ export class OfficeView {
     this.discMat = new THREE.MeshBasicMaterial({ map: canvasTex(64, 64, (x, w, h) => { const g = x.createRadialGradient(32, 32, 2, 32, 32, 32); g.addColorStop(0, 'rgba(20,24,40,.55)'); g.addColorStop(0.55, 'rgba(20,24,40,.24)'); g.addColorStop(1, 'rgba(20,24,40,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }), transparent: true, depthWrite: false });
     this.buildRoom();
     if (!host) this.buildWorld();
-    this.syncAgents(state);
+    // In the tower, or built ahead for the lift, the people come a step after the room, so the build is two short pieces and not one long one.
+    const staff = () => { if (!this.dead && !this.synced) { this.syncAgents(state); this.loadLooks(); } };
+    if (host || pace) Promise.resolve(this.turn()).then(staff); else staff();
     if (!host) this.bind();
-    this.loadLooks();
   }
   /**
    * In the tower a floor is put together a step at a time, each step when the tower gives it a turn: one a frame, and none while the
@@ -946,8 +947,9 @@ export class OfficeView {
       this.pet.group.position.set(L.pet[0], 0, L.pet[1]);
       R.add(this.pet.group); this.petPath = []; this.petWait = 3;
     }
-    mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT); mergeColored(legacy, ROOM_MAT);
-    this.buildFarWalls(); this.cutWalls();
+    // Where a room is put together out of sight (the tower, or ahead for the lift), the merge is a step of its own. It comes before the steps queued below.
+    const merge = () => { if (this.dead) return; mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT); mergeColored(legacy, ROOM_MAT); this.buildFarWalls(); this.cutWalls(); };
+    if (this.host || this.pace) Promise.resolve(this.turn()).then(merge); else merge();
     this.loading = { settled: false };
     this.loadModels().catch((e) => { console.warn('furniture models unavailable, keeping the stand-ins', e); }).finally(() => { this.loading.settled = true; });
   }
@@ -1238,6 +1240,7 @@ export class OfficeView {
     this.models = models; this.extraModels = [];
     this.kit = T;
     this.deskInto = (into, x, z, chairColor, ry) => { const keep = target; target = into; desk(x, z, chairColor, false, ry); target = keep; };
+    if (this.host || this.pace) { await this.turn(); if (this.dead) return; }  // laying the furniture out and merging it are two steps
     mergeColored(models, ROOM_MAT);
     this.root.add(models);
     this.cutWalls();
@@ -1250,7 +1253,7 @@ export class OfficeView {
   /** The floor is one big texture: each room's own material (a CC0 photo-texture once it has loaded, a drawn tile until then), a darker rim along
    *  the walls, soft contact shadows under every piece of furniture, pools of window and lamp light, and each office's owner lettered by the door.
    *  The normal and roughness maps are baked the same way, so the lights catch the planks and the grout. It costs nothing per frame. */
-  bakeFloor() {
+  async bakeFloor() {
     // In the tower a floor is never wider than the screen and there are several, so a quarter of the pixels does. A room flown into from
     // there keeps its bake: baking it again on the floor page would stutter the room just landed in.
     const dens = stage.q?.density ?? 1; const W = this.host ? (dens >= 1 ? 1024 : 768) : dens >= 1 ? 2048 : dens >= 0.6 ? 1536 : 1024, H = Math.round(W * ROOM_D / ROOM_W);
@@ -1276,8 +1279,10 @@ export class OfficeView {
       }
     };
     const old = [this.floorMat.map, this.floorMat.normalMap, this.floorMat.roughnessMap];
-    const tex = canvasTex(W, H, (x) => {
+    // The painting comes in a few pieces, so a room built out of sight (the tower, or ahead for the lift) can take them over several frames.
+    const paint = function* (x) {
       paintRooms(x, 'map');
+      yield;
       // Window light: warm pools, leaning the way the sun does.
       for (const [a, b] of this.plan.windows) {
         const g = x.createLinearGradient(0, 0, 0, H * 0.32); g.addColorStop(0, 'rgba(255,236,200,.24)'); g.addColorStop(1, 'rgba(255,236,200,0)');
@@ -1293,6 +1298,7 @@ export class OfficeView {
       // A threshold strip in every doorway.
       x.fillStyle = 'rgba(40,32,24,.32)';
       for (const d of doorways(this.plan)) { const hw = (d.width / 2) * ppu, t = 0.14 * ppu; if (d.along) x.fillRect(px(d.x) - hw, pz(d.z) - t, hw * 2, t * 2); else x.fillRect(px(d.x) - t, pz(d.z) - hw, t * 2, hw * 2); }
+      yield;
       // Each room's name by the way in; an office carries its owner's name, like the lettering in an old office block.
       x.save(); x.textBaseline = 'bottom';
       for (const r of this.plan.rooms || []) {
@@ -1309,6 +1315,7 @@ export class OfficeView {
       x.strokeStyle = 'rgba(20,16,12,.34)'; x.lineWidth = 3 * k; x.beginPath(); for (const w of wallLines(this.plan)) { x.moveTo(px(w.x0), pz(w.z0)); x.lineTo(px(w.x1), pz(w.z1)); } x.stroke();
       const rim = (x0, y0, x1, y1, a) => { const g = x.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, `rgba(20,16,12,${a})`); g.addColorStop(1, 'rgba(20,16,12,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H); };
       rim(0, 0, 0, 70 * k, 0.34); rim(0, 0, 70 * k, 0, 0.34); rim(W, 0, W - 40 * k, 0, 0.12); rim(0, H, 0, H - 40 * k, 0.12);
+      yield;
       // Contact shadows under furniture, pulled slightly toward the camera side of the sun. Drawn an eighth the size and stretched, which
       // blurs them for nearly nothing: a canvas shadow blur on every piece was most of the cost of a bake.
       const sw = Math.ceil(W / 8), sh = Math.ceil(H / 8), small = shadowCanvas(sw, sh), s = small.getContext('2d');
@@ -1318,13 +1325,26 @@ export class OfficeView {
       x.save(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high'; x.drawImage(small, 0, 0, sw, sh, -6 * k, 5 * k, sw * 8, sh * 8); x.restore();
       x.fillStyle = 'rgba(15,12,10,.18)';
       for (const [fx, fz, fw, fd] of this.nav.footprints) x.fillRect(px(fx - fw / 2) + 4 * k, pz(fz - fd / 2) + 4 * k, fw * ppu - 8 * k, fd * ppu - 8 * k);
-    });
+    };
+    const paced = this.host || this.pace, token = this.bakeToken = (this.bakeToken || 0) + 1;
+    const gone = () => this.dead || token !== this.bakeToken;
+    let tex;
+    if (paced) {
+      tex = canvasTex(W, H, () => {});
+      const x = tex.image.getContext('2d');
+      for (const _ of paint.call(this, x)) { await this.turn(); if (gone()) { tex.dispose(); return; } }  // eslint-disable-line no-unused-vars
+      tex.needsUpdate = true;
+    } else tex = canvasTex(W, H, (x) => { for (const _ of paint.call(this, x)); });  // eslint-disable-line no-unused-vars
+    let normal = null, rough = null;
+    if (pbr) {
+      if (paced) { await this.turn(); if (gone()) { tex.dispose(); return; } }
+      normal = canvasTex(W, H, (x) => paintRooms(x, 'normal')); normal.colorSpace = THREE.NoColorSpace;
+      if (paced) { await this.turn(); if (gone()) { tex.dispose(); normal.dispose(); return; } }
+      rough = canvasTex(W, H, (x) => paintRooms(x, 'rough')); rough.colorSpace = THREE.NoColorSpace;
+    }
     tex.anisotropy = 8; tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     this.floorMat.map = tex;
-    if (pbr) {
-      const n = canvasTex(W, H, (x) => paintRooms(x, 'normal')); n.colorSpace = THREE.NoColorSpace; this.floorMat.normalMap = n; this.floorMat.normalScale.set(0.7, 0.7);
-      const r = canvasTex(W, H, (x) => paintRooms(x, 'rough')); r.colorSpace = THREE.NoColorSpace; this.floorMat.roughnessMap = r; this.floorMat.roughness = 1;
-    }
+    if (pbr) { this.floorMat.normalMap = normal; this.floorMat.normalScale.set(0.7, 0.7); this.floorMat.roughnessMap = rough; this.floorMat.roughness = 1; }
     this.floorMat.needsUpdate = true; this.baked = true;
     for (const t of old) if (t && t !== this.floorMat.map && t !== this.floorMat.normalMap && t !== this.floorMat.roughnessMap) t.dispose();
   }
@@ -1408,6 +1428,7 @@ export class OfficeView {
   }
   /** Staff arrive, and existing ones keep their place. Called for the snapshot and each hire. Everyone gets a room of their own. */
   syncAgents(state) {
+    this.synced = true;
     this.setFloorName(state.floor.name);
     const staff = state.agents.filter((a) => a.role !== 'manager');
     const fresh = staff.filter((a) => !this.actors.has(a.id));
@@ -1556,6 +1577,7 @@ export class OfficeView {
         g.add(place(T[t.m], { x: at.x, y, z: at.z, ry: at.ry, scale: FS * (t.s ?? 1), tint: t.rug ? tints(mix(o.theme.wall, '#f4efe6', 0.45)) : t.m.startsWith('chair') || t.m.startsWith('lounge') ? tints(o.theme.wall) : null }));
       }
     }
+    if (this.host || this.pace) { await this.turn(); if (this.dead || token < this.furnishedToken) return; }
     mergeColored(g, ROOM_MAT);
     if (!this.detailOn) g.traverse((m) => { if (m.isMesh) m.castShadow = false; });
     const old = this.officeModels; this.officeModels = g; this.root.add(g);
