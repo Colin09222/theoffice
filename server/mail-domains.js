@@ -134,8 +134,8 @@ export function createMailDomains({ db, set, provider, mailDomain, now, log, eng
     return undefined;
   }
   function moveToFull(d) {
-    setRow(d.domain, { status: 'full', next_at: now() + 600e3, told: 0 });
-    noteFull(row(d.domain));
+    setRow(d.domain, { status: 'full', next_at: now() + 600e3 });
+    noteFull(row(d.domain));  // heard once, however many times it goes round
   }
   async function writeDns(d) {
     let out;
