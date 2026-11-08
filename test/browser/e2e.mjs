@@ -71,14 +71,14 @@ async function run(label, opts, t, adminCode) {
     const code = await adminCode(); // from the real admin CLI path
     await p.type('.code-input', code);
     await p.click('.modal button[type=submit]');
-    await p.until('document.querySelector("[data-recovery]") !== null', 'recovery code');
+    // Straight up to the floor: the recovery code waits on a card there, until the boss says it's saved.
+    await p.until('document.body.dataset.page === "floor" && !!window.__office', 'floor page');
+    await p.until('document.querySelector("[data-recovery-card] [data-recovery]") !== null', 'recovery code');
     const rec = await p.ev('document.querySelector("[data-recovery]").textContent');
     if (!/^RECOVER-/.test(rec)) throw new Error('no recovery code');
     const ck = (await p.cookies()).find((c) => c.name === 'office_s');
     if (!ck || !ck.httpOnly || !ck.secure || ck.sameSite !== 'Lax' || ck.path !== '/theoffice') throw new Error(`cookie flags: ${JSON.stringify(ck && { h: ck.httpOnly, s: ck.secure, l: ck.sameSite, p: ck.path })}`);
     if (await p.ev('document.cookie.includes("office_s")')) throw new Error('script can read the session cookie');
-    await p.click('.modal .btn.primary');
-    await p.until('document.body.dataset.page === "floor" && !!window.__office', 'floor page');
     await sleep(2200);
     await shot('04-floor-new');
   });

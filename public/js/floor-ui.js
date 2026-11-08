@@ -458,8 +458,6 @@ class FloorPage {
       this.bodyEl.append(h('p.readonly-note', {}, 'Only the boss of this floor can talk to the manager.'));
     }
     this.scrollChat();
-    // After Go the chat opens on the step the team is on, not the bottom of the step list.
-    if (this.landOnStep) { this.landOnStep = false; requestAnimationFrame(() => requestAnimationFrame(() => this.chatList?.querySelector('[data-step-state="doing"], [data-step-state="todo"]')?.scrollIntoView({ block: 'center' }))); }
   }
   // ---- the three ways in ----
   isNewFloor() { return this.owner && this.state.floor.status === 'active' && !(this.state.messages || []).some((m) => m.role === 'boss') && !this.state.tasks.length; }
@@ -509,7 +507,13 @@ class FloorPage {
       } }, h('span.q-who', {}, `${q.agentName} asks`), h('p', {}, q.text), h('div.row', {}, a, h('button.btn.primary', { type: 'submit' }, 'Answer'))));
     }
   }
-  scrollChat() { if (this.chatList) this.chatList.scrollTop = this.chatList.scrollHeight; }
+  scrollChat() {
+    if (!this.chatList) return;
+    // Right after Go the chat stays on the step the team is on, even as the first messages come in, instead of the bottom of the step list.
+    const step = Date.now() < (this.landUntil || 0) ? this.chatList.querySelector('[data-step-state="doing"], [data-step-state="todo"]') : null;
+    if (step) { const l = this.chatList.getBoundingClientRect(), r = step.getBoundingClientRect(); this.chatList.scrollTop += r.top - l.top - (l.height - r.height) / 2; return; }
+    this.chatList.scrollTop = this.chatList.scrollHeight;
+  }
 
   // ---- talk ----
   /** Everything people have said to each other, oldest first, with the words the server decided this viewer may read. */

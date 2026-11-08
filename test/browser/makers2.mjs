@@ -15,7 +15,8 @@ const step = async (name, fn) => { try { await fn(); } catch (e) {
   try { await lastPage?.shot(join(SHOTS, `fail-${name.replace(/[^a-z0-9]+/gi, '-')}.jpg`)); } catch {}
   check(name, false, `${e.message} ${info}`); } };
 
-const t = await boot({ mockDelayMs: 200, peopleTalk: false, liveCheckDelayMs: 5 });
+// A slow enough team that the held state is on screen long enough to read.
+const t = await boot({ mockDelayMs: 700, peopleTalk: false, liveCheckDelayMs: 5 });
 const base = t.base;
 const main = new URL(base).origin;
 const b = await launch();
@@ -82,10 +83,10 @@ try {
       const r = await c.post(`/api/floors/${c.slug}/makers/start`, { type: 'game', name: 'Cheat Hive', pitch: 'Bees and a cheat [cheat]' });
       if (r.status !== 200) throw new Error(`start ${r.status}`);
       await p.ev('window.__office.tab = "chat"; window.__office.panelOpen = true; window.__office.reload()');
-      await p.until('window.__held > 0', 'Launch held while the team fixes it', 25000);
+      await p.until('window.__held > 0', 'Launch held while the team fixes it', 40000);
       check(`${label}: the button says it is fixing a serious bug first`, /Fixing a serious bug first/.test(await p.ev('(window.__seen || []).filter((x) => /Fixing a serious bug/.test(x)).slice(-1)[0] || ""')));
       check(`${label}: no Launch button while held`, !(await p.ev('!!document.querySelector("[data-launch]")')));
-      await p.until('!!document.querySelector("[data-launch-anyway]")', 'the boss being asked', 30000);
+      await p.until('!!document.querySelector("[data-launch-anyway]")', 'the boss being asked', 70000);
       await p.shot(join(SHOTS, `hold-${label}.jpg`));
       const warn = await p.ev('document.querySelector("[data-launch-warning]").textContent');
       check(`${label}: the warning names the bug`, /wave=9/.test(warn), warn);

@@ -52,7 +52,7 @@ export function launchFlow(page, { onBack = null } = {}) {
         if (type === 'business') await api(`/floors/${page.slug}/business/start`, { method: 'POST', body: { wish: `${name.value.trim()}: ${pitch.value.trim()}`.slice(0, 300) } });
         else await api(`/floors/${page.slug}/makers/start`, { method: 'POST', body: { type, idea: card.id, starter: card.starter, name: name.value.trim(), pitch: pitch.value.trim(), goal: goal.value.trim(), plan: plan.value.split('\n').map((s) => s.trim()).filter(Boolean) } });
         page.view?.bossTalks?.(); toast('The team is on it');
-        page.landOnStep = true;
+        page.landUntil = Date.now() + 8000;
         // The maker card lives in the chat, which is where the boss just was, even once the floor has a name.
         page.tab = 'chat'; page.panelOpen = true;
         await page.reload?.();
@@ -105,6 +105,7 @@ export function makerCard(page) {
       steps, job.report ? h('p.maker-report', {}, `Last test: ${job.report.verdict === 'pass' ? 'passed' : 'not yet'}${job.report.summary ? `, ${job.report.summary}` : ''}`) : null,
       job.liveCheck ? h('p.maker-report', { 'data-live-check': job.liveCheck.ok ? 'ok' : 'failed' }, job.liveCheck.ok ? (job.type === 'website' ? 'Checked on the live link.' : 'Saves and leaderboard checked on the live link.') : `The live link check found a problem: ${job.liveCheck.problem}`) : null,
       asking, held, launch, job.launchedWith?.length ? h('p.maker-warn', { 'data-launched-with': '' }, `Live with a known serious bug: ${job.launchedWith[0]}`) : null, link, another].filter(Boolean));
+    if (Date.now() < (page.landUntil || 0)) requestAnimationFrame(() => page.scrollChat?.());
   };
   async function decide(choice) { try { const r = await api(`/floors/${page.slug}/makers/decide`, { method: 'POST', body: { choice } }); render(r.makers.job); } catch (e) { toast(e.message, 'bad'); } }
   async function share(url) {
