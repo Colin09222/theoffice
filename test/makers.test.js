@@ -346,3 +346,20 @@ describe('the job card is honest about passes', () => {
     assert.ok(j.steps.every((x) => x.state !== 'todo' && x.state !== 'doing'), 'nothing is left looking like it might still happen');
   });
 });
+
+describe('the two plain pages', () => {
+  let t;
+  before(async () => { t = await boot(); });
+  after(() => t.close());
+  test('about and privacy are served, honest and contactable, and the lobby links them', async () => {
+    for (const [path, want] of [['/privacy', /office@iscolinfree\.com/], ['/about', /office@iscolinfree\.com/]]) {
+      const r = await fetch(`${t.base}${path}`);
+      assert.equal(r.status, 200, path);
+      assert.match(r.headers.get('content-type') || '', /text\/html/);
+      const html = await r.text();
+      assert.match(html, want); assert.ok(!/\$\d/.test(html), 'no money figures');
+    }
+    const privacy = await (await fetch(`${t.base}/privacy`)).text();
+    assert.match(privacy, /Limited Use/); assert.match(privacy, /Anthropic and OpenRouter/);
+  });
+});

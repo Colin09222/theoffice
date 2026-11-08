@@ -1,5 +1,6 @@
 // Dialogs for getting a floor: entering a code, setting up the company and boss, and signing back in with a recovery code.
-import { h, api, modal, refreshMe, BASE, session, ApiError } from './dom.js';
+import { h, api, modal, refreshMe, BASE, session, ApiError, recoveryBox } from './dom.js';
+export { recoveryBox };
 import { characterBuilder, swatches } from './builder.js';
 import { DEFAULT_LOOK, DEFAULT_COLORS, slugFrom } from './looks.js';
 
@@ -17,9 +18,13 @@ export function openClaim({ code = '' } = {}) {
     const stepCode = () => {
       const input = h('input.code-input', { name: 'code', placeholder: 'OFFICE-XXXX-XXXX-XXXX-XXXX', value: state.code, autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', autofocus: true, 'aria-label': 'Your office code', maxlength: 64 });
       const e = err();
+      let busy = false;
+      // Pasting a whole code is the whole step: no extra tap. The server checks it exactly as it always has, and a bad one just shows why.
+      input.addEventListener('paste', () => setTimeout(() => { if (input.value.trim().length >= 12) form.requestSubmit(); }, 0));
       const form = h('form.stack', { onsubmit: async (ev) => {
         ev.preventDefault();
-        e.hidden = true;
+        if (busy) return;
+        busy = true; e.hidden = true;
         try {
           const r = await api('/claim/check', { method: 'POST', body: { code: input.value } }); state.code = input.value; state.floor = r.floor;
           // No form: the office manager gets the company's name out of you on the phone. A server that still wants the form says so with a 400.
@@ -29,7 +34,7 @@ export function openClaim({ code = '' } = {}) {
             await refreshMe();
             stepRecovery(made);
           } catch (x) { if (x instanceof ApiError && x.status === 400) stepCompany(); else throw x; }
-        } catch (x) { showErr(e, x); }
+        } catch (x) { showErr(e, x); input.select?.(); } finally { busy = false; }
       } },
       h('p.lede', {}, 'Got a code from the building manager? It opens one office, once.'),
       input, e, h('button.btn.primary.wide', { type: 'submit' }, 'Unlock the door'),
@@ -73,21 +78,14 @@ export function openClaim({ code = '' } = {}) {
       state.look = builder.look;
       name.focus();
     };
+    // No stop in the lobby: the keys are handed over on the floor, where they stay on screen until the boss has saved them.
     const stepRecovery = (r) => {
       movedIn = r.slug;
-      body.replaceChildren(h('div.stack', {},
-        h('p.lede', {}, 'The keys are yours. Keep this recovery code somewhere safe: it is the only way back in from another device, and it won\'t be shown again.'),
-        recoveryBox(r.recoveryCode),
-        h('p.fineprint', {}, `Your floor's address is ${location.origin}${BASE}/floor/${r.slug}`),
-        h('button.btn.primary.wide', { type: 'button', onclick: () => close() }, 'Go up. Your manager is on the phone')));
+      session.pendingRecovery = { slug: r.slug, code: r.recoveryCode };
+      close();
     };
     stepCode();
   }, { wide: true, onClose: () => { if (movedIn) window.officeGo(`/floor/${movedIn}`); } });
-}
-
-export function recoveryBox(code) {
-  const copy = h('button.btn.ghost', { type: 'button', onclick: async () => { try { await navigator.clipboard.writeText(code); copy.textContent = 'Copied'; } catch { copy.textContent = 'Select and copy it'; } } }, 'Copy');
-  return h('div.recovery', {}, h('code', { 'data-recovery': true }, code), copy);
 }
 
 export function openLogin(slugHint = '') {

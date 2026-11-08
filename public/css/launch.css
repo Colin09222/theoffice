@@ -38,3 +38,7 @@
 .maker-bugs { margin: 0; font-size: 14px; color: var(--ink-2); } ul.maker-bugs { padding-left: 18px; flex-basis: 100%; }
 .maker-warn { margin: 0; flex-basis: 100%; font-size: 14px; font-weight: 700; color: var(--tomato); }
 .maker-anyway { border-color: var(--tomato); color: var(--tomato); } .maker-anyway.armed { background: var(--tomato); color: #fff; }
+.recovery-card { display: grid; gap: 8px; margin: 6px 0; padding: 12px; border-radius: 12px; background: var(--white); border: 2px solid var(--leaf); }
+.recovery-card p { margin: 0; font-size: 15px; } .recovery-card b { color: var(--leaf); }
+.recovery-card [data-recovery-done] { justify-self: end; }
+.dir-legal { margin: 6px 0 0; text-align: center; font-size: 13px; color: var(--ink-3); } .dir-legal a { color: inherit; }

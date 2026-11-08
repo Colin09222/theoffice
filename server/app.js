@@ -998,6 +998,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       const rest = pathname.slice(BASE.length);
       if (rest === '/robots.txt') return send(res, 200, 'User-agent: *\nDisallow: /\n', { 'content-type': 'text/plain; charset=utf-8' });
       if (rest === '/sdk/office.js' && (req.method === 'GET' || req.method === 'HEAD')) { limit('read', ip); return send(res, 200, req.method === 'HEAD' ? undefined : SDK_JS, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }); }
+      if ((rest === '/privacy' || rest === '/about') && (req.method === 'GET' || req.method === 'HEAD')) { limit('read', ip); return serveStatic(req, res, `${rest}.html`); }
       if (rest.startsWith('/f/')) {
         limit('publicSite', ip);
         if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...BASE_HEADERS, 'content-security-policy': SANDBOX_CSP, allow: 'GET, HEAD' }); return res.end(); }

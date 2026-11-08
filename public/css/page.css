@@ -1,0 +1,10 @@
+/* The two plain pages: /theoffice/about and /theoffice/privacy. */
+body { margin: 0; background: #f7f1e4; color: #2a2118; font: 18px/1.55 Georgia, 'Times New Roman', serif; }
+main { max-width: 680px; margin: 0 auto; padding: 40px 22px 60px; }
+h1 { font-size: 34px; line-height: 1.15; margin: 0 0 4px; }
+.updated { color: #7a6a52; font-size: 15px; margin: 0 0 26px; }
+h2 { font-size: 22px; margin: 30px 0 8px; }
+p, li { margin: 0 0 12px; }
+ul { padding-left: 22px; }
+a { color: #8a3b12; }
+footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #d8ccb4; font-size: 15px; color: #7a6a52; }

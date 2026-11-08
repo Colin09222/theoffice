@@ -89,6 +89,11 @@ export function modal(title, build, { wide = false, onClose, locked = false } = 
   return { el: card, close };
 }
 
+export function recoveryBox(code) {
+  const copy = h('button.btn.ghost', { type: 'button', onclick: async () => { try { await navigator.clipboard.writeText(code); copy.textContent = 'Copied'; } catch { copy.textContent = 'Select and copy it'; } } }, 'Copy');
+  return h('div.recovery', {}, h('code', { 'data-recovery': true }, code), copy);
+}
+
 export const money = (n) => `$${Number(n || 0).toFixed(n >= 10 ? 2 : n >= 0.1 ? 2 : 3)}`;
 export function timeAgo(ms) {
   const s = Math.max(0, (Date.now() - ms) / 1000);

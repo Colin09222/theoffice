@@ -1,6 +1,6 @@
 // The lobby overlay: the sign out front, the felt directory board with its lift panel, the To Let board, and the news strip.
 import { stage } from './stage.js';
-import { h, api, session, isPhone, toast, clear, put, timeAgo } from './dom.js';
+import { h, api, session, isPhone, toast, clear, put, timeAgo, BASE } from './dom.js';
 import { buildStack, lobbyMode, setLobbyMode } from './stack.js';
 import { LobbyView } from './lobby-scene.js';
 import { icon } from './icons.js';
@@ -216,7 +216,8 @@ export async function showLobby(root) {
     h('div.dir-search', {}, search, toggle, topBtn),
     head, wallHead, boardHead,
     list, wall, board,
-    h('p.dir-hint', {}, 'Anyone can walk in and watch'));
+    h('p.dir-hint', {}, 'Anyone can walk in and watch'),
+    h('p.dir-legal', {}, h('a', { href: `${BASE}/about` }, 'About'), ' · ', h('a', { href: `${BASE}/privacy` }, 'Privacy')));
 
   const account = session.floor
     ? h('button.btn.chrome', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, icon('elevator'), h('span', {}, 'My floor'))

@@ -16,6 +16,7 @@ import { journeyBar, chipsRow, startButton, renderBusiness, businessActive, busi
 import { handOver, peekHandoff, takeHandoff } from './handoff.js';
 import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } from './mail-ui.js';
 import { launchFlow, makerCard } from './launch-ui.js';
+import { recoveryBox } from './dom.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -424,7 +425,7 @@ class FloorPage {
       h('div.intercom-who', {}, h('b', {}, mgr?.name || 'Office Manager'), h('small', {}, h('i'), this.streamBuf ? 'Talking…' : this.owner ? 'On the desk phone' : 'The boss\'s line')),
       h('div.intercom-grille', { 'aria-hidden': 'true' }));
     this.intercomEl.classList.toggle('on-air', !!this.streamBuf);
-    this.bodyEl.append(this.intercomEl, this.chatList);
+    this.bodyEl.append(...(this.recoveryCard() ? [this.recoveryEl] : []), this.intercomEl, this.chatList);
     // The launcher (public/js/launch-ui.js): three taps to a building team, then the maker card with Launch.
     this.lanesEl = this.isNewFloor() ? launchFlow(this) : makerCard(this);
     this.chatList.append(...(this.lanesEl ? [this.lanesEl] : []), this.questionsEl, this.streamEl);
@@ -457,6 +458,8 @@ class FloorPage {
       this.bodyEl.append(h('p.readonly-note', {}, 'Only the boss of this floor can talk to the manager.'));
     }
     this.scrollChat();
+    // After Go the chat opens on the step the team is on, not the bottom of the step list.
+    if (this.landOnStep) { this.landOnStep = false; requestAnimationFrame(() => requestAnimationFrame(() => this.chatList?.querySelector('[data-step-state="doing"], [data-step-state="todo"]')?.scrollIntoView({ block: 'center' }))); }
   }
   // ---- the three ways in ----
   isNewFloor() { return this.owner && this.state.floor.status === 'active' && !(this.state.messages || []).some((m) => m.role === 'boss') && !this.state.tasks.length; }
@@ -472,6 +475,17 @@ class FloorPage {
       this.state.floor.setup ? null : h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => this.openCustomise('vibe') }, 'First, make this office yours'));
   }
   // Only the launcher goes once the boss has spoken; a maker card stays with its job.
+  /** The keys, handed over on arrival: the same one-time recovery code, on screen until the boss says it's saved, even across a redraw. */
+  recoveryCard() {
+    if (this.recoveryEl) return this.recoveryEl;
+    const rec = session.pendingRecovery;
+    if (!rec || rec.slug !== this.slug) return null;
+    const card = h('div.recovery-card', { 'data-recovery-card': '' },
+      h('p', {}, h('b', {}, 'The keys are yours.'), ' Keep this recovery code somewhere safe: it is the only way back in from another device, and it won\'t be shown again.'),
+      recoveryBox(rec.code),
+      h('button.btn.ghost', { type: 'button', 'data-recovery-done': '', onclick: () => { session.pendingRecovery = null; this.recoveryEl = null; card.remove(); } }, 'I\'ve saved it'));
+    return (this.recoveryEl = card);
+  }
   dropLanes() { if (this.lanesEl && !this.lanesEl.matches('[data-maker]')) { this.lanesEl.remove(); this.lanesEl = null; } }
   messageEl(m) {
     const who = m.role === 'boss' ? this.state.floor.boss.name : m.role === 'help' ? 'buddehbot' : this.state.agents.find((a) => a.id === m.agentId)?.name || 'Office Manager';
