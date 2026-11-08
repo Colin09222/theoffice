@@ -89,7 +89,7 @@ export function tidyLabels(actors, viewWidth) {
     const showing = !a.bubble.hidden;
     // Their job and full name are for whoever is talking or tapped; a phone would otherwise be a wall of badges.
     const full = !!a.speech || a.view.selected === a.id;
-    if (full !== a.full) { a.full = full; a.tag.classList.toggle('full', full); a.nameW = 0; a.nameH = 0; }
+    if (full !== a.full) { a.full = full; a.tag.classList.toggle('full', full); a.nameW = 0; a.nameH = 0; a.renderBubble?.(); }
     a.nameW ||= a.tag.offsetWidth; a.nameH ||= a.tag.offsetHeight;
     const drawn = showing && !a.tag.classList.contains('crowded');
     const [bw, bh] = showing ? (drawn && a.bubble.offsetWidth ? [a.bubble.offsetWidth, a.bubble.offsetHeight] : estimate(a, calm)) : [0, 0];

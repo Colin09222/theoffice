@@ -69,7 +69,7 @@ function seeded(seed) { let s = seed; return () => { s = (s * 1664525 + 10139042
 const mix = (a, b, t) => `#${new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString()}`;
 const shadeHex = (hex, f) => `#${new THREE.Color(hex).multiplyScalar(f).getHexString()}`;
 /** Paint for the rooms' low walls: the company's own wall colour, taken deeper and richer than pale paint, so a room reads as a room from above. */
-const deepen = (hex) => { const c = new THREE.Color(hex), h = { h: 0, s: 0, l: 0 }; c.getHSL(h, THREE.SRGBColorSpace); c.setHSL(h.h, h.s < 0.06 ? 0.16 : Math.min(0.86, Math.max(0.44, h.s * 1.25 + 0.12)), Math.max(0.4, Math.min(0.62, h.l * 0.72)), THREE.SRGBColorSpace); return `#${c.getHexString(THREE.SRGBColorSpace)}`; };
+const deepen = (hex) => { const c = new THREE.Color(hex), h = { h: 0, s: 0, l: 0 }; c.getHSL(h, THREE.SRGBColorSpace); c.setHSL(h.h, h.s < 0.06 ? 0.1 : Math.min(0.58, Math.max(0.3, h.s * 0.9 + 0.08)), Math.max(0.5, Math.min(0.68, h.l * 0.82)), THREE.SRGBColorSpace); return `#${c.getHexString(THREE.SRGBColorSpace)}`; };
 
 /** One tile of flooring, drawn once per finish for the whole visit and repeated across every baked floor. A tower bakes the same few over and over. */
 const tiles = new Map();
@@ -99,15 +99,15 @@ function drawFloorTile(style) {
   }
   if (style === 'carpet') {
     c.width = c.height = 256;
-    x.fillStyle = '#68b5a6'; x.fillRect(0, 0, 256, 256);
-    x.fillStyle = '#74c0b0'; for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) if ((i + j) % 2) x.fillRect(i * 64, j * 64, 64, 64);
+    x.fillStyle = '#8ab7a7'; x.fillRect(0, 0, 256, 256);
+    x.fillStyle = '#95c1b1'; for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) if ((i + j) % 2) x.fillRect(i * 64, j * 64, 64, 64);
     x.strokeStyle = 'rgba(30,86,80,.3)'; x.lineWidth = 3; x.strokeRect(0, 0, 256, 256);
     return { c, across: 7 };
   }
   if (style === 'terrazzo') {
     c.width = c.height = 512;
     x.fillStyle = '#efe0c4'; x.fillRect(0, 0, 512, 512);
-    const cs = ['#e8743c', '#3f8fc0', '#f2b73a', '#46a874', '#e45b76', '#ffffff'];
+    const cs = ['#e6936a', '#79a9c9', '#efc263', '#86ba97', '#e38ca0', '#ffffff'];
     for (let i = 0; i < 90; i++) {
       x.fillStyle = cs[Math.floor(r() * cs.length)];
       x.beginPath(); const px = r() * 512, py = r() * 512, s = 8 + r() * 12;
@@ -136,8 +136,8 @@ function drawFloorTile(style) {
   }
   if (style === 'tile') {
     c.width = c.height = 256;
-    x.fillStyle = '#4fa596'; x.fillRect(0, 0, 256, 256);
-    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) { x.fillStyle = (i + j) % 2 ? '#8fd6c3' : '#a4e0ce'; x.fillRect(i * 128 + 4, j * 128 + 4, 120, 120); x.fillStyle = 'rgba(255,255,255,.35)'; x.fillRect(i * 128 + 4, j * 128 + 4, 120, 10); }
+    x.fillStyle = '#7fae9f'; x.fillRect(0, 0, 256, 256);
+    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) { x.fillStyle = (i + j) % 2 ? '#a9d4c5' : '#b7dccf'; x.fillRect(i * 128 + 4, j * 128 + 4, 120, 120); x.fillStyle = 'rgba(255,255,255,.35)'; x.fillRect(i * 128 + 4, j * 128 + 4, 120, 10); }
     return { c, across: 3 };
   }
   if (style === 'rubber') {
@@ -591,9 +591,10 @@ export class Actor {
     if (!busy) { delete this.bubble.dataset.key; return; }
     // The pill over a working person: what they are on, what stage it is at, and how far the plan has really got.
     const task = this.view.taskFor(this);
-    const label = this.state === 'queued' ? 'Waiting for a line' : task?.title || this.activity?.slice(0, 40) || 'Thinking';
+    const calm = (this.view.w || 0) <= 760 && !this.full;
+    const label = this.state === 'queued' ? 'Waiting for a line' : calm ? (STAGE[this.state] || 'Working') : task?.title || this.activity?.slice(0, 40) || 'Thinking';
     const stage = STAGE[this.state] || '';
-    const done = task ? planProgress(this.view.tasks, task) : null;
+    const done = task && !calm ? planProgress(this.view.tasks, task) : null;
     const key = `work|${label}|${stage}|${done ? `${done.done}/${done.total}` : ''}`;
     if (this.bubble.dataset.key === key && this.bubble.dataset.state === this.state) return;
     this.bubble.dataset.key = key; this.bubble.dataset.state = this.state;
@@ -675,7 +676,7 @@ export class OfficeView {
     this.root = new THREE.Group(); this.root.name = `floor-${state.floor.number}`;
     if (!host) this.scene.add(this.root);
     // Late afternoon light with a gentle grade: gold in the highlights, a little violet in the shadows, and enough contrast to pull the rooms apart.
-    this.grade = { vignette: 0.2, grain: 0, warm: 0.82, pop: 1 };
+    this.grade = { vignette: 0.2, grain: 0, warm: 0.82, pop: 0.7 };
     this.ao = { radius: 1.05, intensity: 1.45, color: '#5a3424', falloff: 1 };
     this.bloom = 0.18;
     this.floorNumber = state.floor.number;
@@ -726,7 +727,7 @@ export class OfficeView {
     if (pbr) textureSet('wood', { pbr: false }).then((set) => {
       if (!set?.map || this.dead || this.deck) return;
       const plate = TOWER_W * WORLD_SCALE + 1.1;
-      const deck = new THREE.Mesh(new THREE.PlaneGeometry(plate, plate), new THREE.MeshStandardMaterial({ map: repeating(set.map, { color: true, repeat: plate / 3.4 }), color: '#ead9c0', roughness: 0.82, metalness: 0 }));
+      const deck = new THREE.Mesh(new THREE.PlaneGeometry(plate, plate), new THREE.MeshStandardMaterial({ map: repeating(set.map, { color: true, repeat: plate / 3.4 }), color: this.host ? '#ead9c0' : '#b9a78d', roughness: 0.82, metalness: 0 }));
       deck.rotation.x = -Math.PI / 2; deck.position.y = -0.055; deck.receiveShadow = true; deck.userData.keep = true;
       this.deck = deck; this.room.add(deck);
     });
@@ -780,16 +781,17 @@ export class OfficeView {
     for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(terrace, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
     for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { out('#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); out('#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
     // The terrace is part of the company too: planters along the rail in its colours and somewhere to sit outside. A timber deck follows in loadLooks.
+    // On a floor page the terrace is quieter than the room, so the eye stays on the people. In the tower it is part of the outside and keeps its colours.
+    const hush = (c) => (this.host ? c : mix(c, '#c9baa4', 0.55));
     for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
       const x = i * 6.4 + (sz < 0 ? 1.4 : 0), z = sz * (plate / 2 - 0.85);
-      out(mix(primary, '#cfc4b0', 0.62), 1.9, 0.55, 0.85, x, 0, z);
-      out(i % 2 ? '#5c8650' : '#6c9452', 1.7, 0.36 + ((i * i) % 3) * 0.14, 0.66, x, 0.55, z);
+      out(hush(mix(primary, '#cfc4b0', 0.62)), 1.9, 0.55, 0.85, x, 0, z);
+      out(hush(i % 2 ? '#5c8650' : '#6c9452'), 1.7, 0.36 + ((i * i) % 3) * 0.14, 0.66, x, 0.55, z);
     }
     for (const [x, z] of [[-10.5, plate / 2 - 2.9], [8.5, plate / 2 - 3.1]]) {
       out('#a8825c', 1.25, 0.07, 1.25, x, 0.72, z, { geo: cyl }); out('#3d3b44', 0.09, 0.72, 0.09, x, 0, z, { geo: cyl });
       for (const a of [0.4, 2.5, 4.6]) { const sx = x + Math.cos(a) * 1.3, sz = z + Math.sin(a) * 1.3; out(mix(primary, '#ffffff', 0.32), 0.62, 0.1, 0.62, sx, 0.44, sz); out('#3d3b44', 0.07, 0.44, 0.07, sx, 0, sz, { cast: false }); }
     }
-    if (!this.host) this.dressTerrace(out, plate);
     this.floorMat = toonMaterial();
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), this.floorMat);
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.userData.keep = true; room.add(floor);
@@ -969,20 +971,6 @@ export class OfficeView {
     if (this.host || this.pace) Promise.resolve(this.turn()).then(merge); else merge();
     this.loading = { settled: false };
     this.loadModels().catch((e) => { console.warn('furniture models unavailable, keeping the stand-ins', e); }).finally(() => { this.loading.settled = true; });
-  }
-  /** A roof terrace worth looking at from a floor page: tables under striped parasols, and a string of warm bulbs along the rail. Plain pieces, baked with the rest. */
-  dressTerrace(out, plate) {
-    const { primary, accent } = this.colors, edge = plate / 2 - 1.05, pale = '#fff2d8';
-    for (const [x, z] of [[-6.5, edge], [5.5, edge], [12.5, edge], [-12, -edge], [-3, -edge], [6, -edge], [12, -edge]]) {
-      out('#3d3b44', 0.08, 2.7, 0.08, x, 0, z, { geo: cyl });
-      for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; out(i % 2 ? accent : pale, 1.15, 0.5, 0.52, x + Math.cos(a + Math.PI / 8) * 0.88, 2.34, z + Math.sin(a + Math.PI / 8) * 0.88, { geo: cone, ry: -a - Math.PI / 8 + Math.PI / 2, cast: false }); }
-      out(mix(primary, pale, 0.45), 1.1, 0.1, 1.1, x, 0.74, z, { geo: cyl });
-      for (const k of [-1, 1]) { out(pale, 0.62, 0.32, 0.62, x + k * 1.45, 0, z, { geo: cyl }); out(mix(accent, pale, 0.3), 0.66, 0.08, 0.66, x + k * 1.45, 0.32, z, { geo: cyl }); }
-    }
-    // Festoon lights: warm bulbs along the back rail, the one run of light you see from indoors.
-    const bulb = new THREE.MeshBasicMaterial({ color: '#ffd98a', toneMapped: false });
-    for (let x = -plate / 2 + 1.2; x < plate / 2; x += 1.15) { const b = new THREE.Mesh(sph, bulb); b.scale.setScalar(0.3); b.position.set(x, 2.5 + Math.sin(x * 0.9) * 0.12, -plate / 2 + 0.4); b.userData.keep = true; this.terrace.add(b); }
-    out('#4a4750', plate - 1, 0.03, 0.03, 0, 2.62, -plate / 2 + 0.4, { cast: false });
   }
   /**
    * The walls that make the rooms. Every pane on a floor goes into one mesh, so ten glass rooms cost one draw call, and the frames bake

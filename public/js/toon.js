@@ -32,6 +32,6 @@ export function warmFlat(color) {
   const c = new THREE.Color(color), h = { h: 0, s: 0, l: 0 };
   c.getHSL(h, THREE.SRGBColorSpace);
   const grey = h.s < 0.06;
-  c.setHSL(grey ? 0.09 : h.h, grey ? 0.14 : Math.min(0.97, h.s * 1.2 + 0.12), Math.min(0.94, 0.08 + 0.92 * h.l ** 0.94), THREE.SRGBColorSpace);
+  c.setHSL(grey ? 0.09 : h.h, grey ? 0.14 : Math.min(0.97, h.s * 1.08 + 0.08), Math.min(0.94, 0.1 + 0.9 * h.l ** 0.94), THREE.SRGBColorSpace);
   return c;
 }
