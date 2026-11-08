@@ -134,7 +134,7 @@ export function installPay(ext) {
     } catch (e) { log('warn', 'pay_confirm_failed', { err: hideKeys(e?.message) }); }
   }
   const safePath = (raw) => {
-    const s = String(raw ?? '/');
+    const s = String(raw ?? '/').split('#')[0];
     return s.length <= 512 && /^\/(?!\/)[^\\\r\n]*$/.test(s) ? s : '/';
   };
   const urlWith = (origin, path, flag) => `${origin}${path}${path.includes('?') ? '&' : '?'}office_pay=${flag}`;

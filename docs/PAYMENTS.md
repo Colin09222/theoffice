@@ -12,7 +12,7 @@ Nothing is deployed by this repo's tests. Stripe has no key yet; until there is 
 
 1. Sign up at stripe.com and activate the platform account. Under **Connect**, finish the platform profile and branding (name, icon, colour: Stripe requires them for hosted onboarding) and enable the countries you want. Set **Connect > Settings > Onboarding options** as you like.
 2. Do this all in **test mode first** (see below), then repeat with the live key: the two are kept completely apart.
-3. In the server's environment, set the secret key:
+3. In the server's `.env` (the container reads it through `env_file`), set the secret key:
    ```
    STRIPE_SECRET_KEY=sk_test_...   # or sk_live_..., or a restricted rk_ key. Never in git.
    ```
@@ -21,9 +21,9 @@ Nothing is deployed by this repo's tests. Stripe has no key yet; until there is 
    STRIPE_SECRET_KEY=... node scripts/pay-setup.mjs /run/secrets/stripe-whsec
    ```
    It creates a Connect endpoint for `https://iscolinfree.com/theoffice/api/pay/webhook`, listening for every event in `WEBHOOK_EVENTS`, and writes the signing secret to the file you name with mode 600. It prints neither the key nor the secret. Stripe shows a secret only once, so running it a second time changes nothing unless you pass `--rotate`.
-5. Set the secret from that file and restart:
+5. Put the secret from that file in `.env` too, and restart:
    ```
-   STRIPE_WEBHOOK_SECRET=$(cat /run/secrets/stripe-whsec)
+   STRIPE_WEBHOOK_SECRET=whsec_...
    ```
    Both settings are required. With a key but no webhook secret the building stays "being set up", because without webhooks a lapsed subscription would never lose access.
 6. Check it: `curl -s https://<label>.middistance.com/_office/cloud/pay/status` answers `{"ready":false,"testMode":true,...}` until that floor's boss has connected, then `ready:true`.

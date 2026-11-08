@@ -389,7 +389,10 @@
     var payLocal = { ok: false, ready: false, code: 'local', message: 'Payments work once this site is published.' };
     var payFailed = function (e) { return { ok: false, ready: true, code: (e && e.code) || 'failed', message: (e && e.message) || 'That did not work. Try again in a moment.' }; };
     // Always a page on this site: the server refuses anything else, and these are the only kinds it builds a Stripe URL back to.
-    var herePath = function () { return location.pathname + location.search; };
+    var herePath = function () { return location.pathname + location.search.replace(/([?&])office_pay=[^&]*(&|$)/, function (m, a, b) { return b ? a : ''; }); };
+    // Stripe's pages refuse to open in a frame, so inside a preview frame they go to a new tab.
+    var inFrame = function () { try { return window.top !== window.self; } catch (e) { return true; } };
+    var leave = function (url) { if (inFrame()) window.open(url, '_blank', 'noopener'); else location.assign(url); };
     var pay = {
       /** {ready, testMode, message, products: [{key, name, description, amountCents, currency, interval}]}. Never throws. */
       status: function () {
@@ -402,7 +405,7 @@
         var redirect = o.redirect !== false;
         if (self.mode === 'local') return Promise.resolve(payLocal);
         return request('POST', 'pay/checkout', { product: o.product, returnPath: o.returnPath || herePath() }, { timeout: 25000 })
-          .then(function (r) { if (r.ok && r.url && redirect) location.assign(r.url); return r; }, payFailed);
+          .then(function (r) { if (r.ok && r.url && redirect) leave(r.url); return r; }, payFailed);
       },
       /** True when this signed-in person has paid for this product and it hasn't lapsed or been refunded. Decided on the server each time. */
       has: function (product) {
@@ -415,7 +418,7 @@
         var redirect = o.redirect !== false;
         if (self.mode === 'local') return Promise.resolve(payLocal);
         return request('POST', 'pay/manage', { returnPath: o.returnPath || herePath() }, { timeout: 25000 })
-          .then(function (r) { if (r.ok && r.url && redirect) location.assign(r.url); return r; }, payFailed);
+          .then(function (r) { if (r.ok && r.url && redirect) leave(r.url); return r; }, payFailed);
       },
     };
 
