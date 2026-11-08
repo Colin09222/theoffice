@@ -11,8 +11,8 @@ const ONLY = process.env.POLISH_ONLY || '';
 let failures = 0;
 const results = {};
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`.slice(0, 600)); if (!ok) failures++; };
-const STEP = process.env.POLISH_STEP || '';  // run only the steps whose name has this in it
-const step = async (name, fn) => { if (STEP && !name.includes(STEP)) return; try { const d = await fn(); check(name, true, d || ''); } catch (e) { check(name, false, String(e.message).slice(0, 300)); } };
+const STEP = process.env.POLISH_STEP || '';  // run only the steps whose name matches this pattern
+const step = async (name, fn) => { if (STEP && !new RegExp(STEP).test(name)) return; try { const d = await fn(); check(name, true, d || ''); } catch (e) { check(name, false, String(e.message).slice(0, 300)); } };
 
 
 // A slow mock line, so the staff are still at their work when the building is looked at.
