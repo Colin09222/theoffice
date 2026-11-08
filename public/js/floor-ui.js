@@ -18,6 +18,7 @@ import { aheadState, isParked, lift, park, peekAhead, unpark } from './floorcach
 import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } from './mail-ui.js';
 import { renderServers, renderServerRequests, serverTab, serversPending } from './server-panel.js';
 import { payTab, payPending, renderPayRequests, renderPay, onPayLanding } from './pay-ui.js';
+import { legalPending, renderLegalRequests } from './legal-ui.js';
 import { renderNumbers } from './numbers-ui.js';
 import { onChatEvent } from './chat-ui.js';
 import { launchFlow, makerCard } from './launch-ui.js';
@@ -391,7 +392,7 @@ class FloorPage {
     if (businessActive(this)) tabs.push(['business', 'Business']);
     tabs.push(['talk', 'Talk'], ['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
     if (this.owner) {
-      const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + serversPending(this) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length + mailPending(this) + payPending(this);
+      const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + serversPending(this) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length + mailPending(this) + payPending(this) + legalPending(this);
       tabs.push(mailTab(this));  // email: the boss's own Inbox (mail-ui.js)
       tabs.push(payTab(this));  // payments: connect Stripe, status, sales (pay-ui.js)
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
@@ -853,7 +854,8 @@ class FloorPage {
     renderMailRequests(this, list);  // email to someone new, waiting for the boss's OK
     renderServerRequests(this, list);  // a server slot, waiting for the boss's OK
     renderPayRequests(this, list);  // a product and price the team proposed, waiting for the boss's tap
-    if (!items.length && !(this.state.domains || []).length && !(this.state.ios || []).length && !mailPending(this) && !serversPending(this) && !payPending(this)) list.append(h('p.empty', {}, this.state.domainsOn ? 'No requests. Staff can ask, but only you can say yes.' : 'No requests. Staff can ask for things here, but they can\'t buy anything.'));
+    renderLegalRequests(this, list);  // the Lawyer's drafts and facts, waiting for the boss's tap (legal-ui.js)
+    if (!items.length && !(this.state.domains || []).length && !(this.state.ios || []).length && !mailPending(this) && !serversPending(this) && !payPending(this) && !legalPending(this)) list.append(h('p.empty', {}, this.state.domainsOn ? 'No requests. Staff can ask, but only you can say yes.' : 'No requests. Staff can ask for things here, but they can\'t buy anything.'));
     for (const p of items) {
       const setStatus = async (status) => { try { await api(`/floors/${this.slug}/purchases/${p.id}`, { method: 'POST', body: { status } }); p.status = status; sfx('stamp'); this.renderTabs(); this.renderBody(); } catch (e) { toast(e.message, 'bad'); } };
       list.append(h(`article.card.request.${p.status}`, {},

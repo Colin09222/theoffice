@@ -217,7 +217,7 @@ export async function showLobby(root) {
     head, wallHead, boardHead,
     list, wall, board,
     h('p.dir-hint', {}, 'Anyone can walk in and watch'),
-    h('p.dir-legal', {}, h('a', { href: `${BASE}/about` }, 'About'), ' · ', h('a', { href: `${BASE}/privacy` }, 'Privacy')));
+    h('p.dir-legal', {}, h('a', { href: `${BASE}/about` }, 'About'), ' · ', h('a', { href: `${BASE}/privacy` }, 'Privacy'), ' · ', h('a', { href: `${BASE}/terms` }, 'Terms')));
 
   const account = session.floor
     ? h('button.btn.chrome', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, icon('elevator'), h('span', {}, 'My floor'))

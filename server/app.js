@@ -23,6 +23,7 @@ import { appLabel, appOrigin, appHostLabel, lookupLabel, appHeaders, previewCook
 import { handleData, DataError, DATA_LIMITS, clearProjectData } from './appdata.js';
 import { installCloud, CHAT_JS, CHAT_PANEL_JS, SDK_JS, API_PREFIX } from './cloud/index.js';
 import { installPay } from './cloud/pay.js';
+import { installLegal } from './legal.js';
 import { recordVisit, projectStats, formEntries, formsCsv, formCount } from './launch.js';
 import { DomainRefused } from './domains.js';
 import { installOrders } from './orders.js';
@@ -716,6 +717,9 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // Email: every company's own address. See docs/MAIL.md.
   const mail = installMail(ext);
   extensions.push(mail);
+  // The Lawyer: each project's own Terms, Privacy and Refunds, up only after the boss's tap. See docs/LEGAL.md.
+  const legal = installLegal(ext);
+  extensions.push(legal);
   // Their timers run with the engine's: started by whoever starts the engine, stopped on close.
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
@@ -742,9 +746,11 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     let path = segs.filter((s, i) => !(s === '' && i === segs.length - 1)).join('/');
     if (path === '' || trailingSlash) path = path ? `${path}/index.html` : 'index.html';
     let safe;
+    const lg = legal.page(f, pr, path);  // the approved /terms, /privacy and /refunds (server/legal.js); matched exactly, before the file rules
+    if (lg) return lg;
     try { safe = cleanPath(path, { binary: true }); } catch { return null; }
     const row = get(db, 'SELECT content FROM published_files WHERE floor_id=? AND project=? AND path=?', f.id, pr.slug, safe);
-    if (row) return { type: mimeOf(safe), body: row.content };
+    if (row) return legal.decorate(f, pr, { type: mimeOf(safe), body: row.content });
     if (safe !== 'index.html' && !safe.endsWith('/index.html')) return null;
     const md = get(db, 'SELECT content FROM published_files WHERE floor_id=? AND project=? AND path=?', f.id, pr.slug, safe.replace(/index\.html$/, 'index.md'));
     if (!md) return null;
@@ -1013,7 +1019,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       const rest = pathname.slice(BASE.length);
       if (rest === '/robots.txt') return send(res, 200, 'User-agent: *\nDisallow: /\n', { 'content-type': 'text/plain; charset=utf-8' });
       if (rest === '/sdk/office.js' && (req.method === 'GET' || req.method === 'HEAD')) { limit('read', ip); return send(res, 200, req.method === 'HEAD' ? undefined : SDK_JS, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }); }
-      if ((rest === '/privacy' || rest === '/about') && (req.method === 'GET' || req.method === 'HEAD')) { limit('read', ip); return serveStatic(req, res, `${rest}.html`); }
+      if ((rest === '/privacy' || rest === '/about' || rest === '/terms') && (req.method === 'GET' || req.method === 'HEAD')) { limit('read', ip); return serveStatic(req, res, `${rest}.html`); }
       if (rest.startsWith('/f/')) {
         limit('publicSite', ip);
         if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...BASE_HEADERS, 'content-security-policy': SANDBOX_CSP, allow: 'GET, HEAD' }); return res.end(); }
