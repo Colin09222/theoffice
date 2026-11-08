@@ -9,6 +9,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { boot, claim, floorState, until, Client, sleep } from './helpers.js';
 import { get, all, run, openDb } from '../server/db.js';
+import { loadConfig } from '../server/config.js';
 import { nextRunAt, stripFigures, figuresIn, composeReport, dailyStatus, requestDailyRun, setDailyPaused, ensureDailySchema } from '../server/daily.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -66,6 +67,14 @@ describe('the pure parts', () => {
     assert.doesNotMatch(r, /budget|\$\d/i);
     const s = composeReport({ when: 'x', facts, outcome: 'stopped', why: 'budget', tasks: [], published: [], summary: '', next: '' });
     assert.match(s, /stopped/); assert.doesNotMatch(s, /budget|\$\d/i);
+  });
+});
+
+describe('the settings', () => {
+  test('the building-wide limit defaults to 5 floors a day, and both limits can be set', () => {
+    assert.equal(loadConfig({}).dailyMaxFloors, 5);
+    assert.equal(loadConfig({ DAILY_MAX_FLOORS: '2' }).dailyMaxFloors, 2);
+    assert.equal(loadConfig({ DAILY_TOKEN_CAP: '1000' }).dailyTokenCap, 1000);
   });
 });
 
