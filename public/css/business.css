@@ -137,6 +137,31 @@
 .requisition.running .stamp { border-color: var(--leaf); color: var(--leaf); }
 .requisition.declined .stamp, .requisition.rejected .stamp { border-color: var(--ink-3); color: var(--ink-3); }
 .requisition .row { display: flex; gap: 8px; }
+.requisition.ended .stamp, .requisition.withdrawn .stamp, .requisition.failed .stamp, .requisition.paused .stamp { border-color: var(--ink-3); color: var(--ink-3); }
+.requisition.approved .stamp { border-color: var(--sun-d); color: var(--sun-d); }
+
+/* the Google search ad, as it would show, and its keywords */
+.search-ad { margin: 0 0 8px; padding: 8px 10px; border-radius: 6px; background: #fff; box-shadow: inset 0 0 0 1px var(--line); }
+.search-ad small { display: block; font: 600 12.5px var(--cond); color: var(--ink-3); }
+.search-ad small span { color: var(--ink-2, var(--ink)); }
+.search-ad b { display: block; margin: 2px 0; font: 600 16px/1.25 var(--cond); color: #1a4fb5; }
+.search-ad p { margin: 0; font-size: 14px; line-height: 1.35; }
+.keywords { display: flex; flex-wrap: wrap; gap: 5px; }
+.keywords .kw { padding: 1px 7px; border-radius: 3px; background: var(--paper-2); font: 600 13px var(--cond); }
+
+/* where paid ads run: a switch plate, one lit lamp per channel; one that isn't here yet is taped over */
+.ad-where { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 2px 0 10px; }
+.plate { position: relative; display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 8px 10px; border: 0; border-radius: 5px; text-align: left; font: inherit; color: var(--ink);
+  background: linear-gradient(#f4efe3, #e6dfcd); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12), 0 2px 0 var(--line); cursor: default; }
+.plate b { font: 700 14px/1.15 var(--cond); }
+.plate-lamp { flex: none; width: 12px; height: 12px; border-radius: 50%; background: #b9b2a3; box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .2); }
+.plate.on .plate-lamp { background: radial-gradient(circle at 35% 30%, #c9f5d4, var(--leaf)); box-shadow: 0 0 8px rgba(40, 160, 80, .6); }
+.plate.soon { opacity: .78; }
+.plate.soon b { color: var(--ink-3); }
+.plate .tape { position: absolute; right: -4px; top: -8px; padding: 2px 8px; background: rgba(255, 236, 160, .92); box-shadow: 0 1px 2px rgba(0, 0, 0, .18); transform: rotate(4deg);
+  font: 700 11.5px var(--cond); letter-spacing: .06em; text-transform: uppercase; color: #6b5300; }
+@media (max-width: 420px) { .ad-where { grid-template-columns: 1fr; } }
+
 
 /* the way in */
 .biz-start .ico { fill: var(--teal-d); }

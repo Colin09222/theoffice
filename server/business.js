@@ -2,15 +2,42 @@
 // them a business idea and build it. The work itself is ordinary tasks for the ordinary staff, through the ordinary engine, tools and ledger; this
 // module only keeps the journey's place, hands out each step's tasks, reads where they stand, and tells the manager what changed. See docs/BUSINESS.md.
 // Honesty: an idea card's links must have been opened or found on this floor, and every figure on it must come from one of them. Money: the only
-// figure anyone sees is the boss's own choice of ad money, an ad request needs the boss's own click, and it then waits for the building manager.
+// figure anyone sees is the boss's own choice of ad money, and an ad request needs the boss's own click. Paid ads run on Google Search only, and
+// only with ADS_PAID_ENABLED on: the approval is recorded first, then the campaign is made PAUSED, then switched on; it ends within 7 days, never
+// costs more than the approved amount, and the building's monthly cap is checked before each one. See docs/ADS.md and server/googleads.js.
 import { readFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { get, all, run, tx } from './db.js';
 import { slugify, readFile, floorBytes, mimeOf } from './workspace.js';
+import { googleAdsFromConfig, planCampaign, createCampaign, campaignId, campaignStats, checkSearchAd, monthStartMs, AdsError, HARD_MAX_USD, LIMITS } from './googleads.js';
+import { createMockGoogleAds } from './googleads-mock.js';
 
 const CONFIG = JSON.parse(readFileSync(new URL('../config/business.json', import.meta.url), 'utf8'));
 export const loadBusinessConfig = () => CONFIG;
 export const NOTE = 'Business mode:';
-const LIVE_SPEND = ['awaiting_boss', 'queued', 'running'];
+// A floor has one of these at a time. queued is the old by-hand path's, kept for requests filed before Google was connected.
+const LIVE_SPEND = ['awaiting_boss', 'approved', 'running', 'paused', 'queued'];
+// Approved this month: what counts against the building's monthly cap.
+const COMMITTED = ['approved', 'running', 'paused', 'ended'];
+
+const AD_COLUMNS = {
+  tag: "TEXT NOT NULL DEFAULT ''", campaign: "TEXT NOT NULL DEFAULT ''", budget_rn: "TEXT NOT NULL DEFAULT ''", starts_at: 'INTEGER', ends_at: 'INTEGER',
+  spent_micros: 'INTEGER NOT NULL DEFAULT 0', impressions: 'INTEGER NOT NULL DEFAULT 0', clicks: 'INTEGER NOT NULL DEFAULT 0', synced_at: 'INTEGER',
+  note: "TEXT NOT NULL DEFAULT ''", updated_at: 'INTEGER',
+};
+/** The ad requests table, with its Google columns. The watchdog and the admin script open it too. */
+export function ensureAdSpend(db) {
+  db.exec(SCHEMA);
+  const have = new Set(all(db, 'PRAGMA table_info(ad_spend)').map((c) => c.name));
+  for (const [name, def] of Object.entries(AD_COLUMNS)) if (!have.has(name)) db.exec(`ALTER TABLE ad_spend ADD COLUMN ${name} ${def}`);
+  db.exec(`DROP INDEX IF EXISTS ad_spend_one_live; CREATE UNIQUE INDEX IF NOT EXISTS ad_spend_live ON ad_spend(floor_id) WHERE status IN (${LIVE_SPEND.map((s) => `'${s}'`).join(',')});`);
+}
+/** What counts against the monthly cap: every campaign approved or running this month, at its approved amount or its real cost if that is higher. */
+export function committedUsd(db, { now = Date.now(), timeZone = 'America/New_York', except = 0 } = {}) {
+  const since = monthStartMs(now, timeZone);
+  const rows = all(db, `SELECT amount, spent_micros FROM ad_spend WHERE id != ? AND status IN (${COMMITTED.map(() => '?').join(',')}) AND (decided_at >= ? OR COALESCE(ends_at, 0) >= ?)`, except, ...COMMITTED, since, since);
+  return rows.reduce((n, r) => n + Math.max(Number(r.amount) || 0, (Number(r.spent_micros) || 0) / 1e6), 0);
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS business_journeys (
@@ -25,7 +52,6 @@ CREATE TABLE IF NOT EXISTS ad_spend (
   audience TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'awaiting_boss', purchase_id INTEGER, created_at INTEGER NOT NULL, decided_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS ad_spend_floor ON ad_spend(floor_id, id);
-CREATE UNIQUE INDEX IF NOT EXISTS ad_spend_one_live ON ad_spend(floor_id) WHERE status IN ('awaiting_boss','queued','running');
 `;
 
 export class BusinessError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
@@ -99,7 +125,7 @@ export function checkAdSpend({ amount, chosen, live = false, cfg = CONFIG }) {
   if (live) return 'this floor already has a campaign going. One at a time: nothing was filed';
   return null;
 }
-export const moneyOk = (amount, cfg = CONFIG) => Number.isInteger(amount) && cfg.adMoney.includes(amount) && amount <= cfg.adMaxUsd;
+export const moneyOk = (amount, cfg = CONFIG) => Number.isInteger(amount) && cfg.adMoney.includes(amount) && amount <= Math.min(cfg.adMaxUsd, HARD_MAX_USD);
 
 // ---- the journey's shape ----
 const stepIndex = (id) => CONFIG.steps.findIndex((s) => s.id === id);
@@ -107,9 +133,19 @@ const TASK_ITEMS = CONFIG.tracks.flatMap((t) => t.items.filter((i) => i.task));
 
 export function installBusiness(ext) {
   const { db, cfg, engine, log, now, hooks, GET, POST, json, send, readJson, limit, requireOwner, floorBySlug, viewerFor, HttpError, BASE } = ext;
-  db.exec(SCHEMA);
+  ensureAdSpend(db);
   const on = cfg.businessMode !== false;
   let timer = null, stopped = false;
+  // Google Ads: the real API with this server's credentials, a mock in tests (cfg.adsMock, never from the environment), or nothing.
+  const adsMock = cfg.adsMock ? createMockGoogleAds({ now, timeZone: cfg.googleAds?.timeZone }) : null;
+  const gads = googleAdsFromConfig(cfg, { mock: adsMock });
+  const tz = gads?.timeZone || cfg.googleAds?.timeZone || 'America/New_York';
+  const paidOn = () => !!(cfg.adsPaidEnabled && gads);
+  const moneyOptions = () => (paidOn() ? CONFIG.adMoney.filter((n) => n <= Math.min(CONFIG.adMaxUsd, HARD_MAX_USD)) : [0]);
+  const roomFor = (amount, except = 0) => committedUsd(db, { now: now(), timeZone: tz, except }) + Number(amount) <= cfg.adMonthlyCapUsd;
+  const dayText = (ms) => new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(ms));
+  const PAID_OFF = 'Paid ads aren’t switched on yet. Launch for free and the ads still go up on the floor to share.';
+  const NO_ROOM = 'The building can’t take another paid campaign this month. Launch for free and the ads still go up on the floor to share.';
   const seen = new Map();  // floorId -> what the floor last saw of the journey, so a change is announced once
 
   const rowOf = (floorId) => get(db, 'SELECT * FROM business_journeys WHERE floor_id=?', floorId);
@@ -276,7 +312,7 @@ export function installBusiness(ext) {
     const extra = notes ? ` What the boss asked for this time: "${plain(notes, 300)}".` : '';
     return {
       pictures: `Business mode, Customers. Make ${CONFIG.ads.pictures} picture ads for "${idea.name}" (${idea.sell}, for ${idea.whoPays}; live at ${url}) with generate_image in project ${slug}, directory ads: name one ad-1 (aspect 1:1, for the feed) and one ad-2 (aspect 9:16, for stories). Each an illustration, never a photo pretending to be real; any words in the picture short and spelled out in your prompt. No prices, customer counts or claims.${extra} Don't publish.`,
-      ads: `Business mode, Customers. Plan the ads for "${idea.name}" (${idea.sell}, for ${idea.whoPays}; live at ${url}; the offer is in projects/${slug}/notes/offer.md). First call save_ad_plan with the headline, the primary text, the goal, who it is for, where (Facebook and Instagram first) and an A-versus-B test (two headlines, or a picture against a video). Then make ${CONFIG.ads.videos} short vertical video ads with make_video_ad in project ${slug}: ${CONFIG.video.minSeconds} to ${CONFIG.video.maxSeconds} seconds each, one caption line each, named video-1 and video-2, showing the idea rather than any real person or place. Nothing invented: no customer numbers, testimonials or prices that aren't marked as planned in the offer.${extra} Don't publish.`,
+      ads: `Business mode, Customers. Plan the ads for "${idea.name}" (${idea.sell}, for ${idea.whoPays}; live at ${url}; the offer is in projects/${slug}/notes/offer.md). Paid ads run as a Google search ad (Facebook and Instagram come later); the picture and video ads are for sharing. First call save_ad_plan with the headline and the primary text (for sharing), the goal, who it is for, an A-versus-B test (two headlines), and the Google search ad: ${LIMITS.headlines[0]} to ${LIMITS.headlines[1]} search_headlines of ${LIMITS.headline} characters or fewer with no exclamation marks, ${LIMITS.descriptions[0]} to ${LIMITS.descriptions[1]} search_descriptions of ${LIMITS.description} characters or fewer, and ${LIMITS.keywords[0]} to ${LIMITS.keywords[1]} keywords, the short phrases someone types into Google when they want this. Then make ${CONFIG.ads.videos} short vertical video ads with make_video_ad in project ${slug}: ${CONFIG.video.minSeconds} to ${CONFIG.video.maxSeconds} seconds each, one caption line each, named video-1 and video-2, showing the idea rather than any real person or place. Nothing invented: no customer numbers, testimonials or prices that aren't marked as planned in the offer.${extra} Don't publish.`,
     };
   }
   function startCustomers(floor, row, { notes = '' } = {}) {
@@ -312,16 +348,18 @@ export function installBusiness(ext) {
     const row = activeRow(c.floor.id);
     if (!row || row.step !== 'customers' || tasksOf(row).ads !== c.task?.id) throw new BusinessError(409, 'not_now', 'save_ad_plan is only for the Business mode ads task');
     const t = (k, max, min = 3) => { const v = plain(a?.[k], max); if (v.length < min) throw new BusinessError(400, 'missing', `${k} is required`); return v; };
+    // Paid ads run on Google Search, so that is where the plan says; the picture and video ads are made for sharing either way.
     const plan = {
-      headline: t('headline', 60), primaryText: t('primary_text', 200), goal: t('goal', 160), who: t('who', 200),
-      where: (Array.isArray(a?.where) ? a.where : String(a?.where ?? '').split(/,|\band\b/)).map((w) => plain(w, 40)).filter(Boolean).slice(0, 4),
-      test: { a: plain(a?.test_a, 120), b: plain(a?.test_b, 120), measure: plain(a?.test_measure, 120) || 'whichever gets more sign-ups per view' },
+      headline: t('headline', 60), primaryText: t('primary_text', 200), goal: t('goal', 160), who: t('who', 200), where: ['Google Search'],
+      test: { a: plain(a?.test_a, 120), b: plain(a?.test_b, 120), measure: plain(a?.test_measure, 120) || 'whichever gets more sign-ups per click' },
     };
-    if (!plan.where.length || !/facebook|instagram/i.test(plan.where[0])) throw new BusinessError(400, 'where', 'where starts with Facebook or Instagram');
     if (!plan.test.a || !plan.test.b) throw new BusinessError(400, 'test', 'the A-versus-B test needs both test_a and test_b');
+    const search = checkSearchAd({ headlines: a?.search_headlines, descriptions: a?.search_descriptions, keywords: a?.keywords, path1: a?.path1, path2: a?.path2 });
+    if (!search.ok) throw new BusinessError(400, 'search_ad', `nothing was saved: ${search.problems.join('; ')}`);
+    plan.search = { headlines: search.headlines, descriptions: search.descriptions, keywords: search.keywords, path1: search.path1, path2: search.path2 };
     // The ad's words promise nothing the offer doesn't: a figure in them is one the offer or the rival prices already carry.
     const notes = ['offer.md', 'prices.md'].map((f) => readFile(db, c.floor.id, `projects/${row.project}/notes/${f}`)?.content).filter((x) => typeof x === 'string').join(' ');
-    const loose = unbacked([plan.headline, plan.primaryText, plan.test.a, plan.test.b].join(' • '), notes);
+    const loose = unbacked([plan.headline, plan.primaryText, plan.test.a, plan.test.b, ...search.headlines, ...search.descriptions].join(' • '), notes);
     if (loose.length) throw new BusinessError(400, 'figures', `nothing was saved: ${loose.slice(0, 4).map((f) => `"${f.text}"`).join(', ')} ${loose.length === 1 ? 'is' : 'are'} not in the offer. Take ${loose.length === 1 ? 'it' : 'them'} out of the ad words`);
     patch(c.floor.id, { ads: JSON.stringify({ ...adsOf(row), plan }) });
     c.say('typing', 'Planning the campaign', 'wrote the ad words and the campaign plan', { project: row.project });
@@ -393,14 +431,17 @@ export function installBusiness(ext) {
     if (row.step === 'launch') throw new BusinessError(409, 'launched', 'This one has already launched.');
     const a = skip ? 0 : Number(amount ?? 0);
     if (!moneyOk(a)) throw new BusinessError(400, 'bad_amount', 'Choose one of the ad amounts shown.');
+    if (a > 0 && !paidOn()) throw new BusinessError(400, 'paid_off', PAID_OFF);
     if (!skip && !adsReady(row)) throw new BusinessError(409, 'not_ready', 'The ads are still being made.');
+    if (a > 0 && !adsOf(row).plan?.search) throw new BusinessError(409, 'no_search_ad', 'The Google search ad isn’t written yet. Ask your manager to change the ads, or launch for free.');
+    if (a > 0 && !roomFor(a)) throw new BusinessError(409, 'no_room', NO_ROOM);
     patch(floor.id, { step: 'launch', ad_money: a, money_set: 1, ads_skipped: skip ? 1 : 0 });
     const n = publishAds(floor, activeRow(floor.id));
     const url = engine.liveUrl(floor, row.project);
     const report = `give the boss the launch report for ${row.project} with launch_report.`;
     const guide = skip ? `the boss skipped ads for now, so it launches without them. Step 4 of 4, Launch: ${report} Then, in a line, say they can make ads any time by asking you.`
       : a === 0 ? `the boss chose no ad money: "just for fun". Step 4 of 4, Launch: the ads are up on the floor${n ? ' and on the live site' : ''} for anyone to share. ${report} Then tell the boss, in a line or two, how to share them and who to send them to first.`
-        : `the boss chose ad money for this campaign and it is waiting on their approval. Step 4 of 4, Launch: call request_ad_spend with amount ${a} (exactly that), the audience from the plan, and the ads (the file names in ads/). Then ${report} Tell the boss the request needs their one click on the floor, and then goes to the building manager; Meta isn't connected yet, so it is queued until the building manager acts on it. Don't repeat the amount in chat.`;
+        : `the boss chose ad money for this campaign and it is waiting on their approval. Step 4 of 4, Launch: call request_ad_spend with amount ${a} (exactly that), the audience from the plan, and the ads (the file names in ads/). Then ${report} Tell the boss the request needs their one click on the floor; then it runs as a Google search ad for up to a week, never spends more than they approved, and stops on its own. Don't repeat the amount in chat.`;
     if (by === 'boss') tellManager(floor, 'launch', guide);
     log('info', 'business launch', { floorId: floor.id, paid: a > 0, skip, by });
     changed(floor.id);
@@ -412,50 +453,147 @@ export function installBusiness(ext) {
     const live = !!get(db, `SELECT 1 x FROM ad_spend WHERE floor_id=? AND status IN (${LIVE_SPEND.map(() => '?').join(',')})`, c.floor.id, ...LIVE_SPEND);
     const problem = checkAdSpend({ amount: a?.amount, chosen: row.money_set ? row.ad_money : 0, live });
     if (problem) throw new BusinessError(400, 'refused', problem);
+    if (!paidOn()) throw new BusinessError(400, 'refused', 'paid ads are switched off in this building right now, so nothing was filed. The ads are up on the floor to share for free');
+    if (!roomFor(a.amount)) throw new BusinessError(400, 'refused', 'the building can’t take another paid campaign this month, so nothing was filed. The ads are up on the floor to share for free');
     const files = adFiles(c.floor.id, row.project);
     const known = new Set([...files.pictures, ...files.videos].map((f) => f.name));
     const ads = (Array.isArray(a?.ads) ? a.ads : []).map((x) => String(x).split('/').pop()).filter((x) => known.has(x)).slice(0, 6);
     const audience = plain(a?.audience, 300) || adsOf(row).plan?.who || '';
     if (!audience) throw new BusinessError(400, 'audience', 'say who the ads are for in audience');
     try {
-      run(db, 'INSERT INTO ad_spend (floor_id,project,amount,ads,audience,status,created_at) VALUES (?,?,?,?,?,?,?)', c.floor.id, row.project, Number(a.amount), JSON.stringify(ads.length ? ads : [...known].slice(0, 4)), audience, 'awaiting_boss', now());
+      run(db, 'INSERT INTO ad_spend (floor_id,project,amount,ads,audience,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)', c.floor.id, row.project, Number(a.amount), JSON.stringify(ads.length ? ads : [...known].slice(0, 4)), audience, 'awaiting_boss', now(), now());
     } catch { throw new BusinessError(409, 'live', 'this floor already has a campaign going. One at a time: nothing was filed'); }
     c.say('typing', 'Filing the ad request', 'filed an ad spend request for the boss to approve');
     engine.emit(c.floor.id, 'ad_spend', {}, { persist: false, ownerOnly: true });
     changed(c.floor.id);
-    return 'Filed. The boss sees it on the floor with an Approve button. Nothing is spent until they click it, and then the building manager handles it. Meta isn\'t connected yet, so say it will be queued for the building manager.';
+    return 'Filed. The boss sees it on the floor with an Approve button. Nothing is spent until they click it; then it runs as a Google search ad for up to a week, never over what they approved, and stops on its own.';
   }
-  /** The boss's one click. Approving files it with the building manager on the same path as any purchase; declining just closes it. */
+  const spendRow = (id) => get(db, 'SELECT * FROM ad_spend WHERE id=?', id);
+  /** Closes a request that never reached Google, or that Google turned down, with the reason. Nothing was spent either way. */
+  function closeSpend(r, status, note, say) {
+    if (!run(db, `UPDATE ad_spend SET status=?, note=?, decided_at=COALESCE(decided_at, ?), updated_at=? WHERE id=? AND status IN ('awaiting_boss','approved')`, status, plain(note, 200), now(), now(), r.id).changes) return;
+    const floor = get(db, 'SELECT * FROM floors WHERE id=?', r.floor_id);
+    if (floor && say) tellManager(floor, '', say);
+    changed(r.floor_id);
+  }
+  /** The boss's one click. Approving records it, then the campaign is made on Google, paused, and switched on once it is all there. */
   function decideAdSpend(floor, id, answer) {
     const r = get(db, 'SELECT * FROM ad_spend WHERE id=? AND floor_id=?', id, floor.id);
     if (!r) throw new BusinessError(404, 'not_found', 'There is no such ad request.');
     if (r.status !== 'awaiting_boss') throw new BusinessError(409, 'decided', 'That one is already decided.');
     if (answer === 'decline') {
-      run(db, "UPDATE ad_spend SET status='declined', decided_at=? WHERE id=? AND status='awaiting_boss'", now(), id);
-      tellManager(floor, '', 'the boss declined the ad spend request. Nothing was spent and nothing goes to the building manager. Acknowledge it in a line; the ads stay up on the floor to share.');
+      run(db, "UPDATE ad_spend SET status='declined', decided_at=?, updated_at=? WHERE id=? AND status='awaiting_boss'", now(), now(), id);
+      tellManager(floor, '', 'the boss declined the ad spend request. Nothing was spent. Acknowledge it in a line; the ads stay up on the floor to share.');
     } else if (answer === 'approve') {
-      const mgr = manager(floor.id);
-      const pr = project(floor.id, r.project);
-      const plan = adsOf(activeRow(floor.id) || {}).plan;
-      tx(db, () => {
-        if (!run(db, "UPDATE ad_spend SET status='queued', decided_at=? WHERE id=? AND status='awaiting_boss'", now(), id).changes) throw new BusinessError(409, 'decided', 'That one is already decided.');
-        const pid = engine.filePurchase(floor, mgr, {
-          item: `AD SPEND: Facebook and Instagram ads for ${pr?.title || r.project}`, price: r.amount,
-          why: `Ads: ${parse(r.ads, []).join(', ') || 'the ads on the floor'}. Audience: ${r.audience}.${plan ? ` Goal: ${plan.goal}. A/B test: ${plan.test.a} vs ${plan.test.b}.` : ''} Approved by the boss on the floor. Meta isn't connected yet, so this is queued for the building manager.`,
-          link: pr?.published_at ? engine.liveUrl(floor, r.project) : '',
+      if (!paidOn()) closeSpend(r, 'withdrawn', 'Paid ads are switched off right now', 'the boss approved the ad, but paid ads are switched off in this building right now, so nothing was set up and nothing was spent. Say so in a line; the ads stay up on the floor to share.');
+      else {
+        // The cap is checked and the approval recorded together, so two floors approving at once can't both squeeze under it.
+        const ok = tx(db, () => {
+          if (!roomFor(r.amount, id)) return false;
+          if (!run(db, "UPDATE ad_spend SET status='approved', decided_at=?, tag=?, updated_at=? WHERE id=? AND status='awaiting_boss'", now(), randomBytes(3).toString('hex'), now(), id).changes) throw new BusinessError(409, 'decided', 'That one is already decided.');
+          return true;
         });
-        run(db, 'UPDATE ad_spend SET purchase_id=? WHERE id=?', pid, id);
-      });
-      tellManager(floor, '', 'the boss approved the ad spend request. It is now queued for the building manager, the same way a purchase is; nothing runs on Meta until the building manager acts on it. Tell the boss that in a line.');
+        if (!ok) closeSpend(r, 'withdrawn', 'No room for another paid campaign in the building this month', 'the boss approved the ad, but the building can’t take another paid campaign this month, so nothing was set up and nothing was spent. Say so in a line, without any amounts; the ads stay up on the floor to share.');
+        else {
+          tellManager(floor, '', 'the boss approved the ad. It is being set up on Google Search now: made paused, then switched on once it is all in place. It runs for up to a week, never spends more than they approved, and stops on its own. Tell the boss that in a line or two; don\'t repeat the amount.');
+          setImmediate(() => { runCampaign(id).catch(() => {}); });
+        }
+      }
     } else throw new BusinessError(400, 'bad_answer', 'answer is approve or decline');
     changed(floor.id);
     return adSpendView(floor.id);
   }
+  /** Makes the approved request's campaign on Google, PAUSED, then switches it on, but only while the boss's approval still stands on record. */
+  const settingUp = new Set();
+  async function runCampaign(id) {
+    if (!gads || settingUp.has(id)) return;
+    settingUp.add(id);
+    let made = null;
+    try {
+      const r = spendRow(id);
+      if (!r || r.status !== 'approved' || !r.decided_at) return;
+      const floor = get(db, 'SELECT * FROM floors WHERE id=?', r.floor_id);
+      if (!paidOn() || !floor) return closeSpend(r, 'withdrawn', 'Paid ads were switched off before it started');
+      const pr = project(r.floor_id, r.project);
+      // The ad points at the live site: its own domain, its app address, or the building's address plus the floor's path.
+      const live = pr?.published_at && !pr.private ? engine.liveUrl(floor, r.project) : '';
+      let finalUrl = '';
+      try { finalUrl = live ? new URL(live, `${cfg.publicOrigin || 'http://localhost'}/`).href : ''; } catch { /* left empty: refused below */ }
+      const words = adsOf(rowOf(r.floor_id) || {}).plan?.search || {};
+      let plan;
+      try {
+        plan = planCampaign({ requestId: r.id, tag: r.tag, label: `floor ${floor.number ?? floor.id} ${r.project}`, amountUsd: r.amount, days: cfg.adCampaignDays, cpcCeilingUsd: cfg.adCpcCeilingUsd,
+          now: now(), timeZone: tz, finalUrl, ...words, geo: CONFIG.google?.geo, language: CONFIG.google?.language });
+      } catch (e) {
+        return closeSpend(r, 'failed', e.message, `the Google ad couldn't be set up: ${plain(e.message, 200)}. Nothing was spent. Tell the boss plainly in a line; once it's fixed you can file it again with request_ad_spend if they want.`);
+      }
+      run(db, 'UPDATE ad_spend SET starts_at=?, ends_at=?, updated_at=? WHERE id=?', plan.startsAt, plan.endsAt, now(), id);
+      made = await createCampaign(gads, plan);
+      run(db, 'UPDATE ad_spend SET campaign=?, budget_rn=?, updated_at=? WHERE id=?', made.campaign, made.budget, now(), id);
+      const again = spendRow(id);
+      if (again?.status !== 'approved' || !again.decided_at || !paidOn()) {
+        if (made.status !== 'PAUSED') await gads.setStatus([made.campaign], 'PAUSED');
+        if (again?.status === 'approved') closeSpend(again, 'withdrawn', 'Paid ads were switched off before it started');
+        return;
+      }
+      await gads.setStatus([made.campaign], 'ENABLED');
+      run(db, "UPDATE ad_spend SET status='running', updated_at=? WHERE id=? AND status='approved'", now(), id);
+      log('info', 'ad campaign on', { floorId: r.floor_id, request: id, campaign: campaignId(made.campaign), ends: plan.endText });
+      tellManager(floor, '', `the Google search ad is on now and runs until ${dayText(plan.endsAt)}, then stops on its own. Tell the boss in a line, and that you'll tell them how many people saw it and clicked.`);
+      changed(r.floor_id);
+    } catch (e) {
+      const why = e instanceof AdsError ? e.message : 'Google Ads didn’t answer';
+      log('warn', 'ad campaign failed', { request: id, err: plain(why, 200) });
+      if (made?.campaign) await gads.setStatus([made.campaign], 'PAUSED').catch(() => {});
+      const r = spendRow(id);
+      if (r) closeSpend(r, 'failed', why, `Google didn't take the ad (${plain(why, 160)}). Nothing was spent. Tell the boss plainly in a line; once it's fixed you can file it again with request_ad_spend if they want.`);
+    } finally { settingUp.delete(id); }
+  }
+  /** Every minute or so: picks up a set-up a restart cut short, pauses and closes campaigns past their end, and reads views, clicks and cost. */
+  let adsBusy = false, lastAds = 0, lastSync = 0;
+  async function adsTick({ force = false } = {}) {
+    if (!gads || adsBusy || (!force && now() - lastAds < cfg.adsTickMs)) return;
+    adsBusy = true; lastAds = now();
+    try {
+      for (const r of all(db, "SELECT id FROM ad_spend WHERE status='approved' AND COALESCE(updated_at, decided_at, 0) < ?", now() - 60000)) await runCampaign(r.id);
+      const rows = all(db, "SELECT * FROM ad_spend WHERE status IN ('running','paused') AND campaign != ''");
+      for (const r of rows.filter((x) => x.ends_at && x.ends_at <= now())) {
+        if (r.status === 'running') await gads.setStatus([r.campaign], 'PAUSED');
+        run(db, "UPDATE ad_spend SET status='ended', updated_at=? WHERE id=?", now(), r.id);
+        const floor = get(db, 'SELECT * FROM floors WHERE id=?', r.floor_id);
+        if (floor && r.status === 'running') tellManager(floor, '', `the Google search ad has finished, as planned. ${r.impressions ? `It was seen ${r.impressions} times and clicked ${r.clicks} times.` : ''} Tell the boss in a line, without any amounts.`);
+        changed(r.floor_id);
+      }
+      const on = rows.filter((x) => !(x.ends_at && x.ends_at <= now()));
+      if (on.length && (force || now() - lastSync >= cfg.adsSyncMs)) {
+        lastSync = now();
+        const stats = await campaignStats(gads, on.map((r) => campaignId(r.campaign)));
+        for (const r of on) {
+          const s = stats.get(campaignId(r.campaign));
+          if (!s) continue;
+          run(db, 'UPDATE ad_spend SET spent_micros=?, impressions=?, clicks=?, synced_at=? WHERE id=?', s.costMicros, s.impressions, s.clicks, now(), r.id);
+          // Belt and braces with the watchdog: one that has cost more than its approved amount stops at once.
+          if (r.status === 'running' && s.costMicros > r.amount * 1e6) {
+            await gads.setStatus([r.campaign], 'PAUSED');
+            run(db, "UPDATE ad_spend SET status='paused', note=?, updated_at=? WHERE id=?", 'Stopped: it cost more than was approved', now(), r.id);
+            log('warn', 'ad campaign over its amount, paused', { request: r.id, campaign: campaignId(r.campaign) });
+          }
+          if (s.impressions !== r.impressions || s.clicks !== r.clicks) changed(r.floor_id);
+        }
+      }
+    } catch (e) { log('error', 'ads', { err: plain(e?.message || e, 200) }); } finally { adsBusy = false; }
+  }
   function adSpendView(floorId) {
     const r = get(db, 'SELECT * FROM ad_spend WHERE floor_id=? ORDER BY id DESC LIMIT 1', floorId);
     if (!r) return null;
-    const label = { awaiting_boss: 'Waiting for your approval', queued: 'Queued for the building manager', running: 'Running: the building manager took it on', declined: 'You declined it', rejected: 'The building manager turned it down' }[r.status] || r.status;
-    return { id: r.id, amount: r.amount, status: r.status, label, ads: parse(r.ads, []), audience: r.audience, metaConnected: !!cfg.metaAdsReady, createdAt: r.created_at };
+    const label = {
+      awaiting_boss: 'Waiting for your approval', approved: 'Approved: setting it up on Google Search', running: 'Running on Google Search', ended: 'Finished',
+      paused: 'Stopped early. Nothing more will be spent', failed: 'Google didn’t take it. Nothing was spent', withdrawn: 'Not set up. Nothing was spent', declined: 'You declined it',
+      queued: 'Queued for the building manager', rejected: 'The building manager turned it down',
+    }[r.status] || r.status;
+    return { id: r.id, amount: r.amount, status: r.status, label, where: 'Google Search', ads: parse(r.ads, []), audience: r.audience, createdAt: r.created_at,
+      endsOn: r.ends_at && ['approved', 'running', 'paused', 'ended'].includes(r.status) ? dayText(r.ends_at) : '', views: r.impressions || 0, clicks: r.clicks || 0,
+      note: ['failed', 'withdrawn', 'paused'].includes(r.status) ? r.note : '' };
   }
 
   // ---- the boss's and the manager's other asks ----
@@ -541,7 +679,8 @@ export function installBusiness(ext) {
       research: { searches: (research.searches || []).slice(-8), pages: (research.pages || []).slice(-12), markets: research.markets || [], compared: research.compared || [] },
       researchTask: (() => { const t = taskRow(tasksOf(row).ideas); return t ? { status: t.status } : null; })(),
       ads, preview: !!row.project && stepIndex(row.step) >= 1,
-      adMoney: { options: CONFIG.adMoney, chosen: row.money_set ? row.ad_money : 0, set: !!row.money_set, ready: phase === 'money' },
+      adMoney: { options: moneyOptions(), chosen: row.money_set ? row.ad_money : 0, set: !!row.money_set, ready: phase === 'money', paid: paidOn() },
+      channels: [{ id: 'google', label: 'Google Search', on: paidOn() }, { id: 'meta', label: 'Facebook & Instagram', on: false, soon: true }],
       adSpend: adSpendView(f.id),
     };
   }
@@ -624,6 +763,7 @@ export function installBusiness(ext) {
         step(floor, row);
       }
       syncSpend();
+      adsTick().catch(() => {});
     } catch (e) { log('error', 'business', { err: String(e?.message || e).slice(0, 200) }); }
   }
 
@@ -693,6 +833,7 @@ export function installBusiness(ext) {
 
   engine.business = {
     on, start, pick, launch, action, stop, proposeIdeas, saveAdPlan, videoTarget, videoSaved, videoFailed, requestAdSpend, decideAdSpend,
+    ads: { api: gads, mock: adsMock, paidOn, runCampaign, tick: adsTick },
     toolsFor, sawTool, stateLine, brief, view, tick, active: (floorId) => !!activeRow(floorId),
     ideasTask: (floorId) => tasksOf(activeRow(floorId) || {}).ideas,
   };

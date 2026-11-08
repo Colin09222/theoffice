@@ -113,7 +113,7 @@ const DEFS = {
   business_action: fn('business_action', 'In Business mode, do what the boss just asked: more_ideas (they want different idea cards), pick (they named a card: idea is its number, from 1), redo_ads (they want the ads changed: say how in notes), skip_ads (launch without ads for now). Use it only because the boss asked.', {
     action: { type: 'string', enum: ['more_ideas', 'pick', 'redo_ads', 'skip_ads'] }, idea: { type: 'integer', description: 'For pick: the card number, from 1' }, notes: S('What the boss wants instead, in their words'),
   }, ['action']),
-  request_ad_spend: fn('request_ad_spend', 'In Business mode at launch, file the ad money the boss chose as a request. It needs the boss\'s own Approve click, then goes to the building manager. It never spends anything itself.', {
+  request_ad_spend: fn('request_ad_spend', 'In Business mode at launch, file the ad money the boss chose as a request. It needs the boss\'s own Approve click; then it runs as a Google search ad for up to a week, never over that amount. It never spends anything itself.', {
     amount: { type: 'integer', description: 'Exactly the amount the boss chose' }, audience: S('Who the ads are shown to, from the campaign plan'),
     ads: { type: 'array', items: { type: 'string' }, description: 'The ad file names in the project\'s ads folder, such as ad-1.png' },
   }, ['amount', 'audience']),
@@ -126,10 +126,14 @@ const DEFS = {
     markets_checked: { type: 'array', items: { type: 'string' }, description: 'The markets you looked at' },
     compared: { type: 'array', description: 'How the ideas compared, including any you dropped', items: { type: 'object', properties: { idea: S('Idea'), verdict: S('Why it made the cut or didn\'t') }, required: ['idea', 'verdict'] } },
   }, ['ideas', 'markets_checked', 'compared']),
-  save_ad_plan: fn('save_ad_plan', 'Business mode ads task only: save the ad words and the campaign plan the boss sees on the floor.', {
-    headline: S('Up to about 40 characters'), primary_text: S('Up to about 125 characters'), goal: S('What the campaign is for, such as sign-ups for the notify-me list'), who: S('Who it is shown to'),
-    where: { type: 'array', items: { type: 'string' }, description: 'Where it runs, Facebook and Instagram first' }, test_a: S('Version A of the test'), test_b: S('Version B of the test'), test_measure: S('How the winner is picked'),
-  }, ['headline', 'primary_text', 'goal', 'who', 'where', 'test_a', 'test_b']),
+  save_ad_plan: fn('save_ad_plan', 'Business mode ads task only: save the ad words, the Google search ad and the campaign plan the boss sees on the floor. Paid ads run on Google Search; the picture and video ads are for sharing.', {
+    headline: S('For the picture and video ads, up to about 40 characters'), primary_text: S('Goes with the shared ads, up to about 125 characters'), goal: S('What the campaign is for, such as sign-ups for the notify-me list'), who: S('Who it is shown to'),
+    search_headlines: { type: 'array', items: { type: 'string' }, description: 'The Google search ad\'s headlines: 3 to 15, each 30 characters or fewer, no exclamation marks' },
+    search_descriptions: { type: 'array', items: { type: 'string' }, description: 'The Google search ad\'s descriptions: 2 to 4, each 90 characters or fewer' },
+    keywords: { type: 'array', items: { type: 'string' }, description: '3 to 10 phrases someone types into Google when they want this, each up to 80 characters and 10 words' },
+    path1: S('Optional word shown after the site\'s address in the ad, up to 15 letters'), path2: S('Optional second word after path1, up to 15 letters'),
+    test_a: S('Version A of the test'), test_b: S('Version B of the test'), test_measure: S('How the winner is picked'),
+  }, ['headline', 'primary_text', 'goal', 'who', 'search_headlines', 'search_descriptions', 'keywords', 'test_a', 'test_b']),
   make_video_ad: fn('make_video_ad', 'Business mode ads task only: make one short vertical video ad with a video model, saved in the project\'s ads folder with its caption. Costs real money, so make each one count.', {
     project: S('Project slug'), name: S('File name without extension, such as video-1'), prompt: S('What the video shows, up to 1000 characters. No on-screen text: the caption is added separately'),
     caption: S('The one caption line people read with the sound off'), seconds: { type: 'integer', description: 'Length, 6 to 10 seconds' },

@@ -171,11 +171,28 @@ function planEl(b) {
   const p = b.ads?.plan;
   if (!p) return null;
   const row = (label, text) => h('div.wo-row', {}, h('span', {}, label), h('p', {}, text));
+  const s = p.search;
+  const host = hostOf(b.liveUrl || '') || 'your-site';
   return h('section.work-order', { 'data-plan': '' },
     h('div.wo-head', {}, h('b', {}, 'Campaign plan'), h('small', {}, 'Work order')),
     h('div.ad-words', {}, h('span', {}, 'The ad'), h('b', {}, p.headline), h('p', {}, p.primaryText)),
-    row('Goal', p.goal), row('Who', p.who), row('Where', p.where.join(', ')),
+    s ? h('div.search-ad', { 'data-search-ad': '', 'aria-label': 'The Google search ad' },
+      h('small', {}, 'Sponsored · ', h('span', {}, [host, s.path1, s.path2].filter(Boolean).join(' › '))),
+      h('b', {}, s.headlines.slice(0, 3).join(' | ')),
+      h('p', {}, s.descriptions[0] || '')) : null,
+    row('Goal', p.goal), row('Who', p.who), row('Where', (p.where || []).join(', ')),
+    s ? h('div.wo-row', {}, h('span', {}, 'Keywords'), h('p.keywords', { 'data-keywords': '' }, ...s.keywords.map((k) => h('span.kw', {}, k)))) : null,
     row('A vs B', `A: ${p.test.a}  ·  B: ${p.test.b}`), row('Winner', p.test.measure));
+}
+/** Where paid ads run, as a switch plate: Google Search lit, Facebook and Instagram taped over until they come. */
+function whereEl(b) {
+  const ch = b.channels || [];
+  if (!ch.length) return null;
+  return h('div.ad-where', { role: 'radiogroup', 'aria-label': 'Where paid ads run', 'data-ad-where': '' }, ...ch.map((c) => {
+    const soon = c.soon || !c.on;
+    return h(`button.plate${c.on ? '.on' : ''}${soon ? '.soon' : ''}`, { type: 'button', role: 'radio', 'aria-checked': String(!!c.on), 'aria-disabled': String(soon), disabled: soon, 'data-channel': c.id },
+      h('i.plate-lamp', { 'aria-hidden': 'true' }), h('b', {}, `${c.label} ads`), soon ? h('span.tape', {}, 'coming soon') : null);
+  }));
 }
 function moneyEl(page, b) {
   let chosen = page.bizMoney ?? b.adMoney.chosen ?? 0;
@@ -191,8 +208,11 @@ function moneyEl(page, b) {
   } }, icon('rocket-launch'), h('span', {}, chosen ? `Launch with ${dollars(chosen)} of ads` : 'Launch for free'));
   return h('section.ad-money', { 'data-money-box': '' },
     h('div.wo-head', {}, h('b', {}, 'Ad money'), h('small', {}, b.adMoney.ready ? 'Your choice' : 'Once the ads are ready')),
+    whereEl(b),
     h('div.coins', { role: 'radiogroup', 'aria-label': 'Ad money for this campaign' }, ...coins),
-    h('p.fineprint', {}, 'With $0 the ads go up on your floor to share, free. Any other amount becomes a request you approve with one click; then it waits for the building manager, because Meta isn’t connected yet.'),
+    h('p.fineprint', {}, b.adMoney.paid
+      ? 'With $0 the ads go up on your floor to share, free. Any other amount becomes a request you approve with one click; then it runs as a Google search ad for up to a week and never spends more than you chose.'
+      : 'Paid ads are coming soon. For now the ads go up on your floor to share, free.'),
     go);
 }
 function customersStep(page, b) {
@@ -206,14 +226,20 @@ function spendEl(page, b) {
     for (const x of e.currentTarget.parentNode.querySelectorAll('button')) x.disabled = true;
     try { const r = await api(`/floors/${page.slug}/business/ad-spend/${s.id}`, { method: 'POST', body: { answer } }); apply(page, r); } catch (err) { toast(err.message, 'bad'); for (const x of e.currentTarget.parentNode.querySelectorAll('button')) x.disabled = false; }
   };
+  const live = s.status === 'running' || s.status === 'ended' || s.status === 'paused';
   return h(`section.requisition.${s.status}`, { 'data-ad-spend': s.status },
     h('div.wo-head', {}, h('b', {}, 'AD SPEND request'), h('small', {}, `No. ${s.id}`)),
     h('div.wo-row', {}, h('span', {}, 'Amount'), h('p', {}, h('b', {}, dollars(s.amount)), ', your choice for this campaign')),
+    h('div.wo-row', {}, h('span', {}, 'Where'), h('p', {}, s.where || 'Google Search')),
     h('div.wo-row', {}, h('span', {}, 'Ads'), h('p', {}, s.ads.join(', ') || 'The ads above')),
     h('div.wo-row', {}, h('span', {}, 'Audience'), h('p', {}, s.audience)),
+    s.endsOn ? h('div.wo-row', {}, h('span', {}, s.status === 'ended' ? 'Ended' : 'Ends'), h('p', {}, s.endsOn)) : null,
+    live ? h('div.wo-row', { 'data-ad-stats': '' }, h('span', {}, 'So far'), h('p', {}, `Seen ${s.views} ${s.views === 1 ? 'time' : 'times'}, ${s.clicks} ${s.clicks === 1 ? 'click' : 'clicks'}`)) : null,
     h('p.stamp', {}, s.label),
+    s.note ? h('p.fineprint', {}, s.note) : null,
     s.status === 'awaiting_boss' ? h('div.row', {}, h('button.btn.primary', { type: 'button', 'data-approve': '', onclick: decide('approve') }, icon('check-circle'), 'Approve'), h('button.btn.ghost', { type: 'button', 'data-decline': '', onclick: decide('decline') }, 'Decline')) : null,
-    s.status === 'queued' ? h('p.fineprint', {}, 'Meta isn’t connected yet, so nothing runs until the building manager picks it up. Nothing is spent before then.') : null);
+    s.status === 'awaiting_boss' ? h('p.fineprint', {}, 'Approve and it runs as a Google search ad for up to a week, then stops on its own. It never spends more than this amount.') : null,
+    s.status === 'queued' ? h('p.fineprint', {}, 'Nothing runs until the building manager picks it up. Nothing is spent before then.') : null);
 }
 function launchStep(page, b) {
   const out = [];
@@ -222,6 +248,8 @@ function launchStep(page, b) {
     out.push(h('p.biz-note', {}, b.launched ? 'Launched. Your launch report is in the chat.' : 'Launching: your manager is writing the launch report.'));
     const s = spendEl(page, b);
     if (s) out.push(s);
+    const w = whereEl(b);
+    if (w) out.push(w);
   }
   if (b.ads && !b.ads.skipped) out.push(h('h3.biz-sub', {}, 'The ads, ready to share'), adsEl(page, b, { share: true }));
   return out;
