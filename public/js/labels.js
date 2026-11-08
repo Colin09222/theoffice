@@ -80,9 +80,9 @@ export function tidyLabels(actors, viewWidth) {
   const bottom = calm && panel?.height ? panel.top : Infinity;
   // Nothing goes over the page's own pieces: the header card, the lift and any banner. The labels draw under them, so a label there would be cut off.
   const blocks = [];
-  for (const sel of ['.floor-top', '.floor-scrubber', '.visitor-note', '.talk-pill:not([hidden])', '.journey-slot > *']) {
-    const r = document.querySelector(sel)?.getBoundingClientRect();
-    if (r?.width && r.height) blocks.push({ x0: r.left - 4, y0: r.top - 4, x1: r.right + 4, y1: r.bottom + 4 });
+  for (const el of document.querySelectorAll('.floor-top, .floor-scrubber, .controls > *, .talk-pill:not([hidden]), .journey-slot > *')) {
+    const r = el.getBoundingClientRect();
+    if (r.width && r.height) blocks.push({ x0: r.left - 4, y0: r.top - 4, x1: r.right + 4, y1: r.bottom + 4 });
   }
   const items = [];
   for (const a of actors.values()) {

@@ -338,8 +338,10 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     // The room eases into its new space a frame at a time, and on this renderer that takes a while.
     await p.until('(() => { const v = window.__office.view; return Math.abs(v.insetNow.bottom - v.insets.bottom) < 1 && v.pinKey; })()', 'the room settled', 30000);
     await sleep(600);
-    await p.click('.pin[data-pin=talk]');
-    await p.until('window.__office.tab === "talk"', 'talk tab', 3000);
+    // Whichever pin is out where a thumb can reach it opens its own tab.
+    const pin = await p.ev('document.querySelector(".pin:not([hidden])").dataset.pin');
+    await p.click(`.pin[data-pin=${pin}]`);
+    await p.until(`window.__office.tab === ${JSON.stringify(pin)}`, `${pin} tab`, 3000);
     await p.click('[data-tab=chat]');
   });
   await step(tag('the company card lives in the sheet'), async () => {

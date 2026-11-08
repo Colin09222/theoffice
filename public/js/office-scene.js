@@ -579,6 +579,7 @@ export class Actor {
       const key = `say|${this.speech.text}`;
       this.bubble.hidden = false;
       if (this.bubble.dataset.key !== key) {
+        if ((this.view.w || 0) <= 760) this.tag.classList.add('crowded');  // on a phone new words wait for the next tidy, so a bubble never appears somewhere it hasn't been checked
         this.bubble.dataset.key = key; delete this.bubble.dataset.state;
         const line = document.createElement('span'); line.textContent = this.speech.text;
         this.bubble.className = `char-bubble speech${this.speech.small ? ' small-talk' : ''}`;
@@ -597,6 +598,7 @@ export class Actor {
     const done = task && !calm ? planProgress(this.view.tasks, task) : null;
     const key = `work|${label}|${stage}|${done ? `${done.done}/${done.total}` : ''}`;
     if (this.bubble.dataset.key === key && this.bubble.dataset.state === this.state) return;
+    if ((this.view.w || 0) <= 760 && this.bubble.hidden !== false) this.tag.classList.add('crowded');  // the same: wait for the tidy
     this.bubble.dataset.key = key; this.bubble.dataset.state = this.state;
     this.bubble.dataset.text = label;
     this.bubble.className = 'char-bubble task-pill';
@@ -2047,7 +2049,9 @@ export class OfficeView {
     for (const p of this.pins) {
       this.tv.set(p.at[0], p.at[1], p.at[2]).project(this.camera);
       const x = (this.tv.x * 0.5 + 0.5) * this.w, y = (-this.tv.y * 0.5 + 0.5) * this.h, i = this.insetNow;
-      const shown = !close && x > 8 && x < this.w - 8 && y > i.top + 8 && y < this.h - i.bottom;
+      const ctl = document.querySelector('.controls')?.getBoundingClientRect();
+      const under = ctl?.width && ctl.height && x > ctl.left - 22 && x < ctl.right + 22 && y > ctl.top - 22 && y < ctl.bottom + 22;
+      const shown = !close && !under && x > 8 && x < this.w - 8 && y > i.top + 8 && y < this.h - i.bottom;
       p.el.hidden = !shown;
       if (shown) p.el.style.transform = `translate(-50%,-50%) translate(${x.toFixed(1)}px,${y.toFixed(1)}px)`;
     }
