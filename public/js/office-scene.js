@@ -591,7 +591,7 @@ export class Actor {
     if (!busy) { delete this.bubble.dataset.key; return; }
     // The pill over a working person: what they are on, what stage it is at, and how far the plan has really got.
     const task = this.view.taskFor(this);
-    const calm = (this.view.w || 0) <= 760 && !this.full;
+    const calm = !this.full;  // a short word over someone's head, whatever the screen; the task itself is one tap away, and in the Right now line
     const label = this.state === 'queued' ? 'Waiting for a line' : calm ? (STAGE[this.state] || 'Working') : task?.title || this.activity?.slice(0, 40) || 'Thinking';
     const stage = STAGE[this.state] || '';
     const done = task && !calm ? planProgress(this.view.tasks, task) : null;
@@ -774,7 +774,7 @@ export class OfficeView {
     const terrace = new THREE.Group(); R.add(terrace); this.terrace = terrace;
     const out = (c, w, hh, dd, x, y, z, o = {}) => piece(terrace, c, w, hh, dd, x, y, z, { ...o, mat: o.mat || outdoor(c) });
     const plate = TOWER_W * WORLD_SCALE + 1.2;
-    const surround = (c) => (this.host ? c : '#2e2733');
+    const surround = (c) => (this.host ? c : '#efe3d1');
     out(surround('#e9dfcf'), plate, 0.42, plate, 0, -0.48, 0);
     out(surround('#d4c8b6'), plate + 0.3, 0.12, plate + 0.3, 0, -0.6, 0, { cast: false });
     out(surround('#d9d0c0'), ROOM_W + 1.1, 0.05, ROOM_D + 1.1, 0, -0.08, 0, { recv: true, cast: false });
@@ -785,9 +785,9 @@ export class OfficeView {
     // The terrace is part of the company too: planters along the rail in its colours and somewhere to sit outside. A timber deck follows in loadLooks.
     // On a floor page the terrace is quieter than the room, so the eye stays on the people. In the tower it is part of the outside and keeps its colours.
     const hush = (c) => (this.host ? c : mix(c, '#c9baa4', 0.55));
-    // On a floor page a wide dark stage hides whatever is outside the slab (the podium under floor 1, the roofs below), fading out at its rim so the city still shows from far back.
+    // On a floor page a wide pale backdrop, like paper under a model, hides whatever is outside the slab (the podium under floor 1, the roofs below), fading out at its rim so the city still shows from far back.
     if (!this.host) {
-      const fade = new THREE.Mesh(new THREE.CircleGeometry(78, 48), new THREE.MeshBasicMaterial({ map: canvasTex(256, 256, (x, w, h) => { const g = x.createRadialGradient(128, 128, 0, 128, 128, 128); g.addColorStop(0, 'rgba(46,39,51,1)'); g.addColorStop(0.72, 'rgba(46,39,51,1)'); g.addColorStop(1, 'rgba(46,39,51,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }), transparent: true, depthWrite: false, fog: false }));
+      const fade = new THREE.Mesh(new THREE.CircleGeometry(78, 48), new THREE.MeshBasicMaterial({ map: canvasTex(256, 256, (x, w, h) => { const g = x.createRadialGradient(128, 128, 0, 128, 128, 128); g.addColorStop(0, 'rgba(239,227,209,1)'); g.addColorStop(0.72, 'rgba(239,227,209,1)'); g.addColorStop(1, 'rgba(239,227,209,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }), transparent: true, depthWrite: false, fog: false }));
       fade.rotation.x = -Math.PI / 2; fade.position.y = -0.7; fade.renderOrder = -1; fade.userData.keep = true; terrace.add(fade);
     }
     if (this.host) for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
