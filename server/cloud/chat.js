@@ -161,7 +161,11 @@ const INJECTION = [
 export const looksLikeInjection = (text) => INJECTION.some((r) => r.test(text));
 const GREETING = /^(?:hi+|hello+|hey+|yo|good\s+(?:morning|afternoon|evening)|thanks?(?:\s+you)?|thx|ty|ok(?:ay)?|bye|goodbye)[\s!.,?]*$/i;
 
-const figureIn = (fig, known) => known.replace(/[^\p{N}]/gu, ' ').split(/\s+/).includes(fig.replace(/[^\p{N}]/gu, ''));
+// Figures are compared as numbers, so $24.50 is $24.50 however it was written and 1,200 is 1200.
+const normal = (n) => n.replace(/,/g, '').replace(/\.(\d*?)0+$/, '.$1').replace(/\.$/, '');
+const figureOf = (s) => normal(String(s).match(/\d[\d,]*(?:\.\d+)?/)?.[0] || '');
+const figuresIn = (known) => new Set([...known.matchAll(/\d[\d,]*(?:\.\d+)?/g)].map((m) => normal(m[0])));
+const figureIn = (fig, known) => figuresIn(known).has(figureOf(fig));
 const MONEY = /(?:[$€£¥]\s?\d[\d.,]*|\b\d[\d.,]*\s?(?:dollars?|euros?|pounds?|usd|eur|gbp|bucks))/gi;
 const PERCENT = /\b\d{1,3}(?:\.\d+)?\s?(?:%|percent\b)/gi;
 const PROMISE_WORDS = /\b(?:refund\w*|money[-\s]?back|discount\w*|coupon\w*|promo\s+code\w*|voucher\w*|compensat\w*|reimburs\w*|guarantee\w*|warrant\w*|free\s+of\s+charge)\b/gi;
@@ -172,7 +176,7 @@ const DEADLINE = [
   /\b(?:same|next)[-\s]day\b/gi,
 ];
 const ACTION = /\bI(?:'ve|\s+have|'ll|\s+will|\s+am\s+going\s+to)\s+(?:gone\s+ahead\s+and\s+|just\s+)?(?:cancel|refund|book|order|process|chang|updat|send|sent|email|charg|ship|issu|reset|delet|add|remov|escalat)\w*/i;
-const SECRETISH = /sk-(?:or|ant)-|Bearer\s+\S|ya29\.|-----BEGIN [A-Z ]*PRIVATE KEY/i;
+const SECRETISH = /sk-(?:or|ant)-[A-Za-z0-9_-]|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}|\bya29\.[A-Za-z0-9._-]|-----BEGIN [A-Z ]*PRIVATE KEY/;
 const RULE_ECHO = /Your only source of facts|company information between the two|\[\[PASS|KNOW-[0-9a-f]{8}/i;
 /**
  * What the model wrote, against what the company actually said. Returns the answer to show, or {ok: false} and why, in which case the question goes to the boss
@@ -407,8 +411,10 @@ export function createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, eng
     }
     const conv = conversation(F, p, body.conversation, true);
     const typed = clean(body.text).slice(0, L.chars);
-    if (typed) addMessage(conv, 'visitor', typed);
-    const question = typed || get(db, "SELECT text FROM chat_messages WHERE conversation_id=? AND role='visitor' ORDER BY id DESC LIMIT 1", conv.id)?.text;
+    const last = get(db, "SELECT text FROM chat_messages WHERE conversation_id=? AND role='visitor' ORDER BY id DESC LIMIT 1", conv.id)?.text;
+    // The same words again ("yes, pass it on") aren't a new message, they're the one already in the chat.
+    if (typed && typed !== last) addMessage(conv, 'visitor', typed);
+    const question = typed || last;
     if (!question) return reply(400, { error: 'empty', message: 'What would you like to ask the team?' });
     return reply(200, handOff(f, pr, conv, question, 'asked for a person'));
   }

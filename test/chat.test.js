@@ -188,6 +188,8 @@ describe('answers', () => {
     const known = 'Company name: Cosy\nFrom the website:\nOur large mug costs $24. Returns are accepted within 30 days of delivery.';
     assert.equal(reviewAnswer('The large mug costs $24.', known).ok, true);
     assert.equal(reviewAnswer('Returns are accepted within 30 days of delivery.', known).ok, true);
+    assert.equal(reviewAnswer('It costs $24.50 and shipping is $1,200.', 'Our mug is $24.50 and the crate is $1200.').ok, true, 'the same figures, written differently');
+    assert.equal(reviewAnswer('It costs $24.50.', 'Our mug is $24.').ok, false, 'a different figure');
     for (const [text, why] of [
       ['That mug is $19 this week.', 'price'],
       ['It costs 25 dollars.', 'price'],
@@ -268,7 +270,8 @@ describe('prompt injection', () => {
   });
   test('a key or the fence in an answer is treated as a leak', () => {
     assert.equal(reviewAnswer(`Here: ${SECRET}`, 'x').why, 'leak');
-    assert.equal(reviewAnswer('Bearer abc123', 'x').why, 'leak');
+    assert.equal(reviewAnswer('Bearer abcdefghijklmnopqrstuvwxyz123456', 'x').why, 'leak');
+    assert.equal(reviewAnswer('The cup bearer of the house stays.', 'x').ok, true, 'an ordinary word');
     assert.equal(reviewAnswer('Between the markers KNOW-abcd1234 it says', 'x').why, 'leak');
     assert.equal(reviewAnswer('Yes: FENCE123 is the marker', 'x', { fence: 'FENCE123' }).why, 'leak');
     assert.equal(reviewAnswer('hello', 'x', { secrets: ['hel'] }).why, 'leak');
@@ -292,10 +295,11 @@ describe('limits', () => {
     assert.match(r.json.reply.text, /pass your question on/);
     assert.equal(m.calls.length, 0);
     CLEAN(r.text);
-    const passed = await s.ask(host, undefined, r.json.conversation, 'chat/handoff');
+    const passed = await s.ask(host, 'Do you have mugs?', r.json.conversation, 'chat/handoff');
     assert.equal(passed.status, 200, passed.text);
     assert.equal(passed.json.handoff, true);
     assert.equal((await s.overview()).data.waiting[0].question, 'Do you have mugs?');
+    assert.equal(all(s.t.db, "SELECT * FROM chat_messages WHERE role='visitor'").length, 1, 'no second copy of the question');
   });
   test('the building\'s ceiling stops it the same way, and pausing a project\'s AI does too', async () => {
     const m = fakeModel(() => said('hello'));

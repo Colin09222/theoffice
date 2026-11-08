@@ -21,7 +21,7 @@ export function chatHandlers({ engine }) {
   const guard = (fn) => { try { return fn(); } catch (e) { if (e?.name === 'CloudError' || e?.status) throw new WorkspaceError(e.message); throw e; } };
   return {
     chat_questions(c, a) {
-      c.say?.('reading', 'Checking what visitors asked');
+      c.say?.('reading', 'Checking the site chat');
       const list = chat().unanswered(c.floor.id, { days: Number.isInteger(a.days) ? a.days : 7 });
       if (!list.length) return 'Nothing is waiting: the chat has answered everything visitors asked lately.';
       return `${list.length} question${list.length === 1 ? '' : 's'} waiting for the boss:\n${chat().fence(list)}`;
