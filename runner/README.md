@@ -177,12 +177,43 @@ Operator shortcuts on hz: `runnerctl GET /v1/apps`, `deploy-dir.mjs <label> <fol
 
 ## Install / restore
 
-Install (done 2026-11-08, see the dated note in ACCESS-AND-OPS.md): gVisor `runsc` from gVisor's
-apt repository; `deploy/daemon.json` merged into `/etc/docker/daemon.json` and `systemctl reload
-docker` (SIGHUP; no container restarts); `bash deploy/install.sh --with-browser-base`; the Caddy
-changes in `deploy/Caddyfile.runner`, validated, then `caddy reload`.
+**Status 2026-11-08 00:15 ET: not installed.** The go (Colon's Hetzner snapshot) did not arrive
+within the 90-minute window, so nothing on hz was changed. The source is staged at
+`/root/office-runner-src` and the browser base image is already built. When the go comes, as root
+on hz from that folder:
 
-Restore (backups and a RESTORE.md are in `/root/office-runner-backup-*` on hz):
+1. `B=$(bash deploy/backup.sh)`: saves the Caddyfile, daemon.json (absent today), iptables, ip6tables
+   and nft rules, UFW status, networks and container StartedAt, with a RESTORE.md.
+2. `bash deploy/install-gvisor.sh`: `runsc` from gVisor's apt repository (only that package; its
+   postinst touches Docker only when daemon.json exists, and then only with `systemctl reload`),
+   merges `deploy/daemon.json` (runtimes `runsc` and `runsc-build`), `systemctl reload docker`.
+   Check that every container's StartedAt is unchanged, and that
+   `docker run --rm --runtime=runsc --network none node:22-slim@sha256:5ec23b7c… node -p "require('os').release()"`
+   prints gVisor's `4.4.0`.
+3. `bash deploy/install.sh --with-browser-base`; check the sites.
+4. DNS under gVisor: `docker run --rm --runtime=runsc --network office-apps --ip 172.30.0.200 node:22-slim@sha256:5ec23b7c… node -e "require('dns').promises.lookup('example.com').then(console.log)"`.
+   If Docker's embedded DNS (127.0.0.11) isn't reachable from gVisor's network stack, write
+   `/opt/office-runner/etc/resolv.conf` (`nameserver 185.12.64.1`, `nameserver 185.12.64.2`), set
+   `"APP_RESOLV_CONF": "/opt/office-runner/etc/resolv.conf"` in runner.json, restart office-runner.
+5. Caddy: if `md5sum /opt/edge/Caddyfile` is still `e3d0255e2ae008473b451e84c20b3b63`, write the
+   validated staged file in place (`cat /root/runner-survey/Caddyfile.new > /opt/edge/Caddyfile`),
+   otherwise apply `deploy/Caddyfile.runner` by hand; then `docker exec edge-caddy-1 caddy validate
+   --config /etc/caddy/Caddyfile` and `docker exec edge-caddy-1 caddy reload --config
+   /etc/caddy/Caddyfile`. Check iscolinfree.com (now 302 to /theoffice/), /theoffice/,
+   sortmydog.com and a middistance.com project.
+6. Proof: `deploy-dir.mjs hello samples/hello-ws` and `deploy-dir.mjs scraper samples/scraper`, then
+   `docker exec -u 10001:10001 office-app-<label> node attack.js <net|rate|bw|oom|cpu|fork|fs|who>`,
+   a WebSocket round trip to `wss://api--hello.middistance.com/ws`, `/scrape?url=https://example.com`
+   on the scraper, two more apps then a 5th deploy (409), `IDLE_MINUTES` set low to watch sleep and
+   wake, `/v1/apps/<label>/logs`, `kill-all` and `--release`, the sites after every step.
+
+Check these first after the go, they can only be settled on the real box: Chromium under gVisor
+with `--pids-limit 128` (gVisor's own threads count against the cgroup, so Chromium may need fewer
+processes or the browser tier a higher limit); Docker's embedded DNS under runsc (fallback above);
+whether gVisor honours `noexec` on `/tmp` and `/data`; that an over-limit app is OOM-killed as a
+whole sandbox.
+
+Restore, once installed (backups and a RESTORE.md will be in `/root/office-runner-backup-*` on hz):
 
 1. Apps off: `/opt/office-runner/kill-all`.
 2. Caddy: `cat /root/office-runner-backup-*/Caddyfile > /opt/edge/Caddyfile` (in place, same inode),
