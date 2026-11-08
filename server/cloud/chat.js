@@ -80,7 +80,10 @@ export function injectChat(body) {
   if (i >= 0 && /^<\/body\s*>\s*(?:<\/html\s*>\s*)?(?:<!--[\s\S]*?-->\s*)*$/i.test(body.slice(i))) return `${body.slice(0, i)}${CHAT_SCRIPT}${body.slice(i)}`;
   return `${body}\n${CHAT_SCRIPT}`;
 }
-const isPrivacyPage = (segs) => /^privacy(?:[-_]policy)?(?:\.html?)?$/i.test(String(segs.filter(Boolean).at(-1) === 'index.html' ? segs.filter(Boolean).at(-2) : segs.filter(Boolean).at(-1) || ''));
+const isPrivacyPage = (segs) => {
+  const parts = segs.filter(Boolean), last = parts.at(-1) === 'index.html' ? parts.at(-2) : parts.at(-1);
+  return /^privacy(?:[-_]policy)?(?:\.html?)?$/i.test(last || '');
+};
 /** A company's own privacy page says the chat exists, in one sentence, wherever the page ends. */
 export function addPrivacyLine(body) {
   if (typeof body !== 'string' || body.includes('data-office-chat-privacy')) return body;
