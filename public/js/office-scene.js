@@ -588,6 +588,7 @@ export class Actor {
       return;
     }
     const busy = this.state !== 'idle';
+    if ((this.view.w || 0) <= 760 && this.bubble.hidden && busy) this.tag.classList.add('crowded');  // a note that has just appeared waits for the tidy too
     this.bubble.hidden = !busy;
     if (!busy) { delete this.bubble.dataset.key; return; }
     // The pill over a working person: what they are on, what stage it is at, and how far the plan has really got.
@@ -598,7 +599,6 @@ export class Actor {
     const done = task && !calm ? planProgress(this.view.tasks, task) : null;
     const key = `work|${label}|${stage}|${done ? `${done.done}/${done.total}` : ''}`;
     if (this.bubble.dataset.key === key && this.bubble.dataset.state === this.state) return;
-    if ((this.view.w || 0) <= 760 && this.bubble.hidden !== false) this.tag.classList.add('crowded');  // the same: wait for the tidy
     this.bubble.dataset.key = key; this.bubble.dataset.state = this.state;
     this.bubble.dataset.text = label;
     this.bubble.className = 'char-bubble task-pill';
