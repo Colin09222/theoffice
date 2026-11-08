@@ -346,6 +346,8 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     await p.click('[data-tab=chat]');
   });
   await step(tag('a line said out loud fits the screen and stays above the sheet, with people walking between rooms'), async () => {
+    await p.ev('window.__office.setSheet("half"); true');
+    await sleep(900);
     await p.ev('for (const a of window.__office.view.actors.values()) a.idleTimer = 1e9; true');
     await p.ev(RECORD);
     await p.ev(`window.__bubbleBad = []; window.__watch = setInterval(() => { for (const e of document.querySelectorAll('#labels .char-bubble.speech:not([hidden])')) { const r = e.getBoundingClientRect(); const sheet = document.querySelector('.floor-panel').getBoundingClientRect(); if (r.left < -2 || r.right > innerWidth + 2) window.__bubbleBad.push('off side ' + Math.round(r.left) + ' ' + Math.round(r.right)); if (r.bottom > sheet.top + 2) window.__bubbleBad.push('under the sheet'); if (parseFloat(getComputedStyle(e).fontSize) < 11) window.__bubbleBad.push('too small'); } }, 120); true`);
