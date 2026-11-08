@@ -242,3 +242,18 @@ body[data-lobby="building"] .hero, body[data-lobby="building"] .hints, body[data
   .stack-strip { grid-template-columns: 50px 1fr 18px; min-height: 92px; }
 }
 @media (prefers-reduced-motion: reduce) { .stack-strip.live .stack-dot, .stack-strip.live .portrait.busy { animation: none; } }
+
+/* The 3D building: the scene shows through, the strips stay away, and every floor in view has a plaque by it that also opens it. */
+body[data-tower="3d"] #scene { visibility: visible; }
+body[data-tower="3d"] { background: #cfe0ec; }
+.tower-plaques { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
+.tower-plaque { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 7px; max-width: 230px; min-height: 36px; padding: 4px 12px 4px 4px; border: 0; border-radius: 999px; background: rgba(28, 23, 18, .8); color: #fff8e6; font: 700 15px/1 var(--cond); white-space: nowrap; pointer-events: auto; cursor: pointer; will-change: transform; translate: 0 -50%; box-shadow: 0 2px 10px rgba(0, 0, 0, .2); }
+.tower-plaque b { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 999px; background: var(--brand, #d9774a); color: #fff; font-size: 16px; }
+.tower-plaque span { overflow: hidden; text-overflow: ellipsis; }
+.tower-plaque i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #3fd06a; box-shadow: 0 0 0 3px rgba(63, 208, 106, .25); }
+.tower-plaque:hover, .tower-plaque:focus-visible { outline: none; background: rgba(28, 23, 18, .94); box-shadow: 0 0 0 3px var(--brand, #d9774a); }
+.tower-plaque.to-let { background: rgba(58, 54, 48, .72); color: #e8dcc4; font-size: 13px; }
+.tower-plaque.to-let b { background: #7d7466; }
+.tower-plaque.off { visibility: hidden; }
+body.tower-flying .tower-plaques, body.tower-flying #labels { opacity: 0; transition: opacity .25s; }
+@media (max-width: 760px) { .tower-plaque { min-height: 32px; max-width: 180px; font-size: 14px; } .tower-plaque b { min-width: 24px; height: 24px; font-size: 14px; } }

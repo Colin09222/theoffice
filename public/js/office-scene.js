@@ -417,6 +417,7 @@ export class Actor {
     this.nameEl = document.createElement('span'); this.nameEl.className = 'char-name'; this.nameEl.textContent = info.name;
     this.bubble = document.createElement('span'); this.bubble.className = 'char-bubble'; this.bubble.hidden = true;
     this.tag.append(this.bubble, this.nameEl);
+    if (view.host) { this.tagOff = true; this.tag.style.visibility = 'hidden'; }  // the tower shows it once the floor is in view
     view.labels.append(this.tag);
     // The kit's model takes over from the stand-in when it lands; a failed load changes nothing.
     loadModelCharacter(info.look, { accent: view.colors.accent }).then((mc) => this.swapChar(mc)).catch((e) => { if (!this.dead) console.warn('character model unavailable', e); });
