@@ -16,7 +16,7 @@ export function openClaim({ code = '' } = {}) {
     const state = { code, floor: null, name: '', tagline: '', colors: { ...DEFAULT_COLORS }, bossName: '', look: { ...DEFAULT_LOOK } };
     let builder = null;
     const stepCode = () => {
-      const input = h('input.code-input', { name: 'code', placeholder: 'OFFICE-XXXX-XXXX-XXXX-XXXX', value: state.code, autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', autofocus: true, 'aria-label': 'Your office code', maxlength: 64 });
+      const input = h('input.code-input', { name: 'code', placeholder: 'OFFICE-XXXX-XXXX-XXXX-XXXX', value: state.code, autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', autofocus: true, 'aria-label': 'Your office code', maxlength: 500 });  // room for a whole pasted message: the server finds the code in it
       const e = err();
       let busy = false;
       // Pasting a whole code is the whole step: no extra tap. The server checks it exactly as it always has, and a bad one just shows why.

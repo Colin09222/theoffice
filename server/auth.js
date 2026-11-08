@@ -13,7 +13,13 @@ function randomGroups(groups, len) {
   }
   return out.join('-');
 }
-export const normalizeCode = (c) => String(c ?? '').trim().toUpperCase().replace(/[\s_]+/g, '-').slice(0, 64);
+/** A code pasted out of a chat message can bring the rest of the message with it, so the OFFICE-XXXX-XXXX-XXXX-XXXX part is found wherever it is. */
+const OFFICE_CODE = /OFFICE[\s_-]*([A-Z0-9]{4})[\s_-]*([A-Z0-9]{4})[\s_-]*([A-Z0-9]{4})[\s_-]*([A-Z0-9]{4})/;
+export function normalizeCode(c) {
+  const up = String(c ?? '').trim().toUpperCase(), m = up.match(OFFICE_CODE);
+  if (m) return `OFFICE-${m[1]}-${m[2]}-${m[3]}-${m[4]}`;
+  return up.replace(/[\s_]+/g, '-').slice(0, 64);
+}
 
 export function issueCode(db, floorNumber = null, now = Date.now()) {
   const code = `OFFICE-${randomGroups(4, 4)}`;

@@ -1,5 +1,5 @@
 // ID-badge photos. Everyone gets a real headshot of their own 3D self, one at a time and out of the way of the room. Until it's developed
-// (or where there's no WebGL at all) they get a drawn face in the same colours and the same big eyes, from the cast's own spec.
+// (or where there's no WebGL at all) they get a drawn one in the same colours, from the cast's own spec.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { stage } from './stage.js';
 import { h } from './dom.js';
@@ -45,11 +45,11 @@ async function develop() {
       const mc = new Character(job.look, { accent: job.accent, scale: 2.2, role: jobOf(job.look) });
       if (document.hidden) await new Promise((r) => setTimeout(r, 200));
       mc.update(0.016);
-      mc.group.rotation.y = 0.22;  // just off square-on, so the big eyes both look at you
+      mc.group.rotation.y = 0.16;  // just off square-on, so both dot eyes look at you
       scene.add(mc.group); mc.group.updateMatrixWorld(true);
-      // Frame the whole soft face from the person's own height, so a wizard's hat and a very short manager both fit.
+      // The top of the bean with its dot eyes, over the collar, lapels and tie, and any hat: framed from the person's own height.
       const tall = mc.headTop, top = mc.labelY;
-      const view = Math.max(tall * 0.92, top * 0.98), aimY = top - view * 0.5;
+      const view = Math.max(tall * 0.6, top * 1.05 - tall * 0.5), aimY = top * 1.02 - view * 0.5;
       cam.position.set(0.12, aimY + tall * 0.04, view / 2 / Math.tan(THREE.MathUtils.degToRad(9)) + 0.4);
       cam.lookAt(0, aimY, 0);
       renderer.render(scene, cam);

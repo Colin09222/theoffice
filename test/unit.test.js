@@ -114,6 +114,16 @@ test('cookies carry every required flag and Path=/theoffice', () => {
   for (const f of ['Path=/theoffice', 'HttpOnly', 'Secure', 'SameSite=Lax', 'Max-Age=100']) assert.ok(c.includes(f), f);
   assert.deepEqual(parseCookies('a=1; b=2; a=3'), { a: '1', b: '2' });
 });
+test('an office code is found inside whatever was pasted with it', () => {
+  const code = 'OFFICE-ABCD-EFGH-JKLM-NPQR';
+  assert.equal(normalizeCode(`Here's your code: ${code} thanks!`), code);
+  assert.equal(normalizeCode(`Hi!\n\n  ${code.toLowerCase()}\n`), code);
+  assert.equal(normalizeCode('office abcd efgh jklm npqr'), code);
+  assert.equal(normalizeCode('OFFICE_ABCD_EFGH_JKLM_NPQR'), code);
+  assert.equal(normalizeCode(code), code);
+  // Recovery codes and anything else keep the old behaviour.
+  assert.equal(normalizeCode(' recover-abcde fghjk '), 'RECOVER-ABCDE-FGHJK');
+});
 test('secrets hash and verify', () => { const h = hashSecret('abc'); assert.ok(verifySecret('abc', h)); assert.ok(!verifySecret('abd', h)); assert.ok(!verifySecret('abc', 'junk')); assert.equal(normalizeCode(' office-ab cd '), 'OFFICE-AB-CD'); });
 test('scrub removes keys from provider errors', () => {
   const s = scrub('bad key sk-or-v1-abc123 Bearer xyz MYSECRET', { openrouterKey: 'MYSECRET' });

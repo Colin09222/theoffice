@@ -263,7 +263,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     limit('code', ip);
     const b = await readJson(req, 2048);
     const row = get(db, 'SELECT floor_number,claimed_at FROM codes WHERE hash=?', A.sha256(A.normalizeCode(b.code)));
-    if (!row || row.claimed_at) throw new HttpError(404, 'bad_code', 'That code isn\'t valid, or it has already opened an office.');
+    if (!row) throw new HttpError(404, 'bad_code', 'We don\'t recognise that code. Check it and try again.');
+    if (row.claimed_at) throw new HttpError(404, 'bad_code', 'That code has already opened an office.');
     json(res, 200, { ok: true, floor: row.floor_number && row.floor_number <= cfg.towerFloors ? row.floor_number : nextFreeFloor() });
   });
   function nextFreeFloor(wanted) {
@@ -288,7 +289,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const recovery = A.newRecoveryCode(); const recoveryHash = A.hashSecret(recovery);
     const floorId = tx(db, () => {
       const row = get(db, 'SELECT * FROM codes WHERE hash=?', hash);
-      if (!row || row.claimed_at) throw new HttpError(404, 'bad_code', 'That code isn\'t valid, or it has already opened an office.');
+      if (!row) throw new HttpError(404, 'bad_code', 'We don\'t recognise that code. Check it and try again.');
+      if (row.claimed_at) throw new HttpError(404, 'bad_code', 'That code has already opened an office.');
       const number = nextFreeFloor(row.floor_number);
       if (!number) throw new HttpError(409, 'no_floors', 'The building is full, or that floor is taken.');
       const base = name ? given : `floor-${number}`;
