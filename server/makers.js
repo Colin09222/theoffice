@@ -86,6 +86,7 @@ export function parseReport(text) {
 export function decide(job, ev, cfg = CONFIG) {
   const limit = cfg.passes.failsBeforeAsking || 2;
   const depth = Math.max(0, Math.min(cfg.passes.max ?? 3, job.depth ?? cfg.passes.depth ?? 3));
+  const minDepth = Math.min(depth, cfg.types[job.type]?.minDepthPasses ?? 0);
   const overTokens = (cfg.passes.maxJobTokens || 0) > 0 && (job.tokens || 0) >= cfg.passes.maxJobTokens;
   const rulesFor = cfg.types[job.type]?.doneRules || [];
   if (ev.step === 'doc') {
@@ -112,14 +113,27 @@ export function decide(job, ev, cfg = CONFIG) {
   const blockers = r.bugs.filter((b) => b.severity === 'blocker');
   const passing = r.verdict === 'pass' && !regressions.length && !browserBroken.length && !blockers.length;
   const unmet = rulesFor.filter((x) => r.rules[x.id] === false || (r.rules[x.id] === undefined && x.check === 'judge')).map((x) => x.text);
-  const allDone = passing && !unmet.length && !r.bugs.some((b) => b.severity === 'major');
   const merged = { ...best }; if (passing) for (const [k, v] of Object.entries(r.rules)) if (v !== null) merged[k] = v;
-  const bugs = [...regressions.map((t) => ({ severity: 'blocker', text: `Regression: ${t}` })), ...browserBroken.filter((t) => !regressions.includes(t)).map((t) => ({ severity: 'blocker', text: `Done-rule failing: ${t}` })), ...r.bugs].slice(0, 30);
-  const patch = { fails: passing ? 0 : (job.fails || 0) + 1, best: merged, bugs, unmet, launchable: job.launchable || passing, lastPassing: passing ? job.pass : job.lastPassing ?? -1 };
-  if (allDone) return { action: 'ready', patch, passing, why: 'every done-rule passed' };
-  if (!passing && patch.fails >= limit) return { action: 'ask', patch, passing, why: regressions.length ? 'a regression is still there after a second try' : 'the same pass failed the Tester twice' };
-  if (job.pass >= depth || overTokens) return patch.launchable ? { action: 'ready', patch, passing, why: overTokens ? 'it reached the job\'s work limit' : 'every depth pass is done' } : { action: 'ask', patch, passing, why: overTokens ? 'it reached the job\'s work limit without a version that passed' : 'no version passed the Tester yet' };
-  return { action: 'build', pass: job.pass + 1, patch, passing, bugs, regressions, unmet };
+  // A rule marked serious that came back false is a bug even if the Tester didn't list it, a cheat left in the shipped build for one.
+  const seriousRules = rulesFor.filter((x) => x.serious && r.rules[x.id] === false && !browserBroken.includes(x.text)).map((x) => ({ severity: x.serious, text: `Done-rule failing: ${x.text}` }));
+  const bugs = [...regressions.map((t) => ({ severity: 'blocker', text: `Regression: ${t}` })), ...browserBroken.filter((t) => !regressions.includes(t)).map((t) => ({ severity: 'blocker', text: `Done-rule failing: ${t}` })), ...seriousRules, ...r.bugs].slice(0, 30);
+  // Anything major or worse holds Launch and goes straight to a fix pass, which doesn't use up a depth pass.
+  const serious = bugs.filter((b) => b.severity === 'major' || b.severity === 'blocker');
+  const fixLimit = cfg.passes.fixesBeforeAsking || 2;
+  const fixTries = serious.length && job.fixing ? (job.fixTries || 0) + 1 : 0;
+  const clean = passing && !serious.length;
+  const patch = { fails: passing ? 0 : (job.fails || 0) + 1, best: merged, bugs, unmet, launchable: job.launchable || passing, lastPassing: passing ? job.pass : job.lastPassing ?? -1, held: serious.length ? serious.slice(0, 6) : null, fixTries, fixing: false };
+  const done = { patch, passing, clean, serious };
+  if (clean && !unmet.length && job.pass >= minDepth) return { action: 'ready', ...done, why: 'every done-rule passed and the depth passes ran' };
+  if (serious.length) {
+    if (overTokens) return { action: 'ask', ...done, why: 'it reached the job\'s work limit with a serious bug still open' };
+    if (fixTries >= fixLimit) return { action: 'ask', ...done, why: `the team tried ${fixLimit} times and couldn't fix a serious bug` };
+    return { action: 'build', pass: job.pass, fix: true, ...done, patch: { ...patch, fixing: true }, bugs, regressions, unmet };
+  }
+  if (!passing && patch.fails >= limit) return { action: 'ask', ...done, why: regressions.length ? 'a regression is still there after a second try' : 'the same pass failed the Tester twice' };
+  if (job.pass >= depth || overTokens) return patch.launchable ? { action: 'ready', ...done, why: overTokens ? 'it reached the job\'s work limit' : 'every depth pass is done', outOfTokens: overTokens } : { action: 'ask', ...done, why: overTokens ? 'it reached the job\'s work limit without a version that passed' : 'no version passed the Tester yet' };
+  // A version that failed gets redone at the same pass: only a passing one earns the next depth pass.
+  return { action: 'build', pass: passing ? job.pass + 1 : job.pass, ...done, bugs, regressions, unmet };
 }
 const ruleText = (rules, id) => rules.find((x) => x.id === id)?.text || id;
 
@@ -138,7 +152,7 @@ It is where the depth gets decided, so make it specific enough that two builders
 7. Juice and audio: what shakes, what bursts into particles, where hit-stop goes, what tweens, which sound for what.
 8. Phone controls: exactly what each thumb does on a portrait phone.
 9. Look: a palette with hex values, the shapes, and the one idea only this game has.
-10. Passes: what the playable slice holds, then what each depth pass adds (pass 1, 2, 3).
+10. Passes: what the playable slice holds, then what each depth pass adds: pass 1 more mechanics and content; pass 2 progression and meta (unlocks, upgrades, difficulty curve, more levels or waves); pass 3 balance, onboarding, juice and audio.
 About two pages. It builds on the starter already in the project (read STARTER.md), so design for it. Original only: no named game's characters, levels, art or look. Do not publish.`,
   app: (j) => `Write notes/spec.md for ${j.title}: ${j.pitch}
 Exactly these headings: Who it is for (one line); The core thing they make or track (the ${j.object || 'item'}, with its fields); Screens (landing, sign up, the list, the detail or edit, settings), what each shows when empty, loading and failing; The one moment it has to nail; Passes (what the first version holds, then what each polish pass adds); Words (the landing page headline, three short points, and the call to action, all real: no testimonials, numbers or prices nobody gave). Payments are only a "coming soon" hook. It builds on the starter already in the project (read STARTER.md). Do not publish.`,
@@ -149,19 +163,21 @@ design.md: a palette with names and hex values, typefaces (system stacks with ch
 const DOC_ROLE = { game: 'designer', app: 'writer', website: 'writer' };
 
 export function docBrief(job) { return `${MARK} doc · ${job.title}\n${DOC[job.type](job)}`; }
-export function buildBrief(job, pass, { bugs = [], regressions = [], unmet = [] } = {}, cfg = CONFIG) {
+export function buildBrief(job, pass, { bugs = [], regressions = [], unmet = [], fix = false } = {}, cfg = CONFIG) {
+  const passJob = cfg.types[job.type]?.passJobs?.[pass - 1] || '';
   const doc = job.type === 'game' ? 'notes/design.md' : job.type === 'app' ? 'notes/spec.md' : 'notes/copy.md and notes/design.md';
   const head = pass === 0
     ? `Build the first ${job.type === 'game' ? 'playable slice' : 'version'} of ${job.title} from ${doc}, on the starter already in this project. Read STARTER.md first: it already has ${STARTER_HAS[job.type]}. Make it this ${job.type === 'game' ? 'game' : job.type === 'app' ? 'app' : 'site'}: replace the starter's demo content, keep its structure and its test hooks.`
-    : `Depth pass ${pass} of ${job.depth} on ${job.title}. Add what ${doc} lists for pass ${pass}, and fix the Tester's list below first. Change what's needed; don't rewrite what works.`;
-  const fix = [
+    : `Depth pass ${pass} of ${job.depth} on ${job.title}.${passJob ? ` This pass has its own job: ${passJob}` : ''} Add what ${doc} lists for pass ${pass}, and fix the Tester's list below first. Change what's needed; don't rewrite what works.`;
+  const fixHead = `Fix pass on ${job.title}. The Tester found serious bugs (major or blocker), and Launch is held until they are gone. Fix every [major] and [blocker] item below, nothing new until they're fixed, and don't rewrite what works.${job.type === 'game' ? ' Remove any cheat or debug hook from the shipped build (URL parameters like ?wave=, god mode, test keys, debug panels).' : ''}`;
+  const fixList = [
     regressions.length ? `REGRESSIONS (these worked before; fix them first, nothing goes live until they do):\n${regressions.map((x) => `- ${x}`).join('\n')}` : '',
     bugs.length ? `The Tester's bug list from the last pass:\n${bugs.map((b) => `- [${b.severity}] ${b.text}`).join('\n')}` : '',
     unmet.length ? `Done-rules not met yet:\n${unmet.map((x) => `- ${x}`).join('\n')}` : '',
   ].filter(Boolean).join('\n');
   return `${MARK} build ${pass} · ${job.title}
-${head}
-${fix}
+${fix ? fixHead : head}
+${fixList}
 The Tester plays it after you, in a real browser, against these done-rules:
 ${rulesBlock(job.type, cfg)}
 Quality bars: ${barsLine(job.type, cfg)}.
@@ -172,14 +188,15 @@ const STARTER_HAS = {
   app: 'a landing page and a signed-in app shell on Office Cloud accounts and the database, with create, edit and delete, empty, loading and error states, settings and a coming-soon payments hook',
   website: 'fast accessible sections, full search and social meta, and a contact form that posts to Office Cloud',
 };
-export function testBrief(job, pass, { computer = false } = {}, cfg = CONFIG) {
+export function testBrief(job, pass, { computer = false, recheck = [] } = {}, cfg = CONFIG) {
   const doc = job.type === 'game' ? 'notes/design.md' : job.type === 'app' ? 'notes/spec.md' : 'notes/copy.md';
   const how = computer
     ? `Run the browser half first: node .office/playtest.mjs project --type ${job.type} --out .office/playtest (install playwright with npm i -D playwright && npx playwright install chromium if it asks). It serves the project, ${job.type === 'game' ? 'plays 60 s of scripted and random keyboard, touch and gamepad input at desktop and phone size, watches for console errors, soft-locks and the frame rate, and saves screenshots of the menu, play and game over' : job.type === 'app' ? 'signs up, creates something, reloads, signs out and back in, at desktop and phone size' : 'checks the phone layout, every link, the meta tags and the form'}, and writes playtest.json with a result for each browser rule. Then look at the screenshots and judge them against ${doc}, as a ${job.type === 'game' ? 'player: is it clear, is it alive, would you go again' : 'first real visitor'}.`
     : `You have no browser here, so read the code against ${doc} and the rules, and give null for any browser rule you can't be sure of.`;
+  const lateGame = job.type === 'game' ? `Every pass, including this one, re-check the late game: reach the final boss (or last level) and the win screen, on a debug copy of the project at .office/debug-copy, where you may start at the last wave with extra health. That copy never ships, so never put it inside the project or save it. Say in your report that you reached them, or that this version doesn't have them yet. Set lategame true only if the boss and the win screen really worked. Any cheat or debug hook left in the shipped build (a ?wave= style link, god mode, test keys, a debug panel) is a major bug even if the game is fun: list it as major and set nocheats false. Then look for such hooks in the shipped files on purpose. ` : '';
   return `${MARK} test ${pass} · ${job.title}
-Test ${pass === 0 ? 'the first version' : `depth pass ${pass}`} of ${job.title}. ${how}
-Fix nothing big yourself: the Builder gets your list. Write TEST-REPORT.md in the project (it never goes live): what you checked, what you saw, then the bugs worst first. End it with this block, filled in, and nothing after it:
+Test ${pass === 0 ? 'the first version' : `depth pass ${pass}`} of ${job.title}. ${how}${recheck.length ? `\nThe Builder just tried to fix these. Check each one yourself, and list any still there with its severity:\n${recheck.map((b) => `- [${b.severity}] ${b.text}`).join('\n')}\n` : ''}
+${lateGame}Fix nothing big yourself: the Builder gets your list. Write TEST-REPORT.md in the project (it never goes live): what you checked, what you saw, then the bugs worst first. End it with this block, filled in, and nothing after it:
 \`\`\`office-verdict
 {"verdict": "pass or fail", "rules": {${cfg.types[job.type].doneRules.map((r) => `"${r.id}": true`).join(', ')}}, "bugs": [{"severity": "blocker, major or minor", "text": "what is wrong and how to see it"}], "regressions": ["anything that worked in the last version and doesn't now"], "summary": "one line"}
 \`\`\`
@@ -232,16 +249,17 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
   const computerOn = (role) => !!engine.computer?.handles?.(role);
   const tokensSince = (floorId, t) => get(db, 'SELECT COALESCE(SUM(prompt_tokens+completion_tokens),0) n FROM ledger WHERE floor_id=? AND created_at>=?', floorId, t).n;
 
-  function queue(floor, j, step, pass, brief, role, deps = []) {
+  function queue(floor, j, step, pass, brief, role, deps = [], fix = false) {
     const lane = config.types[j.type].lane;
-    const title = step === 'doc' ? `Design doc: ${j.title}` : step === 'build' ? (pass === 0 ? `Build the first version of ${j.title}` : `Depth pass ${pass}: ${j.title}`) : `Play-test ${pass === 0 ? 'the first version' : `pass ${pass}`} of ${j.title}`;
+    const title = step === 'doc' ? `Design doc: ${j.title}` : fix ? (step === 'build' ? `Fix the serious bugs in ${j.title}` : `Re-test ${j.title} after the fix`) : step === 'build' ? (pass === 0 ? `Build the first version of ${j.title}` : `Depth pass ${pass}: ${j.title}`) : `Play-test ${pass === 0 ? 'the first version' : `pass ${pass}`} of ${j.title}`;
     const r = engine.assignTask(floor, manager(floor), { to: role, title, brief, plan: `Make ${j.title}`, project: j.project, dependsOn: deps, afterPrevious: false, lane });
     run(db, 'INSERT INTO maker_tasks (task_id, job_id, step, pass) VALUES (?,?,?,?)', r.id, j.id, step, pass);
     return r.id;
   }
   function queuePass(floor, j, pass, extra) {
-    const b = queue(floor, j, 'build', pass, buildBrief(j, pass, extra, config), 'builder');
-    queue(floor, j, 'test', pass, testBrief(j, pass, { computer: computerOn('tester') }, config), 'tester', [b]);
+    const fix = !!extra?.fix;
+    const b = queue(floor, j, 'build', pass, buildBrief(j, pass, extra, config), 'builder', [], fix);
+    queue(floor, j, 'test', pass, testBrief(j, pass, { computer: computerOn('tester'), recheck: fix ? (extra.bugs || []).filter((x) => x.severity === 'major' || x.severity === 'blocker') : [] }, config), 'tester', [b], fix);
     save(j, { stage: 'build', pass });
   }
 
@@ -319,6 +337,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     const st = stateOf(j);
     const worst = (st.bugs || []).slice(0, 3).map((b) => `- ${b.text}`).join('\n');
     save(j, { stage: 'asking' }, { asked: why });
+    if (st.held && !j.launched_at) { say(floor, `**${j.title} still has a serious bug, boss:** ${why}.${worst ? `\n${worst}` : ''}\nIt's your call: **Keep trying**, ${st.launchable ? `**Launch anyway** (${st.snapshotClean ? 'the last version with no known serious bug, without the newest work' : 'with that bug in it, for anyone with the link to find'}), ` : ''}or **Stop**. The buttons are on the maker card.`); return; }
     say(floor, `**${j.title} is stuck, boss:** ${why}.${worst ? `\n${worst}` : ''}\nRather than go round in circles, it's your call: **Try again**, ${st.launchable ? '**Launch what works** (the last version that passed), ' : ''}or **Stop**. The buttons are on the maker card.`);
   }
   async function ready(floor, j, why, passing = true) {
@@ -346,15 +365,16 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     const report = link.step === 'test' && ok ? parseReport(file && file.updated_at >= task.created_at ? file.content : result) : null;
     const d = decide({ ...st, type: j.type, pass: link.pass, depth: j.depth, tokens: tokensSince(floor.id, j.started_at) }, { step: link.step, ok: link.step === 'test' ? ok && !!report : ok, report }, config);
     save(j, { pass: link.pass, stage: link.step === 'doc' ? 'build' : link.step === 'build' && ok ? 'test' : j.stage }, { ...d.patch, lastReport: report ? { verdict: report.verdict, summary: report.summary, bugs: report.bugs.length, pass: link.pass } : st.lastReport || null });
-    if (report && d.passing) snapshot(j);
+    // The launch candidate is the newest clean version. A version that passed with a serious bug only fills in while there's no clean one, so "launch anyway" has something to launch.
+    if (report && d.passing && (d.clean || !st.snapshotClean)) { snapshot(j); save(j, {}, { snapshotClean: !!d.clean, snapshotFlaws: d.clean ? [] : d.serious.slice(0, 6) }); }
     const cancelPaired = () => { for (const t of all(db, "SELECT m.task_id id FROM maker_tasks m JOIN tasks t ON t.id=m.task_id WHERE m.job_id=? AND t.status IN ('todo','blocked')", j.id)) engine.cancelTask(floor, t.id); };
     try {
       if (d.action === 'wait') return true;
       if (d.action === 'redo-doc') { cancelPaired(); const doc = queue(floor, j, 'doc', 0, docBrief({ ...j, ...stateOf(j) }), DOC_ROLE[j.type]); const b = queue(floor, j, 'build', 0, buildBrief({ ...j, ...stateOf(j) }, 0, {}, config), 'builder', [doc]); queue(floor, j, 'test', 0, testBrief(j, 0, { computer: computerOn('tester') }, config), 'tester', [b]); return true; }
       if (d.action === 'retest') { queue(floor, j, 'test', d.pass, testBrief(j, d.pass, { computer: computerOn('tester') }, config), 'tester'); return true; }
-      if (d.action === 'build') { cancelPaired(); queuePass(floor, j, d.pass, { bugs: d.bugs, regressions: d.regressions, unmet: d.unmet || [] }); return true; }
+      if (d.action === 'build') { cancelPaired(); queuePass(floor, j, d.pass, { bugs: d.bugs, regressions: d.regressions, unmet: d.unmet || [], fix: !!d.fix }); return true; }
       cancelPaired();
-      if (d.action === 'ready') { ready(floor, j, d.why, !!d.passing).catch(() => {}); return true; }
+      if (d.action === 'ready') { if (d.outOfTokens) save(j, {}, { skippedWhy: 'the work limit' }); ready(floor, j, d.why, !!d.passing).catch(() => {}); return true; }
       if (d.action === 'ask') { ask(floor, j, d.why); return true; }
     } catch (e) {
       // The floor's own limits (open tasks, tasks a day) can refuse a pass. Then it's the boss's call, not a silent stop.
@@ -363,15 +383,20 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     return true;
   }
 
-  async function launch(floor) {
+  /** anyway: the boss's explicit choice after the team couldn't fix a serious bug. Without it, an open serious bug holds Launch. */
+  async function launch(floor, { anyway = false } = {}) {
     const j = jobOf(floor.id);
     if (!j) throw new WorkspaceError('nothing has been made here yet');
-    if (!stateOf(j).launchable) throw new WorkspaceError('no version has passed the Tester yet');
+    const st = stateOf(j);
+    if (!st.launchable) throw new WorkspaceError('no version has passed the Tester yet');
+    const held = !!st.held && !j.launched_at;
+    if (held && !(anyway && j.stage === 'asking')) throw new WorkspaceError(j.stage === 'asking' ? 'a serious bug is still open: choose Keep trying, or Launch anyway' : 'the team is fixing a serious bug first');
     const url = await publishTested(floor, j);
-    save(j, { launched_at: j.launched_at || now(), ...(j.stage === 'asking' ? { stage: 'ready' } : {}) });
+    const flaws = held && !st.snapshotClean ? (st.snapshotFlaws || []) : [];
+    save(j, { launched_at: j.launched_at || now(), ...(j.stage === 'asking' ? { stage: 'ready' } : {}) }, flaws.length ? { launchedWith: flaws.slice(0, 6) } : {});
     const share = shareUrl(floor, j);
     engine.feed?.(floor.id, null, `${j.title} launched`, j.project);
-    say(floor, `**${j.title} is live:** ${share}\nShare that link. Want it on its own .com? Ask me and I'll find one; you approve before anything is bought.`);
+    say(floor, `**${j.title} is live:** ${share}\n${flaws.length ? `It went out with a known serious bug, your call: ${clip(flaws[0].text, 200)}\n` : ''}Share that link. Want it on its own .com? Ask me and I'll find one; you approve before anything is bought.`);
     return { url, share, view: view(floor) };
   }
   function decideAsk(floor, choice) {
@@ -380,11 +405,12 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     if (choice === 'stop') { save(j, { stage: 'stopped' }); say(floor, `Stopped work on ${j.title}. Everything made so far stays on the drive.`); return view(floor); }
     if (choice === 'retry') {
       const st = stateOf(j);
-      save(j, {}, { fails: 0 });
+      save(j, {}, { fails: 0, fixTries: 0 });
       const docDone = get(db, "SELECT 1 x FROM maker_tasks m JOIN tasks t ON t.id=m.task_id WHERE m.job_id=? AND m.step='doc' AND t.status='done'", j.id);
       if (!docDone) { const doc = queue(floor, j, 'doc', 0, docBrief({ ...j, ...st }), DOC_ROLE[j.type]); const b = queue(floor, j, 'build', 0, buildBrief({ ...j, ...st }, 0, {}, config), 'builder', [doc]); queue(floor, j, 'test', 0, testBrief(j, 0, { computer: computerOn('tester') }, config), 'tester', [b]); save(j, { stage: 'doc', pass: 0 }); }
+      else if (st.held) { save(j, {}, { fixing: true }); queuePass(floor, j, j.pass, { bugs: st.bugs || [], unmet: st.unmet || [], fix: true }); }
       else queuePass(floor, j, Math.min(j.pass + (st.lastPassing === j.pass ? 1 : 0), j.depth), { bugs: st.bugs || [], unmet: st.unmet || [] });
-      say(floor, `Going again on ${j.title}, with the Tester's list.`);
+      say(floor, st.held ? `Going again on ${j.title}: one more try at that serious bug.` : `Going again on ${j.title}, with the Tester's list.`);
       return view(floor);
     }
     throw new WorkspaceError('choose retry or stop');
@@ -400,13 +426,25 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     // Work stopped from outside the loop (Stop all, a cancelled task) leaves nothing open: that becomes the boss's call, once.
     if (OPEN.has(j.stage) && tasks.length && !tasks.some((t) => ['todo', 'doing', 'blocked'].includes(t.status))) { ask(floor, j, 'the work was stopped before it finished'); return view(floor); }
     const steps = [{ label: j.type === 'game' ? 'Design doc' : 'Spec', state: stepState('doc', 0) }, { label: j.type === 'game' ? 'Playable slice' : 'First version', state: stepState('build', 0) }, { label: 'Tested', state: stepState('test', 0) }];
-    for (let p = 1; p <= j.depth; p++) steps.push({ label: `${j.type === 'game' ? 'Depth' : 'Polish'} pass ${p}`, state: stepState('test', p) === 'done' ? 'done' : stepState('build', p) === 'done' ? 'doing' : stepState('build', p) });
+    const over = j.stage === 'ready' || j.stage === 'stopped';
+    const passJobs = config.types[j.type].passJobs || [];
+    for (let p = 1; p <= j.depth; p++) {
+      const raw = stepState('test', p) === 'done' ? 'done' : stepState('build', p) === 'done' ? 'doing' : stepState('build', p);
+      // A pass that never ran on a finished job was skipped, and the card says so, rather than leaving it unticked next to LIVE.
+      const skipped = over && ['todo', 'doing'].includes(raw);
+      const state = skipped || raw === 'skipped' ? 'skipped' : raw;
+      steps.push({ label: `${j.type === 'game' ? 'Depth' : 'Polish'} pass ${p}`, state, job: passJobs[p - 1] ? passJobs[p - 1].split(':')[0] : '', note: state === 'skipped' ? (st.skippedWhy || 'not run') : '' });
+    }
+    const running = OPEN.has(j.stage);
+    const heldNow = !!st.held && !j.launched_at;
     return {
       types,
       job: {
         id: j.id, type: j.type, title: j.title, pitch: j.pitch, goal: j.goal, plan: parse(j.plan, []), project: j.project, stage: j.stage, pass: j.pass, depth: j.depth,
-        launchable: !!st.launchable, launched: !!j.launched_at, url: j.launched_at ? shareUrl(floor, j) : '', steps,
-        report: st.lastReport || null, asking: j.stage === 'asking' ? { why: st.asked || '', canLaunch: !!st.launchable } : null,
+        launchable: !!st.launchable && !heldNow, launched: !!j.launched_at, url: j.launched_at ? shareUrl(floor, j) : '', steps, running,
+        held: heldNow && (running || j.stage === 'asking') ? { bugs: st.held.slice(0, 3).map((b) => b.text), tries: st.fixTries || 0, fixing: running } : null,
+        launchedWith: st.launchedWith?.length ? st.launchedWith.map((b) => b.text) : null,
+        report: st.lastReport || null, asking: j.stage === 'asking' ? { why: st.asked || '', canLaunch: !!st.launchable && !j.launched_at, held: heldNow, flaws: heldNow && !st.snapshotClean ? (st.snapshotFlaws || []).slice(0, 3).map((b) => b.text) : [] } : null,
       },
     };
   }
@@ -445,7 +483,8 @@ export function installMakers(ext) {
   });
   POST('/api/floors/:slug/makers/launch', async ({ req, res, p, ip }) => {
     const f = requireOwner(req, p.slug); limit('mutate', ip);
-    const r = await wrap(() => makers.launch(f));
+    const b = await readJson(req, 256);
+    const r = await wrap(() => makers.launch(f, { anyway: b.anyway === true }));
     json(res, 200, { url: r.share, makers: r.view });
   });
   POST('/api/floors/:slug/makers/decide', async ({ req, res, p, ip }) => {

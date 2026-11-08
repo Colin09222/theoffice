@@ -1,17 +1,24 @@
 {
   "_comment": "The maker flow: what the boss can start in three taps, the passes each kind of job goes through, and the bars its Tester and the review loop hold it to. server/makers.js reads this file. No money anywhere in it.",
   "passes": {
-    "_comment": "depth: depth passes after the playable slice (0 to max). A pass that fails twice asks the boss instead of looping. maxJobTokens counts every model token the floor spends after the job starts.",
+    "_comment": "depth: depth passes after the playable slice (0 to max). A job runs at least minDepthPasses (per type) even when every done-rule already passes. An open major or blocker bug holds Launch and sends the team straight into a fix pass; after fixesBeforeAsking failed fix attempts the boss chooses: keep trying, or launch anyway with a warning. A pass that fails with no serious bug asks after failsBeforeAsking tries. maxJobTokens counts every model token the floor spends after the job starts, sized for all three depth passes plus fix rounds.",
     "depth": 3,
     "max": 3,
     "failsBeforeAsking": 2,
-    "maxJobTokens": 6000000
+    "fixesBeforeAsking": 2,
+    "maxJobTokens": 20000000
   },
   "types": {
     "game": {
       "label": "Game",
       "blurb": "A real game with levels, enemies and upgrades",
       "lane": "game",
+      "minDepthPasses": 3,
+      "passJobs": [
+        "More mechanics and content: new enemies or obstacles, new abilities, new things to do. Something a player notices in the first minute of a run.",
+        "Progression and meta: unlocks and upgrades that matter, a difficulty curve that really ramps, more levels or waves, a reason to play one more run.",
+        "Balance, onboarding, juice and audio: tune the numbers so the first minute teaches and the last minute tests, clear first-run hints, shake, particles, tweens, hit-stop, sound for every action, and a mute that works."
+      ],
       "goal": "A game people play for 10+ minutes, with saves and a shared leaderboard, live at a link",
       "plan": ["Design doc: core loop, controls, 3+ mechanics, levels, upgrades, juice", "Playable slice on the starter", "Depth passes, each one played by the Tester in a real browser", "Launch with a share link"],
       "doneRules": [
@@ -25,7 +32,9 @@
         { "id": "progression", "text": "Levels or waves that ramp, upgrades or unlocks, scoring and a win or lose", "check": "judge" },
         { "id": "juice", "text": "Juice and audio: shake, particles, tweens, hit-stop and sound, with mute", "check": "judge" },
         { "id": "phone", "text": "Plays on a phone with on-screen or tap controls", "check": "judge" },
-        { "id": "depth", "text": "Enough content for 10+ minutes of play", "check": "judge" }
+        { "id": "depth", "text": "Enough content for 10+ minutes of play", "check": "judge" },
+        { "id": "lategame", "text": "The late game holds up: the final boss or last level and the win screen work, checked every pass on a debug copy", "check": "judge" },
+        { "id": "nocheats", "text": "No cheat or debug hook in the shipped build: no ?wave= style links, god mode, test keys or debug panels", "check": "judge", "serious": "major" }
       ],
       "bars": { "maxConsoleErrors": 0, "softlockSeconds": 60, "frozenSeconds": 12, "minFps": 30, "headlessMinFps": 18, "minMechanics": 3, "minPlayMinutes": 10 }
     },
@@ -33,6 +42,7 @@
       "label": "App / SaaS",
       "blurb": "A signed-in web app with real accounts and data",
       "lane": "app",
+      "minDepthPasses": 1,
       "goal": "A working web app: sign up, make something, find it again tomorrow, live at a link",
       "plan": ["Spec: who it is for, the core object, the screens", "Landing page plus a signed-in app shell on the starter", "Polish passes, each tested end to end by the Tester", "Launch with a share link"],
       "doneRules": [
@@ -53,6 +63,7 @@
       "label": "Website",
       "blurb": "A fast, good-looking site with real words",
       "lane": "website",
+      "minDepthPasses": 1,
       "goal": "A fast site that looks made for this subject, with a contact form that works, live at a link",
       "plan": ["Words and look: who it is for, the one thing a visitor should do", "The site on the starter", "Polish passes, each checked by the Tester at phone and desktop size", "Launch with a share link"],
       "doneRules": [

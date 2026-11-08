@@ -8,7 +8,7 @@ import { checkSite } from '../server/launch-check.js';
 
 const CFG = loadMakersConfig();
 const rulesAll = (type, v = true) => Object.fromEntries(CFG.types[type].doneRules.map((r) => [r.id, v]));
-const browserOnly = (type) => Object.fromEntries(CFG.types[type].doneRules.map((r) => [r.id, r.check === 'browser']));
+const browserOnly = (type) => Object.fromEntries(CFG.types[type].doneRules.map((r) => [r.id, r.check === 'browser' || r.serious === 'major']));
 
 describe('ideas', () => {
   test('three cards per type, each ready for Go, and games mix 2D and 3D', () => {
@@ -55,16 +55,28 @@ describe('loop control', () => {
     assert.equal(d.action, 'build'); assert.equal(d.pass, 1); assert.equal(d.patch.launchable, true);
     assert.ok(d.unmet.some((u) => /3 distinct mechanics/.test(u)));
   });
-  test('it stops early once every done-rule passes', () => {
-    const d = decide(job(), test0(rulesAll('game')));
-    assert.equal(d.action, 'ready'); assert.equal(d.patch.launchable, true);
+  test('a job runs its minimum depth passes even when every done-rule already passes', () => {
+    const early = decide(job(), test0(rulesAll('game')));
+    assert.equal(early.action, 'build'); assert.equal(early.pass, 1); assert.equal(early.patch.launchable, true);
+    assert.equal(decide(job({ pass: 2 }), test0(rulesAll('game'))).pass, 3);
+    assert.equal(decide(job({ pass: 3 }), test0(rulesAll('game'))).action, 'ready');
+    const site = { type: 'website', pass: 0, depth: 3, fails: 0, best: {}, launchable: false, tokens: 0 };
+    assert.equal(decide(site, test0(rulesAll('website'))).action, 'build', 'a website gets its one polish pass');
+    assert.equal(decide({ ...site, pass: 1 }, test0(rulesAll('website'))).action, 'ready');
+    assert.equal(CFG.types.game.minDepthPasses, 3); assert.equal(CFG.types.app.minDepthPasses, 1); assert.equal(CFG.types.website.minDepthPasses, 1);
+  });
+  test('each game depth pass has its own job, and the brief names it', () => {
+    assert.equal(CFG.types.game.passJobs.length, 3);
+    for (const p of [1, 2, 3]) assert.ok(buildBrief({ type: 'game', title: 'T', depth: 3 }, p).includes(CFG.types.game.passJobs[p - 1].split(':')[0]));
+    assert.match(testBrief({ type: 'game', title: 'T' }, 2, { computer: true }), /final boss/); assert.match(testBrief({ type: 'game', title: 'T' }, 0, { computer: true }), /debug copy/);
+    assert.doesNotMatch(testBrief({ type: 'website', title: 'T' }, 1, { computer: true }), /final boss/);
   });
   test('the bug list feeds the next pass', () => {
     const d = decide(job(), { step: 'test', ok: true, report: { verdict: 'fail', rules: { ...browserOnly('game'), inputs: false }, bugs: [{ severity: 'major', text: 'Touch does nothing' }], regressions: [] } });
     assert.equal(d.action, 'build'); assert.equal(d.patch.launchable, false);
     assert.ok(d.bugs.some((b) => /Touch does nothing/.test(b.text))); assert.ok(d.bugs.some((b) => /Done-rule failing/.test(b.text)));
     const brief = buildBrief({ type: 'game', title: 'T', depth: 3 }, d.pass, d);
-    assert.match(brief, /Touch does nothing/); assert.match(brief, /^\[Maker\] build 1/);
+    assert.match(brief, /Touch does nothing/); assert.match(brief, /^\[Maker\] build 0/); assert.match(brief, /Fix pass/);
   });
   test('a regression blocks: it is not passing, it is a blocker, and the last good version stays the launch candidate', () => {
     const d = decide(job({ pass: 1, best: { inputs: true }, launchable: true, lastPassing: 0 }), test0({ ...browserOnly('game'), inputs: false }));
@@ -77,10 +89,36 @@ describe('loop control', () => {
     const bad = { step: 'test', ok: true, report: { verdict: 'fail', rules: {}, bugs: [{ severity: 'blocker', text: 'x' }], regressions: [] } };
     const first = decide(job(), bad);
     assert.equal(first.action, 'build');
-    assert.equal(decide(job({ pass: 1, ...first.patch }), bad).action, 'ask');
+    const fix1 = decide(job({ ...first.patch }), bad);
+    assert.equal(fix1.action, 'build', 'a first failed fix goes round again');
+    assert.equal(decide(job({ ...fix1.patch }), bad).action, 'ask', 'two failed fixes ask the boss');
+    const soft = { step: 'test', ok: true, report: { verdict: 'fail', rules: {}, bugs: [{ severity: 'minor', text: 'x' }], regressions: [] } };
+    assert.equal(decide(job(), soft).pass, 0, 'a failed version is redone at the same pass');
+    assert.equal(decide(job({ fails: 1 }), soft).action, 'ask', 'a pass that fails twice without a serious bug still asks');
     assert.equal(decide(job({ fails: 1 }), { step: 'build', ok: false }).action, 'ask');
     assert.equal(decide(job(), { step: 'build', ok: false }).action, 'build');
     assert.equal(decide(job({ fails: 1 }), { step: 'test', ok: false }).action, 'ask');
+  });
+  test('an open major bug holds Launch, a fix pass follows, and two failed fixes ask the boss', () => {
+    const report = (o = {}) => ({ step: 'test', ok: true, report: { verdict: 'pass', rules: browserOnly('game'), bugs: [{ severity: 'major', text: 'A ?wave=9 link cheats the board' }], regressions: [], ...o } });
+    const first = decide(job(), report());
+    assert.equal(first.action, 'build'); assert.equal(first.pass, 0, 'no depth pass used'); assert.equal(first.fix, true); assert.ok(first.patch.held.some((b) => /cheats/.test(b.text))); assert.equal(first.patch.launchable, true); assert.equal(first.passing, true); assert.equal(first.clean, false);
+    const second = decide(job({ ...first.patch }), report());
+    assert.equal(second.action, 'build'); assert.equal(second.patch.fixTries, 1); assert.ok(second.patch.held);
+    const third = decide(job({ ...second.patch }), report());
+    assert.equal(third.action, 'ask'); assert.match(third.why, /tried 2 times/);
+    const fixed = decide(job({ ...second.patch }), test0(browserOnly('game')));
+    assert.equal(fixed.action, 'build'); assert.equal(fixed.pass, 1); assert.equal(fixed.patch.held, null); assert.equal(fixed.clean, true); assert.equal(fixed.patch.fixTries, 0);
+    const cheatRule = decide(job(), test0({ ...browserOnly('game'), nocheats: false }));
+    assert.equal(cheatRule.fix, true, 'a cheat left in the build is a major bug even if the Tester forgot to list it');
+    assert.ok(cheatRule.bugs.some((b) => b.severity === 'major' && /cheat/.test(b.text)));
+    assert.equal(decide(job({ tokens: CFG.passes.maxJobTokens }), report()).action, 'ask', 'out of work with a serious bug open is the boss\'s call');
+  });
+  test('the brief for a fix pass lists the bugs and the re-test checks them', () => {
+    const d = decide(job(), { step: 'test', ok: true, report: { verdict: 'pass', rules: browserOnly('game'), bugs: [{ severity: 'major', text: 'Save is lost on reload' }], regressions: [] } });
+    const b = buildBrief({ type: 'game', title: 'T', depth: 3 }, d.pass, d);
+    assert.match(b, /Fix pass on T/); assert.match(b, /\[major\] Save is lost/); assert.match(b, /debug hook/);
+    assert.match(testBrief({ type: 'game', title: 'T' }, 0, { computer: true, recheck: d.serious }), /tried to fix these[\s\S]*Save is lost/);
   });
   test('passes and tokens are capped', () => {
     assert.equal(decide(job({ pass: 3, launchable: true }), test0(browserOnly('game'))).action, 'ready');
@@ -142,8 +180,8 @@ describe('three taps to a team that is building, then Launch', () => {
   test('the passes run on their own: first version passes, a depth pass meets the rest, it stops early and offers Launch', async () => {
     const s = await until(async () => { const st = await floorState(c); return st.makers?.job?.stage === 'ready' ? st : null; }, { what: 'job ready', timeout: 20000 });
     const j = s.makers.job;
-    assert.equal(j.launchable, true); assert.equal(j.launched, false); assert.equal(j.pass, 1, 'stopped after one depth pass, not three');
-    assert.ok(j.steps.some((x) => x.label === 'Depth pass 1' && x.state === 'done'));
+    assert.equal(j.launchable, true); assert.equal(j.launched, false); assert.equal(j.pass, 3, 'all three depth passes ran');
+    for (const p of [1, 2, 3]) assert.ok(j.steps.some((x) => x.label === `Depth pass ${p}` && x.state === 'done'), `depth pass ${p} shows done`);
     assert.equal(get(t.db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing','review')", fid()).n, 0);
     assert.ok(s.messages.some((m) => m.role === 'manager' && /passed the Tester/.test(m.text)));
     assert.equal(get(t.db, 'SELECT published_at p FROM projects WHERE floor_id=? AND slug=?', fid(), j.project).p, null, 'nothing is live before Launch');
@@ -207,11 +245,76 @@ describe('a job that keeps failing asks the boss, and the boss decides', () => {
     assert.equal(r.status, 200);
     const s = await until(async () => { const st = await floorState(c); return st.makers?.job?.stage === 'asking' ? st : null; }, { what: 'asking', timeout: 20000 });
     assert.equal(s.makers.job.asking.canLaunch, false);
-    assert.ok(s.messages.some((m) => /stuck/.test(m.text) && /Try again/.test(m.text)));
+    assert.ok(s.messages.some((m) => /serious bug/.test(m.text) && /Keep trying/.test(m.text)));
     const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
-    assert.equal(get(t.db, "SELECT COUNT(*) n FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='tester'", fid).n, 2, 'it stopped after two tries');
+    assert.equal(get(t.db, "SELECT COUNT(*) n FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='tester'", fid).n, 3, 'it stopped after the first try and two failed fixes');
     const stop = await c.post(`/api/floors/${c.slug}/makers/decide`, { choice: 'stop' });
     assert.equal(stop.status, 200); assert.equal(stop.data.makers.job.stage, 'stopped');
     assert.equal((await c.post(`/api/floors/${c.slug}/makers/decide`, { choice: 'retry' })).status, 400);
+  });
+});
+
+describe('a serious bug holds Launch', () => {
+  let t, c;
+  before(async () => { t = await boot(); c = await claim(t, 'Cheat Co'); });
+  after(() => t.close());
+  const job = async () => (await floorState(c)).makers.job;
+  const fid = () => get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
+  const testers = () => get(t.db, "SELECT COUNT(*) n FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='tester'", fid()).n;
+
+  test('a cheat that stays through two fixes reaches the boss, who can keep trying or launch anyway, and Launch alone is refused', async () => {
+    assert.equal((await c.post(`/api/floors/${c.slug}/makers/start`, { type: 'game', name: 'Hive Cheat', pitch: 'Bugs versus bees [cheat]' })).status, 200);
+    let j = await until(async () => { const v = await job(); return v?.stage === 'asking' ? v : null; }, { what: 'asking', timeout: 20000 });
+    assert.equal(testers(), 3, 'the first test and two failed fixes');
+    assert.equal(j.launchable, false, 'no plain Launch while it is held');
+    assert.equal(j.asking.held, true); assert.equal(j.asking.canLaunch, true); assert.ok(j.asking.flaws.some((b) => /wave=9/.test(b)));
+    const refused = await c.post(`/api/floors/${c.slug}/makers/launch`, {});
+    assert.equal(refused.status, 400); assert.match(refused.data.message || refused.data.error || JSON.stringify(refused.data), /serious bug/);
+    assert.equal(get(t.db, 'SELECT published_at p FROM projects WHERE floor_id=? AND slug=?', fid(), j.project).p, null, 'nothing went live');
+    // Keep trying goes round again.
+    assert.equal((await c.post(`/api/floors/${c.slug}/makers/decide`, { choice: 'retry' })).status, 200);
+    j = await until(async () => { const v = await job(); return v?.stage === 'asking' ? v : null; }, { what: 'asking again', timeout: 20000 });
+    assert.equal(testers(), 5, 'two more fix attempts');
+    // Launch anyway, with the warning kept on the card.
+    const went = await c.post(`/api/floors/${c.slug}/makers/launch`, { anyway: true });
+    assert.equal(went.status, 200, JSON.stringify(went.data));
+    assert.equal(went.data.makers.job.launched, true); assert.ok(went.data.makers.job.launchedWith.some((b) => /wave=9/.test(b)));
+    const s = await floorState(c);
+    assert.ok(s.messages.some((m) => /known serious bug/.test(m.text)));
+  });
+
+  test('a job can\'t launch anyway unless the boss was asked', async () => {
+    const d = await boot(); const co = await claim(d, 'Other Co');
+    await co.post(`/api/floors/${co.slug}/makers/start`, { type: 'website', name: 'Plain Site', pitch: 'A plain site' });
+    assert.equal((await co.post(`/api/floors/${co.slug}/makers/launch`, { anyway: true })).status, 400, 'no version has passed yet');
+    await d.close();
+  });
+});
+
+describe('a major bug found once is fixed before Launch comes back', () => {
+  let t, c;
+  before(async () => { t = await boot(); c = await claim(t, 'Fix Co'); });
+  after(() => t.close());
+  test('the fix pass uses no depth pass, and all three still run', async () => {
+    assert.equal((await c.post(`/api/floors/${c.slug}/makers/start`, { type: 'game', name: 'Once Bug', pitch: 'Mostly fine [major-once]' })).status, 200);
+    const j = await until(async () => { const s = await floorState(c); return s.makers?.job?.stage === 'ready' ? s.makers.job : null; }, { what: 'ready', timeout: 30000 });
+    assert.equal(j.pass, 3); assert.equal(j.launchable, true); assert.equal(j.held, null);
+    const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
+    assert.equal(get(t.db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND title LIKE 'Fix the serious bugs%'", fid).n, 1);
+    assert.equal(get(t.db, "SELECT COUNT(*) n FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='tester'", fid).n, 5, 'first test, re-test, three depth passes');
+    assert.equal((await c.post(`/api/floors/${c.slug}/makers/launch`, {})).status, 200);
+  });
+});
+
+describe('the job card is honest about passes', () => {
+  let t, c;
+  before(async () => { t = await boot(); c = await claim(t, 'Site Co'); });
+  after(() => t.close());
+  test('a website that finished after its one polish pass shows the other passes skipped, not unticked', async () => {
+    assert.equal((await c.post(`/api/floors/${c.slug}/makers/start`, { type: 'website', name: 'Full Site', pitch: 'A complete site [full]' })).status, 200);
+    const j = await until(async () => { const s = await floorState(c); return s.makers?.job?.stage === 'ready' ? s.makers.job : null; }, { what: 'ready', timeout: 20000 });
+    const pass = (n) => j.steps.find((x) => x.label === `Polish pass ${n}`);
+    assert.equal(pass(1).state, 'done'); assert.equal(pass(2).state, 'skipped'); assert.equal(pass(3).state, 'skipped');
+    assert.ok(j.steps.every((x) => x.state !== 'todo' && x.state !== 'doing'), 'nothing is left looking like it might still happen');
   });
 });

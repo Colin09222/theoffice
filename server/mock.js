@@ -273,7 +273,8 @@ function managerStep(meta, messages = []) {
 }
 
 // The maker loop (server/makers.js). Flags in the boss's pitch pick what the Tester finds: [full] passes every rule at once, [broken]
-// always fails, [regress] breaks a rule in pass 1 that pass 0 had. With none, the first version passes the browser rules and pass 1 the rest.
+// always fails, [regress] breaks a rule in pass 1 that pass 0 had, [cheat] keeps a major bug in every version, [major-once] has a major bug
+// until the first fix pass re-tests it. With none, the first version passes the browser rules and pass 1 the rest.
 function makerStep(meta) {
   const m = /^\[Maker\] (doc|build|test) (\d+)?/.exec(meta.task.brief || '');
   if (!m) return null;
@@ -285,9 +286,11 @@ function makerStep(meta) {
     const ids = (meta.task.brief.match(/"rules": \{([^}]*)\}/)?.[1] || '').match(/"([a-z][a-z0-9_-]*)"/g)?.map((x) => x.slice(1, -1)) || [];
     const judged = new Set((meta.task.brief.match(/^- ([a-z0-9_-]+): .*\(judged/gm) || []).map((x) => x.slice(2).split(':')[0]));
     const broken = /\[broken\]/.test(boss), full = /\[full\]/.test(boss), regress = /\[regress\]/.test(boss) && pass === 1;
-    const rules = Object.fromEntries(ids.map((id) => [id, broken ? id !== 'loads' && false : regress && id === 'inputs' ? false : full || pass >= 1 || !judged.has(id)]));
+    const recheck = /The Builder just tried to fix these/.test(meta.task.brief);
+    const cheat = /\[cheat\]/.test(boss), majorOnce = /\[major-once\]/.test(boss) && !recheck && pass === 0;
+    const rules = Object.fromEntries(ids.map((id) => [id, broken ? id !== 'loads' && false : regress && id === 'inputs' ? false : id === 'nocheats' ? !cheat : full || pass >= 1 || !judged.has(id)]));
     const verdict = broken || regress ? 'fail' : 'pass';
-    const bugs = broken ? [{ severity: 'blocker', text: 'It never leaves the menu.' }] : regress ? [{ severity: 'blocker', text: 'Touch stopped moving the player.' }] : [];
+    const bugs = broken ? [{ severity: 'blocker', text: 'It never leaves the menu.' }] : regress ? [{ severity: 'blocker', text: 'Touch stopped moving the player.' }] : cheat ? [{ severity: 'major', text: 'A ?wave=9 link starts a run at wave 9.' }] : majorOnce ? [{ severity: 'major', text: 'The save button does nothing.' }] : [];
     list.push(call('write_file', { path: `${dir}/TEST-REPORT.md`, content: `# Test report, pass ${pass}\n\nPlayed it.\n\n\`\`\`office-verdict\n${JSON.stringify({ verdict, rules, bugs, regressions: [], summary: verdict === 'pass' ? 'Plays well.' : 'Broken.' })}\n\`\`\`\n` }));
   }
   if (meta.step < list.length) return { toolCalls: [list[meta.step]] };

@@ -67,6 +67,7 @@ export function launchFlow(page, { onBack = null } = {}) {
 }
 
 const STEP_ICON = { done: 'check-circle', doing: 'clock', failed: 'warning', skipped: 'x', todo: 'caret-down' };
+const STEP_WORD = { done: 'done', doing: 'running', failed: 'failed', skipped: 'skipped' };
 /** The running job: its passes, the last test, Launch once a version passed, the share link after. Null when there is no job. */
 export function makerCard(page) {
   const m = page.state.makers;
@@ -75,22 +76,33 @@ export function makerCard(page) {
   const render = (job) => {
     box.dataset.stage = job.stage;
     const building = ['doc', 'build', 'test'].includes(job.stage);
-    const steps = h('ol.maker-steps', {}, ...job.steps.map((s) => h(`li.${s.state}`, {}, icon(STEP_ICON[s.state] || 'caret-down'), s.label)));
+    const steps = h('ol.maker-steps', {}, ...job.steps.map((s) => h(`li.${s.state}`, { 'data-step-state': s.state }, icon(STEP_ICON[s.state] || 'caret-down'), s.label, STEP_WORD[s.state] ? h('em.step-word', {}, s.state === 'skipped' && s.note && s.note !== 'not run' ? `skipped, ${s.note}` : STEP_WORD[s.state]) : null)));
+    const held = job.held?.fixing ? h('div.maker-held', { 'data-launch-held': '' }, h('button.btn.primary.maker-launch', { type: 'button', disabled: true }, icon('rocket-launch'), 'Fixing a serious bug first'), job.held.bugs.length ? h('p.maker-bugs', {}, job.held.bugs[0]) : null) : null;
     const launch = job.launchable && !job.launched ? h('button.btn.primary.maker-launch', { type: 'button', 'data-launch': '', onclick: async () => {
       launch.disabled = true;
       try { const r = await api(`/floors/${page.slug}/makers/launch`, { method: 'POST', body: {} }); render(r.makers.job); share(r.url); } catch (e) { toast(e.message, 'bad'); launch.disabled = false; }
     } }, icon('rocket-launch'), 'Launch') : null;
     const link = job.launched && job.url ? h('div.maker-share', {}, h('a', { href: job.url, target: '_blank', rel: 'noopener', 'data-share-url': '' }, job.url), h('button.btn.ghost', { type: 'button', onclick: () => share(job.url) }, icon('share-fat'), 'Share')) : null;
-    const asking = job.asking ? h('div.maker-ask', {}, h('p', {}, `Stuck: ${job.asking.why}.`),
-      h('button.btn', { type: 'button', 'data-retry': '', onclick: () => decide('retry') }, 'Try again'),
-      job.asking.canLaunch && !job.launched ? h('button.btn.primary', { type: 'button', onclick: () => launch?.click() }, 'Launch what works') : null,
+    // After two failed fixes the boss chooses, and a launch with a serious bug takes two deliberate taps.
+    const stillHeld = !!job.asking?.held;
+    const armed = { on: false };
+    const anyway = stillHeld && job.asking.canLaunch ? h('button.btn.maker-anyway', { type: 'button', 'data-launch-anyway': '', onclick: async () => {
+      if (!armed.on) { armed.on = true; anyway.textContent = 'Yes, launch it anyway'; anyway.classList.add('armed'); return; }
+      anyway.disabled = true;
+      try { const r = await api(`/floors/${page.slug}/makers/launch`, { method: 'POST', body: { anyway: true } }); render(r.makers.job); share(r.url); } catch (e) { toast(e.message, 'bad'); anyway.disabled = false; }
+    } }, 'Launch anyway') : null;
+    const asking = job.asking ? h('div.maker-ask', {}, h('p', {}, stillHeld ? `Serious bug: ${job.asking.why}.` : `Stuck: ${job.asking.why}.`),
+      stillHeld && job.held?.bugs?.length ? h('ul.maker-bugs', {}, ...job.held.bugs.map((t) => h('li', {}, t))) : null,
+      anyway ? h('p.maker-warn', { 'data-launch-warning': '' }, job.asking.flaws?.length ? `Launch anyway puts this live with a known serious bug: ${job.asking.flaws[0]}` : 'Launch anyway puts the last version with no known serious bug live, without the newest work.') : null,
+      h('button.btn', { type: 'button', 'data-retry': '', onclick: () => decide('retry') }, stillHeld ? 'Keep trying' : 'Try again'),
+      anyway || (job.asking.canLaunch && !job.launched ? h('button.btn.primary', { type: 'button', onclick: () => launch?.click() }, 'Launch what works') : null),
       h('button.btn.ghost', { type: 'button', onclick: () => decide('stop') }, 'Stop')) : null;
     // Once this one is out in the world, the same three taps start the next thing. Back returns to this card.
     const another = job.stage === 'ready' && job.launched ? h('button.link.maker-new', { type: 'button', 'data-make-new': '', onclick: () => { const flow = launchFlow(page, { onBack: () => { flow.replaceWith(box); page.lanesEl = box; } }); page.lanesEl = flow; box.replaceWith(flow); } }, 'Make something new') : null;
     box.replaceChildren(...[
-      h('div.maker-head', {}, h('b', {}, job.title), h('span', {}, building ? 'Team is building' : job.stage === 'ready' ? (job.launched ? 'Live' : 'Ready to launch') : job.stage === 'asking' ? 'Needs you' : '')),
+      h('div.maker-head', {}, h('b', {}, job.title), h('span', {}, building ? (job.launched ? 'Live, and getting better' : 'Team is building') : job.stage === 'ready' ? (job.launched ? 'Live' : 'Ready to launch') : job.stage === 'asking' ? 'Needs you' : '')),
       steps, job.report ? h('p.maker-report', {}, `Last test: ${job.report.verdict === 'pass' ? 'passed' : 'not yet'}${job.report.summary ? `, ${job.report.summary}` : ''}`) : null,
-      asking, launch, link, another].filter(Boolean));
+      asking, held, launch, job.launchedWith?.length ? h('p.maker-warn', { 'data-launched-with': '' }, `Live with a known serious bug: ${job.launchedWith[0]}`) : null, link, another].filter(Boolean));
   };
   async function decide(choice) { try { const r = await api(`/floors/${page.slug}/makers/decide`, { method: 'POST', body: { choice } }); render(r.makers.job); } catch (e) { toast(e.message, 'bad'); } }
   async function share(url) {

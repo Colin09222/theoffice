@@ -33,3 +33,8 @@
 .maker-share { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; } .maker-share a { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 700; color: var(--teal-d); }
 .maker-ask { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; } .maker-ask p { flex-basis: 100%; margin: 0; }
 @media (min-width: 761px) { .launch-cards { grid-template-columns: 1fr 1fr; } }
+.maker-steps li .step-word { margin-left: auto; font: 700 12px var(--cond); font-style: normal; text-transform: uppercase; letter-spacing: .05em; opacity: .75; }
+.maker-held { display: grid; gap: 6px; } .maker-held .maker-launch[disabled] { background: var(--ink-3); opacity: 1; cursor: default; }
+.maker-bugs { margin: 0; font-size: 14px; color: var(--ink-2); } ul.maker-bugs { padding-left: 18px; flex-basis: 100%; }
+.maker-warn { margin: 0; flex-basis: 100%; font-size: 14px; font-weight: 700; color: var(--tomato); }
+.maker-anyway { border-color: var(--tomato); color: var(--tomato); } .maker-anyway.armed { background: var(--tomato); color: #fff; }
