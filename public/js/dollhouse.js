@@ -236,13 +236,23 @@ export class Room {
     if (!p) return;
     const text = l.text.length > 90 ? `${l.text.slice(0, 88).trimEnd()}…` : l.text;
     p.say.firstChild.textContent = text;
-    // Kept inside the room: a bubble near either wall hangs off its speaker's far side.
-    const edge = this.p.s(70);
-    p.say.classList.toggle('lean-r', p.x < edge);
-    p.say.classList.toggle('lean-l', p.x > this.p.w - edge);
+    // Kept inside the room: a bubble near either wall hangs off its speaker's far side. Under the plaque, where two lines would
+    // cover the floor's name and status, it's one line leaning away from it.
+    const edge = this.p.s(70), tight = this.underPlate(p);
+    p.say.classList.toggle('one', tight);
+    p.say.classList.toggle('lean-r', tight || p.x < edge);
+    p.say.classList.toggle('lean-l', !tight && p.x > this.p.w - edge);
     p.say.classList.add('up');
     this.budget.up++;
     this.saying = { p, until: now + Math.min(7000, Math.max(3800, 2400 + text.length * 50)) };
+  }
+  /** Whether a two-line bubble over this person would run into the plaque. Read from the layout once per bubble, which is rare. */
+  underPlate(p) {
+    const plate = this.el.parentElement?.querySelector('.dh-plate');
+    if (!plate) return false;
+    const right = plate.offsetLeft + plate.offsetWidth - this.el.offsetLeft, bottom = plate.offsetTop + plate.offsetHeight;
+    const headTop = this.el.offsetHeight - p.y - this.p.s(60);
+    return headTop - this.p.s(7) - bottom < this.p.s(44) && p.x - this.p.s(90) < right;
   }
   /** Off the screen: whatever was being said is left unsaid, so the bubbles left up are only ones someone can see. */
   quiet() { if (this.saying) this.hush(); }

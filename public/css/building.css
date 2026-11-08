@@ -293,6 +293,8 @@ body[data-lobby="building"] .hero, body[data-lobby="building"] .hints, body[data
 .dh-say > span { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .dh-say::after { content: ""; position: absolute; left: 50%; top: 100%; margin-left: -6px; border: 6px solid transparent; border-top-color: #1c1712; border-bottom: 0; }
 .dh-say.up { opacity: 1; transform: translateX(-50%) scale(1); }
+.dh-say.one { max-width: calc(230px * var(--k)); }
+.dh-say.one > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dh-say.lean-r { left: -4px; transform: scale(.6); transform-origin: 10px 100%; }
 .dh-say.lean-r.up, .dh-say.lean-l.up { transform: scale(1); }
 .dh-say.lean-r::after { left: 18px; }
