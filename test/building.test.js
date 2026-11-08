@@ -229,3 +229,33 @@ describe('building: ticker and launched wall', () => {
     assert.equal(later.items[0].kind, 'feed');
   });
 });
+
+describe('building: the 3D tower\'s staff and rooms', () => {
+  let t, visitor, a, b, hidden;
+  before(async () => {
+    t = await boot();
+    visitor = new Client(t, { origin: null });
+    a = await claim(t, 'Stair Co', { floor: 4, body: { tagline: 'Up we go' } });
+    b = await claim(t, 'Shut Co', { floor: 6 });
+    hidden = await claim(t, 'Ghost Co', { floor: 8 });
+    run(t.db, "UPDATE floors SET decor=json_set(decor, '$.layout', 'pods', '$.wall', '#d9cfe8') WHERE slug=?", a.slug);
+    run(t.db, 'UPDATE floors SET hidden=1 WHERE slug=?', hidden.slug);
+    run(t.db, "UPDATE floors SET status='suspended' WHERE slug=?", b.slug);
+  });
+  after(async () => { await t.close(); });
+
+  test('each open floor\'s room comes with its staff: its layout and finishes, and the boss\'s name and look, nothing more', async () => {
+    const r = await visitor.get('/api/building/staff');
+    assert.equal(r.status, 200);
+    const room = r.data.rooms[4];
+    assert.equal(room.decor.layout, 'pods');
+    assert.equal(room.decor.wall, '#d9cfe8');
+    assert.deepEqual(Object.keys(room.boss).sort(), ['look', 'name']);
+    assert.equal(room.boss.name, 'Boss');
+    assert.ok(r.data.floors[4].length >= 2, 'the staff are still there, as before');
+  });
+  test('a hidden floor and one closed by the building manager are left out, rooms and staff alike', async () => {
+    const r = await visitor.get('/api/building/staff');
+    for (const n of [6, 8]) { assert.equal(r.data.rooms[n], undefined, `room ${n}`); assert.equal(r.data.floors[n], undefined, `staff ${n}`); }
+  });
+});
