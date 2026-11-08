@@ -470,7 +470,7 @@ export function installMail(ext) {
     if (m.refs) headers.References = m.refs;
     if (Object.keys(headers).length) message.headers = headers;
     try {
-      const r = await provider.send(message, { idempotencyKey: `office-mail-${m.id}` });
+      const r = await provider.send(message, { idempotencyKey: `office-mail-${m.id}-${m.created_at}` });
       run(db, "UPDATE mail_messages SET status='sent', provider_id=?, sent_at=?, note='', updated_at=? WHERE id=?", oneLine(r?.id, 80), now(), now(), id);
     } catch (e) {
       // Not counted against the day if it never left. A retryable failure goes round again on the tick, a few times at most.
