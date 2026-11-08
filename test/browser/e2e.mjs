@@ -64,7 +64,7 @@ async function run(label, opts, t, adminCode) {
     await p.until('document.querySelector(".code-input") !== null', 'code dialog');
     await p.type('.code-input', 'OFFICE-NOPE-NOPE');
     await p.click('.modal button[type=submit]');
-    await p.until('(() => { const e = document.querySelector(".form-error"); return e && !e.hidden && /isn.t valid/.test(e.textContent); })()', 'error message');
+    await p.until('(() => { const e = document.querySelector(".form-error"); return e && !e.hidden && /recognise that code/.test(e.textContent); })()', 'error message');
   });
   await step(tag('claim: a code alone opens the office, recovery code, secure cookie'), async () => {
     const code = await adminCode(); // from the real admin CLI path

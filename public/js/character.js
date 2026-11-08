@@ -111,7 +111,7 @@ export function createPreview(canvas, look, accent) {
   const floor = new THREE.Mesh(new THREE.CircleGeometry(1.1, 28), new THREE.ShadowMaterial({ opacity: 0.22 })); floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
   const cam = new THREE.PerspectiveCamera(26, (rect.width || 200) / (rect.height || 240), 0.1, 30);
   cam.position.set(0, 1.65, 6.3); cam.lookAt(0, 1.12, 0);  // room above the head for the tallest hat
-  const make = (l, a) => { const c = new Character(l, { accent: a, scale: 1.4 }); c.setAnim('stand'); return c; };
+  const make = (l, a) => { const c = new Character(l, { accent: a, scale: 1.4, role: 'boss' }); c.setAnim('stand'); return c; };  // this is the boss choosing their own look
   let ch = make(look, accent); scene.add(ch.group);
   let raf, dead = false, last = performance.now(), shown = '';
   const loop = (now) => {
