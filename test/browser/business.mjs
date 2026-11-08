@@ -12,7 +12,10 @@ const OUT = process.env.BUSINESS_SHOTS || ''; if (OUT) mkdirSync(OUT, { recursiv
 const results = []; let failures = 0;
 const check = (name, ok, detail = '') => { results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); if (!ok) failures++; console.log(results.at(-1)); };
 const step = async (name, fn) => { try { await fn(); check(name, true); } catch (e) { check(name, false, String(e.message).slice(0, 300)); } };
-const t = await boot({ mockDelayMs: 60, rateScale: 50, businessTickMs: 80, modesTickMs: 60000, mediaMock: true, searchMock: true, peopleTalk: false, adsPaidEnabled: true, adsMock: true });
+// The test drives the journey's runner itself, every 80 ms like a quick server, so it can hold the journey at a step.
+const t = await boot({ mockDelayMs: 60, rateScale: 50, businessTickMs: 3600000, modesTickMs: 60000, mediaMock: true, searchMock: true, peopleTalk: false, adsPaidEnabled: true, adsMock: true });
+let holdJourney = false;
+const driver = setInterval(() => { if (!holdJourney) t.app.engine.business.tick(); }, 80);
 // The ad has to point at an https address; locally the site lives at a path on http, so the ad is given the address it would have on the web.
 { const live = t.app.engine.liveUrl.bind(t.app.engine); t.app.engine.liveUrl = (f, s) => live(f, s).replace(/^\/theoffice\//, 'https://office.example/theoffice/'); }
 const base = `http://localhost:${t.port}/theoffice`;
@@ -75,7 +78,7 @@ try {
     await p.ev('window.__sawPreview = false; new MutationObserver(() => { if (document.querySelector(".biz-frame")?.getAttribute("src")) window.__sawPreview = true; }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] }); true');
     // A mock build is over in a blink, long before a real one, so the journey is held at Build (its runner paused; the team still works)
     // until the preview has shown the page as saved.
-    t.app.engine.business.stop();
+    holdJourney = true;
     try {
       await p.click('[data-pick="0"]');
       await p.until('document.querySelectorAll(".tracks .track").length === 4', 'four tracks');
@@ -88,7 +91,7 @@ try {
       if (head !== 'done,now,next,next') throw new Error(head);
       await p.until('[...document.querySelectorAll(".track")].filter((x) => x.classList.contains("done") || x.classList.contains("working")).length >= 2', 'lamps lit', 30000);
       await shot(p, 'business-2-desktop-build.jpg');
-    } finally { t.app.engine.business.start(); }
+    } finally { holdJourney = false; }
   });
 
   await step('desktop: the ads (pictures and captioned videos), the campaign plan and the ad money, $0 chosen to start with', async () => {
@@ -171,6 +174,7 @@ try {
   const errs = p.errors?.filter?.((e) => !/favicon|ERR_ABORTED/.test(e)) || [];
   check('no page errors', !errs.length, errs.slice(0, 2).join(' | ').slice(0, 200));
 } finally {
+  clearInterval(driver);
   b.close();
   await t.close();
 }
