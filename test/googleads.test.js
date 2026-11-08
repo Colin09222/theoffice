@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { planCampaign, campaignOperations, createCampaign, createGoogleAds, googleAdsFromConfig, watchAccount, checkSearchAd, campaignId, zonedMs, accountInfo, HARD_MAX_USD, MAX_DAYS } from '../server/googleads.js';
 import { createMockGoogleAds } from '../server/googleads-mock.js';
-import { ensureAdSpend, adsStopped } from '../server/business.js';
+import { ensureAdSpend, adsStopped, stopAds, resumeAds } from '../server/business.js';
+import { runWatchdog } from '../server/ads-guard.js';
 import { openDb, run, get, all } from '../server/db.js';
 import { scrub } from '../server/llm.js';
 
@@ -198,14 +199,58 @@ describe('the spend watchdog', () => {
 });
 
 describe('the spend watchdog: after the review', () => {
-  test('one that went over and is paused already trips nothing more; the rest carry on', async () => {
+  test('one over its amount stops everything even when the server paused it first; raised once, it trips again only if it is on again', async () => {
     const { mock, api, ids, known, status } = await account();
     mock.spend(ids.a, 10.5);
-    assert.equal((await watchAccount({ api, known, capUsd: 50 })).alert, true);
+    await api.setStatus([api.rn('campaigns', ids.a)], 'PAUSED');
+    const first = await watchAccount({ api, known, capUsd: 50 });
+    assert.equal(first.alert, true);
+    assert.deepEqual(first.over, [ids.a]);
+    assert.deepEqual([status(ids.a), status(ids.b)], ['PAUSED', 'PAUSED'], 'the rest stop too');
+    // The alarm was raised for it (the database remembers that), and the admin has switched the other one back on: nothing trips.
     await api.setStatus([api.rn('campaigns', ids.b)], 'ENABLED');
-    const again = await watchAccount({ api, known, capUsd: 50 });
+    const alarmed = [{ ...known[0], alarmed: true }, known[1]];
+    const again = await watchAccount({ api, known: alarmed, capUsd: 50 });
     assert.equal(again.alert, false, again.line);
     assert.deepEqual([status(ids.a), status(ids.b)], ['PAUSED', 'ENABLED']);
+    // On again at Google while over: everything stops again, alarm or not.
+    await api.setStatus([api.rn('campaigns', ids.a)], 'ENABLED');
+    const on = await watchAccount({ api, known: alarmed, capUsd: 50 });
+    assert.equal(on.alert, true);
+    assert.deepEqual([status(ids.a), status(ids.b)], ['PAUSED', 'PAUSED']);
+  });
+  test('the watchdog run remembers the alarm it raised, says while new campaigns are held, and "ads resume" counts an overspend as seen', async () => {
+    const { mock, api, ids, status } = await account();
+    const dir = mkdtempSync(join(tmpdir(), 'office-watch-'));
+    const db = openDb(dir);
+    try {
+      ensureAdSpend(db);
+      const add = (floor, id, amount, st) => run(db, 'INSERT INTO ad_spend (floor_id, project, amount, status, created_at, decided_at, campaign, ends_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', floor, 'p', amount, st, Date.now(), Date.now(), api.rn('campaigns', id), Date.now() + 3 * DAY);
+      add(1, ids.a, 10, 'paused'); add(2, ids.b, 5, 'running');
+      // The server's own check paused the first when it went over; the second still runs.
+      mock.spend(ids.a, 10.5);
+      await api.setStatus([api.rn('campaigns', ids.a)], 'PAUSED');
+      const cfg = { adMonthlyCapUsd: 50 };
+      const first = await runWatchdog({ db, cfg, api });
+      assert.equal(first.alert, true, first.line);
+      assert.match(first.line, /^ads ALERT: paused 1 campaign: campaign \d+ cost \$10\.50 of its \$10\.00$/);
+      assert.deepEqual([status(ids.a), status(ids.b)], ['PAUSED', 'PAUSED']);
+      assert.equal(get(db, 'SELECT status FROM ad_spend WHERE floor_id=2').status, 'paused');
+      assert.ok(adsStopped(db), 'nothing new starts');
+      assert.ok(get(db, 'SELECT over_at FROM ad_spend WHERE floor_id=1').over_at, 'the alarm is remembered');
+      const quiet = await runWatchdog({ db, cfg, api });
+      assert.equal(quiet.alert, false, quiet.line);
+      assert.match(quiet.line, /^ads ok: .*; new paid campaigns held since \d{4}-\d\d-\d\d \d\d:\d\d UTC until "ads resume"$/);
+      assert.equal(quiet.line.split('\n').length, 1);
+      // An overspend the admin has already looked at (the server stopped everything, then "ads resume") doesn't stop everything again.
+      run(db, 'UPDATE ad_spend SET over_at=NULL');
+      stopAds(db, 'server spend check', Date.now());
+      assert.equal(resumeAds(db), true);
+      assert.ok(get(db, 'SELECT over_at FROM ad_spend WHERE floor_id=1').over_at, 'resume counts it as seen');
+      const after = await runWatchdog({ db, cfg, api });
+      assert.equal(after.alert, false, after.line);
+      assert.doesNotMatch(after.line, /held/);
+    } finally { db.close(); rmSync(dir, { recursive: true, force: true }); }
   });
   test('an Office campaign on at Google though its request is closed is paused; a pause that can\'t land on one still pauses the rest, and says so', async () => {
     const { mock, api, ids, known, status } = await account();

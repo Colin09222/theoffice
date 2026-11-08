@@ -214,7 +214,7 @@ export async function campaignStats(api, ids) {
 }
 
 /**
- * The spend watchdog's reading of the account, and what it pauses. known: the Office's own campaigns, [{ id, approvedUsd, endsAt, label }].
+ * The spend watchdog's reading of the account, and what it pauses. known: the Office's own campaigns, [{ id, approvedUsd, endsAt, live, alarmed }].
  * Every enabled campaign in the account is paused at once if any Office campaign has cost more than its approved amount, or the account's cost
  * this month is over the cap. A campaign the Office doesn't know is always paused, and one past its end date is paused on schedule.
  */
@@ -231,8 +231,9 @@ export async function watchAccount({ api, known: knownIn, capUsd, now = Date.now
   const campaigns = live.map((r) => ({ id: String(r.campaign?.id), name: String(r.campaign?.name || ''), status: r.campaign?.status, rn: r.campaign?.resourceName || api.rn('campaigns', r.campaign?.id) }));
   const enabled = campaigns.filter((c) => c.status === 'ENABLED');
   const on = new Set(enabled.map((c) => c.id));
-  // Over its approved amount and still on. One that went over and was paused already stays paused and trips nothing more.
-  const over = known.filter((k) => on.has(String(k.id)) && (lifeCost.get(String(k.id)) || 0) > Number(k.approvedUsd) * 1e6).map((k) => ({ ...k, costMicros: lifeCost.get(String(k.id)) }));
+  // Over its approved amount, whether or not it is still on (the server's own check may have paused it first). Once the alarm has been raised
+  // for it (alarmed), one that stays off trips nothing more; one that is on again trips it again.
+  const over = known.filter((k) => (on.has(String(k.id)) || !k.alarmed) && (lifeCost.get(String(k.id)) || 0) > Number(k.approvedUsd) * 1e6).map((k) => ({ ...k, costMicros: lifeCost.get(String(k.id)) }));
   const capHit = monthMicros > capMicros;
   const unknown = enabled.filter((c) => !byId.has(c.id));
   // The Office's own, on at Google though its request is closed or stopped: switched on by hand, or a pause that never landed.

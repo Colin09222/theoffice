@@ -7,7 +7,7 @@ import { checkIdeas, checkAdSpend, figuresIn, unbacked, moneyOk, urlKey, loadBus
 import { purchaseListing, decidePurchase } from '../server/purchases.js';
 import { get, all, run } from '../server/db.js';
 import { pauseAll } from '../server/ads-guard.js';
-import { resumeAds } from '../server/business.js';
+import { resumeAds, adsStopped } from '../server/business.js';
 import { campaignId } from '../server/googleads.js';
 import { createMedia } from '../server/media.js';
 
@@ -223,11 +223,13 @@ describe('the journey in mock mode', () => {
       const seen = await untilStep(c, (b) => b.adSpend?.clicks === 6, 'the clicks');
       assert.equal(seen.adSpend.views, 140);
       assert.doesNotMatch(JSON.stringify(seen.adSpend), /3\.2|spent|cost/);
-      // One that costs more than approved stops at once, and past its end it is closed, on schedule.
+      // One that costs more than approved stops at once, holding new ones until "ads resume", and past its end it is closed, on schedule.
       mock.spend(camp.id, 10.4, { impressions: 400, clicks: 15 });
       await adsOf(t).tick({ force: true });
       assert.equal(camp.status, 'PAUSED');
       assert.equal((await biz(c)).adSpend.status, 'paused');
+      assert.match(adsStopped(t.db)?.reason || '', /^server spend check: campaign \d+ cost \$10\.40 of its \$10\.00$/);
+      assert.equal(adsOf(t).paidOn(), false);
       // Stopped here but switched back on at Google (by hand in the Ads console, or a pause that never landed): the next sync pauses it again.
       camp.status = 'ENABLED';
       await adsOf(t).tick({ force: true });
@@ -366,6 +368,9 @@ describe('the journey in mock mode', () => {
       const second = await fileAndApprove(c2, 5);
       mock.spend([...mock.campaigns.values()][0].id, 26);
       await adsOf(t).tick({ force: true });
+      // Going over its amount stopped the building's paid ads; the admin looks and lifts the stop, and the cap still says no at the click.
+      assert.equal(adsOf(t).paidOn(), false);
+      resumeAds(t.db);
       const no = await second.approve();
       assert.equal(no.status, 200);
       assert.equal(no.data.business.adSpend.status, 'withdrawn');
@@ -397,6 +402,38 @@ describe('the journey in mock mode', () => {
     } finally { await t.close(); }
   });
 
+  test('one campaign over its approved amount stops every Office campaign at once, and nothing new starts until "ads resume"', async () => {
+    const t = await boot({ ...mediaOn, ...paidAds });
+    try {
+      const c1 = await claim(t, 'First Floor Co');
+      const c2 = await claim(t, 'Second Floor Co');
+      await toBudget(t, c1); await toBudget(t, c2);
+      onHttps(t, c1, c2);
+      const mock = adsOf(t).mock;
+      for (const [c, amount] of [[c1, 5], [c2, 10]]) {
+        assert.equal((await c.post(`/api/floors/${c.slug}/business/launch`, { amount })).status, 200);
+        const asked = await untilStep(c, (b) => b.adSpend?.status === 'awaiting_boss', 'the request');
+        assert.equal((await c.post(`/api/floors/${c.slug}/business/ad-spend/${asked.adSpend.id}`, { answer: 'approve' })).status, 200);
+        await untilStep(c, (b) => b.adSpend?.status === 'running', 'the campaign');
+      }
+      const [one, two] = [...mock.campaigns.values()];
+      mock.spend(one.id, 5.2);
+      await adsOf(t).tick({ force: true });
+      assert.deepEqual([one.status, two.status], ['PAUSED', 'PAUSED'], 'both stop, not only the one that went over');
+      const [s1, s2] = [(await biz(c1)).adSpend, (await biz(c2)).adSpend];
+      assert.deepEqual([s1.status, s2.status], ['paused', 'paused']);
+      assert.equal(s2.label, 'Stopped early. Nothing more will be spent');
+      assert.doesNotMatch(`${s1.label} ${s1.note} ${s2.label} ${s2.note}`, /\d/, 'no figure on a floor');
+      assert.equal(adsOf(t).paidOn(), false, 'nothing new starts');
+      assert.deepEqual((await biz(c1)).adMoney?.options ?? [0], [0]);
+      assert.match(adsStopped(t.db).reason, /^server spend check: campaign \d+ cost \$5\.20 of its \$5\.00$/);
+      assert.ok(t.logs.some((l) => /every Office campaign paused/.test(l)), 'with a warning in the log');
+      resumeAds(t.db);
+      assert.equal(adsOf(t).paidOn(), true);
+      assert.deepEqual([one.status, two.status], ['PAUSED', 'PAUSED'], 'paused campaigns stay paused');
+      assert.ok(get(t.db, 'SELECT over_at FROM ad_spend WHERE amount=5').over_at, 'the overspend counts as seen');
+    } finally { await t.close(); }
+  });
   test('when the AI video fails, the ads still finish and the failure is said plainly', async () => {
     const t = await boot(mediaOn);
     try {

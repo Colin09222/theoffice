@@ -11,10 +11,15 @@ export async function runWatchdog({ db, cfg, api, now = Date.now(), pause = true
   ensureAdSpend(db);
   let rows = [];
   // The database is read once Google has been, so a campaign the server made meanwhile is known, not a stranger.
-  const known = () => (rows = all(db, "SELECT * FROM ad_spend WHERE campaign != ''")).map((r) => ({ id: campaignId(r.campaign), approvedUsd: r.amount, endsAt: r.ends_at, request: r.id, live: ['running', 'approved'].includes(r.status) }));
+  const known = () => (rows = all(db, "SELECT * FROM ad_spend WHERE campaign != ''")).map((r) => ({ id: campaignId(r.campaign), approvedUsd: r.amount, endsAt: r.ends_at, request: r.id, live: ['running', 'approved'].includes(r.status), alarmed: !!r.over_at }));
   const res = await watchAccount({ api, known, capUsd: cfg.adMonthlyCapUsd, now, pause });
-  // Over an amount or over the cap: nothing new starts until the admin has looked and run "ads resume".
+  // Over an amount or over the cap: nothing new starts until the admin has looked and run "ads resume". Each campaign over its amount raises the
+  // alarm once; after that it trips it again only if it is switched back on.
   if (pause && (res.over.length || res.capHit)) stopAds(db, res.line, now);
+  if (pause) for (const r of rows) if (res.over.includes(campaignId(r.campaign))) run(db, 'UPDATE ad_spend SET over_at=COALESCE(over_at, ?) WHERE id=?', now, r.id);
+  // All well this time, but the building's stop is still on (an earlier alarm, the server's own spend check, or pause-all): the line says so.
+  const held = !res.alert && adsStopped(db);
+  if (held) res.line += `; new paid campaigns held since ${new Date(held.at).toISOString().slice(0, 16).replace('T', ' ')} UTC until "ads resume"`;
   for (const r of rows) {
     const id = campaignId(r.campaign);
     if (res.lifeCost.has(id)) run(db, 'UPDATE ad_spend SET spent_micros=?, synced_at=? WHERE id=?', res.lifeCost.get(id), now, r.id);

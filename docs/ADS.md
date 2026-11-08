@@ -13,8 +13,9 @@ The free path ($0, "just for fun") stays the default, and it is the only path un
    ad group, the marketer's keywords (phrase match) and a responsive search ad pointing at the floor's live site.
 5. Only then is it switched on, and only if the approval still stands on record, paid ads are still on and no stop is set. If a stop
    landed while it was being switched on, it goes straight back off.
-6. About once a minute the server pauses and closes campaigns past their end. Every 15 minutes it reads views, clicks and cost, and
-   pauses at once any campaign that has cost more than its approved amount. The boss's slip shows views and clicks, never the cost.
+6. About once a minute the server pauses and closes campaigns past their end. Every 15 minutes it reads views, clicks and cost. If any
+   campaign has cost more than its approved amount, it pauses **every** Office campaign at once and sets the building's stop, so nothing new
+   starts until `ads resume`. The boss's slip shows views and clicks, never the cost.
 
 ## The limits, and where they live
 
@@ -72,13 +73,17 @@ The floor is told only "the building can't take another paid campaign this month
 
 It reads each campaign's real cost through the API (`metrics.cost_micros`, all time, and for this month). Then:
 
-- If any Office campaign that is still on has cost more than its approved amount, or the account's cost this month is over the cap, it
-  pauses **every** enabled campaign at once. It also sets the building's stop, so nothing new starts until `ads resume`.
+- If any Office campaign has cost more than its approved amount, or the account's cost this month is over the cap, it pauses **every**
+  enabled campaign at once. It also sets the building's stop, so nothing new starts until `ads resume`.
+  - This holds even when the server's own check paused the over campaign first.
+  - Each campaign over its amount raises this alarm once (the database remembers it). After that it trips again only if it is switched
+    back on, so `ads resume` isn't undone by an old campaign that stays off. `ads resume` also counts every overspend known so far as seen.
 - It always pauses a campaign the Office doesn't know, and an Office campaign that is on though its request is closed.
 - It pauses a campaign past its end date, on schedule.
 - A pause goes through for every campaign it can change, even if one can't be changed, and the line says so.
 
 It prints one line and exits 0 (all well), 1 (it paused something for being over, unknown or stray) or 2 (Google couldn't be read).
+While the building's stop is on, the all-well line ends with "new paid campaigns held since … until "ads resume"".
 `--dry-run` says what it would pause and pauses nothing.
 
 **Before scheduling it:** the account also holds the Lanternfall test campaign (`24450155671`, $2 total, Nov 8–14), which the Office
@@ -90,7 +95,7 @@ Nov 14, or accept that the Lanternfall test stops early.
 ```
 docker compose exec theoffice node scripts/admin.mjs ads list [--json]   # approved against spent per campaign (Google's figures), the month against the cap, any stop
 docker compose exec theoffice node scripts/admin.mjs ads pause-all       # emergency stop: pause every enabled campaign in the account, and hold new ones
-docker compose exec theoffice node scripts/admin.mjs ads resume          # lift the stop (paused campaigns stay paused)
+docker compose exec theoffice node scripts/admin.mjs ads resume          # lift the stop, once you've looked (paused campaigns stay paused)
 ```
 
 ## What was checked against the real API, and what is mocked
