@@ -1,36 +1,20 @@
-// ID-badge photos. Everyone gets a real headshot taken from their own 3D model, one at a time and out of the way of the room.
-// Until it's developed (or where there's no WebGL at all) they get a drawn face in their own colours, which is never a letter in a box.
+// ID-badge photos. Everyone gets a real headshot of their own 3D self, one at a time and out of the way of the room. Until it's developed
+// (or where there's no WebGL at all) they get a drawn face in the same colours and the same big eyes, from the cast's own spec.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { stage } from './stage.js';
 import { h } from './dom.js';
-import { loadModelCharacter } from './character.js';
+import { Character, drawnPortrait, jobOf } from './character.js';
 
-const SVG = 'http://www.w3.org/2000/svg';
 const W = 168, H = 200;
 const photos = new Map();   // look key -> data URL
 const waiting = new Map();  // look key -> { look, els: Set }
 let running = false;
 
 const keyOf = (look) => JSON.stringify(look);
-const shape = (name, attrs) => { const el = document.createElementNS(SVG, name); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
-
-/** The drawn stand-in: shoulders in their outfit, a face in their skin, hair in their hair. */
-function drawn(look = {}) {
-  const svg = shape('svg', { viewBox: '0 0 84 100', 'aria-hidden': 'true', class: 'portrait-drawn' });
-  const skin = look.skin || '#e8b98f', hair = look.hairColor || '#3b2a20', top = look.outfitColor || '#2f4a6b';
-  svg.append(shape('path', { d: 'M8 100c0-22 14-32 34-32s34 10 34 32z', fill: top }));
-  svg.append(shape('rect', { x: 34, y: 56, width: 16, height: 18, rx: 6, fill: skin }));
-  if (look.hair === 'long' || look.hair === 'pigtails') svg.append(shape('path', { d: 'M18 38c0-18 10-28 24-28s24 10 24 28v26H18z', fill: hair }));
-  svg.append(shape('ellipse', { cx: 42, cy: 40, rx: 21, ry: 24, fill: skin }));
-  if (look.hair !== 'none') svg.append(shape('path', { d: look.hair === 'mohawk' ? 'M36 18c0-8 3-14 6-14s6 6 6 14z' : look.hair === 'bun' ? 'M21 36c0-14 9-22 21-22s21 8 21 22c-12-8-28-8-42 0zM35 12a7 7 0 1 1 14 0 7 7 0 0 1-14 0z' : 'M20 38c0-16 9-26 22-26s22 10 22 26c-6-9-14-12-22-12s-16 3-22 12z', fill: hair }));
-  svg.append(shape('circle', { cx: 34, cy: 42, r: 2.6, fill: '#1c1712' }), shape('circle', { cx: 50, cy: 42, r: 2.6, fill: '#1c1712' }));
-  svg.append(shape('path', { d: 'M35 52c4 4 10 4 14 0', fill: 'none', stroke: '#1c1712', 'stroke-width': 2.4, 'stroke-linecap': 'round' }));
-  return svg;
-}
 
 /** A photo frame for this look. It fills itself in if the picture has to be taken first. */
 export function portrait(look, { accent = '#d9774a', name = '', develop: shoot = true } = {}) {
-  const el = h('span.portrait', { 'aria-hidden': 'true', title: name || null }, drawn(look));
+  const el = h('span.portrait', { 'aria-hidden': 'true', title: name || null }, drawnPortrait(look, accent));
   if (!look) return el;
   const key = keyOf(look);
   if (photos.has(key)) { el.append(h('img', { src: photos.get(key), alt: '', width: W, height: H })); return el; }
@@ -51,28 +35,26 @@ async function develop() {
     renderer.setSize(W, H, false);
     renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.NeutralToneMapping;
     const scene = new THREE.Scene();
-    scene.add(new THREE.HemisphereLight('#fff4e0', '#9f8f7a', 2.2));
-    const key = new THREE.DirectionalLight('#fff0d8', 2.6); key.position.set(1.5, 3, 4); scene.add(key);
+    scene.add(new THREE.HemisphereLight('#fff7e8', '#e0ccb2', 2.4));
+    const key = new THREE.DirectionalLight('#fff3dc', 2.4); key.position.set(1.5, 3, 4); scene.add(key);
     const cam = new THREE.PerspectiveCamera(18, W / H, 0.1, 40);
-    const at = new THREE.Vector3(), box = new THREE.Box3();
     while (waiting.size) {
       const [k, job] = waiting.entries().next().value;
       waiting.delete(k);
       if (![...job.els].some((el) => el.isConnected)) continue;  // redrawn since it was asked for; a later render asks again if it matters
-      const mc = await loadModelCharacter(job.look, { accent: job.accent, scale: 2.5 });
+      const mc = new Character(job.look, { accent: job.accent, scale: 2.2, role: jobOf(job.look) });
       if (document.hidden) await new Promise((r) => setTimeout(r, 200));
-      mc.update?.(0.016);
-      mc.group.rotation.y = 0.32;  // a three-quarter turn toward the lens
+      mc.update(0.016);
+      mc.group.rotation.y = 0.22;  // just off square-on, so the big eyes both look at you
       scene.add(mc.group); mc.group.updateMatrixWorld(true);
-      // Frame head and shoulders from the person's own height, so a top hat or a short stature both fit.
-      box.setFromObject(mc.group); box.getCenter(at);
-      const tall = box.max.y - box.min.y, top = box.max.y;
-      const view = tall * (mc.portraitView ?? 0.5), aimY = top - view * 0.47;
-      cam.position.set(at.x + 0.12, aimY + tall * 0.04, at.z + view / 2 / Math.tan(THREE.MathUtils.degToRad(9)) + 0.4);
-      cam.lookAt(at.x, aimY, at.z);
+      // Frame the whole soft face from the person's own height, so a wizard's hat and a very short manager both fit.
+      const tall = mc.headTop, top = mc.labelY;
+      const view = Math.max(tall * 0.92, top * 0.98), aimY = top - view * 0.5;
+      cam.position.set(0.12, aimY + tall * 0.04, view / 2 / Math.tan(THREE.MathUtils.degToRad(9)) + 0.4);
+      cam.lookAt(0, aimY, 0);
       renderer.render(scene, cam);
       const url = canvas.toDataURL('image/webp', 0.86);
-      scene.remove(mc.group); mc.dispose?.();
+      scene.remove(mc.group); mc.dispose();
       photos.set(k, url);
       for (const el of job.els) if (!el.querySelector('img')) el.append(h('img', { src: url, alt: '', width: W, height: H }));
       for (const el of document.querySelectorAll(`.portrait[data-look-key="${CSS.escape(k)}"]`)) if (!el.querySelector('img')) el.append(h('img', { src: url, alt: '', width: W, height: H }));

@@ -1,8 +1,9 @@
-// The furniture is Kenney's CC0 kit and the people Quaternius's (see /models/NOTICE.txt), self-hosted under public/models and loaded
+// The furniture is Kenney's CC0 kit (see /models/NOTICE.txt), self-hosted under public/models and loaded
 // lazily: a floor asks for the pieces it needs, each file is fetched once and gzipped in transit, and every placement is a
 // clone of the cached template. Anything that fails to load simply never appears, and the procedural stand-in stays.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { loadAddons } from './addons.js';
+import { popColor } from './toon.js';
 
 const BASE = `${location.pathname.startsWith('/theoffice') ? '/theoffice' : ''}/models/`;
 // The server stamps the version of the whole models folder here at start-up (server/statics.js), so these files can be cached for good.
@@ -26,7 +27,7 @@ async function fetchGLTF(path) {
 
 /** Kenney's furniture is exported unlit. Each part becomes a lit standard material named after its role, so pieces can be recoloured by role. */
 function litMaterial(src) {
-  const m = new THREE.MeshStandardMaterial({ color: src.color?.clone() || new THREE.Color('#cccccc'), roughness: 0.82, metalness: 0 });
+  const m = new THREE.MeshStandardMaterial({ color: popColor(src.color?.clone() || new THREE.Color('#cccccc')), roughness: 0.82, metalness: 0 });
   m.name = src.name;
   return m;
 }
@@ -70,30 +71,5 @@ export function place(tpl, { x = 0, y = 0, z = 0, ry = 0, scale = 1, tint = null
   return g;
 }
 
-// ---------- people ----------
-
-const peopleCache = new Map();
-/**
- * One person's template: a skinned mesh with the role of each vertex (skin, hair, top...) in `_slot`, plus the rig, its palette and its
- * bones' bind pose. Variants: male-a .. male-f, female-a .. female-f; `far` picks the coarse copy for floors seen across the tower. Packed by scripts/pack-people.mjs; see /models/NOTICE.txt.
- */
-export async function person(variant, { far = false } = {}) {
-  const key = far ? `${variant}-far` : variant;
-  if (!peopleCache.has(key)) {
-    peopleCache.set(key, fetchGLTF(`people/${key}.glb`).then((gltf) => {
-      let mesh = null;
-      gltf.scene.traverse((o) => { if (o.isSkinnedMesh) mesh = o; });
-      const slots = new Uint8Array(mesh.geometry.attributes._slot.count);
-      for (let i = 0, a = mesh.geometry.attributes._slot.array; i < slots.length; i++) slots[i] = a[i * 4];
-      return { scene: gltf.scene, mesh, slots, extras: gltf.parser.json.extras, variant, far };
-    }).catch((e) => { peopleCache.delete(key); throw e; }));
-  }
-  return peopleCache.get(key);
-}
-let clips = null;
-/** The walk, the idle and the gestures, one file for everyone on the shared rig. */
-export const personClips = () => (clips ||= fetchGLTF('people/clips.glb').then((g) => g.animations).catch((e) => { clips = null; throw e; }));
-
 /** True once the addons have loaded and a template is cached, so callers can place synchronously. */
 export const cachedFurniture = (name) => furnitureCache.get(name);
-export async function skeletonUtils() { return (await loadAddons()).SkeletonUtils; }

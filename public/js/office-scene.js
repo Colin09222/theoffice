@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { Character, PendingCharacter, HEAD_TOP, loadModelCharacter } from './character.js';
+import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
 import { getWorld, makeTower, GROUND, FLOOR_H, TOWER_W } from './lobby-scene.js';
@@ -13,6 +13,7 @@ import { textureSet, environmentMap, readyEnvironment, forgetEnvironment, repeat
 import { FloorLife, planProgress } from './life.js';
 import { tidyLabels } from './labels.js';
 import { cutaway, cutAmount, onWall, CUT } from './cutaway.js';
+import { ROOM_RAMP, outlineMaterial } from './toon.js';
 
 stage.onRestored.add(forgetEnvironment);  // the shared panorama lived on the GPU
 
@@ -27,7 +28,6 @@ const SUN_FAR = 64;  // the sun's distance, and its shadow box, scale with the f
 const ZOOM_MIN = 0.8, ZOOM_MAX = 3.6;
 // The CC0 texture each floor finish uses, and how many room units one repeat of it covers. Checker and rubber stay drawn by hand.
 const FLOOR_TEX = { wood: ['wood', 3.2], darkwood: ['darkwood', 3.0], parquet: ['parquet', 2.2], concrete: ['concrete', 5], tile: ['tile', 2.6], carpet: ['carpet', 2.4], terrazzo: ['terrazzo', 3.2] };
-const WALL_TEX = { paint: 'plaster', concrete: 'cast', brick: 'brick' };
 const ROLE_TITLE = { manager: 'Office Manager', researcher: 'Researcher', writer: 'Writer', builder: 'Builder', designer: 'Designer', analyst: 'Analyst', marketer: 'Marketer', tester: 'Tester', illustrator: 'Illustrator' };
 /** A person's job as their name tag and the staff list put it: the title they were hired with, else their role's. */
 export const jobTitle = (info, isBoss = false) => (isBoss ? 'Boss' : info.title || ROLE_TITLE[info.role] || (info.role ? info.role[0].toUpperCase() + info.role.slice(1) : 'Staff'));
@@ -37,9 +37,33 @@ const box = new THREE.BoxGeometry(1, 1, 1);
 const cyl = new THREE.CylinderGeometry(1, 1, 1, 16);
 const cone = new THREE.ConeGeometry(1, 1, 12); const ico = new THREE.IcosahedronGeometry(0.5, 0);
 const sph = new THREE.SphereGeometry(0.5, 14, 10);
-const ROOM_MAT = cutaway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 }), 'room');
+const toonRoom = () => new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: ROOM_RAMP });
+const ROOM_MAT = cutaway(toonRoom(), 'room');
 // The room's front and right walls: only the tower ever turns far enough round to see them, from behind (see cutaway.js).
-const FAR_MAT = cutaway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 }), 'far');
+const FAR_MAT = cutaway(toonRoom(), 'far');
+// Outdoors stays as it always was: the terrace and the slab it stands on keep the ordinary material, like the tower and the street they belong with.
+const TERRACE_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 });
+const ROOM_INK = cutaway(outlineMaterial('#4a3a30', 0.018), 'room');
+/** Everything from the furniture kit comes out a bit chunkier and softer: each corner moves out along its welded normal. Only ever a room's own merged copy, and never the bottoms of things, so nothing leaves the floor. */
+function chunky(root, by = 0.03) {
+  root.traverse((o) => {
+    if (!o.isMesh || !o.userData.merged || o.userData.chunky) return;
+    o.userData.chunky = true;
+    const p = o.geometry.attributes.position, n = o.geometry.attributes.normal;
+    const key = (i) => `${Math.round(p.getX(i) * 500)},${Math.round(p.getY(i) * 500)},${Math.round(p.getZ(i) * 500)}`;
+    const out = new Map();
+    for (let i = 0; i < p.count; i++) { const k = key(i); const e = out.get(k) || [0, 0, 0]; e[0] += n.getX(i); e[1] += n.getY(i); e[2] += n.getZ(i); out.set(k, e); }
+    for (let i = 0; i < p.count; i++) { if (p.getY(i) < 0.05) continue; const e = out.get(key(i)), l = Math.hypot(e[0], e[1], e[2]) || 1; p.setXYZ(i, p.getX(i) + (e[0] / l) * by, p.getY(i) + (e[1] / l) * by, p.getZ(i) + (e[2] / l) * by); }
+    p.needsUpdate = true; o.geometry.computeBoundingSphere();
+  });
+}
+/** A dark line around the furniture, where the tier can spare one more draw call for it: the same geometry, drawn again a touch bigger, back faces only. */
+function outlined(root) {
+  if ((stage.q?.density ?? 1) < 0.7) return;
+  const add = [];
+  root.traverse((o) => { if (o.isMesh && o.userData.merged && !o.userData.inked) { o.userData.inked = true; const ink = new THREE.Mesh(o.geometry, ROOM_INK); ink.userData.keep = true; ink.userData.ink = true; add.push([o, ink]); } });
+  for (const [o, ink] of add) o.parent.add(ink);
+}
 const mats = new Map();
 /** A colour holder: every plain piece bakes into the shared vertex-coloured material, so the material object itself never draws. */
 function lam(color) { let m = mats.get(color); if (!m) { m = new THREE.MeshLambertMaterial({ color }); mats.set(color, m); } return m; }
@@ -413,7 +437,8 @@ export class Actor {
   constructor(view, info, seat, { isBoss = false } = {}) {
     this.view = view; this.id = info.id; this.info = info; this.seat = seat; this.isBoss = isBoss;
     // In the tower nobody sees a person before their model is in, so the procedural stand-in isn't built there.
-    this.char = view.host ? new PendingCharacter(info.look, { scale: CHAR_SCALE }) : new Character(info.look, { accent: view.colors.accent, scale: CHAR_SCALE });
+    rememberJob(info.look, isBoss ? 'boss' : info.role);
+    this.char = new Character(info.look, { accent: view.colors.accent, scale: CHAR_SCALE, role: isBoss ? 'boss' : info.role });
     this.manner = manner(String(info.id)); this.char.setManner(this.manner);
     this.pos = new THREE.Vector3(seat.at[0], 0, seat.at[1]);
     this.group = this.char.group;
@@ -433,22 +458,6 @@ export class Actor {
     this.tag.append(this.bubble, this.roleEl, this.nameEl);
     if (view.host) { this.tagOff = true; this.tag.style.visibility = 'hidden'; }  // the tower shows it once the floor is in view
     view.labels.append(this.tag);
-    // The kit's model takes over from the stand-in when it lands; a failed load changes nothing.
-    Promise.resolve(view.turn()).then(() => (this.dead ? null : loadModelCharacter(info.look, { accent: view.colors.accent, far: !!view.host }))).then((mc) => mc && this.swapChar(mc)).catch((e) => { if (!this.dead) console.warn('character model unavailable', e); });
-  }
-  /** Same place, same pose, same props: the viewer only sees the person get a little more real. */
-  swapChar(next) {
-    if (this.dead) { next.dispose(); return; }
-    const old = this.char;
-    next.group.position.copy(old.group.position); next.group.rotation.copy(old.group.rotation);
-    next.setAnim(old.anim); next.paper.visible = old.paper.visible; next.setManner(this.manner);
-    // Mid-pose stays mid-pose: no standing up and sitting down again, or arms rising afresh, when the model takes over.
-    next.inChair = old.inChair; Object.assign(next.blend, old.blend); next.typeK = old.typeK ?? old.blend.type;
-    this.view.root.remove(old.group); old.dispose();
-    this.char = next; this.group = next.group; this.view.root.add(next.group);
-    if (this.seated) this.sitDown();
-    // A coarse copy that lands after the floor was flown into: the full person is on the way.
-    if (next.far && !this.view.host) loadModelCharacter(this.info.look, { accent: this.view.colors.accent }).then((mc) => this.swapChar(mc)).catch(() => {});
   }
   destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); }
   sitDown() {
@@ -729,17 +738,6 @@ export class OfficeView {
       deck.rotation.x = -Math.PI / 2; deck.position.y = -0.055; deck.receiveShadow = true; deck.userData.keep = true;
       this.deck = deck; this.room.add(deck);
     });
-    const style = this.decor.wallMat || 'paint';
-    if (WALL_TEX[style]) textureSet(WALL_TEX[style], { pbr }).then((set) => { if (set && !this.dead) this.skinWalls(style, set); });
-    this.loadFloorSets();
-  }
-  /** Fetches any floor textures the rooms now need, then bakes the floor again with them. */
-  loadFloorSets() {
-    const pbr = this.pbr;
-    const want = new Set([this.decor.floor, 'carpet', 'tile', ...[...this.offices.values()].map((o) => o.theme.floor)].filter((f) => FLOOR_TEX[f] && !this.floorSets.has(f)));
-    if (!want.size) return;
-    for (const f of want) this.floorSets.set(f, null);
-    Promise.all([...want].map((f) => textureSet(FLOOR_TEX[f][0], { pbr }).then((set) => { if (set) this.floorSets.set(f, set); }))).then(() => { if (!this.dead) this.bakeSoon(); });
   }
   /** The city below and the tower under our feet: the same world the lobby orbits, scaled so one tower floor is this room. */
   buildWorld() {
@@ -777,26 +775,27 @@ export class OfficeView {
     const legacy = new THREE.Group(); R.add(legacy); this.legacy = legacy;
     const wallZ = -ROOM_D / 2, wallX = -ROOM_W / 2;
 
+    const outdoor = new THREE.Group(); R.add(outdoor); this.outdoor = outdoor;
     // The floor plate is the top of the tower: a stone slab the size of the shaft, with a glass rail around the terrace left over.
     const plate = TOWER_W * WORLD_SCALE + 1.2;
-    piece(room, '#e9dfcf', plate, 0.42, plate, 0, -0.48, 0);
-    piece(room, '#d4c8b6', plate + 0.3, 0.12, plate + 0.3, 0, -0.6, 0, { cast: false });
-    piece(room, '#d9d0c0', ROOM_W + 1.1, 0.05, ROOM_D + 1.1, 0, -0.08, 0, { recv: true, cast: false });
-    piece(room, primary, ROOM_W + 0.9, 0.012, ROOM_D + 0.9, 0, -0.022, 0, { recv: false, cast: false });
+    piece(outdoor, '#e9dfcf', plate, 0.42, plate, 0, -0.48, 0);
+    piece(outdoor, '#d4c8b6', plate + 0.3, 0.12, plate + 0.3, 0, -0.6, 0, { cast: false });
+    piece(outdoor, '#d9d0c0', ROOM_W + 1.1, 0.05, ROOM_D + 1.1, 0, -0.08, 0, { recv: true, cast: false });
+    piece(outdoor, primary, ROOM_W + 0.9, 0.012, ROOM_D + 0.9, 0, -0.022, 0, { recv: false, cast: false });
     const rail = new THREE.MeshStandardMaterial({ color: '#cfe0ec', roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false, envMap: env });
-    for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(room, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
-    for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { piece(room, '#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); piece(room, '#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
+    for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(outdoor, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
+    for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { piece(outdoor, '#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); piece(outdoor, '#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
     // The terrace is part of the company too: planters along the rail in its colours and somewhere to sit outside. A timber deck follows in loadLooks.
     for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
       const x = i * 6.4 + (sz < 0 ? 1.4 : 0), z = sz * (plate / 2 - 0.85);
-      piece(room, mix(primary, '#cfc4b0', 0.62), 1.9, 0.55, 0.85, x, 0, z);
-      piece(room, i % 2 ? '#5c8650' : '#6c9452', 1.7, 0.36 + ((i * i) % 3) * 0.14, 0.66, x, 0.55, z);
+      piece(outdoor, mix(primary, '#cfc4b0', 0.62), 1.9, 0.55, 0.85, x, 0, z);
+      piece(outdoor, i % 2 ? '#5c8650' : '#6c9452', 1.7, 0.36 + ((i * i) % 3) * 0.14, 0.66, x, 0.55, z);
     }
     for (const [x, z] of [[-10.5, plate / 2 - 2.9], [8.5, plate / 2 - 3.1]]) {
-      piece(room, '#a8825c', 1.25, 0.07, 1.25, x, 0.72, z, { geo: cyl }); piece(room, '#3d3b44', 0.09, 0.72, 0.09, x, 0, z, { geo: cyl });
-      for (const a of [0.4, 2.5, 4.6]) { const sx = x + Math.cos(a) * 1.3, sz = z + Math.sin(a) * 1.3; piece(room, mix(primary, '#ffffff', 0.32), 0.62, 0.1, 0.62, sx, 0.44, sz); piece(room, '#3d3b44', 0.07, 0.44, 0.07, sx, 0, sz, { cast: false }); }
+      piece(outdoor, '#a8825c', 1.25, 0.07, 1.25, x, 0.72, z, { geo: cyl }); piece(outdoor, '#3d3b44', 0.09, 0.72, 0.09, x, 0, z, { geo: cyl });
+      for (const a of [0.4, 2.5, 4.6]) { const sx = x + Math.cos(a) * 1.3, sz = z + Math.sin(a) * 1.3; piece(outdoor, mix(primary, '#ffffff', 0.32), 0.62, 0.1, 0.62, sx, 0.44, sz); piece(outdoor, '#3d3b44', 0.07, 0.44, 0.07, sx, 0, sz, { cast: false }); }
     }
-    this.floorMat = new THREE.MeshStandardMaterial({ roughness: { carpet: 0.95, rubber: 0.8, tile: 0.35, checker: 0.35 }[d.floor] ?? 0.55, metalness: 0, envMapIntensity: 0.6 });
+    this.floorMat = new THREE.MeshToonMaterial({ gradientMap: ROOM_RAMP });
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, ROOM_D), this.floorMat);
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.userData.keep = true; room.add(floor);
     this.floorTile = floorTile(d.floor);
@@ -970,7 +969,7 @@ export class OfficeView {
       R.add(this.pet.group); this.petPath = []; this.petWait = 3;
     }
     // Where a room is put together out of sight (the tower, or ahead for the lift), the merge is a step of its own. It comes before the steps queued below.
-    const merge = () => { if (this.dead) return; mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT); mergeColored(legacy, ROOM_MAT); this.buildFarWalls(); this.cutWalls(); };
+    const merge = () => { if (this.dead) return; mergeColored(outdoor, TERRACE_MAT); mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT); mergeColored(legacy, ROOM_MAT); this.buildFarWalls(); this.cutWalls(); };
     if (this.host || this.pace) Promise.resolve(this.turn()).then(merge); else merge();
     this.loading = { settled: false };
     this.loadModels().catch((e) => { console.warn('furniture models unavailable, keeping the stand-ins', e); }).finally(() => { this.loading.settled = true; });
@@ -1102,7 +1101,7 @@ export class OfficeView {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.setIndex(idx);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: wallSkin(style, wall), vertexColors: true, roughness: style === 'panels' ? 0.6 : 0.92, metalness: 0, side: THREE.DoubleSide }));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ map: wallSkin(style, wall), vertexColors: true, gradientMap: ROOM_RAMP, side: THREE.DoubleSide }));
     mesh.receiveShadow = true; mesh.userData.keep = true;
     return mesh;
   }
@@ -1208,7 +1207,7 @@ export class OfficeView {
       const front = Math.PI;  // the kit's desk has its drawer at the back; turned, it faces the sitter
       put('desk', { z: -0.2, ry: front, scale: big ? FS * 1.25 : FS * 1.1 });
       put('computerScreen', { y: big ? 1.2 : 1.06, z: -0.58, ry: 0 });
-      // Keys near the front edge, where a seated person's hands land (see TYPE_A in character.js).
+      // Keys near the front edge, where a seated person's hands land.
       put('computerKeyboard', { y: big ? 1.2 : 1.06, z: big ? 0.26 : 0.19 });
       put('computerMouse', { x: 0.56, y: big ? 1.2 : 1.06, z: big ? 0.28 : 0.21 });
       if (T.lampRoundTable) put('lampRoundTable', { x: big ? -1.15 : -0.86, y: big ? 1.2 : 1.06, z: -0.5, scale: FS * 0.72 });
@@ -1265,6 +1264,7 @@ export class OfficeView {
     this.deskInto = (into, x, z, chairColor, ry) => { const keep = target; target = into; desk(x, z, chairColor, false, ry); target = keep; };
     if (this.host || this.pace) { await this.turn(); if (this.dead) return; }  // laying the furniture out and merging it are two steps
     mergeColored(models, ROOM_MAT);
+    chunky(models); outlined(models);
     this.root.add(models);
     this.cutWalls();
     this.root.remove(this.legacy);
@@ -1432,8 +1432,18 @@ export class OfficeView {
       marker('#c8455a'); x.lineWidth = 3; x.beginPath(); x.arc(632, 262, 10, 0, 7); x.stroke();
     });
   }
+  /** Whoever just finished a job does a little jump for joy, the moment the board says so. */
+  celebrateFinished(tasks) {
+    const was = (this.taskWas ||= new Map());
+    for (const t of tasks) {
+      const before = was.get(t.id); was.set(t.id, t.status);
+      if (before === undefined || before === t.status || !(t.status === 'done' || t.status === 'review')) continue;
+      for (const a of this.actors.values()) if (a.taskId === t.id || String(a.id) === String(t.agent_id)) { a.char.celebrate(); break; }
+    }
+  }
   updateBoard(tasks) {
     this.tasks = tasks;
+    this.celebrateFinished(tasks);
     for (const a of this.actors.values()) if (a.state !== 'idle') a.renderBubble();
     const shown = tasks.filter((t) => ['todo', 'doing', 'review', 'blocked', 'done'].includes(t.status));
     const open = shown.some((t) => t.status !== 'done');
@@ -1488,7 +1498,7 @@ export class OfficeView {
     // The rooms nobody has yet are still furnished, and say so on the door, ready for the next hire.
     const owned = new Set(this.owners.values()); let vacant = 0;
     for (const r of this.plan.rooms) if (r.kind === 'staff' && !owned.has(r.id) && !this.offices.has(r.id)) { this.nav.block(...deskRect(r.desk)); this.addOffice(r, { id: `free-${r.id}`, role: 'vacant', name: null }, { own: true }); vacant++; }
-    if (fresh.length || vacant || !this.floorMat.map) { this.rebuildOffices(); this.bakeSoon(); this.loadFloorSets(); if (this.modelsOn) this.furnishOffices(); }
+    if (fresh.length || vacant || !this.floorMat.map) { this.rebuildOffices(); this.bakeSoon(); if (this.modelsOn) this.furnishOffices(); }
     // The boss sees which rooms are free to hire into; a visitor doesn't. A room built in the tower learns who is looking when the page takes it over.
     if (state.viewer && !!state.viewer.owner !== this.bossView) { this.bossView = !!state.viewer.owner; this.drawSigns(); }
     const seen = new Set();
@@ -1617,6 +1627,7 @@ export class OfficeView {
     }
     if (this.host || this.pace) { await this.turn(); if (this.dead || token < this.furnishedToken) return; }
     mergeColored(g, ROOM_MAT);
+    chunky(g); outlined(g);
     if (!this.detailOn) g.traverse((m) => { if (m.isMesh) m.castShadow = false; });
     const old = this.officeModels; this.officeModels = g; this.root.add(g);
     if (old) { old.removeFromParent(); old.traverse((m) => { if (m.userData?.merged) m.geometry.dispose(); }); }
@@ -1657,17 +1668,6 @@ export class OfficeView {
     tex.anisotropy = 8;
     this.signMesh2 = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, toneMapped: false }));
     this.root.add(this.signMesh2);
-  }
-  /** The outer walls in a real material, tinted by the wall colour, with its normal and roughness maps where the tier allows. */
-  skinWalls(style, set) {
-    const wall = this.decor.wall;
-    if (!this.wallSkin) { const back = []; { let at = -ROOM_W / 2; for (const [a, b] of this.plan.windows) { back.push([at, a]); at = b; } back.push([at, ROOM_W / 2]); } this.wallSkin = this.wallSkinMesh('paint', wall, back); this.room.add(this.wallSkin); }
-    const m = this.wallSkin.material;
-    m.map?.dispose(); m.map = repeating(set.map, { color: true });
-    if (set.normal) { m.normalMap = repeating(set.normal); m.normalScale.set(0.8, 0.8); }
-    if (set.rough) { m.roughnessMap = repeating(set.rough); m.roughness = 1; }
-    m.color.set(style === 'brick' ? mix(wall, '#ffffff', 0.7) : style === 'paint' ? mix(wall, '#ffffff', 0.15) : mix(wall, '#ffffff', 0.45));
-    m.needsUpdate = true;
   }
   /** Shows who was tapped: a ring at their feet and a lit name tag, until someone else (or nobody) is. */
   highlight(id) {
@@ -1851,7 +1851,6 @@ export class OfficeView {
     }
     this.buildWorld(); this.bind();
     // Up close now: the full-detail people take over from the tower's coarse ones, one by one.
-    for (const a of this.actors.values()) if (a.char.far) loadModelCharacter(a.info.look, { accent: this.colors.accent }).then((mc) => a.swapChar(mc)).catch(() => {});
     // The same light the tower gave it. Its materials are already the floor page's own, so nothing reloads or bakes again under the camera.
     this.pageLight();
   }

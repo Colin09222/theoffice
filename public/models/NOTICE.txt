@@ -1,7 +1,7 @@
 Third-party models under public/models
 =======================================
 
-All files in this directory except people/ (see below) come from Kenney (www.kenney.nl) and are released under the
+All files in this directory come from Kenney (www.kenney.nl) and are released under the
 Creative Commons Zero (CC0 1.0) public-domain dedication: http://creativecommons.org/publicdomain/zero/1.0/
 Credit is not required; we credit Kenney anyway. Nothing here was taken from any other site.
 
@@ -39,24 +39,11 @@ Files kept (only the ones the app uses; the rest of each kit was not copied):
     character-male-a .. character-male-f, character-female-a .. character-female-f, aid-glasses, aid-sunglasses,
     Textures/colormap.png
 
-The models are recoloured at runtime (company colours on chairs and sofas, a floor's own skin, hair and outfit colours on
-people); the files themselves are not edited.
+The models are recoloured at runtime (company colours on chairs and sofas, the kit's people are not used in the rooms); the files themselves are not edited.
 
 The .glb files are not byte-for-byte the kits': scripts/strip-models.mjs removes animation clips the app never plays and UVs
 no material samples, and stores normals, UVs and skin weights in small integers. The models themselves are unchanged.
 
-People under public/models/people
-----------------------------------
-The office's people are built from Quaternius's Ultimate Modular Men and Ultimate Modular Women packs (https://quaternius.com/packs/ultimatemodularcharacters.html and
-.../ultimatemodularwomen.html), downloaded on 8 November 2026 from the Google Drive folders those pages link to, "Individual Characters/glTF". The License.txt in each pack:
-
-  Ultimate Modular Males by @Quaternius
-  License: CC0 1.0 Universal (CC0 1.0), Public Domain Dedication, https://creativecommons.org/publicdomain/zero/1.0/
-  Credit is not required; we credit Quaternius anyway.
-
-Characters used: men Casual_2, Casual_Hoodie, Farmer, Suit, Worker, Punk; women Casual, Formal, Worker, Suit, Adventurer, Punk (mapped to male-a..f and female-a..f in that
-order). scripts/pack-people.mjs merges each into one skinned mesh on a 22-bone rig (the fingers are folded into the wrist), welds the flat-shaded vertices, drops normals and UVs,
-and records each part's role (skin, hair, top, legs and so on) so a person can be recoloured. clips.glb holds the kit's Idle_Neutral, Walk, Interact and Wave clips, resampled.
-The packs' other files (FBX, blends) were not copied. The Universal Base Characters and Universal Animation Library packs were looked at and not used.
+The office's people are not models: they are made entirely in code (public/js/cast.js).
 
 The floor and wall textures are listed separately, in public/assets/NOTICE.txt.
