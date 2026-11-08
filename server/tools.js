@@ -13,6 +13,7 @@ import { OrderError } from './orders.js';
 import { ModeError } from './modes.js';
 import { HelpError, HELP_LIMITS, flatText } from './help.js';
 import { BusinessError } from './business.js';
+import { MAIL_DEFS, mailHandlers, mailToolsFor } from './mail-tools.js';
 import { LAYOUTS, TONES, VIBES } from '../public/js/looks.js';
 
 const LINK_SCAN_CHARS = 24 * 1000 * 1000, MAX_LINKS_CHECKED = 100;
@@ -140,6 +141,8 @@ const DEFS = {
   }, ['name', 'prompt', 'caption']),
 };
 
+Object.assign(DEFS, MAIL_DEFS);  // email: server/mail-tools.js
+
 // A refusal quotes the link, and reading a draft back shows it again. Neither means anyone has seen the page.
 export const NOT_SEEN_AS_LINK = /^Error:|^<untrusted_data source="workspace:/;
 export const STAFF_TOOLS = ['write_file', 'read_file', 'list_files', 'view_file', 'copy_file', 'publish_project', 'fetch_url', 'web_search', 'ask_boss', 'ask_colleague', 'file_purchase_request'];
@@ -152,7 +155,7 @@ const ROLE_EXTRAS = {
   builder: ['generate_image', 'review_design', 'launch_check'], designer: ['generate_image', 'review_design'], illustrator: ['generate_image', 'review_design'],
   tester: ['review_design', 'launch_check'], marketer: ['check_domain'],
 };
-export const toolsForRole = (role) => [...(role === 'manager' ? MANAGER_TOOLS : STAFF_TOOLS), ...(ROLE_EXTRAS[role] || [])];
+export const toolsForRole = (role) => [...(role === 'manager' ? MANAGER_TOOLS : STAFF_TOOLS), ...(ROLE_EXTRAS[role] || []), ...mailToolsFor(role)];
 const serverSearch = (cfg) => !!(cfg.anthropicKey || cfg.searchMock);
 export const SEARCH_ROLES = new Set(['researcher', 'manager']);
 const mediaOn = (cfg) => !!(cfg.openrouterKey || cfg.mediaMock);
@@ -665,6 +668,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       return `Made ${saved.path} (${Math.ceil(saved.size / 1024)} KB, ${v.seconds} seconds) with its caption in ${at}.vtt.`;
     },
   };
+  Object.assign(handlers, mailHandlers({ engine }));  // email: server/mail-tools.js
   const biz = (fn) => {
     if (!engine.business) throw new WorkspaceError('Business mode is not available here');
     try { return fn(); } catch (e) { if (e instanceof BusinessError) throw new WorkspaceError(e.message); throw e; }

@@ -34,7 +34,7 @@ describe('the manager\'s playbooks', () => {
   });
   test('the business lane covers research, estimates, plan, page, checklist and what only a human can do, and says what nobody here can do', () => {
     const biz = full.slice(full.indexOf('BUSINESS\n'), full.indexOf('Security rules'));
-    assert.match(biz, /nobody here can send email, post, run ads, talk to customers or spend money/);
+    assert.match(biz, /nobody here can post, run ads or spend money, and email to anyone new waits for their OK/);
     assert.match(biz, /cited sources/); assert.match(biz, /named competitors/); assert.match(biz, /target customer/); assert.match(biz, /role analyst/); assert.match(biz, /role marketer/);
     assert.match(biz, /offer and pricing/); assert.match(biz, /estimates/); assert.match(biz, /launch checklist/); assert.match(biz, /waitlist/); assert.match(biz, /only the boss can do/);
   });
@@ -62,7 +62,7 @@ describe('the manager\'s playbooks', () => {
   });
   test('every agent is told what nobody here can do, and to label estimates', () => {
     for (const p of [full, staffPrompt(floor, { name: 'S', title: 'T', role: 'writer' }, {}, {}, FULL), computerPrompt(FULL, 'builder', {}), computerPrompt(FULL, 'tester', {})]) {
-      assert.match(p, /Nobody in this building can send email, post anywhere, run ads, contact anyone, sign up for a service or spend money/);
+      assert.match(p, /Nobody in this building can post anywhere, run ads, sign up for a service or spend money\. The only way to contact anyone is the company's own email/);
       assert.match(p, /label it "Estimate"/); assert.match(p, /source link/); assert.match(p, /marked as proposed/); assert.match(p, /traction/);
     }
   });
@@ -127,7 +127,7 @@ describe('a lane through the engine', () => {
   test('tapping a lane is a short conversation that starts no work', async () => {
     const t = await boot();
     try {
-      for (const [text, re] of [['Let\'s do a game. What could we build?', /Three small ideas/], ['Let\'s do a website. What do you need from me?', /Two quick questions/], ['Let\'s do a small business. Help me work it out.', /Nobody here can send email, post, run ads or spend money/]]) {
+      for (const [text, re] of [['Let\'s do a game. What could we build?', /Three small ideas/], ['Let\'s do a website. What do you need from me?', /Two quick questions/], ['Let\'s do a small business. Help me work it out.', /Nobody here can post, run ads or spend money, and email to anyone new waits for your OK/]]) {
         const a = await claim(t, `Lane ${text.slice(10, 20)}`);
         const fresh = await floorState(a);
         assert.equal(fresh.messages.length, 1); assert.match(fresh.messages[0].text, /Tap one below/);

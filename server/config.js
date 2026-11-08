@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mailSettings } from './mail-config.js';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -146,6 +147,7 @@ export function loadConfig(env = process.env, overrides = {}) {
     helpTimeoutMin: num(env.HELP_TIMEOUT_MIN, 30),
     helpPerFloorDay: num(env.HELP_PER_FLOOR_DAY, 5),
     helpTickMs: num(env.HELP_TICK_MS, 5000),
+    ...mailSettings(env),  // email: RESEND_API_KEY, RESEND_WEBHOOK_SECRET, MAIL_DOMAIN and the caps (docs/MAIL.md)
     ...overrides,
   };
 }

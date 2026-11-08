@@ -343,6 +343,7 @@ export class Engine {
       ...(this.help && this.cfg.helpEnabled !== false ? [this.help.stateLine(floor.id)] : []),
       ...(this.modes ? [this.modes.stateLine(floor.id)] : []),
       ...(this.business?.active(floor.id) ? [this.business.stateLine(floor.id)] : []),
+      ...(this.mail ? [this.mail.stateLine(floor.id)] : []),
     ].join('\n');
     // 'office' notices (outage, stop) are for the boss only. If they reached the model it would lose the thread.
     // Reports stay out too: they quote what was found on pages, and the manager has the facts in the state message.
