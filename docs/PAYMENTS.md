@@ -26,6 +26,7 @@ Until there is a key the floors show "Payments are being set up" and `office.pay
    STRIPE_WEBHOOK_SECRET=whsec_...
    ```
    Both settings are required. With a key but no webhook secret the building stays "being set up", because without webhooks a lapsed subscription would never lose access.
+   Optional: `STRIPE_ACCOUNT_COUNTRY=us` (two letters, defaults to `us`). Stripe now makes connected accounts only through Accounts v2 (`POST /v2/core/accounts`) and wants the country before the boss sees its form, so every new account is made in this country.
 6. Check it: `curl -s https://<label>.middistance.com/_office/cloud/pay/status` answers `{"ready":false,"testMode":true,...}` until that floor's boss has connected, then `ready:true`.
 7. A boss opens their floor's **Payments** tab and taps **Connect Stripe**. Test mode shows a banner to the boss, on Stripe's own pages, and in `office.pay.status()`.
 

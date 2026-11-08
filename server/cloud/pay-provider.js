@@ -63,13 +63,15 @@ export function formEncode(obj) {
 export function createStripe({ apiKey, base = STRIPE_API, fetchImpl = fetch, timeoutMs = 20000, retries = 1, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
   if (!keyMode(apiKey)) throw new PayProviderError('That is not a Stripe secret key.', { code: 'bad_key' });
   const root = String(base).replace(/\/+$/, '');
-  async function call(method, path, { params, query, account, idem } = {}) {
+  async function call(method, path, { params, query, account, idem, jsonBody = false } = {}) {
     const url = `${root}${path}${query ? `?${formEncode(query)}` : ''}`;
     const headers = { authorization: `Bearer ${apiKey}`, 'stripe-version': STRIPE_VERSION };
     if (account) headers['stripe-account'] = account;
     if (idem) headers['idempotency-key'] = idem;
     let body;
-    if (method !== 'GET' && method !== 'DELETE') { headers['content-type'] = 'application/x-www-form-urlencoded'; body = formEncode(params); }
+    if (method !== 'GET' && method !== 'DELETE') {
+      if (jsonBody) { headers['content-type'] = 'application/json'; body = JSON.stringify(params); } else { headers['content-type'] = 'application/x-www-form-urlencoded'; body = formEncode(params); }
+    }
     let lastError;
     for (let attempt = 0; attempt <= retries; attempt++) {
       if (attempt) await sleep(200 * attempt);
@@ -96,7 +98,8 @@ export function createStripe({ apiKey, base = STRIPE_API, fetchImpl = fetch, tim
   const on = (account, idem) => ({ account, idem });
   return {
     call,
-    createAccount: (params, idem) => call('POST', '/v1/accounts', { params, idem }),
+    // Stripe refuses POST /v1/accounts on new platforms, so an account is made through Accounts v2. The acct_ id it returns works with every v1 route below.
+    createAccount: (params, idem) => call('POST', '/v2/core/accounts', { params, idem, jsonBody: true }),
     getAccount: (id) => call('GET', `/v1/accounts/${encodeURIComponent(id)}`),
     createAccountLink: (params) => call('POST', '/v1/account_links', { params }),
     createProduct: (account, params, idem) => call('POST', '/v1/products', { params, ...on(account, idem) }),

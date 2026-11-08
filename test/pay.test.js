@@ -139,13 +139,13 @@ describe('with Stripe connected (mock)', () => {
       const r = await pay(t, shop, 'checkout', u.session, { product: 'pro' });
       assert.equal(r.status, 200); assert.equal(r.json.ok, false); assert.equal(r.json.code, 'not_ready');
     });
-    test('connecting creates the account with controller properties, the boss as seller, and a hosted onboarding link', async () => {
+    test('connecting creates the account through Accounts v2, the boss as seller, and a hosted onboarding link', async () => {
       const r = await boss.post(`/api/floors/${boss.slug}/pay/connect`, {});
       assert.equal(r.status, 200, JSON.stringify(r.data)); assert.match(r.data.url, /\/hosted\/onboard\//);
-      const create = mock.state.requests.find((x) => x.path === '/v1/accounts');
+      const create = mock.state.requests.find((x) => x.path === '/v2/core/accounts');
       assert.ok(create.auth); assert.equal(create.version, '2026-10-28.endive');
-      const b = decodeURIComponent(create.body);
-      assert.match(b, /controller\[fees\]\[payer\]=account/); assert.match(b, /controller\[losses\]\[payments\]=stripe/); assert.match(b, /controller\[requirement_collection\]=stripe/); assert.match(b, /controller\[stripe_dashboard\]\[type\]=full/);
+      const b = JSON.parse(create.body);
+      assert.equal(b.dashboard, 'full'); assert.equal(b.identity.country, 'us'); assert.equal(b.defaults.responsibilities.fees_collector, 'stripe'); assert.equal(b.defaults.responsibilities.losses_collector, 'stripe'); assert.equal(b.configuration.merchant.capabilities.card_payments.requested, true);
       assert.equal(create.idem.startsWith('office-account-'), true);
       const link = mock.state.requests.find((x) => x.path === '/v1/account_links');
       assert.match(decodeURIComponent(link.body), /type=account_onboarding/);
@@ -162,7 +162,7 @@ describe('with Stripe connected (mock)', () => {
     test('connecting again reuses the account and only makes a fresh link', async () => {
       const r = await boss.post(`/api/floors/${boss.slug}/pay/connect`, {});
       assert.equal(r.status, 200);
-      assert.equal(mock.state.requests.filter((x) => x.path === '/v1/accounts').length, 1);
+      assert.equal(mock.state.requests.filter((x) => x.path === '/v2/core/accounts').length, 1);
       assert.equal(mock.state.requests.filter((x) => x.path === '/v1/account_links').length, 2);
       assert.equal(all(t.db, 'SELECT * FROM pay_accounts WHERE floor_id=?', floor.id).length, 1);
     });
