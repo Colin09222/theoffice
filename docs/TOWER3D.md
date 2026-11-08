@@ -37,16 +37,20 @@ and triangle counts below are what a phone's GPU would have to carry.
 
 | | desktop 1440x900 | phone profile, 4x CPU |
 | --- | --- | --- |
-| holding still | 60 fps, 375 draw calls, 371k triangles | 60 fps, 227 draw calls, 249k triangles |
-| riding | 59-60 fps, worst frame 33 ms, no long tasks | 58-59 fps, worst frame 67-75 ms (a floor being built at rest) |
-| flying in | 60 fps, worst frame 33 ms | 58 fps, worst frame 83 ms (the landing) |
-| flying out | 60 fps, worst frame 33 ms | 59 fps, worst frame 33 ms |
-| JS heap | 50-60 MB | 50-90 MB |
+| holding still | 60 fps, 368 draw calls, 373k triangles | 60 fps, 225 draw calls, 249k triangles |
+| riding | 59 fps, worst frame 33 ms, no long tasks | 58 fps, worst frame 67 ms (a floor being built while at rest) |
+| flying in | 60 fps, worst frame 33 ms | 59 fps, worst frame 83 ms (the landing) |
+| flying out | 59 fps, worst frame 33 ms | 57-59 fps, worst frame 33-67 ms |
+| JS heap | 48-76 MB | 42-86 MB |
 
 On a device that keeps missing its frame time the stage steps down by itself: the occlusion goes, then pixels, then the tier, and at the
 lowest tier the tower keeps only the floor in the middle real.
 
 ## Testing
+
+At 7d8a0b0: node suite 878/878 (Node 22, AI_MODE=mock); `tower.mjs` 18/18 on both profiles; `e2e.mjs` 53/70, against 40/70 for origin/main
+on the same machine. Every e2e failure left is there on main too: the CSP note below, and on a phone the customise sheet covering its own
+Decor tab (`[data-custom=decor] is covered by DIV.color-row`), which leaves the sheet open over the later phone steps.
 
 - `node test/browser/tower.mjs` (TOWER_SHOTS=dir keeps screenshots, TOWER_ONLY=desktop|phone runs one profile).
 - `node test/browser/stack.mjs` is now the no-WebGL Building (the strips). Its phone flick step fails on this machine on main too.
