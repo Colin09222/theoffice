@@ -25,12 +25,16 @@ export async function aheadState(slug) {
   return a && performance.now() - a.at < FRESH ? a.state : null;
 }
 /** Keeps a floor's room for a quick way back. Its input is unbound, its tags taken off the page; the stage lets it go with the next view. */
-export function park(slug, view, max = 2) {
+export function park(slug, view, max = 2, keep = '') {
   const old = parked.get(slug); if (old && old.view !== view) old.view.destroy();
   view.unbind?.(); view.unbind = null;
   for (const a of view.actors.values()) a.tag.remove();
-  parked.set(slug, { view, at: performance.now() });
-  while (parked.size > max) { const [k, p] = parked.entries().next().value; parked.delete(k); p.view.destroy(); }
+  parked.delete(slug); parked.set(slug, { view, at: performance.now() });
+  // Over the limit, the longest kept goes first, but never the floor the lift is on its way to.
+  while (parked.size > max) {
+    const k = [...parked.keys()].find((x) => x !== keep && x !== slug); if (!k) break;
+    const p = parked.get(k); parked.delete(k); p.view.destroy();
+  }
 }
 /** A floor's parked room if it is still there and recent enough, else null (and anything stale is thrown away). */
 export function unpark(slug) {

@@ -1959,11 +1959,15 @@ export class OfficeView {
     const p = this.tv.copy(a.group.position); p.y += (a.char.labelY ?? HEAD_TOP * CHAR_SCALE) + 0.2;
     if (this.host) {
       // In the tower: the root stands at its floor's height, and a tag off the screen, or on a floor the tower has quietened, is put away.
-      const wx = a.group.position.x, wz = a.group.position.z;
-      p.add(this.root.position).project(this.camera);
-      // Hidden behind the slab of the floor above: the tower says where that slab's edge facing the camera falls on the screen (see TowerView).
+      p.add(this.root.position);
+      // Hidden behind the slab of the floor above (the tower says where it is): the line from the camera to the tag goes through it.
       let behind = false;
-      if (this.coverY !== undefined && p.z <= 1) { const [nx, nz] = this.coverN || [0, 1], D = this.coverD; const e = this.tv2.set(nx ? nx * D : wx, this.coverY, nz ? nz * D : wz).project(this.camera); behind = p.y > e.y; }
+      const c = this.camera.position;
+      if (this.coverY !== undefined && c.y > this.coverY && p.y < this.coverY) {
+        const t = (this.coverY - c.y) / (p.y - c.y), x = c.x + (p.x - c.x) * t, z = c.z + (p.z - c.z) * t;
+        behind = Math.abs(x) < this.coverD && Math.abs(z) < this.coverD;
+      }
+      p.project(this.camera);
       const off = !this.tagsOn || behind || p.z > 1 || Math.abs(p.x) > 1.25 || Math.abs(p.y) > 1.25;
       if (off !== !!a.tagOff) { a.tagOff = off; a.tag.style.visibility = off ? 'hidden' : ''; }
       if (off) { a.tagX = undefined; return; }

@@ -15,7 +15,6 @@ export function go(path, { replace = false } = {}) {
 window.officeGo = go;
 
 async function route() {
-  performance.mark('office:route');
   const path = location.pathname.replace(/\/+$/, '').slice(BASE.length) || '/';
   // Stepping out of an office goes through the lift doors, the same ones that opened it.
   const fade = $('#fade');

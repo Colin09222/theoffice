@@ -50,7 +50,8 @@ function patch(mat, U) {
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>\nattribute float aSlot; uniform vec4 uFade[${FADE_N}]; uniform float uLift; uniform float uLiftFrom; uniform float uRide; uniform float uGap; uniform float uCutOn; varying float vFade; varying vec3 vCutP; varying vec2 vCut; varying float vFar;`)
       .replace('#include <project_vertex>', `
-        bool _far = aSlot >= 1999.5, _struct = !_far && aSlot >= 999.5; float _slot = _far ? aSlot - 2000.0 : _struct ? aSlot - 1000.0 : aSlot;
+        bool _col = aSlot >= 2999.5, _far = !_col && aSlot >= 1999.5, _struct = _col || (!_far && aSlot >= 999.5);
+        float _slot = _col ? aSlot - 3000.0 : _far ? aSlot - 2000.0 : _struct ? aSlot - 1000.0 : aSlot;
         int _si = int(clamp(_slot, 0.0, ${FADE_N * 4 - 1}.0) + 0.5);
         vFade = _struct ? 1.0 : uFade[_si / 4][_si - (_si / 4) * 4];
         vec4 mvPosition = vec4(transformed, 1.0);
@@ -59,6 +60,11 @@ function patch(mat, U) {
         #endif
         ${CUT_AMOUNT('uCutOn')}
         vCutP = vec3(mvPosition.x, mvPosition.y - (${BASE_Y.toFixed(4)} + _slot * ${FH.toFixed(2)}), mvPosition.z); vCut = _struct ? vec2(0.0) : _cut; vFar = _far ? 1.0 : 0.0;
+        // The corner pillar nearest the camera, when it looks in across that corner, stands right in front of the room: it fades.
+        #ifdef USE_INSTANCING
+          if (_col) { vec2 _c = vec2(instanceMatrix[3].x, instanceMatrix[3].z); bool _near = _c.x * cameraPosition.x > 0.0 && _c.y * cameraPosition.z > 0.0;
+            vFar = _near ? -smoothstep(0.3, 0.5, min(abs(_cd.x), abs(_cd.y))) * uCutOn : 0.0; }
+        #endif
         mvPosition.y += uGap * smoothstep(0.0, 1.0, _slot - uRide) + (_slot > uLiftFrom ? uLift : 0.0);
         mvPosition = modelViewMatrix * mvPosition;
         gl_Position = projectionMatrix * mvPosition;
@@ -69,7 +75,8 @@ function patch(mat, U) {
         float _b = bayer4(gl_FragCoord.xy);
         if (vFade < 0.999 && vFade <= _b) discard;
         // The walls facing the camera go down to their sills; the far ones come up as they do (see cutaway.js).
-        if (vFar > 0.5) { if ((vCutP.z > ${EDGE.FB} ? vCut.x : vCut.y) <= _b) discard; }
+        if (vFar < 0.0) { if (-vFar > _b) discard; }
+        else if (vFar > 0.5) { if ((vCutP.z > ${EDGE.FB} ? vCut.x : vCut.y) <= _b) discard; }
         else if (vCutP.y > ${EDGE.SILL} && ((vCutP.z < ${EDGE.HB} && vCut.x > _b) || (vCutP.x < ${EDGE.HL} && vCut.y > _b))) discard;`);
   };
   mat.customProgramCacheKey = () => `tower2-${mat.type}-${mat.map ? 'map' : 'plain'}`;
@@ -216,7 +223,7 @@ export class TowerView {
       // The slab, a hair inside the one a real floor draws, so the two never fight over the same surface.
       box.add(S + k, 0, y - 0.27, 0, PLATE - 0.04, 0.38, PLATE - 0.04, 0, '#e9dfcf');
       box.add(S + k, 0, y - 0.54, 0, PLATE + 0.26, 0.1, PLATE + 0.26, 0, '#d4c8b6');
-      for (const [px, pz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box.add(S + k, px * (PLATE / 2 + 0.36), y - 0.6 + FH / 2, pz * (PLATE / 2 + 0.36), 0.72, FH, 0.72, 0, '#e2d5c1');
+      for (const [px, pz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) box.add(3000 + k, px * (PLATE / 2 + 0.36), y - 0.6 + FH / 2, pz * (PLATE / 2 + 0.36), 0.72, FH, 0.72, 0, '#e2d5c1');
       const d = this.rooms[s.n]?.decor || {};
       const L = s.plan;
       const wall = s.kind === 'empty' ? '#5f5a53' : d.wall || '#e9e1d3';
@@ -821,7 +828,7 @@ export class TowerView {
       if (!f.view.root.visible) continue;
       f.view.tagsOn = !this.flight && this.zoom > 0.7 && Math.abs(f.slot.k - c) <= (phone ? 0 : 1);
       // Where the slab of the floor above meets the open side facing the camera: a tag whose person is behind it is put away.
-      f.view.coverY = slotY(f.slot.k + 1) + this.offsetOf(f.slot.k + 1) - 0.6; f.view.coverN = this.edge; f.view.coverD = PLATE / 2;
+      f.view.coverY = slotY(f.slot.k + 1) + this.offsetOf(f.slot.k + 1) - 0.6; f.view.coverD = PLATE / 2;
       f.view.update(dt);
       if (f.view.tagsOn) for (const [id, a] of f.view.actors) tags.set(`${f.slot.k}:${id}`, a);
     }

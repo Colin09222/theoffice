@@ -11,7 +11,8 @@ const ONLY = process.env.POLISH_ONLY || '';
 let failures = 0;
 const results = {};
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`.slice(0, 600)); if (!ok) failures++; };
-const step = async (name, fn) => { try { const d = await fn(); check(name, true, d || ''); } catch (e) { check(name, false, String(e.message).slice(0, 300)); } };
+const STEP = process.env.POLISH_STEP || '';  // run only the steps whose name has this in it
+const step = async (name, fn) => { if (STEP && !name.includes(STEP)) return; try { const d = await fn(); check(name, true, d || ''); } catch (e) { check(name, false, String(e.message).slice(0, 300)); } };
 
 
 // A slow mock line, so the staff are still at their work when the building is looked at.
@@ -212,17 +213,18 @@ async function profile(kind) {
     const times = [];
     for (const [dir, n] of [['up', 14], ['down', 12], ['up', 14], ['down', 12]]) {
       // Timed in the page, frame by frame: from the press to the first frame on which the new floor is there in full detail.
-      await p.ev(`(() => { window.__t0 = performance.now(); window.__t1 = 0; window.__doors = 0; const w = () => { if (document.querySelector("#fade")?.classList.contains("in") || document.querySelector("#boot:not(.gone)")) window.__doors++;
+      await p.ev(`(() => { performance.clearMarks(); window.__t0 = performance.now(); window.__t1 = 0; window.__doors = 0; window.__fr = []; const w = () => { if (document.querySelector("#fade")?.classList.contains("in") || document.querySelector("#boot:not(.gone)")) window.__doors++;
+        const v = window.__office?.view; window.__fr.push(Math.round(performance.now() - window.__t0) + (v ? (window.__office.state.floor.number + (v.loading?.settled ? 's' : 'l') + [...v.actors.values()].filter((a) => !a.char.isModel).length + (window.__stage.view === v ? 'v' : '')) : '-'));
         if (window.__office?.state?.floor?.number === ${n} && (${fullDetail})) { window.__t1 = performance.now(); return; } requestAnimationFrame(w); }; requestAnimationFrame(w); })()`);
       if (phone) { const at = await p.ev(`(() => { const q = document.querySelector('[data-scrub=${dir}]').getBoundingClientRect(); return [q.left + q.width / 2, q.top + q.height / 2]; })()`); await tapAt(p, at[0], at[1], true); } else await click(p, `[data-scrub=${dir}]`);
       await p.until('window.__t1 > 0', `floor ${n}`, 20000);
-      times.push(await p.ev('({ ms: Math.round(window.__t1 - window.__t0), doors: window.__doors })'));
+      times.push(await p.ev('({ ms: Math.round(window.__t1 - window.__t0), doors: window.__doors, fr: window.__fr.slice(-3).join(" ") + " marks " + performance.getEntriesByType("mark").map((x) => x.name.replace("office:", "") + "@" + Math.round(x.startTime - window.__t0)).join(" ") })'));
       await sleep(phone ? 2500 : 1500);
     }
     r.lift = times;
     const warm = times.slice(1).map((x) => x.ms);
     if (times.some((x) => x.doors)) throw new Error(`the doors closed: ${JSON.stringify(times)}`);
-    if (Math.max(...warm) > 300) throw new Error(`warm switches ${warm.join(', ')} ms`);
+    if (Math.max(...warm) > 300) throw new Error(`warm switches ${warm.join(', ')} ms; ${times.map((x) => x.fr).join(' | ')}`);
     return `first ${times[0].ms} ms, then ${warm.join(', ')} ms, no doors`;
   });
   await step(`${kind}: a direct link to a floor draws its first 3D frame fast, with no spinner`, async () => {

@@ -172,6 +172,9 @@ class FloorPage {
       if (!state || this.dead) continue;
       const v = new OfficeView({ state, labels: document.createElement('div') });
       park(f.slug, v, isPhone() ? 2 : 3);
+      // Its shaders compiled and its baked floor on the GPU now, so its first frame on screen has nothing left to do.
+      const r = stage.renderer;
+      try { r.compileAsync?.(v.scene, v.camera)?.catch(() => {}); if (v.floorMat?.map) r.initTexture(v.floorMat.map); } catch { /* compiled on first sight instead */ }
     }
   }
   makeView() { return new OfficeView({ state: this.viewState(), labels: this.labels, onSmallTalk: (line) => this.addLocalTalk(line) }); }
@@ -1058,7 +1061,7 @@ class FloorPage {
     this.markSeen?.();
     this.es?.close();
     // Off to the next floor by the lift: this room is kept a minute, so the way back is instant.
-    if (this.parkView && this.view && stage.ok && !this.preview) park(this.slug, this.view, isPhone() ? 2 : 3); else this.view?.destroy();
+    if (this.parkView && this.view && stage.ok && !this.preview) park(this.slug, this.view, isPhone() ? 2 : 3, this.parkView); else this.view?.destroy();
     if (this.labels) clear(this.labels);
     document.documentElement.style.removeProperty('--brand');
     document.documentElement.style.removeProperty('--brand-2');
@@ -1077,16 +1080,13 @@ const safeHref = (u) => (/^https?:\/\//i.test(u) ? u : '#');
 
 export async function showFloor(root, slug) {
   const page = new FloorPage(root, slug);
-  performance.mark('office:floor-load');
   try { await page.load(); } catch (e) {
     root.append(h('div.notfound', {}, h('h1', {}, 'No such floor.'), h('p', {}, e.status === 404 ? 'That office isn\'t in the directory. It may never have opened, or it has closed.' : e.message), h('button.btn.primary', { type: 'button', onclick: () => window.officeGo('/') }, 'Back to the lobby')));
     return;
   }
   // No doors and no curtain: the room's shell is on screen at once, and its furniture and people come in as they load.
   F = page;
-  performance.mark('office:floor-loaded');
   page.mount();
-  performance.mark('office:floor-mounted');
   page.ready = new Promise((done) => {
     const from = performance.now();
     const check = () => {
@@ -1100,6 +1100,6 @@ export async function showFloor(root, slug) {
   window.__office = page; // read by the browser e2e tests
 }
 export function hideFloor({ next = '' } = {}) {
-  if (F && /^\/floor\//.test(next)) F.parkView = true;
+  if (F && /^\/floor\//.test(next)) F.parkView = next.slice('/floor/'.length);
   F?.destroy(); F = null; window.__office = null;
 }
