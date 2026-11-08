@@ -2,8 +2,7 @@
 
 Working already: a landing page (`#/`), sign up and sign in on Office Cloud accounts (`#/signup`, `#/signin`), a signed-in list with
 create, edit, done and delete on `office.db.collection('items')` (private to each person), empty, loading and error states, settings kept
-on the account with `office.saves`, sign out, and a real pricing section on `office.pay` that says so plainly when payments are not set up yet. No email exists here, so there is no
-password reset; the sign-up form says so.
+on the account with `office.saves`, sign out, and a real pricing section on `office.pay` that says so plainly when payments are not set up yet. Sign-up asks for an optional email: it gets a welcome email, and "Forgot password?" (`#/forgot`) mails a reset link through `office.auth.forgotPassword`; the reset page itself is built in at `/_office/reset`.
 
 Make it this app: rename `items` to the spec's core object and give it its real fields, add the screens the spec lists, and give the
 landing page the spec's real words. Keep the `data-office="..."` attributes on the auth form, the create form, the list and sign out:

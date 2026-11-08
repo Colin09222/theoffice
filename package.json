@@ -18,6 +18,7 @@
     "e2e:cloud": "node test/browser/cloud.mjs",
     "e2e:cloud-powers": "node test/browser/cloud-powers.mjs",
     "e2e:mail": "node test/browser/mail.mjs",
+    "e2e:signup-mail": "node test/browser/signup-mail.mjs",
     "e2e:servers": "node test/browser/server-panel.mjs",
     "e2e:numbers": "node test/browser/numbers.mjs",
     "validate-models": "node scripts/validate-models.mjs"

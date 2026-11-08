@@ -1,5 +1,6 @@
 // {{TITLE}}: the app starter. A landing page and a signed-in app on Office Cloud accounts and the database: create, edit and delete
-// with empty, loading and error states, and settings saved to the account. Hash routes: #/ #/signup #/signin #/app #/settings.
+// with empty, loading and error states, and settings saved to the account. Hash routes: #/ #/signup #/signin #/forgot #/app #/settings.
+// A forgotten password: #/forgot mails a link to the built-in reset page at /_office/reset.
 // The data-office attributes are what the Tester's end-to-end check uses (sign up, create, reload, sign out and in): keep them.
 const office = Office.connect();
 const items = office.db.collection('items');
@@ -15,7 +16,8 @@ function route() {
   const inn = !!office.auth.user;
   nav();
   if ((r === 'app' || r === 'settings') && !inn) { location.hash = '#/signin'; return; }
-  if ((r === 'signup' || r === 'signin') && inn) { location.hash = '#/app'; return; }
+  if ((r === 'signup' || r === 'signin' || r === 'forgot') && inn) { location.hash = '#/app'; return; }
+  if (r === 'forgot') { view('forgot'); say($('[data-office="forgot-status"]'), ''); return; }
   if (r === 'signup' || r === 'signin') return showAuth(r);
   if (r === 'app') { view('app'); return load(); }
   if (r === 'settings') { view('settings'); loadSettings(); return loadPlan(); }
@@ -28,21 +30,31 @@ function showAuth(m) {
   mode = m; view('auth');
   $('[data-office="auth-title"]').textContent = m === 'signup' ? 'Create your account' : 'Welcome back';
   $('[data-office="auth-submit"]').textContent = m === 'signup' ? 'Create account' : 'Sign in';
+  $('[data-office="login-label"]').textContent = m === 'signup' ? 'Username' : 'Username or email';
   for (const n of document.querySelectorAll('[data-only]')) n.hidden = n.dataset.only !== m;
   say($('[data-office="auth-error"]'), '');
 }
 $('[data-office="auth-form"]').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = new FormData(e.target), btn = $('[data-office="auth-submit"]'), err = $('[data-office="auth-error"]');
-  const username = String(f.get('username') || '').trim(), password = String(f.get('password') || '');
+  const username = String(f.get('username') || '').trim(), password = String(f.get('password') || ''), email = String(f.get('email') || '').trim();
   if (username.length < 3) return say(err, 'Pick a username of at least 3 characters.', true);
   if (password.length < 8) return say(err, 'Use a password of at least 8 characters.', true);
+  if (mode === 'signup' && email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return say(err, 'That email address does not look right.', true);
   btn.disabled = true; say(err, mode === 'signup' ? 'Creating your account...' : 'Signing in...');
   try {
-    if (mode === 'signup') await office.auth.signUp({ username, password, name: String(f.get('name') || '').trim() || username });
+    if (mode === 'signup') await office.auth.signUp({ username, email: email || undefined, password, name: String(f.get('name') || '').trim() || username });
     else await office.auth.logIn({ login: username, password });
     e.target.reset(); location.hash = '#/app';
   } catch (x) { say(err, x.message || 'That did not work. Try again.', true); } finally { btn.disabled = false; }
+});
+$('[data-office="forgot-form"]').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const st = $('[data-office="forgot-status"]'), btn = $('[data-office="forgot-submit"]'), email = $('[data-office="forgot-email"]').value.trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return say(st, 'Give the email address on your account.', true);
+  btn.disabled = true; say(st, 'Sending...');
+  // The answer is the same whether or not the address has an account: show it as it is.
+  try { const r = await office.auth.forgotPassword(email); say(st, r.message, !r.ok); } catch (x) { say(st, x.message || 'That did not work. Try again.', true); } finally { btn.disabled = false; }
 });
 $('[data-office="signout"]').addEventListener('click', async () => { await office.auth.logOut().catch(() => {}); location.hash = '#/'; });
 office.auth.onChange(() => route());

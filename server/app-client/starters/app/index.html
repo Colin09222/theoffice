@@ -43,14 +43,24 @@
   <section data-view="auth" class="card narrow" hidden>
     <h2 data-office="auth-title">Create your account</h2>
     <form data-office="auth-form" novalidate>
-      <label>Username <input name="username" autocomplete="username" required minlength="3" maxlength="32" data-office="username"></label>
+      <label><span data-office="login-label">Username</span> <input name="username" autocomplete="username" required minlength="3" maxlength="254" data-office="username"></label>
+      <label data-only="signup">Email <span class="fine">(optional, for a password reset)</span> <input name="email" type="email" autocomplete="email" maxlength="254" data-office="email"></label>
       <label data-only="signup">Your name <input name="name" autocomplete="name" maxlength="40" data-office="name"></label>
       <label>Password <input name="password" type="password" autocomplete="current-password" required minlength="8" data-office="password"></label>
       <p class="error" role="alert" data-office="auth-error"></p>
       <button class="btn" type="submit" data-office="auth-submit">Create account</button>
-      <p class="fine">There is no email here, so there is no password reset: keep your password somewhere safe.</p>
+      <p data-only="signin"><a href="#/forgot" data-office="forgot-link">Forgot password?</a></p>
       <p data-only="signup">Have an account? <a href="#/signin">Sign in</a></p>
       <p data-only="signin">New here? <a href="#/signup">Create an account</a></p>
+    </form>
+  </section>
+  <section data-view="forgot" class="card narrow" hidden>
+    <h2>Reset your password</h2>
+    <form data-office="forgot-form" novalidate>
+      <label>Email on your account <input name="email" type="email" autocomplete="email" required maxlength="254" data-office="forgot-email"></label>
+      <p class="status" role="status" data-office="forgot-status"></p>
+      <button class="btn" type="submit" data-office="forgot-submit">Send me a link</button>
+      <p><a href="#/signin">Back to sign in</a></p>
     </form>
   </section>
   <section data-view="app" class="app" hidden>

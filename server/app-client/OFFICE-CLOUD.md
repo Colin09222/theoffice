@@ -32,7 +32,14 @@ office.auth.onChange((user) => ...);    // after log-in, log-out, or a session t
 await office.ready;                     // the stored login has been checked with the server
 await office.auth.setName('Sammy'); await office.auth.changePassword(old, next); await office.auth.deleteAccount(password);
 ```
-**Nothing here sends email, so there is no password reset and no email confirmation.** Say so where people sign up ("keep your password safe: there's no reset yet"), and never promise an email.
+Email is optional, but ask for it at sign-up: with an email the person gets a welcome email and can reset a forgotten password. Both come from your company's own address.
+```js
+const r = await office.auth.forgotPassword(email);  // {ok, message}: always show r.message as it is. It never says whether the address has an account.
+await office.auth.setEmail('sam@example.com', password);  // add or change the email on an older account
+await office.auth.emailAvailable();                 // true or false: whether this site can send account email right now
+```
+The reset link opens a ready-made page on this site, `/_office/reset`, so you build nothing for it; link "Forgot password?" to a small form that calls `forgotPassword`.
+(`office.auth.resetPassword(token, newPassword)` exists if you make your own page.) Account email has a daily limit, so never promise one arrives, and sign-up works with or without it. There is no email confirmation.
 Each project has its own list of people. Passwords are stored hashed; logging in is rate-limited. Usernames are 3 to 24 letters, digits, `_ . -`.
 
 ## Leaderboards
