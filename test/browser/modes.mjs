@@ -68,7 +68,7 @@ try {
     if (!/^Closed for now: everyone has gone home\. Back (at|tomorrow at|[A-Z][a-z]+day at) .+\. You can still call your manager\.$/.test(banner)) throw new Error(banner);
     await p.until('window.__office.view.closed === true', 'room closed');
     // A software-rendered headless room runs slow frames, so this waits for the next ones rather than a fixed time.
-    await p.until('[...window.__office.view.actors.values()].filter((a) => !a.isBoss).every((a) => !a.group.visible && a.tag.hidden)', 'everyone gone home', 20000);
+    await p.until('[...window.__office.view.actors.values()].filter((a) => !a.isBoss).every((a) => !a.group.visible && a.tag.hidden && getComputedStyle(a.tag).display === "none")', 'everyone gone home, name tags too', 20000);
     if (OUT) { await sleep(500); await p.shot(join(OUT, 'modes-2-closed.jpg')); }
   });
 
