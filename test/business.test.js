@@ -6,6 +6,8 @@ import { boot, claim, Client, adminClient, floorState, until } from './helpers.j
 import { checkIdeas, checkAdSpend, figuresIn, unbacked, moneyOk, urlKey, loadBusinessConfig } from '../server/business.js';
 import { purchaseListing, decidePurchase } from '../server/purchases.js';
 import { get, all, run } from '../server/db.js';
+import { pauseAll } from '../server/ads-guard.js';
+import { resumeAds } from '../server/business.js';
 import { campaignId } from '../server/googleads.js';
 
 const SEEN = ['https://example.com/a', 'https://example.org/b', 'https://example.net/c'];
@@ -370,6 +372,12 @@ describe('the journey in mock mode', () => {
       assert.match(failed.adSpend.note, /CANNOT_SET_DATE_TO_PAST/);
       assert.equal(mock.campaigns.size, 1);
       assert.equal(mock.calls.filter((x) => x.path === 'campaigns:mutate' && x.body.operations[0].update.status === 'ENABLED').length, 1, 'only the first was ever switched on');
+      // The admin's emergency stop holds: no paid choices and no new campaign until "ads resume".
+      await pauseAll({ db: t.db, api: adsOf(t).api });
+      assert.equal(adsOf(t).paidOn(), false);
+      assert.match(await t.app.engine.tools.exec(ctx, 'request_ad_spend', JSON.stringify({ amount: 5, audience: 'Dog owners' })), /^Error: .*switched off/);
+      resumeAds(t.db);
+      assert.equal(adsOf(t).paidOn(), true);
       // Switched off, nothing new starts, and a request already filed is withdrawn at the click.
       t.cfg.adsPaidEnabled = false;
       assert.match(await t.app.engine.tools.exec(ctx, 'request_ad_spend', JSON.stringify({ amount: 5, audience: 'Dog owners' })), /^Error: .*switched off/);

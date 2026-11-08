@@ -1,17 +1,20 @@
 // The building's own controls over paid ads: the spend watchdog's run (scripts/ads-watchdog.mjs, from a scheduler), the admin's list of what was
 // approved against what Google says it cost, and the emergency stop. Admin only: nothing here is shown on a floor. See docs/ADS.md.
 import { all, run } from './db.js';
-import { ensureAdSpend, committedUsd } from './business.js';
-import { watchAccount, campaignId, campaignStats, usd } from './googleads.js';
+import { ensureAdSpend, committedUsd, adsStopped, stopAds } from './business.js';
+import { watchAccount, campaignId, campaignStats, usd, pauseTrouble } from './googleads.js';
 
 const WATCHDOG_NOTE = 'Stopped early by the building’s spend check. Nothing more will be spent';
 
 /** One watchdog pass: read the account, pause what has to stop, and write down what it found. Returns watchAccount's answer, line included. */
 export async function runWatchdog({ db, cfg, api, now = Date.now(), pause = true }) {
   ensureAdSpend(db);
-  const rows = all(db, "SELECT * FROM ad_spend WHERE campaign != ''");
-  const known = rows.map((r) => ({ id: campaignId(r.campaign), approvedUsd: r.amount, endsAt: r.ends_at, request: r.id }));
+  let rows = [];
+  // The database is read once Google has been, so a campaign the server made meanwhile is known, not a stranger.
+  const known = () => (rows = all(db, "SELECT * FROM ad_spend WHERE campaign != ''")).map((r) => ({ id: campaignId(r.campaign), approvedUsd: r.amount, endsAt: r.ends_at, request: r.id, live: ['running', 'approved'].includes(r.status) }));
   const res = await watchAccount({ api, known, capUsd: cfg.adMonthlyCapUsd, now, pause });
+  // Over an amount or over the cap: nothing new starts until the admin has looked and run "ads resume".
+  if (pause && (res.over.length || res.capHit)) stopAds(db, res.line, now);
   for (const r of rows) {
     const id = campaignId(r.campaign);
     if (res.lifeCost.has(id)) run(db, 'UPDATE ad_spend SET spent_micros=?, synced_at=? WHERE id=?', res.lifeCost.get(id), now, r.id);
@@ -27,9 +30,11 @@ export async function pauseAll({ db, api, now = Date.now() }) {
   ensureAdSpend(db);
   const rows = await api.search("SELECT campaign.id, campaign.name, campaign.status, campaign.resource_name FROM campaign WHERE campaign.status != 'REMOVED'");
   const on = rows.map((r) => r.campaign).filter((c) => c?.status === 'ENABLED');
-  await api.setStatus(on.map((c) => c.resourceName || api.rn('campaigns', c.id)), 'PAUSED');
+  stopAds(db, 'ads pause-all', now);
+  const r = await api.setStatus(on.map((c) => c.resourceName || api.rn('campaigns', c.id)), 'PAUSED');
   const marked = run(db, "UPDATE ad_spend SET status='paused', note=?, updated_at=? WHERE status IN ('approved','running')", 'Stopped by the building manager. Nothing more will be spent', now).changes;
-  return { paused: on.map((c) => String(c.id)), marked, line: `ads pause-all: paused ${on.length} campaign${on.length === 1 ? '' : 's'} on Google; ${marked} Office request${marked === 1 ? '' : 's'} marked stopped` };
+  const trouble = pauseTrouble(r);
+  return { paused: on.map((c) => String(c.id)), marked, trouble, line: `ads pause-all: paused ${on.length} campaign${on.length === 1 ? '' : 's'} on Google; ${marked} Office request${marked === 1 ? '' : 's'} marked stopped; new paid campaigns stay off until "ads resume"${trouble ? `. Some couldn't be paused: ${trouble}` : ''}` };
 }
 
 /** Approved against spent, per campaign, with Google's own figures when it can be read. */
@@ -43,10 +48,11 @@ export async function adsListing({ db, cfg, api, now = Date.now() }) {
     return { request: r.id, floor: r.floor_number ?? null, project: r.project, status: r.status, approvedUsd: r.amount, spentUsd: Math.round(s ? s.costMicros / 1e4 : r.spent_micros / 1e4) / 100,
       fromGoogle: !!s, googleStatus: s?.status || '', campaign: campaignId(r.campaign), endsAt: r.ends_at ? new Date(r.ends_at).toISOString() : '', note: r.note || '' };
   });
-  return { paidEnabled: !!cfg.adsPaidEnabled, googleConnected: !!api, capUsd: cfg.adMonthlyCapUsd, committedThisMonthUsd: committedUsd(db, { now, timeZone: cfg.googleAds?.timeZone }), items, error };
+  const stop = adsStopped(db);
+  return { paidEnabled: !!cfg.adsPaidEnabled, stopped: stop ? { reason: stop.reason, at: new Date(stop.at).toISOString() } : null, googleConnected: !!api, capUsd: cfg.adMonthlyCapUsd, committedThisMonthUsd: committedUsd(db, { now, timeZone: cfg.googleAds?.timeZone }), items, error };
 }
 export function adsListingText(l) {
-  const head = `Paid ads ${l.paidEnabled ? 'ON' : 'OFF'} (ADS_PAID_ENABLED); Google ${l.googleConnected ? 'connected' : 'not set up'}. This month: ${usd(l.committedThisMonthUsd * 1e6)} committed of the ${usd(l.capUsd * 1e6)} cap.${l.error ? ` Google couldn't be read: ${l.error}` : ''}`;
+  const head = `Paid ads ${l.paidEnabled ? 'ON' : 'OFF'} (ADS_PAID_ENABLED)${l.stopped ? `, STOPPED since ${l.stopped.at.slice(0, 16).replace('T', ' ')} UTC (${l.stopped.reason.slice(0, 120)}); "ads resume" lifts it` : ''}; Google ${l.googleConnected ? 'connected' : 'not set up'}. This month: ${usd(l.committedThisMonthUsd * 1e6)} committed of the ${usd(l.capUsd * 1e6)} cap.${l.error ? ` Google couldn't be read: ${l.error}` : ''}`;
   if (!l.items.length) return `${head}\nNo ad requests yet.`;
   return [head, ...l.items.map((i) => `#${i.request} floor ${i.floor ?? '?'} ${i.project}: ${i.status}${i.googleStatus ? ` (Google: ${i.googleStatus})` : ''}, approved $${i.approvedUsd}, spent ${usd(i.spentUsd * 1e6)}${i.fromGoogle ? '' : ' (last known)'}${i.campaign ? `, campaign ${i.campaign}` : ''}${i.endsAt ? `, ends ${i.endsAt.slice(0, 16).replace('T', ' ')} UTC` : ''}${i.note ? `. ${i.note}` : ''}`)].join('\n');
 }

@@ -10,7 +10,7 @@ import { zonedMs } from './googleads.js';
 const SETTINGS = { customerId: '1234567890', clientId: 'mock-client.apps.googleusercontent.com', clientSecret: 'mock-client-secret', refreshToken: 'mock-refresh-token', apiBase: 'https://googleads.mock', tokenUrl: 'https://oauth2.mock/token' };
 
 export function createMockGoogleAds({ now = Date.now, timeZone = 'America/New_York', version = 'v26' } = {}) {
-  const settings = { ...SETTINGS };
+  const settings = { ...SETTINGS, currency: 'USD', timeZone };
   const tokens = new Map();         // access token -> expiry
   const calls = [];                 // { path, body }, never a token
   let nextId = 1000001;
@@ -127,19 +127,24 @@ export function createMockGoogleAds({ now = Date.now, timeZone = 'America/New_Yo
   function setStatus(body) {
     const ops = Array.isArray(body?.operations) ? body.operations : [];
     const errors = [];
+    const bad = new Set();
     ops.forEach((op, i) => {
       const c = campaigns.get(idOf(op?.update?.resourceName));
-      if (!c) errors.push(err({ mutateError: 'RESOURCE_NOT_FOUND' }, 'Resource was not found.', ['operations', i, 'update']));
-      else if (op.updateMask !== 'status' || !['ENABLED', 'PAUSED', 'REMOVED'].includes(op.update.status)) errors.push(err({ fieldMaskError: 'FIELD_NOT_FOUND' }, 'Only status here.', ['operations', i]));
+      if (!c) { errors.push(err({ mutateError: 'RESOURCE_NOT_FOUND' }, 'Resource was not found.', ['operations', i, 'update'])); bad.add(i); }
+      else if (c.locked) { errors.push(err({ campaignError: 'CANNOT_MODIFY_FOR_TRIAL_CAMPAIGN' }, 'This campaign can\'t be changed.', ['operations', i])); bad.add(i); }
+      else if (op.updateMask !== 'status' || !['ENABLED', 'PAUSED', 'REMOVED'].includes(op.update.status)) { errors.push(err({ fieldMaskError: 'FIELD_NOT_FOUND' }, 'Only status here.', ['operations', i])); bad.add(i); }
     });
-    if (errors.length) return adsError(errors);
-    for (const op of ops) campaigns.get(idOf(op.update.resourceName)).status = op.update.status;
-    return json(200, { results: ops.map((op) => ({ resourceName: op.update.resourceName })) });
+    if (errors.length && !body.partialFailure) return adsError(errors);
+    ops.forEach((op, i) => { if (!bad.has(i)) campaigns.get(idOf(op.update.resourceName)).status = op.update.status; });
+    const out = { results: ops.map((op, i) => (bad.has(i) ? {} : { resourceName: op.update.resourceName })) };
+    if (errors.length) out.partialFailureError = { code: 3, message: errors.map((e) => e.message).join(' '), details: [{ errors }] };
+    return json(200, out);
   }
 
   // ---- search: the handful of GAQL queries the Office sends, read properly; anything else is refused ----
   function search(body) {
     const q = String(body?.query || '').replace(/\s+/g, ' ').trim();
+    if (q === 'SELECT customer.currency_code, customer.time_zone FROM customer') return json(200, { results: [{ customer: { resourceName: `customers/${cid()}`, currencyCode: settings.currency, timeZone: settings.timeZone } }] });
     const m = q.match(/^SELECT (.+?) FROM campaign(?: WHERE (.+))?$/);
     if (!m) return adsError([err({ queryError: 'UNRECOGNIZED_FIELD' }, `The mock doesn't read: ${q.slice(0, 80)}`, ['query'])]);
     const fields = m[1].split(',').map((s) => s.trim());
@@ -191,9 +196,9 @@ export function createMockGoogleAds({ now = Date.now, timeZone = 'America/New_Yo
       c.costMicros = Math.round((usd + lastMonth) * 1e6); c.monthCostMicros = Math.round(usd * 1e6); c.impressions = impressions; c.clicks = clicks;
     },
     /** A campaign somebody made by hand in the same account. */
-    foreign(name, { status = 'ENABLED', usd = 0 } = {}) {
+    foreign(name, { status = 'ENABLED', usd = 0, locked = false } = {}) {
       const id = String(nextId++);
-      campaigns.set(id, { id, name, status, resourceName: rn('campaigns', id), campaignBudget: '', costMicros: Math.round(usd * 1e6), monthCostMicros: Math.round(usd * 1e6), impressions: 0, clicks: 0 });
+      campaigns.set(id, { id, name, status, locked, resourceName: rn('campaigns', id), campaignBudget: '', costMicros: Math.round(usd * 1e6), monthCostMicros: Math.round(usd * 1e6), impressions: 0, clicks: 0 });
       return id;
     },
     failNextMutate(code = { campaignError: 'CANNOT_SET_DATE_TO_PAST' }, message = 'Mock refusal.') { failNext = { code, message }; },

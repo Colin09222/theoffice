@@ -7,9 +7,9 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { planCampaign, campaignOperations, createCampaign, createGoogleAds, googleAdsFromConfig, watchAccount, checkSearchAd, campaignId, zonedMs, HARD_MAX_USD, MAX_DAYS } from '../server/googleads.js';
+import { planCampaign, campaignOperations, createCampaign, createGoogleAds, googleAdsFromConfig, watchAccount, checkSearchAd, campaignId, zonedMs, accountInfo, HARD_MAX_USD, MAX_DAYS } from '../server/googleads.js';
 import { createMockGoogleAds } from '../server/googleads-mock.js';
-import { ensureAdSpend } from '../server/business.js';
+import { ensureAdSpend, adsStopped } from '../server/business.js';
 import { openDb, run, get, all } from '../server/db.js';
 import { scrub } from '../server/llm.js';
 
@@ -192,6 +192,37 @@ describe('the spend watchdog', () => {
   });
 });
 
+describe('the spend watchdog: after the review', () => {
+  test('one that went over and is paused already trips nothing more; the rest carry on', async () => {
+    const { mock, api, ids, known, status } = await account();
+    mock.spend(ids.a, 10.5);
+    assert.equal((await watchAccount({ api, known, capUsd: 50 })).alert, true);
+    await api.setStatus([api.rn('campaigns', ids.b)], 'ENABLED');
+    const again = await watchAccount({ api, known, capUsd: 50 });
+    assert.equal(again.alert, false, again.line);
+    assert.deepEqual([status(ids.a), status(ids.b)], ['PAUSED', 'ENABLED']);
+  });
+  test('an Office campaign on at Google though its request is closed is paused; a pause that can\'t land on one still pauses the rest, and says so', async () => {
+    const { mock, api, ids, known, status } = await account();
+    const r = await watchAccount({ api, known: [{ ...known[0], live: false }, known[1]], capUsd: 50 });
+    assert.equal(r.alert, true);
+    assert.deepEqual([status(ids.a), status(ids.b)], ['PAUSED', 'ENABLED']);
+    assert.match(r.line, /campaign \d+ was on though its request is closed/);
+    await api.setStatus([api.rn('campaigns', ids.a)], 'ENABLED');
+    const stuck = mock.foreign('Cannot be changed', { locked: true });
+    mock.spend(ids.a, 12);
+    const r2 = await watchAccount({ api, known, capUsd: 50 });
+    assert.deepEqual([status(ids.a), status(ids.b), status(stuck)], ['PAUSED', 'PAUSED', 'ENABLED']);
+    assert.match(r2.line, /some couldn't be paused: .*can't be changed/);
+  });
+  test('the account\'s currency and time zone are read from Google', async () => {
+    const mock = createMockGoogleAds();
+    assert.deepEqual(await accountInfo(apiFor(mock)), { currency: 'USD', timeZone: TZ });
+    mock.settings.currency = 'GBP';
+    assert.equal((await accountInfo(apiFor(mock))).currency, 'GBP');
+  });
+});
+
 describe('the watchdog and the admin commands, as their own processes', () => {
   // Async, so this process keeps answering as the mocked API while the script runs.
   const node = (args, env) => new Promise((ok) => {
@@ -230,13 +261,17 @@ describe('the watchdog and the admin commands, as their own processes', () => {
       assert.deepEqual([...mock.campaigns.values()].map((c) => c.status), ['PAUSED', 'PAUSED']);
       const db2 = openDb(dir);
       assert.deepEqual(all(db2, 'SELECT status FROM ad_spend ORDER BY id').map((x) => x.status), ['paused', 'paused']);
+      assert.match(adsStopped(db2)?.reason || '', /^ads ALERT/, 'nothing new starts until the admin has looked');
       assert.equal(get(db2, 'SELECT spent_micros FROM ad_spend WHERE id=2').spent_micros, 5.5e6);
       run(db2, "UPDATE ad_spend SET status='running'"); db2.close();
       await api.setStatus([a.campaign], 'ENABLED');
       const stop = await node(['scripts/admin.mjs', 'ads', 'pause-all'], env);
       assert.equal(stop.status, 0, stop.stderr);
-      assert.equal(stop.stdout.trim(), 'ads pause-all: paused 1 campaign on Google; 2 Office requests marked stopped');
+      assert.equal(stop.stdout.trim(), 'ads pause-all: paused 1 campaign on Google; 2 Office requests marked stopped; new paid campaigns stay off until "ads resume"');
       assert.equal(mock.campaigns.get(campaignId(a.campaign)).status, 'PAUSED');
+      assert.match((await node(['scripts/admin.mjs', 'ads', 'list'], env)).stdout, /STOPPED since .*ads pause-all/);
+      assert.equal((await node(['scripts/admin.mjs', 'ads', 'resume'], env)).stdout.trim(), 'ads resume: new paid campaigns can start again. Paused campaigns stay paused.');
+      assert.doesNotMatch((await node(['scripts/admin.mjs', 'ads', 'list'], env)).stdout, /STOPPED/);
       const off = await node(['scripts/ads-watchdog.mjs'], { DATA_DIR: dir });
       assert.deepEqual([off.status, off.stdout.trim()], [0, 'ads off: Google Ads is not set up on this server']);
       const broken = await node(['scripts/ads-watchdog.mjs'], { ...env, GOOGLE_ADS_REFRESH_TOKEN: 'a-revoked-token' });

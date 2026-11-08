@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { get, all, run, tx } from './db.js';
 import { slugify, readFile, floorBytes, mimeOf } from './workspace.js';
-import { googleAdsFromConfig, planCampaign, createCampaign, campaignId, campaignStats, checkSearchAd, monthStartMs, AdsError, HARD_MAX_USD, LIMITS } from './googleads.js';
+import { googleAdsFromConfig, planCampaign, createCampaign, campaignId, campaignStats, checkSearchAd, monthStartMs, accountInfo, AdsError, HARD_MAX_USD, LIMITS } from './googleads.js';
 import { createMockGoogleAds } from './googleads-mock.js';
 
 const CONFIG = JSON.parse(readFileSync(new URL('../config/business.json', import.meta.url), 'utf8'));
@@ -25,17 +25,24 @@ const AD_COLUMNS = {
   spent_micros: 'INTEGER NOT NULL DEFAULT 0', impressions: 'INTEGER NOT NULL DEFAULT 0', clicks: 'INTEGER NOT NULL DEFAULT 0', synced_at: 'INTEGER',
   note: "TEXT NOT NULL DEFAULT ''", updated_at: 'INTEGER',
 };
+/** The building's stop: set by the admin's pause-all or by the watchdog finding a campaign over its amount or the month over the cap. While it
+ * is set no new paid campaign starts, whatever ADS_PAID_ENABLED says, until the admin runs "ads resume". */
+export const adsStopped = (db) => get(db, 'SELECT reason, at FROM ad_stop WHERE id=1') || null;
+export const stopAds = (db, reason, at = Date.now()) => run(db, 'INSERT INTO ad_stop (id, reason, at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET reason=excluded.reason, at=excluded.at', String(reason).slice(0, 300), at);
+export const resumeAds = (db) => run(db, 'DELETE FROM ad_stop WHERE id=1').changes > 0;
 /** The ad requests table, with its Google columns. The watchdog and the admin script open it too. */
 export function ensureAdSpend(db) {
   db.exec(SCHEMA);
+  db.exec('CREATE TABLE IF NOT EXISTS ad_stop (id INTEGER PRIMARY KEY CHECK (id = 1), reason TEXT NOT NULL, at INTEGER NOT NULL)');
   const have = new Set(all(db, 'PRAGMA table_info(ad_spend)').map((c) => c.name));
   for (const [name, def] of Object.entries(AD_COLUMNS)) if (!have.has(name)) db.exec(`ALTER TABLE ad_spend ADD COLUMN ${name} ${def}`);
   db.exec(`DROP INDEX IF EXISTS ad_spend_one_live; CREATE UNIQUE INDEX IF NOT EXISTS ad_spend_live ON ad_spend(floor_id) WHERE status IN (${LIVE_SPEND.map((s) => `'${s}'`).join(',')});`);
 }
-/** What counts against the monthly cap: every campaign approved or running this month, at its approved amount or its real cost if that is higher. */
+/** What counts against the monthly cap: every campaign approved, running or made on Google this month (whatever became of its request), at its
+ * approved amount or its real cost if that is higher. */
 export function committedUsd(db, { now = Date.now(), timeZone = 'America/New_York', except = 0 } = {}) {
   const since = monthStartMs(now, timeZone);
-  const rows = all(db, `SELECT amount, spent_micros FROM ad_spend WHERE id != ? AND status IN (${COMMITTED.map(() => '?').join(',')}) AND (decided_at >= ? OR COALESCE(ends_at, 0) >= ?)`, except, ...COMMITTED, since, since);
+  const rows = all(db, `SELECT amount, spent_micros FROM ad_spend WHERE id != ? AND (status IN (${COMMITTED.map(() => '?').join(',')}) OR campaign != '') AND (decided_at >= ? OR COALESCE(ends_at, 0) >= ?)`, except, ...COMMITTED, since, since);
   return rows.reduce((n, r) => n + Math.max(Number(r.amount) || 0, (Number(r.spent_micros) || 0) / 1e6), 0);
 }
 
@@ -140,7 +147,15 @@ export function installBusiness(ext) {
   const adsMock = cfg.adsMock ? createMockGoogleAds({ now, timeZone: cfg.googleAds?.timeZone }) : null;
   const gads = googleAdsFromConfig(cfg, { mock: adsMock });
   const tz = gads?.timeZone || cfg.googleAds?.timeZone || 'America/New_York';
-  const paidOn = () => !!(cfg.adsPaidEnabled && gads);
+  const paidOn = () => !!(cfg.adsPaidEnabled && gads && !adsStopped(db));
+  // The account's currency and time zone, read once an hour: a budget is in the account's currency and Google reads dates in its zone.
+  let acct = null;
+  const accountOk = async () => {
+    if (!acct || now() - acct.at > 3600000) acct = { ...(await accountInfo(gads)), at: now() };
+    if (acct.currency !== 'USD') return `the Google Ads account is in ${acct.currency || 'an unknown currency'}, not US dollars`;
+    if (acct.timeZone && acct.timeZone !== tz) return `the Google Ads account's time zone is ${acct.timeZone}, not ${tz}`;
+    return '';
+  };
   const moneyOptions = () => (paidOn() ? CONFIG.adMoney.filter((n) => n <= Math.min(CONFIG.adMaxUsd, HARD_MAX_USD)) : [0]);
   const roomFor = (amount, except = 0) => committedUsd(db, { now: now(), timeZone: tz, except }) + Number(amount) <= cfg.adMonthlyCapUsd;
   const dayText = (ms) => new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(ms));
@@ -520,6 +535,8 @@ export function installBusiness(ext) {
       let finalUrl = '';
       try { finalUrl = live ? new URL(live, `${cfg.publicOrigin || 'http://localhost'}/`).href : ''; } catch { /* left empty: refused below */ }
       const words = adsOf(rowOf(r.floor_id) || {}).plan?.search || {};
+      const wrong = await accountOk();
+      if (wrong) return closeSpend(r, 'failed', wrong, `the Google ad couldn't be set up: ${wrong}. Nothing was spent. Tell the boss plainly in a line; the building manager has to fix the account first.`);
       let plan;
       try {
         plan = planCampaign({ requestId: r.id, tag: r.tag, label: `floor ${floor.number ?? floor.id} ${r.project}`, amountUsd: r.amount, days: cfg.adCampaignDays, cpcCeilingUsd: cfg.adCpcCeilingUsd,
@@ -537,16 +554,30 @@ export function installBusiness(ext) {
         return;
       }
       await gads.setStatus([made.campaign], 'ENABLED');
-      run(db, "UPDATE ad_spend SET status='running', updated_at=? WHERE id=? AND status='approved'", now(), id);
+      // Stopped while it was being switched on (pause-all, the watchdog): it goes straight back off.
+      if (!run(db, "UPDATE ad_spend SET status='running', updated_at=? WHERE id=? AND status='approved'", now(), id).changes) {
+        await gads.setStatus([made.campaign], 'PAUSED');
+        log('warn', 'ad campaign stopped as it was switched on', { request: id, campaign: campaignId(made.campaign) });
+        return;
+      }
       log('info', 'ad campaign on', { floorId: r.floor_id, request: id, campaign: campaignId(made.campaign), ends: plan.endText });
       tellManager(floor, '', `the Google search ad is on now and runs until ${dayText(plan.endsAt)}, then stops on its own. Tell the boss in a line, and that you'll tell them how many people saw it and clicked.`);
       changed(r.floor_id);
     } catch (e) {
       const why = e instanceof AdsError ? e.message : 'Google Ads didn’t answer';
       log('warn', 'ad campaign failed', { request: id, err: plain(why, 200) });
-      if (made?.campaign) await gads.setStatus([made.campaign], 'PAUSED').catch(() => {});
       const r = spendRow(id);
-      if (r) closeSpend(r, 'failed', why, `Google didn't take the ad (${plain(why, 160)}). Nothing was spent. Tell the boss plainly in a line; once it's fixed you can file it again with request_ad_spend if they want.`);
+      const camp = made?.campaign || r?.campaign;
+      if (camp) {
+        // It exists on Google, and may even be on (a switch-on that timed out after it landed). It is paused, and the request stays counted
+        // against the cap and live for the floor, so the watchdog keeps it paused and nobody files a second one on top of it.
+        const paused = await gads.setStatus([camp], 'PAUSED').then(() => true, () => false);
+        run(db, "UPDATE ad_spend SET status='paused', note=?, updated_at=? WHERE id=? AND status='approved'", paused ? 'Stopped while it was being set up. Nothing more will be spent' : 'Stopped while it was being set up', now(), id);
+        if (!paused) log('error', 'ad campaign could not be paused after a failed set-up; the watchdog will pause it', { request: id, campaign: campaignId(camp) });
+        const floor = r && get(db, 'SELECT * FROM floors WHERE id=?', r.floor_id);
+        if (floor) tellManager(floor, '', `Google had trouble switching the ad on (${plain(why, 160)}), so it was stopped. Tell the boss plainly in a line; the building manager will look at it.`);
+        if (r) changed(r.floor_id);
+      } else if (r) closeSpend(r, 'failed', why, `Google didn't take the ad (${plain(why, 160)}). Nothing was spent. Tell the boss plainly in a line; once it's fixed you can file it again with request_ad_spend if they want.`);
     } finally { settingUp.delete(id); }
   }
   /** Every minute or so: picks up a set-up a restart cut short, pauses and closes campaigns past their end, and reads views, clicks and cost. */

@@ -1,18 +1,20 @@
 // Business mode in a real browser, against the real server in mock mode, on a desktop and on a phone: the boss taps Start a business, the step
 // header lights up over the room, the research desk and the idea cards show, a card is picked, the four track lamps and the live preview follow,
 // the ads, the campaign plan and the ad money come next, and launching with ad money gives a request slip that the boss approves with one click
-// and that ends up queued for the building manager. A visitor sees the steps and the launched ads and never the money. BUSINESS_SHOTS=dir saves six pictures.
+// and that becomes a Google search campaign (against the mocked Google Ads API: nothing reaches Google), with Facebook and Instagram shown as
+// coming soon. A visitor sees the steps and the launched ads and never the money. BUSINESS_SHOTS=dir saves six pictures.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { launch, sleep } from './cdp.mjs';
 import { boot, claim, until } from '../helpers.js';
-import { purchaseListing } from '../../server/purchases.js';
 
 const OUT = process.env.BUSINESS_SHOTS || ''; if (OUT) mkdirSync(OUT, { recursive: true });
 const results = []; let failures = 0;
 const check = (name, ok, detail = '') => { results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); if (!ok) failures++; console.log(results.at(-1)); };
 const step = async (name, fn) => { try { await fn(); check(name, true); } catch (e) { check(name, false, String(e.message).slice(0, 300)); } };
-const t = await boot({ mockDelayMs: 60, rateScale: 50, businessTickMs: 80, modesTickMs: 60000, mediaMock: true, searchMock: true, peopleTalk: false });
+const t = await boot({ mockDelayMs: 60, rateScale: 50, businessTickMs: 80, modesTickMs: 60000, mediaMock: true, searchMock: true, peopleTalk: false, adsPaidEnabled: true, adsMock: true });
+// The ad has to point at an https address; locally the site lives at a path on http, so the ad is given the address it would have on the web.
+{ const live = t.app.engine.liveUrl.bind(t.app.engine); t.app.engine.liveUrl = (f, s) => live(f, s).replace(/^\/theoffice\//, 'https://office.example/theoffice/'); }
 const base = `http://localhost:${t.port}/theoffice`;
 const enter = async (p, c, slug) => {
   await p.goto(base);
@@ -69,12 +71,14 @@ try {
   await step('desktop: picking a card starts the build: four track lamps with counts, and the live preview of the page as it is saved', async () => {
     await p.click('[data-tab="business"]');
     await p.until('!!document.querySelector("[data-pick=\'0\']")', 'the pick button');
+    // Mock builds are quick, so the preview is watched for as it comes rather than looked for once.
+    await p.ev('window.__sawPreview = false; new MutationObserver(() => { if (document.querySelector(".biz-frame")?.getAttribute("src")) window.__sawPreview = true; }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] }); true');
     await p.click('[data-pick="0"]');
     await p.until('document.querySelectorAll(".tracks .track").length === 4', 'four tracks');
     const labels = await p.ev('[...document.querySelectorAll(".track-head b")].map((x) => x.textContent).join(",")');
     if (labels !== 'Website,Product,Payments,Analytics') throw new Error(labels);
     if (!/no Stripe/.test(await p.ev('document.querySelector("[data-track=payments]").textContent'))) throw new Error('payments note');
-    await p.until('!!document.querySelector(".biz-frame")?.src', 'the live preview', 40000);
+    await p.until('window.__sawPreview === true', 'the live preview', 40000).catch(async (e) => { throw new Error(`${e.message}: step ${await p.ev('document.querySelector("[data-biz]")?.dataset.biz')}, box ${await p.ev('!!document.querySelector("[data-preview]")')}, api ${JSON.stringify(await p.ev(`fetch("/theoffice/api/floors/${c.slug}/business/preview", { credentials: "same-origin" }).then((r) => r.status + " " + r.statusText).catch((x) => String(x))`))}`); });
     const head = await p.ev('[...document.querySelectorAll(".journey-slot .journey-steps li")].map((li) => li.className).join(",")');
     if (head !== 'done,now,next,next') throw new Error(head);
     await p.until('[...document.querySelectorAll(".track")].filter((x) => x.classList.contains("done") || x.classList.contains("working")).length >= 2', 'lamps lit', 30000);
@@ -86,14 +90,17 @@ try {
     const pics = await p.ev('document.querySelectorAll(".ad.picture img").length'), vids = await p.ev('document.querySelectorAll(".ad.video video track[kind=captions]").length');
     if (pics !== 2 || vids !== 2) throw new Error(`${pics} pictures, ${vids} captioned videos`);
     const plan = await p.ev('document.querySelector("[data-plan]").textContent');
-    for (const w of ['Goal', 'Who', 'Where', 'Facebook', 'A vs B']) if (!plan.includes(w)) throw new Error(`plan has no ${w}`);
+    for (const w of ['Goal', 'Who', 'Where', 'Google Search', 'Keywords', 'mobile dog grooming', 'Sponsored', 'A vs B']) if (!plan.includes(w)) throw new Error(`plan has no ${w}`);
+    const plates = await p.ev('[...document.querySelectorAll("[data-ad-where] .plate")].map((x) => x.dataset.channel + (x.classList.contains("on") ? "+on" : "") + (x.disabled ? "+off" : "") + ":" + x.textContent).join(" | ")');
+    if (!/^google\+on:Google Search ads \| meta\+off:Facebook & Instagram adscoming soon$/.test(plates)) throw new Error(plates);
     const coins = await p.ev('[...document.querySelectorAll(".coin")].map((x) => x.textContent + (x.classList.contains("on") ? "*" : "")).join(" ")');
     if (coins !== '$0just for fun* $5 $10 $25') throw new Error(coins);
     if (!/Launch for free/.test(await p.ev('document.querySelector("[data-launch]").textContent'))) throw new Error('launch label');
+    await p.ev('document.querySelector("[data-plan]").scrollIntoView({ block: "start" })');
     await shot(p, 'business-3-desktop-ads.jpg');
   });
 
-  await step('desktop: launching with $10 files an AD SPEND slip; one click approves it and it is queued for the building manager', async () => {
+  await step('desktop: launching with $10 files an AD SPEND slip; one click approves it and it runs as a Google search ad', async () => {
     await p.click('[data-money="10"]');
     if (!/Launch with \$10 of ads/.test(await p.ev('document.querySelector("[data-launch]").textContent'))) throw new Error('label did not follow');
     await p.click('[data-launch]');
@@ -101,10 +108,14 @@ try {
     const slip = await p.ev('document.querySelector("[data-ad-spend]").textContent');
     if (!/\$10/.test(slip) || !/Waiting for your approval/.test(slip)) throw new Error(slip.slice(0, 200));
     await p.click('[data-approve]');
-    await p.until('/Queued for the building manager/.test(document.querySelector("[data-ad-spend]")?.textContent || "")', 'queued').catch(async (e) => { throw new Error(`${e.message}: ${await p.ev('document.querySelector("[data-ad-spend]")?.textContent')} | ${JSON.stringify(t.db.prepare('SELECT status FROM ad_spend').all())} | ${await p.ev('[...document.querySelectorAll(".toast")].map((x) => x.textContent).join(" / ")')}`); });
-    const l = purchaseListing(t.db);
-    if (l.purchases.length !== 1 || l.purchases[0].priceUsd !== 10 || !/AD SPEND/.test(l.purchases[0].item)) throw new Error(JSON.stringify(l.purchases).slice(0, 200));
+    await p.until('/Running on Google Search/.test(document.querySelector("[data-ad-spend]")?.textContent || "")', 'running', 20000).catch(async (e) => { throw new Error(`${e.message}: ${await p.ev('document.querySelector("[data-ad-spend]")?.textContent')} | ${JSON.stringify(t.db.prepare('SELECT status, note FROM ad_spend').all())} | ${await p.ev('[...document.querySelectorAll(".toast")].map((x) => x.textContent).join(" / ")')}`); });
+    const slip2 = await p.ev('document.querySelector("[data-ad-spend]").textContent');
+    if (!/Ends[A-Z][a-z]{2}, /.test(slip2) || !/Seen 0 times, 0 clicks/.test(slip2)) throw new Error(slip2.slice(0, 300));
+    const camps = [...t.app.engine.business.ads.mock.campaigns.values()];
+    if (camps.length !== 1 || camps[0].status !== 'ENABLED') throw new Error(JSON.stringify(camps.map((x) => x.status)));
+    if (!await p.ev('!!document.querySelector("[data-ad-where] [data-channel=meta][disabled]")')) throw new Error('no coming-soon plate at launch');
     await p.until('document.querySelectorAll(".journey-slot .journey-steps li.done").length === 4', 'all four steps done', 30000);
+    await p.ev('document.querySelector("[data-ad-spend]").scrollIntoView({ block: "start" })');
     await shot(p, 'business-4-desktop-launch.jpg');
   });
 
@@ -119,7 +130,8 @@ try {
     const text = await v.ev('document.querySelector(".tab-body").textContent + document.querySelector(".journey-slot").textContent');
     if (/\$\d|ad money|AD SPEND|Approve/i.test(text)) throw new Error(text.match(/.{0,40}(\$\d|ad money|AD SPEND|Approve).{0,40}/i)[0]);
     if (await v.ev('document.querySelectorAll(".idea-card, .coin, .chip").length')) throw new Error('boss-only parts showed');
-    if (await v.ev('document.querySelectorAll("[data-share]").length') !== 4) throw new Error('no share buttons');
+    if (await v.ev('document.querySelectorAll(".ad-wall [data-share]").length') !== 4) throw new Error('no share buttons');
+    if (/\bnull\b/.test(await v.ev('document.body.innerText'))) throw new Error('"null" written on the page');
     vb.close();
   });
 

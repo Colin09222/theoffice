@@ -73,7 +73,8 @@ export function createGoogleAds({ customerId, clientId, clientSecret, refreshTok
       return out;
     },
     mutate: (operations, { validateOnly = false } = {}) => call('googleAds:mutate', { mutateOperations: operations, partialFailure: false, validateOnly }),
-    setStatus: (resourceNames, status) => resourceNames.length ? call('campaigns:mutate', { operations: resourceNames.map((resourceName) => ({ update: { resourceName, status }, updateMask: 'status' })) }) : Promise.resolve({ results: [] }),
+    // A pause goes through for every campaign it can change, even if one of them can't be (partialFailure); switching on is all or nothing.
+    setStatus: (resourceNames, status) => resourceNames.length ? call('campaigns:mutate', { operations: resourceNames.map((resourceName) => ({ update: { resourceName, status }, updateMask: 'status' })), partialFailure: status === 'PAUSED' }) : Promise.resolve({ results: [] }),
     token,
   };
   return api;
@@ -193,6 +194,13 @@ export async function createCampaign(api, plan) {
   return out;
 }
 export const campaignId = (rn) => String(rn || '').split('/').pop();
+/** What a pause couldn't change, in a few words, or ''. */
+export const pauseTrouble = (resp) => (resp?.partialFailureError ? describeError({ error: resp.partialFailureError }, 'partial').slice(0, 200) || 'some campaigns could not be paused' : '');
+/** The account's own currency and time zone: budgets are in its currency, and Google reads dates in its zone. */
+export async function accountInfo(api) {
+  const c = (await api.search('SELECT customer.currency_code, customer.time_zone FROM customer'))[0]?.customer || {};
+  return { currency: c.currencyCode || '', timeZone: c.timeZone || '' };
+}
 const micros = (v) => Number(v || 0);
 export const usd = (m) => `$${(Number(m || 0) / 1e6).toFixed(2)}`;
 
@@ -209,31 +217,40 @@ export async function campaignStats(api, ids) {
  * Every enabled campaign in the account is paused at once if any Office campaign has cost more than its approved amount, or the account's cost
  * this month is over the cap. A campaign the Office doesn't know is always paused, and one past its end date is paused on schedule.
  */
-export async function watchAccount({ api, known, capUsd, now = Date.now(), pause = true }) {
-  const byId = new Map(known.map((k) => [String(k.id), k]));
+export async function watchAccount({ api, known: knownIn, capUsd, now = Date.now(), pause = true }) {
   const live = await api.search("SELECT campaign.id, campaign.name, campaign.status, campaign.resource_name FROM campaign WHERE campaign.status != 'REMOVED'");
   const life = await api.search('SELECT campaign.id, metrics.cost_micros FROM campaign');
   const month = await api.search('SELECT campaign.id, metrics.cost_micros FROM campaign WHERE segments.date DURING THIS_MONTH');
+  // Read after Google, so a campaign switched on while it was reading is already on the list rather than taken for a stranger.
+  const known = typeof knownIn === 'function' ? knownIn() : knownIn;
+  const byId = new Map(known.map((k) => [String(k.id), k]));
   const lifeCost = new Map(); for (const r of life) lifeCost.set(String(r.campaign?.id), (lifeCost.get(String(r.campaign?.id)) || 0) + micros(r.metrics?.costMicros));
   const monthMicros = month.reduce((n, r) => n + micros(r.metrics?.costMicros), 0);
   const capMicros = Math.max(0, Number(capUsd) || 0) * 1e6;
   const campaigns = live.map((r) => ({ id: String(r.campaign?.id), name: String(r.campaign?.name || ''), status: r.campaign?.status, rn: r.campaign?.resourceName || api.rn('campaigns', r.campaign?.id) }));
-  const over = known.filter((k) => (lifeCost.get(String(k.id)) || 0) > Number(k.approvedUsd) * 1e6).map((k) => ({ ...k, costMicros: lifeCost.get(String(k.id)) }));
-  const capHit = monthMicros > capMicros;
   const enabled = campaigns.filter((c) => c.status === 'ENABLED');
+  const on = new Set(enabled.map((c) => c.id));
+  // Over its approved amount and still on. One that went over and was paused already stays paused and trips nothing more.
+  const over = known.filter((k) => on.has(String(k.id)) && (lifeCost.get(String(k.id)) || 0) > Number(k.approvedUsd) * 1e6).map((k) => ({ ...k, costMicros: lifeCost.get(String(k.id)) }));
+  const capHit = monthMicros > capMicros;
   const unknown = enabled.filter((c) => !byId.has(c.id));
-  const ended = enabled.filter((c) => byId.has(c.id) && byId.get(c.id).endsAt && byId.get(c.id).endsAt <= now);
-  const alert = !!(over.length || capHit || unknown.length);
-  const toPause = over.length || capHit ? enabled : [...unknown, ...ended];
-  if (pause && toPause.length) await api.setStatus(toPause.map((c) => c.rn), 'PAUSED');
+  // The Office's own, on at Google though its request is closed or stopped: switched on by hand, or a pause that never landed.
+  const stray = enabled.filter((c) => byId.has(c.id) && byId.get(c.id).live === false);
+  const ended = enabled.filter((c) => byId.has(c.id) && byId.get(c.id).live !== false && byId.get(c.id).endsAt && byId.get(c.id).endsAt <= now);
+  const toPause = over.length || capHit ? enabled : [...unknown, ...stray, ...ended];
+  let trouble = '';
+  if (pause && toPause.length) trouble = pauseTrouble(await api.setStatus(toPause.map((c) => c.rn), 'PAUSED'));
+  const alert = !!(over.length || capHit || unknown.length || stray.length || trouble);
   const why = [
     ...over.map((k) => `campaign ${k.id} cost ${usd(k.costMicros)} of its ${usd(Number(k.approvedUsd) * 1e6)}`),
     capHit ? `this month's cost ${usd(monthMicros)} is over the ${usd(capMicros)} cap` : '',
     ...unknown.map((c) => `campaign ${c.id} "${c.name.slice(0, 40)}" isn't the Office's`),
+    ...stray.map((c) => `campaign ${c.id} was on though its request is closed`),
+    trouble ? `some couldn't be paused: ${trouble}` : '',
   ].filter(Boolean);
   const officeCount = campaigns.filter((c) => byId.has(c.id)).length;
   const line = alert
     ? `ads ALERT: ${pause ? 'paused' : 'would pause'} ${toPause.length} campaign${toPause.length === 1 ? '' : 's'}: ${why.join('; ')}`
     : `ads ok: ${officeCount} Office campaign${officeCount === 1 ? '' : 's'}, ${usd(monthMicros)} this month of the ${usd(capMicros)} cap${ended.length ? `; paused ${ended.length} that ended` : ''}`;
-  return { alert, line, paused: pause ? toPause.map((c) => c.id) : [], over: over.map((k) => String(k.id)), unknown: unknown.map((c) => c.id), ended: ended.map((c) => c.id), capHit, monthMicros, lifeCost, campaigns };
+  return { alert, line, paused: pause ? toPause.map((c) => c.id) : [], over: over.map((k) => String(k.id)), unknown: unknown.map((c) => c.id), stray: stray.map((c) => c.id), ended: ended.map((c) => c.id), capHit, monthMicros, lifeCost, campaigns, known, trouble };
 }
