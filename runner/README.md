@@ -112,7 +112,7 @@ and UFW's rules are untouched. Base chains at priority -10, so a drop there is f
   Per app (each has its own address): **10 new connections/s** (burst 40), **≤ 64 open**,
   **upload 1 MB/s** (burst 4 MB), **download 4 MB/s** (burst 16 MB), DNS 20 queries/s.
 * Apps may reach this host only at its public address on 80/443, i.e. Caddy, so
-  `https://iscolinfree.com` (the Office, and Phase 2's AI proxy) works.
+  `https://fakebusiness.io` (the Office, and Phase 2's AI proxy) works.
 * Dropped: 0/8, 10/8, 100.64/10, 127/8, **169.254/16 (169.254.169.254)**, 172.16/12, 192.168/16 and
   the other special ranges, multicast; **SMTP 25/465/587**; every other port and protocol; IPv6; any
   host service (sshd, the Office on 127.0.0.1:8083, the runner, Caddy's admin, Docker's networks);
@@ -199,7 +199,7 @@ cloudtasks folder for every result).** To reinstall from a copy of this folder, 
    validated staged file in place (`cat /root/runner-survey/Caddyfile.new > /opt/edge/Caddyfile`),
    otherwise apply `deploy/Caddyfile.runner` by hand; then `docker exec edge-caddy-1 caddy validate
    --config /etc/caddy/Caddyfile` and `docker exec edge-caddy-1 caddy reload --config
-   /etc/caddy/Caddyfile`. Check iscolinfree.com (now 302 to /theoffice/), /theoffice/,
+   /etc/caddy/Caddyfile`. Check fakebusiness.io (302 to /theoffice/), /theoffice/,
    sortmydog.com and a middistance.com project.
 6. Proof: `deploy-dir.mjs hello samples/hello-ws` and `deploy-dir.mjs scraper samples/scraper`, then
    `docker exec -u 10001:10001 office-app-<label> node attack.js <net|rate|bw|oom|cpu|fork|fs|who>`,

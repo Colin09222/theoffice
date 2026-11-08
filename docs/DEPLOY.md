@@ -32,7 +32,7 @@ Fill in `.env`:
 | `ANTHROPIC_API_KEY` | Your Claude API key, for the Claude roles |
 | `OPENROUTER_API_KEY` | Your OpenRouter key, for the rest |
 | `ADMIN_PASSWORD` | A long password for `/theoffice/admin` |
-| `PUBLIC_ORIGIN` | `https://iscolinfree.com`. Required: CSRF checks compare against it, and `fetch_url` refuses this domain because of it |
+| `PUBLIC_ORIGIN` | `https://fakebusiness.io`. Required: CSRF checks compare against it, and `fetch_url` refuses this domain because of it |
 | `TRUST_PROXY` | `1`. Caddy appends the real client IP to `X-Forwarded-For` and the app reads the rightmost hop. Don't set it if anything other than the gate can reach the port |
 | `FLOOR_DAILY_USD` | `10` |
 | `GLOBAL_DAILY_USD` | `25` |
@@ -87,7 +87,7 @@ Restart the gate the way you normally do.
 ## 5. Check it, and issue the first code
 
 ```sh
-curl -sI https://iscolinfree.com/theoffice/ | grep -iE 'HTTP|content-security|x-robots'
+curl -sI https://fakebusiness.io/theoffice/ | grep -iE 'HTTP|content-security|x-robots'
 docker compose exec theoffice node scripts/admin.mjs code            # any free floor
 docker compose exec theoffice node scripts/admin.mjs code --floor 7  # a specific floor
 docker compose exec theoffice node scripts/admin.mjs floors
@@ -99,6 +99,17 @@ Then, in a browser:
 - Open `/theoffice`, claim a floor, send the manager a message and watch for a reply.
 - Open a published site and run `self.origin` in its console. It should print `"null"`.
 - Check `/live` and the Bender HQ site still behave as before.
+
+## Addresses
+
+The building lives at `https://fakebusiness.io`: the root sends you to `/theoffice/` (the app's paths are all under it), `www` sends you to the bare domain, and `PUBLIC_ORIGIN` is that origin. Caddy on hz serves it straight from the app, without the gate.
+
+- **Launched apps stay on `*.middistance.com`,** and company email stays `@middistance.com`. Apps run other people's code, so they must never share a registrable domain with the main site (`server/index.js` warns if they do).
+- **The old address, `iscolinfree.com`, still answers.** `/theoffice` and everything under it is a 301 to the same path on the new domain, and `/`, `village.` and `island.` go to `/theoffice/`, with these exceptions, which Caddy still sends on to the Office through the gate:
+  - `/theoffice/api/mail/inbound` and `/theoffice/api/pay/webhook`, because Resend and Stripe POST to them and neither follows a redirect. Their webhook URLs stay on the old domain.
+  - `/theoffice/about` and `/theoffice/privacy`, because the Stripe and Google forms name those URLs, plus `/theoffice/css/page.css`, the stylesheet those two pages load (their CSP is `style-src 'self'`, so a redirected stylesheet wouldn't load).
+- The old address stays on the staff's and Office Cloud's "keep away" list (`FORMER_HOME` in `server/config.js`), so nobody's code can reach the owner's other sites there.
+- A boss's login is a cookie that belongs to one address, so everyone signs in once more on the new domain, with their floor and recovery code.
 
 ## Rollback
 

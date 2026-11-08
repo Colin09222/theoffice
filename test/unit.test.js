@@ -8,7 +8,7 @@ import { compact } from '../server/engine.js';
 import { wrapUntrusted, toolDefs, STAFF_TOOLS, MANAGER_TOOLS } from '../server/tools.js';
 import { parseCookies, cookieHeader, normalizeCode, hashSecret, verifySecret } from '../server/auth.js';
 import { scrub } from '../server/llm.js';
-import { loadModels } from '../server/config.js';
+import { loadConfig, loadModels } from '../server/config.js';
 import { validLook } from '../server/app.js';
 
 test('markdown renders the basics', () => {
@@ -59,6 +59,12 @@ test('checkUrl refuses schemes, credentials, ports and obfuscated hosts', () => 
   assert.throws(() => checkUrl('https://iscolinfree.com/live', { denyHosts: ['iscolinfree.com'] }), FetchBlocked);
   assert.throws(() => checkUrl('https://sub.iscolinfree.com/', { denyHosts: ['iscolinfree.com'] }), FetchBlocked);
   assert.equal(checkUrl('https://example.com/a').host, 'example.com');
+});
+
+test('the building\'s old address stays off limits after the move', () => {
+  const { fetchDenyHosts: denyHosts } = loadConfig({ PUBLIC_ORIGIN: 'https://fakebusiness.io' });
+  for (const u of ['https://iscolinfree.com/trainingprogram', 'https://village.iscolinfree.com/']) assert.throws(() => checkUrl(u, { denyHosts }), FetchBlocked, u);
+  assert.equal(checkUrl('https://example.com/a', { denyHosts }).host, 'example.com');
 });
 test('htmlToText strips active content', () => {
   const t = htmlToText('<p>Hello</p><script>evil()</script><style>x{}</style><b>you</b>');

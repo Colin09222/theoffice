@@ -77,7 +77,7 @@ try {
   await p.ev(`getJson(${JSON.stringify(`${SITE}/data.json`)})`);
   await p.until('document.getElementById("words").textContent === "200 open"', 'office.fetch and json()', 15000);
   check('office.fetch brings back JSON the page can read', true);
-  check('the site saw an honest User-Agent', hits.filter((h) => h.url === '/news').every((h) => /TheOfficeBot.*iscolinfree\.com\/theoffice/.test(h.ua)));
+  check('the site saw an honest User-Agent', hits.filter((h) => h.url === '/news').every((h) => /TheOfficeBot.*fakebusiness\.io\/theoffice/.test(h.ua)));
   check('the scraped page\'s own script never ran', !hits.some((h) => h.url === '/ran'));
 
   await p.ev(`read(${JSON.stringify(`${SITE}/members`)})`);

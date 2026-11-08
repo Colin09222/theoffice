@@ -65,6 +65,10 @@ describe('what names can be asked for', () => {
     test(`refuses ${JSON.stringify(bad).slice(0, 40)}`, () => assert.throws(() => cleanDomain(cfg, bad), DomainRefused));
   }
   test('accepts an ordinary name, tidied', () => assert.equal(cleanDomain(cfg, ' TinyTeacups.COM. '), 'tinyteacups.com'));
+  test('the building\'s addresses, new and old, can\'t be bought', () => {
+    const moved = loadConfig({}, { domainTlds: ['com', 'io'], appsBaseDomain: 'middistance.com', publicOrigin: 'https://fakebusiness.io', domainContactSource: 'owned.com' });
+    for (const own of ['fakebusiness.io', 'iscolinfree.com', 'middistance.com']) assert.throws(() => cleanDomain(moved, own), DomainRefused, own);
+  });
 });
 
 describe('the whole purchase', () => {

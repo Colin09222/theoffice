@@ -71,7 +71,7 @@ const tests = {
       ['public 1.1.1.1:443', () => tcp('1.1.1.1', 443)],
       ['public HTTPS example.com', () => get('https://example.com/')],
       ['public HTTP example.com', () => get('http://example.com/')],
-      ['Office public https://iscolinfree.com/theoffice/', () => get('https://iscolinfree.com/theoffice/')],
+      ['Office public https://fakebusiness.io/theoffice/', () => get('https://fakebusiness.io/theoffice/')],
     ];
     for (const [name, f] of checks) out(name, await f());
   },

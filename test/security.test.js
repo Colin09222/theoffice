@@ -165,7 +165,7 @@ describe('2. fetch_url is SSRF-safe', () => {
     const SECRET = 'sk-or-v1-SECRETKEY123456';
     const floor = { name: 'n', tagline: 't', number: 1 };
     const prompts = managerPrompt(floor, { name: 'B' }, { manager: 'M' }) + staffPrompt(floor, { name: 'A', title: 'T' }, { brief: 'b' }, {});
-    assert.doesNotMatch(prompts, /sk-or|OPENROUTER|ADMIN_PASSWORD|hz\b|iscolinfree/i);
+    assert.doesNotMatch(prompts, /sk-or|OPENROUTER|ADMIN_PASSWORD|hz\b|iscolinfree|fakebusiness/i);
     const seen = [];
     const { createMockClient } = await import('../server/mock.js');
     const t0 = await boot(); const inner = createMockClient(t0.cfg); await t0.close();

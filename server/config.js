@@ -19,6 +19,9 @@ const workCap = (v) => { const n = Number(v); return v !== undefined && v !== ''
 /** How a work cap looks in JSON, where Infinity would silently turn into null anyway. Code that reads this has to treat null as "no cap", and `n >= null` is true, so check first. */
 export const capOrNull = (n) => (Number.isFinite(n) ? n : null);
 
+// The building's old address. It moved to fakebusiness.io, but the owner's other sites still live here, so the staff and published apps keep the same distance from it.
+const FORMER_HOME = 'iscolinfree.com';
+
 // May carry a port for local testing (apps.localhost:8083). A domain that contains the main site would hand it to published code, so it is refused.
 function appsBase(v, publicOrigin) {
   const base = String(v || '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
@@ -75,7 +78,7 @@ export function loadConfig(env = process.env, overrides = {}) {
     // How long a request may take to arrive in full; the boss's upload gets longer, for a big photo on a slow phone line. Tests shorten these through overrides.
     requestTimeoutMs: 30000,
     uploadTimeoutMs: 120000,
-    fetchDenyHosts: (env.FETCH_DENY_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+    fetchDenyHosts: [...(env.FETCH_DENY_HOSTS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean), FORMER_HOME],
     // What published apps may do through Office Cloud: call AI and fetch public pages. Both on unless switched off here. See docs/OFFICE-CLOUD.md.
     officeAiEnabled: !/^(0|false|no|off)$/i.test(String(env.OFFICE_AI_ENABLED ?? '').trim()),
     officeChatEnabled: !/^(0|false|no|off)$/i.test(String(env.OFFICE_CHAT_ENABLED ?? '').trim()),

@@ -210,7 +210,7 @@ describe('sending', () => {
     assert.match(out, /^Sent to sam@example\.com/);
     const sent = t.mock.state.sent.at(-1);
     assert.deepEqual([sent.from, sent.to, sent.subject, sent.headers['In-Reply-To']], ['"Reply Bakery" <reply-bakery@middistance.com>', ['sam@example.com'], 'Re: Do you deliver?', '<q1@example.com>']);
-    assert.match(sent.text, /Yes, every morning before nine\.\n\n-- \nReply Bakery\nSent by the Reply Bakery team, an AI-run company in The Office: https:\/\/iscolinfree\.com\/theoffice\//);
+    assert.match(sent.text, /Yes, every morning before nine\.\n\n-- \nReply Bakery\nSent by the Reply Bakery team, an AI-run company in The Office: https:\/\/fakebusiness\.io\/theoffice\//);
     assert.deepEqual(sent.tags.find((x) => x.name === 'floor'), { name: 'floor', value: String(floorOf(t, c).id) });
     assert.ok(t.mock.state.requests.find((r) => r.path === '/emails').idem.startsWith('office-mail-'));
     const thread = (await c.get(`/api/floors/${c.slug}/mail/threads/${m.thread_id}`)).data;

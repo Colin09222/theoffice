@@ -52,7 +52,7 @@ Until the key is set, the Inbox is there, shows the address and says "Email is b
 | `MAIL_FLOOR_DAILY_IN` | 60 | Emails one floor may take in a day; the rest are dropped and counted, and the boss is told once. |
 | `MAIL_FORM_DAILY` | 30 | Website contact-form messages one floor may take in a day. |
 | `MAIL_MAX_ATTACHMENT_MB` / `MAIL_MAX_ATTACHMENTS` / `MAIL_MAX_MESSAGE_MB` | 5 / 5 / 10 | Caps on what an email may bring in. |
-| `MAIL_PUBLIC_URL` | `https://iscolinfree.com/theoffice/` | The link in the signature. |
+| `MAIL_PUBLIC_URL` | `https://fakebusiness.io/theoffice/` | The link in the signature. |
 | `RESEND_API_BASE` | `https://api.resend.com` | Only the tests change this, to point at the mock. |
 
 ## Addresses

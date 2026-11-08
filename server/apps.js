@@ -17,7 +17,7 @@ const usable = (l) => l.length <= 63 && LABEL.test(l) && l.slice(2, 4) !== '--' 
 export const RESERVED_LABELS = new Set(('www www1 www2 api api2 mail email smtp imap pop pop3 ftp sftp ssh webmail mx mx1 mx2 ns ns1 ns2 ns3 ns4 dns vpn cpanel whm root admin administrator app apps cdn static assets media img images files upload uploads download downloads status health monitor metrics '
   + 'blog docs doc help support contact about privacy terms legal security abuse postmaster hostmaster webmaster autoconfig autodiscover dkim dmarc spf test staging dev demo preview beta sandbox console dashboard '
   + 'login signin signup account accounts auth oauth sso billing pay payment payments shop store '
-  + 'office theoffice middistance iscolinfree localhost example').split(' '));
+  + 'office theoffice middistance iscolinfree fakebusiness localhost example').split(' '));
 export const shortLabelFor = (project) => {
   const l = String(project);
   return l.length >= 3 && l.length <= 58 && !l.includes('--') && usable(l) && !RESERVED_LABELS.has(l) ? l : null;

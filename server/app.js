@@ -43,7 +43,7 @@ import { installDaily } from './daily.js';
 import { absoluteMeta } from './metaabs.js';
 
 const BASE = '/theoffice';
-// Exact policy from the security brief. Published content runs on an opaque origin, with no access to any iscolinfree.com cookie, page or API.
+// Exact policy from the security brief. Published content runs on an opaque origin, with no access to any main-site cookie, page or API.
 export const SANDBOX_CSP = 'sandbox allow-scripts allow-forms allow-popups';
 const APP_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const BASE_HEADERS = {

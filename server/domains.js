@@ -23,7 +23,7 @@ export function cleanDomain(cfg, raw) {
   if (parts[0].slice(2, 4) === '--') throw new DomainRefused('international and reserved-form names are not allowed');
   if (!cfg.domainTlds.includes(parts[1])) throw new DomainRefused(`only these endings can be bought here: ${cfg.domainTlds.join(', ')}`);
   if (MARKS.test(parts[0])) throw new DomainRefused('that name contains someone else\'s brand');
-  for (const own of [cfg.appsBaseDomain?.split(':')[0], (() => { try { return new URL(cfg.publicOrigin).hostname; } catch { return ''; } })(), cfg.domainContactSource]) {
+  for (const own of [cfg.appsBaseDomain?.split(':')[0], (() => { try { return new URL(cfg.publicOrigin).hostname; } catch { return ''; } })(), cfg.domainContactSource, ...(cfg.fetchDenyHosts || [])]) {
     if (own && (d === own || own.endsWith(`.${d}`))) throw new DomainRefused('that name is part of this building');
   }
   return d;

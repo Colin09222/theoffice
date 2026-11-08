@@ -420,7 +420,7 @@ describe('office.fetch and office.scrape', () => {
       assert.equal((await s.fetchPage(w.url('/feed'))).json.type, 'application/rss+xml');
       assert.equal((await s.fetchPage(w.url('/notes'))).json.text, 'notes');
       assert.ok(w.hits.filter((x) => x.url !== '/robots.txt').every((x) => x.ua === USER_AGENT && !x.cookie));
-      assert.match(USER_AGENT, /The ?Office/); assert.match(USER_AGENT, /iscolinfree\.com\/theoffice/);
+      assert.match(USER_AGENT, /The ?Office/); assert.match(USER_AGENT, /fakebusiness\.io\/theoffice/);
     } finally { await s.t.close(); await w.close(); }
   });
 

@@ -151,9 +151,9 @@ The ledger and each task's `cost_usd` keep every real figure for the admin. The 
    Spent should match what you expect from the provider dashboards. A `flag` of `100%` means that provider's roles have already stopped: raise the limit in `.env` and run step 4 again if you meant it to carry on. The numbers are real figures, so keep this output to yourself.
 6. **Check the site.**
    ```sh
-   curl -sI 'https://iscolinfree.com/theoffice/' | grep -iE 'cache-control|etag'         # no-cache and an etag
-   curl -sI -H 'accept-encoding: br' 'https://iscolinfree.com/theoffice/js/main.js' | grep -i content-encoding   # br, once it has been up for half a minute
-   curl -s 'https://iscolinfree.com/theoffice/api/floors/<slug>' | grep -cE '"spend"|costUsd'   # 0
+   curl -sI 'https://fakebusiness.io/theoffice/' | grep -iE 'cache-control|etag'         # no-cache and an etag
+   curl -sI -H 'accept-encoding: br' 'https://fakebusiness.io/theoffice/js/main.js' | grep -i content-encoding   # br, once it has been up for half a minute
+   curl -s 'https://fakebusiness.io/theoffice/api/floors/<slug>' | grep -cE '"spend"|costUsd'   # 0
    ```
    Then open a floor on a phone and a desktop, as an owner and as a visitor. There should be no `$` anywhere except on a domain or purchase being decided. The Customise panel should open, and the lobby should draw.
 7. **Start polling.** Nothing tells the assistant anything by itself, so something has to run these on a schedule, the help line more often than `HELP_TIMEOUT_MIN`:

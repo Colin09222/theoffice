@@ -7,7 +7,7 @@ import { CloudError } from './store.js';
 import { parseRobots, robotsAllows } from './robots.js';
 import { scrapeHtml } from './scrape.js';
 
-export const USER_AGENT = 'TheOfficeBot/1.0 (+https://iscolinfree.com/theoffice/; fetching a public page for a site built at The Office)';
+export const USER_AGENT = 'TheOfficeBot/1.0 (+https://fakebusiness.io/theoffice/; fetching a public page for a site built at The Office)';
 // HTML, JSON, XML and plain text, and nothing else: no scripts, no images, no files.
 const READABLE = /^(text\/(html|plain|xml)|application\/(json|xml|xhtml\+xml|rss\+xml|atom\+xml|ld\+json|[a-z0-9.-]+\+(json|xml)))$/i;
 const HTML = /html/i;

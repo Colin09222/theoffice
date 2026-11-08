@@ -67,7 +67,7 @@ Never `*` with credentials. Send what the server needs in the body or an `Author
 | Name | What |
 |---|---|
 | `OFFICE_TOKEN` | a project-scoped token (`ofs_...`, 256 bits). Only its SHA-256 is kept. Minted at the first deploy, ended when the server is deleted or the floor is closed or wiped |
-| `OFFICE_CLOUD_URL` | `https://iscolinfree.com/theoffice/api/app-cloud`. The app firewall allows the host's public 443 |
+| `OFFICE_CLOUD_URL` | `https://fakebusiness.io/theoffice/api/app-cloud`. The app firewall allows the host's public 443 |
 | `OFFICE_SERVER_URL` | the server's own address |
 | `OFFICE_SITE_ORIGINS` | above |
 

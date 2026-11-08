@@ -10,7 +10,7 @@
 #          new connections 10/s (burst 40), at most 64 open at once,
 #          upload 1 MB/s (burst 4 MB), download 4 MB/s (burst 16 MB)
 #        DNS to Hetzner's resolvers only (20 queries/s)
-#        this host only at its public address on 80/443, i.e. Caddy (iscolinfree.com, the Office)
+#        this host only at its public address on 80/443, i.e. Caddy (fakebusiness.io, the Office)
 #   not: private ranges, loopback, 169.254.0.0/16 (metadata), multicast, other containers,
 #        SMTP 25/465/587, any other port or protocol, IPv6, host services (sshd, 127.0.0.1:*)
 # office-build 172.30.1.0/24, bridge br-office-build: build containers. Nothing is forwarded; the
