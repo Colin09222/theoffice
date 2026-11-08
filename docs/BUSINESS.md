@@ -24,8 +24,11 @@ described in [ADS.md](ADS.md).
   - Payments says honestly that there is no Stripe here, and uses a notify-me sign-up instead.
 - **3. Customers.** The marketer makes:
   - 2 picture ads;
-  - 2 vertical video ads of 6–10 s with captions (`google/gemini-omni-1.2-flash` on OpenRouter, falling back to a screen recording of
-    the real site made on the Builder's computer);
+  - 2 vertical video ads of 6–10 s with captions (`google/gemini-omni-1.2-flash` on OpenRouter's `/videos` jobs, through the image key
+    and the ledger; the model always makes sound, so the request asks for it. A job that fails at the provider gets one go on
+    `google/gemini-omni-1.1-flash`, and past both it falls back to a screen recording of the real site made on the Builder's computer).
+    On 2026-11-07, three 1.2 jobs failed upstream ("Video generation failed"; its provider had about 61% uptime that day), and a 3 s 360p
+    clip from 1.1 came back in 19 s for $0.10 and went on the ledger;
   - the ad words;
   - a campaign plan (goal, who, where, an A-versus-B test). Where is always Google Search: paid ads run there only, for now;
   - the Google search ad: 3–15 headlines, 2–4 descriptions and 3–10 keywords.
@@ -44,17 +47,21 @@ described in [ADS.md](ADS.md).
 **Money.** No figure is shown on a floor except the boss's own choice of ad money on their own slip. Visitors see the steps, the
 lamps and the launched ads, never an amount.
 
-## Status (2026-11-07, 22:35 ET)
+## Status (2026-11-07, 23:00 ET)
 
-- Branch `business` in `repos/theoffice-business`, pushed. Not deployed: nothing goes live until Colon says so.
+- Branch `business` in `repos/theoffice-business`, pushed, with origin/stack and origin/stack-hotfix merged in. Not deployed: nothing
+  goes live until Colon says so.
+- **Google only, for now** (Colon's decision): as described above, and checked in a real browser at both steps.
 - **Tests:**
   - `test/business.test.js` and `test/googleads.test.js`: 30 of 30 pass, against the mocked Google Ads API.
-  - Related suites (unit, budget, domains, launch, routing, review, modes, orders, anthropic): 283 of 283 pass.
-- **Browser check** (`node test/browser/business.mjs`, real server in mock mode): 8 of 9 pass, desktop and phone. The run covers the
-  idea cards, chips, tracks, ads, Google plan, switch plates, approval leading to a running campaign, the visitor view and no page
-  errors. The build-step live-preview check fails in mock mode: the mock builder saves and publishes the page within a fraction of a
-  second, so the journey is in Customers before the floor sees the page. The preview now asks again every 3 s while it is on screen,
-  for real builds that save long before a lamp changes.
+  - With the related suites (no-budget-word, statics, security, unit, budget, domains, launch, routing, review, modes, orders,
+    anthropic): 402 of 402 pass.
+- **Browser check** (`node test/browser/business.mjs`, real server in mock mode): 9 of 9 pass, desktop and phone. The run covers:
+  - the idea cards, chips and tracks;
+  - the live preview. The test holds the journey at Build, because a mock build is over before the floor could show it;
+  - the ads, the Google plan, and the switch plates at Customers and at Launch;
+  - approval leading to a running campaign;
+  - the visitor view, and no page errors.
 - **Real API:** validate-only requests (which create nothing) passed for the whole campaign as built. From hz, the token refreshes and
   the account reads as America/New_York, USD.
 - **Open:** the real $5 test with Colon; scheduling the watchdog (see the Lanternfall note in ADS.md); switching `ADS_PAID_ENABLED` on
