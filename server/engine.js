@@ -11,7 +11,7 @@ import { createMedia, createMockMedia } from './media.js';
 import { createSearch, createMockSearch } from './search.js';
 import { appLabel, appOrigin } from './apps.js';
 import { formCount } from './launch.js';
-import { managerPrompt, staffPrompt } from './prompts.js';
+import { managerPrompt, staffPrompt, ON_OUR_OWN } from './prompts.js';
 import { slugify, WorkspaceError, listFiles, readFile, attachmentsOf } from './workspace.js';
 import { describeFiles, toolMessage, withFiles, fileTokens } from './attachments.js';
 import { seededLook } from '../public/js/looks.js';
@@ -338,6 +338,7 @@ export class Engine {
       ...(notLive.length ? [`Finished but not live: ${notLive.map((u) => `${u.slug} (${u.never ? 'never published' : 'changed since it was published'})`).join(' | ')}`] : []),
       ...(this.domains.enabled ? [`Domains: ${domainLines.length ? domainLines.join(' | ') : 'none'}. Limit: ${this.cfg.domainsPerFloorDay} a day, and only the boss's click buys one.`] : []),
       ...(this.help && this.cfg.helpEnabled !== false ? [this.help.stateLine(floor.id)] : []),
+      ...(this.modes ? [this.modes.stateLine(floor.id)] : []),
     ].join('\n');
     // 'office' notices (outage, stop) are for the boss only. If they reached the model it would lose the thread.
     // Reports stay out too: they quote what was found on pages, and the manager has the facts in the state message.
@@ -359,6 +360,7 @@ export class Engine {
     const toReview = tasks.filter((t) => t.status === 'review');
     return { messages: out, meta: {
       kind: 'manager', setup: !floor.name, floorId: floor.id, floorSlug: floor.slug, step: 0, lastBoss: bossMsgs[bossMsgs.length - 1]?.text || '', bossFiles: out.filter((m) => m.role === 'user' && m.files).flatMap((m) => m.files), allBoss: bossMsgs.map((m) => m.text).join(' '),
+      autopilot: last?.role === 'note' && last.text.startsWith('Work mode:') && this.modes ? this.modes.brief(floor.id) : null,
       isFreshBoss: last?.role === 'boss', answered: last?.role === 'note' && /answered/.test(last.text), guidance: last?.role === 'help' ? last.text : '', helpDeadEnd: last?.role === 'note' && /buddehbot/.test(last.text),
       toReview, reviewsWaiting: counts.review, openCount: counts.n - counts.review, published,
       slugFor: (s) => slugify(String(s).replace(/\[[a-z]+\]/g, '').replace(ACT_WORDS, ' '), 'launch').slice(0, 30).replace(/-+$/, '') || 'launch',
@@ -381,6 +383,8 @@ export class Engine {
     this.bossRead.set(floorId, newestBoss);
     // A job the team picked for itself in a work mode. A turn that reads something new from the boss is the boss's, whatever else is going on.
     ctx.autonomous = !ctx.bossTurn && !!this.modes?.running(floorId);
+    meta.autonomous = ctx.autonomous;
+    if (ctx.autonomous) meta.modeList = this.modes.brief(floorId).nextUp;
     const call = { floorId, agent: mgr, signal, project: '', autonomous: ctx.autonomous };
     const maxSteps = this.cfg.maxManagerSteps;
     const opening = messages.length;
@@ -468,14 +472,14 @@ export class Engine {
     if (!messages) {
       messages = [
         { role: 'system', content: staffPrompt(floor, agent, roleCfg, { ...task, live: this.isLive(floor.id, task.project) }, this.cfg, this.people.personBlock(agent, task)) },
-        { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${this.handoffFor(floor, task)}${describeFiles(this.taskFiles(task))}`, ...(this.taskFiles(task).length ? { files: this.taskFiles(task).map((f) => f.path) } : {}) },
+        { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${task.auto ? `\n\n${ON_OUR_OWN}` : ''}${this.handoffFor(floor, task)}${describeFiles(this.taskFiles(task))}`, ...(this.taskFiles(task).length ? { files: this.taskFiles(task).map((f) => f.path) } : {}) },
       ];
     }
     // A task that started on a computer has no system prompt of its own here. It never runs without the safety rules.
     if (messages[0]?.role !== 'system') messages.unshift({ role: 'system', content: staffPrompt(floor, agent, roleCfg, task, this.cfg, this.people.personBlock(agent, task)) });
     this.setAgent(agent.id, { state: 'thinking', activity: task.title, project: task.project, task_id: task.id });
     this.feed(floorId, agent, `started "${task.title}"`, task.project);
-    const call = { floorId, agent, signal, project: task.project, taskId: task.id };
+    const call = { floorId, agent, signal, project: task.project, taskId: task.id, autonomous: !!task.auto };
     const allBoss = all(this.db, "SELECT text FROM messages WHERE floor_id=? AND role='boss' ORDER BY id DESC LIMIT 12", floorId).map((m) => m.text).join(' ');
     const answers = () => all(this.db, 'SELECT answer FROM questions WHERE task_id=? AND answer IS NOT NULL', task.id).map((q) => q.answer);
     const maxSteps = this.cfg.maxStaffSteps;

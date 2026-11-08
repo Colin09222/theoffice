@@ -107,6 +107,12 @@ export function loadConfig(env = process.env, overrides = {}) {
     ordersRunTimeoutMin: num(env.ORDERS_RUN_TIMEOUT_MIN, 180),
     ordersTickMs: num(env.ORDERS_TICK_MS, 30000),
     ordersEstimateUsd: num(env.ORDERS_ESTIMATE_USD, 0.6),
+    // Work modes: in Set hours or Nonstop the team picks its own next job whenever the floor is quiet, this many minutes after the last one finished.
+    // There is no money cap per floor: the building's own limits stop it, and three failed jobs in a row pause it. See docs/WORK-MODES.md.
+    autopilotGapMin: Math.max(0, num(env.AUTOPILOT_GAP_MIN, 5)),
+    autopilotMaxFails: Math.max(1, num(env.AUTOPILOT_MAX_FAILS, 3)),
+    autopilotRunTimeoutMin: num(env.AUTOPILOT_RUN_TIMEOUT_MIN, 180),
+    modesTickMs: num(env.MODES_TICK_MS, 5000),
     // Filler companies (floors-plus): scripted floors that look busy and never call a model. Off unless asked for.
     fillerCompanies: env.FILLER_COMPANIES === '1',
     fillerTickMs: num(env.FILLER_TICK_MS, 9000),

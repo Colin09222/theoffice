@@ -332,6 +332,7 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
   async function banter(floorId) {
     const f = floorRow(floorId);
     if (!speakable(f) || !f.name || engine.spentOver(floorId, 0)) return false;
+    if (engine.modes?.closed(floorId)) return false;  // outside set hours everyone has gone home
     if (usedToday(floorId, 'talk-banter') >= (cfg.banterPerFloorDay ?? 60)) return false;
     // Only finished, open work, so a line can't reach a visitor about anything else or claim something that never happened.
     const work = all(db, "SELECT t.id,t.title,t.result,t.project,t.agent_id,t.status FROM tasks t LEFT JOIN projects p ON p.floor_id=t.floor_id AND p.slug=t.project WHERE t.floor_id=? AND t.status IN ('done','review','failed') AND COALESCE(p.private,0)=0 AND (t.project!='' OR ?=0) ORDER BY t.id DESC LIMIT 6", floorId, f.default_private);

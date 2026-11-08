@@ -15,7 +15,7 @@ import { applySync, baselineOf, projectFiles, publishSnapshot, WorkspaceError } 
 import { COMPUTER_TOOL_DEFS, computerToolName, toolsForRole } from './tools.js';
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { IOS_HOSTS } from './ios.js';
-import { computerPrompt, computerBriefing } from './prompts.js';
+import { computerPrompt, computerBriefing, ON_OUR_OWN } from './prompts.js';
 
 const PACKAGE_HOSTS = ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org'];
 const OUTPUT_WAIT_MS = 30000;
@@ -213,7 +213,7 @@ export class Computer {
       }
       task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       if (!task.transcript) {
-        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, person: e.people.personBlock(agent, task), live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }), uploads: e.taskFiles(task) }, e.cfg) }]), task.id);
+        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, person: e.people.personBlock(agent, task), live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }), uploads: e.taskFiles(task) }, e.cfg) + (task.auto ? `\n\n${ON_OUR_OWN}` : '') }]), task.id);
         task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       }
       st = this.newState(floor, agent, task, signal);

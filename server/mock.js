@@ -1,6 +1,8 @@
 // AI_MODE=mock: deterministic scripted model. It speaks the same interface as the real client and returns real tool calls,
 // so every test drives the actual tool loop, ledger, limiter and SSE paths with no key and no spend.
 // Keywords in the boss's message pick scenarios: [ask] [mgrask] [buy] [hire] [fail] [private] [spendy] [slow] [ssrf] [traverse] [inject] [revise] [web] [standing] [cancelorder] [help] [lane:game] [colleague] [rename] [letgo] [logo].
+// Work modes: "work nonstop", "work 9 to 5 on weekdays" and "only when I ask" set the mode, and a "Work mode:" note runs the next job off the list.
+// A goal holding [ask] or [buy] passes it on to that job's brief, and [build] or [buy] hands the job to the builder or the researcher.
 // A floor with no name yet is set up by chat: "called Something" or "you pick" makes the company.
 import { ProviderError } from './llm.js';
 import { voiced } from './mock-voice.js';
@@ -45,6 +47,18 @@ function talkStep(meta) {
   }
 }
 
+const DAYS_SAID = [[/weekends?/i, ['sat', 'sun']], [/every ?day|daily/i, ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']], [/./, ['mon', 'tue', 'wed', 'thu', 'fri']]];
+const MODE_SAID = /\b(work(?:ing)? nonstop|work(?:ing)? 24\/7|only when i ask|work(?:ing)? \d{1,2}(?::\d\d)? ?(?:to|-|–) ?\d{1,2})/i;
+function modeArgs(boss) {
+  if (/only when i ask/i.test(boss)) return { mode: 'ask' };
+  if (/nonstop|24\/7/i.test(boss)) return { mode: 'nonstop' };
+  const m = boss.match(/work(?:ing)? (\d{1,2})(?::(\d\d))? ?(?:to|-|–) ?(\d{1,2})(?::(\d\d))?/i);
+  const start = Number(m[1]); let end = Number(m[3]);
+  if (end <= start && end <= 12) end += 12;
+  const pad = (h, mm) => `${String(h % 24).padStart(2, '0')}:${mm || '00'}`;
+  return { mode: 'hours', start: pad(start, m[2]), end: pad(end, m[4]), days: DAYS_SAID.find(([re]) => re.test(boss))[1] };
+}
+
 function managerStep(meta, messages = []) {
   const boss = meta.lastBoss || '';
   const slug = meta.slugFor(boss);
@@ -68,6 +82,25 @@ function managerStep(meta, messages = []) {
     if (meta.step === 0) return { toolCalls: [call('ask_buddehbot', { question: boss.replace(/\[help\]/g, '').trim() || 'How do I get round a tool that keeps failing?', what_was_tried: 'I tried the obvious thing twice.' })] };
     return { content: `I have asked buddehbot and I am carrying on meanwhile, boss.${/^Error/.test([...messages].reverse().find((m) => m.role === 'tool')?.content || '') ? ' It did not go through.' : ''}` };
   }
+  // Work modes, said in chat.
+  if (MODE_SAID.test(boss) && meta.isFreshBoss && !meta.toReview.length) {
+    if (meta.step === 0) return { toolCalls: [call('set_work_mode', modeArgs(boss))] };
+    const last = [...messages].reverse().find((m) => m.role === 'tool')?.content || '';
+    return { content: /^Error/.test(last) ? 'That did not work, boss.' : `Done, boss. ${last.replace(/^Work mode set: /, 'From now on: ').split('. The boss')[0]}.` };
+  }
+  // A quiet floor in a work mode: the next job off the list.
+  if (meta.autopilot && !meta.isFreshBoss && !meta.toReview.length) {
+    const a = meta.autopilot;
+    const item = a.nextUp[0] || 'Write a one-page plan for the company';
+    if (meta.step === 0) {
+      const calls = [];
+      if (!a.goal) calls.push(call('update_backlog', { goal: 'Get the company known', next_up: ['Write a one-page plan for the company', 'Draft the launch post', 'Make a pricing page'] }, 0));
+      const pass = ['[ask]', '[buy]'].filter((f) => (a.goal || '').includes(f)).join(' ');
+      calls.push(call('assign_task', { to: /\[build\]/.test(a.goal || '') ? 'builder' : /\[buy\]/.test(a.goal || '') ? 'researcher' : 'writer', title: item, brief: `Do the next thing on our list: ${item}.${pass ? ` ${pass}` : ''}`, project: 'next-up' }, 1));
+      return { toolCalls: calls };
+    }
+    return { content: `Picked the next job: **${item}**.` };
+  }
   const lane = boss.match(/^Let's do a (game|website|small business)\b/i)?.[1]?.toLowerCase().replace('small ', '');
   if (lane && meta.isFreshBoss && !meta.toReview.length) return { content: LANE_OPENERS[lane] };
   // Standing orders (floors-plus). These come before everything else: the boss's words may also hold an action word.
@@ -86,6 +119,12 @@ function managerStep(meta, messages = []) {
   if (meta.toReview.length) {
     const sendBack = (t) => /\[revise\]/.test(t.brief) && t.revisions === 0;
     if (meta.step === 0) return { toolCalls: meta.toReview.map((t, i) => call('review_task', { task_id: t.id, verdict: sendBack(t) ? 'revise' : 'approve', notes: 'Looks good.' }, i)) };
+    // A job the team picked for itself: tick it off the list and say what it did.
+    if (meta.autonomous && meta.step === 1 && !meta.openCount && !meta.toReview.some(sendBack)) {
+      const list = meta.modeList || [];
+      const doneTitle = meta.toReview[0].title;
+      return { toolCalls: [call('update_backlog', { next_up: [...list.filter((x) => x !== doneTitle), `Follow up on "${doneTitle}"`].slice(0, 8), summary: `Finished "${doneTitle}" and put it on the drive.` })] };
+    }
     if (meta.openCount || meta.toReview.some(sendBack)) return { content: 'Sent one thing back for another pass. I will report when it returns.' };
     const links = meta.published.map((p) => `[${p.title}](${p.url})`).join(', ');
     return { content: `All done, boss. ${links ? `Published: ${links}.` : 'Nothing needed publishing.'} Want another round?` };
