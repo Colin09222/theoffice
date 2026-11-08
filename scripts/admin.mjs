@@ -15,12 +15,16 @@ import { googleAdsFromConfig } from '../server/googleads.js';
 import { adsListing, adsListingText, pauseAll } from '../server/ads-guard.js';
 import { ensureAdSpend, resumeAds } from '../server/business.js';
 import { scrub } from '../server/llm.js';
+import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, MailError } from '../server/mail.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
 const usage = () => {
   console.log(['Usage:',
     '  node scripts/admin.mjs code [--floor N]       issue a one-time office code',
+    '  node scripts/admin.mjs mail status [--json]   email: sending and receiving, today\'s counts, each floor\'s address, pauses and alerts. No message text',
+    '  node scripts/admin.mjs mail pause|resume [--floor N]   stop or restart sending for one floor, or for the whole building. Receiving carries on',
+    '  node scripts/admin.mjs mail suppress <address>   never send to this address again, from any floor',
     '  node scripts/admin.mjs floors                 list floors',
     '  node scripts/admin.mjs floors hide|show --floor N   hide floor N from the lobby, directory and lift, or show it again. It still opens by its own link',
     '  node scripts/admin.mjs backend usage [--json]   every project\'s Office Cloud backend: accounts, documents, saves, scores, files and storage. Counts only',
@@ -169,5 +173,20 @@ if (cmd === 'code') {
       console.log(resumeAds(db) ? 'ads resume: new paid campaigns can start again. Paused campaigns stay paused.' : 'ads resume: there was no stop to lift.');
     } else usage();
   } catch (e) { die(`Google Ads: ${scrub(e?.message || e, cfg)}`); }
+} else if (cmd === 'mail') {
+  // Reads and writes the database only; the server sees a pause or a suppression on its next send. It prints no key or secret.
+  ensureMailSchema(db);
+  const sub = rest[0];
+  const fl = rest.indexOf('--floor') >= 0 ? Number(rest[rest.indexOf('--floor') + 1]) : null;
+  const floorRow = () => { const f = get(db, 'SELECT id, number, name FROM floors WHERE number=?', fl); if (!f) die(`There is no floor ${fl}.`); return f; };
+  if (sub === 'status') {
+    const s = mailStatus(db, cfg);
+    console.log(rest.includes('--json') ? JSON.stringify(s, null, 2) : mailStatusText(s));
+  } else if (sub === 'pause' || sub === 'resume') {
+    const on = sub === 'pause';
+    if (fl !== null) { const f = floorRow(); setFloorPause(db, f.id, on, 'building manager'); console.log(`Email sending ${on ? 'paused' : 'back on'} for floor ${f.number} ${f.name}.`); } else { setBuildingPause(db, on); console.log(`Email sending ${on ? 'paused' : 'back on'} for the whole building.`); }
+  } else if (sub === 'suppress') {
+    try { console.log(`${suppressAddress(db, rest[1], 'building manager')} will get no more email from the building.`); } catch (e) { if (e instanceof MailError) die(e.message); throw e; }
+  } else usage();
 } else usage();
 db.close();

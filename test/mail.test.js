@@ -434,3 +434,58 @@ describe('the provider client', () => {
     } finally { await mock.close(); }
   });
 });
+
+describe('the scripts', () => {
+  test('mail-setup creates the domain with receiving on, prints the DNS records, and writes the signing secret to a 600 file without printing it', async () => {
+    const { execFile } = await import('node:child_process');
+    const { mkdtempSync, readFileSync, statSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const mock = await startMockResend();
+    try {
+      const dir = mkdtempSync(join(tmpdir(), 'mailsetup-'));
+      const run1 = (extra = []) => new Promise((resolve) => execFile(process.execPath, ['scripts/mail-setup.mjs', join(dir, 'secret'), ...extra], { env: { PATH: process.env.PATH, RESEND_API_KEY: mock.apiKey, RESEND_API_BASE: mock.base } }, (err, stdout, stderr) => resolve({ code: err ? err.code : 0, out: stdout + stderr })));
+      const first = await run1();
+      assert.equal(first.code, 0, first.out);
+      assert.match(first.out, /Created middistance\.com/); assert.match(first.out, /MX\s+@/); assert.match(first.out, /resend\._domainkey/);
+      assert.ok(!first.out.includes(mock.webhookSecret) && !first.out.includes(mock.apiKey), 'no secret on screen');
+      assert.equal(readFileSync(join(dir, 'secret'), 'utf8').trim(), mock.webhookSecret);
+      assert.equal(statSync(join(dir, 'secret')).mode & 0o777, 0o600);
+      assert.deepEqual(mock.state.domains[0].capabilities, { sending: 'enabled', receiving: 'enabled' });
+      assert.deepEqual([mock.state.webhooks[0].endpoint, mock.state.webhooks[0].events], ['https://iscolinfree.com/theoffice/api/mail/inbound', ['email.received', 'email.bounced', 'email.complained']]);
+      const second = await run1(['--verify']);
+      assert.equal(second.code, 0, second.out);
+      assert.match(second.out, /Found middistance\.com/); assert.match(second.out, /Found the webhook/);
+      assert.equal(mock.state.domains.length, 1); assert.equal(mock.state.webhooks.length, 1);
+      const nokey = await new Promise((resolve) => execFile(process.execPath, ['scripts/mail-setup.mjs', join(dir, 'x')], { env: { PATH: process.env.PATH } }, (err, stdout, stderr) => resolve({ code: err ? err.code : 0, out: stdout + stderr })));
+      assert.notEqual(nokey.code, 0); assert.match(nokey.out, /RESEND_API_KEY/);
+    } finally { await mock.close(); }
+  });
+
+  test('admin.mjs mail status, pause, resume and suppress', async () => {
+    const { execFile } = await import('node:child_process');
+    const { mkdtempSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { openDb } = await import('../server/db.js');
+    const dir = mkdtempSync(join(tmpdir(), 'mailadmin-'));
+    const db = openDb(dir);
+    run(db, "INSERT INTO floors (slug,number,name,colors,boss,decor,recovery_hash,created_at) VALUES ('kiln-co',3,'Kiln Co','{}','{}','{}','x',1)");
+    db.close();
+    const admin = (...a) => new Promise((resolve) => execFile(process.execPath, ['scripts/admin.mjs', 'mail', ...a], { env: { PATH: process.env.PATH, DATA_DIR: dir, RESEND_API_KEY: 're_hidden_key_123' } }, (err, stdout, stderr) => resolve({ code: err ? err.code : 0, out: stdout + stderr })));
+    const s = await admin('status');
+    assert.equal(s.code, 0, s.out); assert.match(s.out, /sending on/); assert.match(s.out, /Floor 3 Kiln Co: no address yet/); assert.ok(!s.out.includes('re_hidden_key_123'));
+    assert.match((await admin('pause', '--floor', '3')).out, /paused for floor 3/);
+    assert.match((await admin('status')).out, /Floor 3 Kiln Co: .*PAUSED/);
+    assert.match((await admin('resume', '--floor', '3')).out, /back on for floor 3/);
+    assert.match((await admin('pause')).out, /paused for the whole building/);
+    assert.match((await admin('status')).out, /PAUSED for the whole building/);
+    assert.match((await admin('resume')).out, /back on for the whole building/);
+    assert.match((await admin('suppress', 'Spam@Trap.example')).out, /spam@trap\.example will get no more email/);
+    assert.notEqual((await admin('suppress', 'nonsense')).code, 0);
+    assert.notEqual((await admin('pause', '--floor', '9')).code, 0);
+    const db2 = openDb(dir);
+    assert.ok(get(db2, "SELECT 1 x FROM mail_suppressed WHERE address='spam@trap.example'"));
+    db2.close();
+  });
+});
