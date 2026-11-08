@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { get, all, run } from '../server/db.js';
 import { writeFile, publishSnapshot } from '../server/workspace.js';
+import { absoluteMeta } from '../server/metaabs.js';
 import { appLabel, appHostLabel, appCsp } from '../server/apps.js';
 import { DATA_LIMITS } from '../server/appdata.js';
 import { loadConfig } from '../server/config.js';
@@ -188,6 +189,24 @@ describe('a project on its own origin', () => {
     const sig = signPreview(serverSecret(t.db), floorA.id, 'expiring', exp);
     assert.equal((await hit(t, host, `/~p${exp}.${sig}/`)).status, 404);
     assert.equal((await hit(t, host, '/', { headers: { cookie: `__Host-office_preview=${exp}.${sig}` } })).status, 404);
+  });
+  test('link previews get absolute addresses, filled in when the page is served', async () => {
+    const page = '<head><meta property="og:image" content="images/og.jpg"><meta name="twitter:image" content=\'./images/og.jpg\'><meta property="og:url" content="./"><meta property="og:title" content="images/x.jpg"><meta property="og:image:alt" content="a dog"></head>';
+    const host = publish(t, floorA, 'preview', { 'index.html': page, 'about/index.html': '<meta property="og:image" content="../images/og.jpg"><meta property="og:image" content="https://cdn.example/x.png">' });
+    const home = (await hit(t, host, '/')).text;
+    assert.match(home, new RegExp(`<meta property="og:image" content="https://${host}/images/og\\.jpg">`));
+    assert.match(home, new RegExp(`<meta name="twitter:image" content="https://${host}/images/og\\.jpg">`));
+    assert.match(home, new RegExp(`<meta property="og:url" content="https://${host}/">`));
+    assert.match(home, /og:title" content="images\/x\.jpg"/, 'only preview addresses change'); assert.match(home, /og:image:alt" content="a dog"/);
+    const about = (await hit(t, host, '/about/')).text;
+    assert.match(about, new RegExp(`content="https://${host}/images/og\\.jpg"`)); assert.match(about, /content="https:\/\/cdn\.example\/x\.png"/, 'absolute stays as it was');
+    assert.match((await hit(t, host, '/some/route')).text, new RegExp(`og:image" content="https://${host}/images/og\\.jpg"`), 'a client-side route resolves from the root page');
+  });
+  test('the preview rewrite cannot be steered into markup', () => {
+    const out = absoluteMeta('<meta property="og:image" content="x.jpg">', "https://a.example/it's/<b>/\"q");
+    assert.doesNotMatch(out, /<b>|it's|"q/); assert.match(out, /^<meta property="og:image" content="https:\/\/a\.example\/[^"]*x\.jpg">$/);
+    assert.equal(absoluteMeta('<meta property="og:image" content="data:image/png;base64,AA">', 'https://a.example/'), '<meta property="og:image" content="data:image/png;base64,AA">');
+    assert.equal(absoluteMeta('<p>no meta</p>', 'https://a.example/'), '<p>no meta</p>');
   });
   test('a suspended floor\'s projects go dark, on both addresses', async () => {
     const c = await claim(t, 'Suspended Co');
