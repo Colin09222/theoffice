@@ -187,7 +187,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     await owner.post(`/api/floors/${owner.slug}/chat`, { text: 'go build tiny loaves' });
     await p.until('window.__office.state.tasks.length >= 4 && window.__office.state.tasks.every((x) => x.status === "done") && [...window.__office.view.actors.values()].every((a) => a.seated && !a.scene && !window.__office.view.life.queues.size)', 'all back at their desks', 110000);
     const r = await readRec(p);
-    const staff = await p.ev('window.__office.state.agents.filter((a) => a.role !== "manager").map((a) => a.id)');
+    const staff = await p.ev('window.__office.state.agents.filter((a) => a.role !== "manager" && a.role !== "lawyer").map((a) => a.id)');  // the Lawyer has no part in a build, so he stays at his desk
     const crew = staff.map((id) => r.rooms[id] || []);
     const went = crew.filter((seq) => seq.includes('meeting') && seq.length >= 3).length;
     if (went < staff.length) throw new Error(`only ${went} of ${staff.length} went to the meeting and back: ${JSON.stringify(crew)}`);
