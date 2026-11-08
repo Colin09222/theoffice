@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client, adminClient, floorState, until } from './helpers.js';
 import { checkIdeas, checkAdSpend, figuresIn, unbacked, moneyOk, urlKey, loadBusinessConfig } from '../server/business.js';
 import { purchaseListing, decidePurchase } from '../server/purchases.js';
-import { get, all } from '../server/db.js';
+import { get, all, run } from '../server/db.js';
+import { campaignId } from '../server/googleads.js';
 
 const SEEN = ['https://example.com/a', 'https://example.org/b', 'https://example.net/c'];
 const seenOnly = (urls) => new Set(urls.map(urlKey).filter((k) => !SEEN.map(urlKey).includes(k)));
@@ -85,6 +86,12 @@ describe('ad spend: limits and amounts', () => {
 });
 
 const mediaOn = { mediaMock: true, searchMock: true, businessTickMs: 40, modesTickMs: 60000 };
+// Paid ads switched on, against the mocked Google Ads API (server/googleads-mock.js). Nothing in these tests reaches Google.
+const paidAds = { adsPaidEnabled: true, adsMock: true };
+// The ad points at the live site's full https address, so these tests give the building one. Clients then send that origin.
+const ORIGIN = 'https://office.example';
+const onHttps = (t, ...clients) => { t.cfg.publicOrigin = ORIGIN; for (const c of clients) c.origin = ORIGIN; };
+const adsOf = (t) => t.app.engine.business.ads;
 const biz = async (c) => (await floorState(c)).business;
 async function untilStep(c, pred, what) { return until(async () => { const b = await biz(c); return pred(b) ? b : null; }, { what, timeout: 30000 }); }
 async function toIdeas(t, c, wish) {
@@ -100,8 +107,8 @@ async function toBudget(t, c) {
 }
 
 describe('the journey in mock mode', () => {
-  test('the whole journey with ad money: ideas, build tracks, ads, an AD SPEND request, the boss\'s approval, the building manager', async () => {
-    const t = await boot(mediaOn);
+  test('the whole journey with ad money: ideas, build tracks, ads, an AD SPEND request, the boss\'s approval, a Google search campaign that ends on schedule', async () => {
+    const t = await boot({ ...mediaOn, ...paidAds });
     try {
       const c = await claim(t);
       const visitor = new Client(t);
@@ -139,9 +146,13 @@ describe('the journey in mock mode', () => {
       assert.match(budget.ads.pictures[0].src, /^\/theoffice\/api\/floors\/[a-z0-9-]+\/business\/file\/ad-1\.png$/, 'a path the floor page can load');
       assert.equal(budget.ads.videos.length, 2);
       assert.ok(budget.ads.videos.every((v) => v.captions), 'every video has its captions');
-      assert.equal(budget.ads.plan.where[0], 'Facebook');
+      assert.deepEqual(budget.ads.plan.where, ['Google Search']);
       assert.ok(budget.ads.plan.test.a && budget.ads.plan.test.b);
-      assert.deepEqual(budget.adMoney, { options: [0, 5, 10, 25], chosen: 0, set: false, ready: true });
+      const words = budget.ads.plan.search;
+      assert.deepEqual(words.keywords, ['mobile dog grooming', 'dog grooming at home', 'dog groomer near me', 'in home dog grooming'], 'the marketer\'s keywords');
+      assert.ok(words.headlines.length >= 3 && words.headlines.every((x) => x.length <= 30) && words.descriptions.every((x) => x.length <= 90));
+      assert.deepEqual(budget.adMoney, { options: [0, 5, 10, 25], chosen: 0, set: false, ready: true, paid: true });
+      assert.deepEqual(budget.channels.map((x) => [x.id, x.on, !!x.soon]), [['google', true, false], ['meta', false, true]], 'Google on, Facebook and Instagram coming soon');
       assert.ok(budget.chips.includes('Skip ads for now') && budget.chips.includes('Change the ads'));
       const vtt = await c.raw('GET', `/api/floors/${c.slug}/business/file/video-1.vtt`);
       assert.match(await vtt.text(), /^WEBVTT[\s\S]*Grooming that comes to you/);
@@ -153,6 +164,7 @@ describe('the journey in mock mode', () => {
       const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
       assert.equal(get(t.db, "SELECT COUNT(*) n FROM ledger WHERE floor_id=? AND kind='video'", fid).n, 2);
       // More than $25, or an amount that isn't a choice, is refused.
+      onHttps(t, c, visitor);
       assert.equal((await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 50 })).status, 400);
       assert.equal((await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 7 })).status, 400);
       assert.equal((await visitor.post(`/api/floors/${c.slug}/business/launch`, { amount: 10 })).status, 401);
@@ -162,28 +174,56 @@ describe('the journey in mock mode', () => {
       assert.equal(asked.adSpend.amount, 10);
       assert.match(asked.adSpend.audience, /Dog owners/);
       assert.equal(get(t.db, "SELECT COUNT(*) n FROM purchases WHERE floor_id=?", fid).n, 0, 'nothing reaches the building manager before the boss\'s click');
-      // The boss approves with one click. It goes to the building manager on the purchases path.
+      // The boss approves with one click. The approval is on record first; then the campaign is made on Google, PAUSED, and only then switched on.
       assert.equal((await visitor.post(`/api/floors/${c.slug}/business/ad-spend/${asked.adSpend.id}`, { answer: 'approve' })).status, 401);
+      const mock = adsOf(t).mock;
+      assert.equal(mock.calls.length, 0, 'Google hears nothing before the boss\'s click');
       const ok = await c.post(`/api/floors/${c.slug}/business/ad-spend/${asked.adSpend.id}`, { answer: 'approve' });
       assert.equal(ok.status, 200, JSON.stringify(ok.data));
-      assert.equal(ok.data.business.adSpend.status, 'queued');
-      assert.equal(ok.data.business.adSpend.label, 'Queued for the building manager');
+      assert.ok(['approved', 'running'].includes(ok.data.business.adSpend.status), ok.data.business.adSpend.status);
       assert.equal((await c.post(`/api/floors/${c.slug}/business/ad-spend/${asked.adSpend.id}`, { answer: 'approve' })).status, 409, 'one click, once');
-      const listing = purchaseListing(t.db);
-      assert.equal(listing.purchases.length, 1);
-      assert.equal(listing.purchases[0].priceUsd, 10);
-      assert.match(listing.purchases[0].item, /AD SPEND: Facebook and Instagram ads/);
-      assert.match(listing.purchases[0].reason, /queued for the building manager/);
+      const ran = await untilStep(c, (b) => b.adSpend?.status === 'running', 'the campaign on Google');
+      assert.equal(ran.adSpend.label, 'Running on Google Search');
+      assert.match(ran.adSpend.endsOn, /^[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}$/);
+      assert.equal(mock.campaigns.size, 1, 'one campaign');
+      const made = mock.calls.find((x) => x.path === 'googleAds:mutate').body;
+      assert.equal(made.validateOnly, false);
+      const campOp = made.mutateOperations.find((o) => o.campaignOperation).campaignOperation.create;
+      const budgetOp = made.mutateOperations.find((o) => o.campaignBudgetOperation).campaignBudgetOperation.create;
+      assert.equal(campOp.status, 'PAUSED', 'made paused');
+      assert.deepEqual([budgetOp.period, budgetOp.totalAmountMicros], ['CUSTOM_PERIOD', '10000000'], 'a total budget of exactly the approved amount');
+      assert.deepEqual(campOp.networkSettings, { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false });
+      assert.ok(Number(campOp.targetSpend.cpcBidCeilingMicros) > 0);
+      const steps = mock.calls.map((x) => (x.path === 'campaigns:mutate' ? x.body.operations[0].update.status : x.path));
+      assert.ok(steps.indexOf('googleAds:mutate') < steps.indexOf('ENABLED'), steps.join(' > '));
+      const camp = [...mock.campaigns.values()][0];
+      assert.equal(camp.status, 'ENABLED');
+      assert.deepEqual(mock.keywords.map((k) => k.keyword.text), words.keywords);
+      assert.deepEqual(mock.ads[0].ad.finalUrls, [`${ORIGIN}/theoffice/f/${c.slug}/${budget.project}/`], 'the ad points at the floor\'s live site');
+      const row = get(t.db, 'SELECT * FROM ad_spend WHERE id=?', asked.adSpend.id);
+      assert.ok(row.decided_at && row.ends_at - row.decided_at <= 7 * 86400000, 'ends within 7 days of the approval');
+      assert.equal(get(t.db, "SELECT COUNT(*) n FROM purchases WHERE floor_id=?", fid).n, 0, 'Google, not the by-hand purchases path');
       // A second campaign while this one is live is refused, server-side.
       const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", fid);
       const floor = get(t.db, 'SELECT * FROM floors WHERE id=?', fid);
       const ctx = t.app.engine.toolCtx(floor, mgr, null, ['request_ad_spend']);
       assert.match(await t.app.engine.tools.exec(ctx, 'request_ad_spend', JSON.stringify({ amount: 10, audience: 'Anyone' })), /^Error: .*One at a time/);
       assert.match(await t.app.engine.tools.exec(ctx, 'request_ad_spend', JSON.stringify({ amount: 25, audience: 'Anyone' })), /^Error: .*exactly what the boss chose/);
-      // The building manager marks it; the card follows.
-      decidePurchase(t.db, listing.purchases[0].id, 'bought', 'Running it by hand this week');
-      const ran = await untilStep(c, (b) => b.adSpend?.status === 'running', 'the building manager\'s decision');
-      assert.match(ran.adSpend.label, /building manager/);
+      // Views and clicks reach the boss's slip; what it cost doesn't.
+      mock.spend(camp.id, 3.2, { impressions: 140, clicks: 6 });
+      await adsOf(t).tick({ force: true });
+      const seen = await untilStep(c, (b) => b.adSpend?.clicks === 6, 'the clicks');
+      assert.equal(seen.adSpend.views, 140);
+      assert.doesNotMatch(JSON.stringify(seen.adSpend), /3\.2|spent|cost/);
+      // One that costs more than approved stops at once, and past its end it is closed, on schedule.
+      mock.spend(camp.id, 10.4, { impressions: 400, clicks: 15 });
+      await adsOf(t).tick({ force: true });
+      assert.equal(camp.status, 'PAUSED');
+      assert.equal((await biz(c)).adSpend.status, 'paused');
+      run(t.db, 'UPDATE ad_spend SET ends_at=? WHERE id=?', Date.now() - 1000, asked.adSpend.id);
+      await adsOf(t).tick({ force: true });
+      const over = await untilStep(c, (b) => b.adSpend?.status === 'ended', 'the end of the campaign');
+      assert.equal(over.adSpend.label, 'Finished');
       const done = await untilStep(c, (b) => b.launched, 'the launch report');
       assert.deepEqual(done.steps.map((s) => s.state), ['done', 'done', 'done', 'done']);
       assert.equal(done.progress, 100);
@@ -201,7 +241,14 @@ describe('the journey in mock mode', () => {
     const t = await boot(mediaOn);
     try {
       const c = await claim(t);
-      await toBudget(t, c);
+      const ready = await toBudget(t, c);
+      // Paid ads are off unless ADS_PAID_ENABLED is set: then only the free path exists.
+      assert.deepEqual(ready.adMoney.options, [0]);
+      assert.equal(ready.adMoney.paid, false);
+      assert.deepEqual(ready.channels.map((x) => [x.id, x.on]), [['google', false], ['meta', false]]);
+      const paid = await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 5 });
+      assert.equal(paid.status, 400);
+      assert.match(paid.data.message || paid.data.error || JSON.stringify(paid.data), /switched on|bad_amount|ad amounts/);
       const go = await c.post(`/api/floors/${c.slug}/business/launch`, { amount: 0 });
       assert.equal(go.status, 200, JSON.stringify(go.data));
       const done = await untilStep(c, (b) => b.launched, 'the launch report');
@@ -251,7 +298,7 @@ describe('the journey in mock mode', () => {
   });
 
   test('declining the ad request spends nothing and frees the floor for another; skipping ads launches without them', async () => {
-    const t = await boot(mediaOn);
+    const t = await boot({ ...mediaOn, ...paidAds });
     try {
       const c = await claim(t);
       await toBudget(t, c);
@@ -259,6 +306,7 @@ describe('the journey in mock mode', () => {
       const asked = await untilStep(c, (b) => b.adSpend?.status === 'awaiting_boss', 'the request');
       const no = await c.post(`/api/floors/${c.slug}/business/ad-spend/${asked.adSpend.id}`, { answer: 'decline' });
       assert.equal(no.data.business.adSpend.status, 'declined');
+      assert.equal(adsOf(t).mock.calls.length, 0, 'Google never heard of it');
       const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
       assert.equal(get(t.db, 'SELECT COUNT(*) n FROM purchases WHERE floor_id=?', fid).n, 0);
       const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", fid);
@@ -275,6 +323,56 @@ describe('the journey in mock mode', () => {
         assert.equal(done.ads.skipped, true);
         assert.equal((await floorState(new Client(t2), c2.slug)).business.ads, null, 'skipped ads are not put up');
       } finally { await t2.close(); }
+    } finally { await t.close(); }
+  });
+
+  test('the building\'s monthly cap is checked at launch and again at the boss\'s click, never named on a floor; a campaign Google refuses spends nothing', async () => {
+    const t = await boot({ ...mediaOn, ...paidAds, adMonthlyCapUsd: 30 });
+    try {
+      const c1 = await claim(t, 'First Floor Co');
+      const c2 = await claim(t, 'Second Floor Co');
+      await toBudget(t, c1); await toBudget(t, c2);
+      onHttps(t, c1, c2);
+      const mock = adsOf(t).mock;
+      const fileAndApprove = async (c, amount) => {
+        const go = await c.post(`/api/floors/${c.slug}/business/launch`, { amount });
+        assert.equal(go.status, 200, JSON.stringify(go.data));
+        const asked = await untilStep(c, (b) => b.adSpend?.status === 'awaiting_boss', 'the request');
+        return { id: asked.adSpend.id, approve: () => c.post(`/api/floors/${c.slug}/business/ad-spend/${asked.adSpend.id}`, { answer: 'approve' }) };
+      };
+      const first = await fileAndApprove(c1, 25);
+      assert.equal((await first.approve()).status, 200);
+      await untilStep(c1, (b) => b.adSpend?.status === 'running', 'the first campaign');
+      // $25 of $30 is taken this month: $10 more is refused at launch, without a figure.
+      const big = await c2.post(`/api/floors/${c2.slug}/business/launch`, { amount: 10 });
+      assert.equal(big.status, 409);
+      assert.doesNotMatch(JSON.stringify(big.data), /\d/, 'the cap is never named');
+      // $5 fits at launch, but by the boss's click the first campaign has cost more than its amount, so it no longer does.
+      const second = await fileAndApprove(c2, 5);
+      mock.spend([...mock.campaigns.values()][0].id, 26);
+      await adsOf(t).tick({ force: true });
+      const no = await second.approve();
+      assert.equal(no.status, 200);
+      assert.equal(no.data.business.adSpend.status, 'withdrawn');
+      assert.equal(no.data.business.adSpend.label, 'Not set up. Nothing was spent');
+      assert.doesNotMatch(`${no.data.business.adSpend.label} ${no.data.business.adSpend.note}`, /\d|\bcap\b/i, 'no figure and no cap on the floor');
+      assert.equal(mock.campaigns.size, 1, 'nothing was made on Google for it');
+      // With room again, Google refusing the campaign leaves nothing running and says why; the floor can file again.
+      t.cfg.adMonthlyCapUsd = 100;
+      const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c2.slug).id;
+      const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", fid);
+      const ctx = t.app.engine.toolCtx(get(t.db, 'SELECT * FROM floors WHERE id=?', fid), mgr, null, ['request_ad_spend']);
+      assert.match(await t.app.engine.tools.exec(ctx, 'request_ad_spend', JSON.stringify({ amount: 5, audience: 'Dog owners' })), /^Filed/);
+      const again = await untilStep(c2, (b) => b.adSpend?.status === 'awaiting_boss', 'the second request');
+      mock.failNextMutate({ campaignError: 'CANNOT_SET_DATE_TO_PAST' }, 'Mock refusal.');
+      await c2.post(`/api/floors/${c2.slug}/business/ad-spend/${again.adSpend.id}`, { answer: 'approve' });
+      const failed = await untilStep(c2, (b) => b.adSpend?.status === 'failed', 'Google\'s refusal');
+      assert.match(failed.adSpend.note, /CANNOT_SET_DATE_TO_PAST/);
+      assert.equal(mock.campaigns.size, 1);
+      assert.equal(mock.calls.filter((x) => x.path === 'campaigns:mutate' && x.body.operations[0].update.status === 'ENABLED').length, 1, 'only the first was ever switched on');
+      // Switched off, nothing new starts, and a request already filed is withdrawn at the click.
+      t.cfg.adsPaidEnabled = false;
+      assert.match(await t.app.engine.tools.exec(ctx, 'request_ad_spend', JSON.stringify({ amount: 5, audience: 'Dog owners' })), /^Error: .*switched off/);
     } finally { await t.close(); }
   });
 
