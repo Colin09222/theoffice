@@ -6,7 +6,7 @@ Both are boss-only. The dashboard has one owner-only route and the run's words a
 
 ## The Numbers tab
 
-A boss-only tab on the floor (`public/js/numbers-ui.js`, `public/css/numbers.css`), phone first, from `GET /api/floors/:slug/numbers[?project=slug]` (`server/numbers.js`, owner-only, `no-store`):
+A boss-only tab on the floor (`public/js/numbers-ui.js`, `public/css/extras.css`), phone first, from `GET /api/floors/:slug/numbers[?project=slug]` (`server/numbers.js`, owner-only, `no-store`):
 
 | Figure | Where it comes from |
 |---|---|
