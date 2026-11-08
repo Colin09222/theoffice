@@ -217,6 +217,23 @@ describe('office.ai', () => {
     } finally { release(); await s.t.close(); }
   });
 
+  test('one project can\'t hold every place in the building', async () => {
+    let release; const open = new Promise((r) => { release = r; });
+    const m = fakeModel(async () => { await open; return reply(); });
+    const s = await setup({ trustProxy: true }, { llm: m });
+    try {
+      const running = [1, 2, 3, 4].map((n) => s.ai({ prompt: 'a' }, { headers: { 'x-forwarded-for': `5.5.5.${n}` } }));
+      for (let i = 0; i < 200 && m.calls.length < 4; i++) await sleep(5);
+      const fifth = await s.ai({ prompt: 'a' }, { headers: { 'x-forwarded-for': '5.5.5.5' } });
+      assert.equal(fifth.status, 429); assert.match(fifth.json.message, /busy on this site/);
+      const other = publish(s.t, s.floor, 'other');
+      const elsewhere = s.ai({ prompt: 'a' }, { host: other, headers: { 'x-forwarded-for': '5.5.6.1' } });
+      release();
+      assert.equal((await elsewhere).status, 200, 'another project still has room');
+      for (const r of await Promise.all(running)) assert.equal(r.status, 200);
+    } finally { release(); await s.t.close(); }
+  });
+
   test('a project has its own requests-per-minute ceiling', async () => {
     const m = fakeModel(() => reply());
     const s = await setup({ trustProxy: true, cloudRates: { aiProject: [2, 60000] } }, { llm: m });

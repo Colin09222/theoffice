@@ -46,8 +46,8 @@ which sit on the older `/_data/v1` store). The same file is at `/theoffice/sdk/o
 | Rooms | 16 people, 50 rooms per project, 1,000 in all; 600 connections in all, 200 per project, 32 per address; messages 8 KB, 20 a second (burst 40) and 32 KB a second each; 100 state keys / 32 KB per room |
 | AI per call | 1,000 tokens written at most (600 by default); 32,000 characters in, plus 8,000 of `system`; 40 messages; 60 seconds |
 | AI per day | 150,000 tokens per project on `fast`, 15,000 on `smart` (input and output both count); a building ceiling for all app AI (`buildingDayUsd`, for the admin's eyes only, default 2) |
-| AI per visitor | 12 calls a minute and 200 a day per address per project, 2 at once; 240 a minute per project; 8 at once in the building |
-| Web pages | 500 real fetches per project per day; 30 a minute and 600 a day per address per project, 3 at once; 240 a minute per project; 8 at once in the building; responses as above |
+| AI per visitor | 12 calls a minute and 200 a day per address per project, 2 at once; 240 a minute and 4 at once per project; 8 at once in the building |
+| Web pages | 500 real fetches per project per day; 30 a minute and 600 a day per address per project, 3 at once; 240 a minute and 6 at once per project; 8 at once in the building; 512 KB and 15 seconds a page |
 | Requests | 30,000 a minute for the building, 3,000 per project, 600 per address, 240 writes per address per project; 120 queries a minute per address and 1,200 per project; 2 uploads at once per address; sign-ups 10 an hour per address; log-ins 10 per 15 minutes per account and address |
 
 Request counts are kept in memory and written once a minute. Memory stays small: rooms cap out near 35 MB of state, at most 4 uploads

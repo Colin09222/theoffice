@@ -62,8 +62,8 @@ export function installCloud(ext) {
     if (!rates.allow(`${bucket}:${key}`, n, w)) throw new CloudError(429, 'rate_limited', message);
   };
   /** At most `max` of these at once from one address, so a few slow ones can't hold every slot. */
-  async function atOnce(key, max, fn) {
-    if ((inFlight.get(key) || 0) >= max) throw new CloudError(429, 'rate_limited', 'Wait for your other requests to finish.');
+  async function atOnce(key, max, fn, message = 'Wait for your other requests to finish.') {
+    if ((inFlight.get(key) || 0) >= max) throw new CloudError(429, 'rate_limited', message);
     inFlight.set(key, (inFlight.get(key) || 0) + 1);
     try { return await fn(); } finally { const n = inFlight.get(key) - 1; if (n > 0) inFlight.set(key, n); else inFlight.delete(key); }
   }
@@ -281,12 +281,13 @@ export function installCloud(ext) {
         const tooFast = 'You\'re asking very quickly. Give it a minute and try again.';
         limit('aiVisitor', `${pk}:${ip}`, tooFast); limit('aiVisitorDay', `${pk}:${ip}`, 'You\'ve used your AI requests here for today. Come back tomorrow.'); limit('aiProject', pk, tooFast);
         const body = await readBody(req, BODY.json);
-        return reply(200, await atOnce(`ai:${ip}`, 2, () => ai.chat({ F, p, pk, body })));
+        // Two at once from one address and four from one project, so one busy site can't hold every place in the building.
+        return reply(200, await atOnce(`ai:${ip}`, 2, () => atOnce(`aiP:${pk}`, 4, () => ai.chat({ F, p, pk, body }), 'The AI is busy on this site right now. Try again in a moment.')));
       }
       if ((a === 'fetch' || a === 'scrape') && !b && m === 'POST') {
         limit('webVisitor', `${pk}:${ip}`); limit('webVisitorDay', `${pk}:${ip}`); limit('webProject', pk);
         const body = await readBody(req, BODY.small);
-        return reply(200, await atOnce(`web:${ip}`, 3, () => web[a]({ F, p, pk, url: body.url })));
+        return reply(200, await atOnce(`web:${ip}`, 3, () => atOnce(`webP:${pk}`, 6, () => web[a]({ F, p, pk, url: body.url }), 'This site is reading a lot of pages right now. Try again in a moment.')));
       }
       throw new CloudError(404, 'not_found', 'No such thing here.');
     } catch (e) {
