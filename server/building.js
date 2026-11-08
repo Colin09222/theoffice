@@ -10,6 +10,12 @@ const TICKER_SCAN = 150;
 const MAX_TICKER = 60;
 const MAX_WALL = 120;
 const PINNED_LAUNCHES = 3;
+const LIFE_TTL_MS = 3000;
+const LIFE_SCAN = 4000;              // how far back through the events table one look goes, newest first
+const LIFE_TALK_MS = 3 * 60_000;     // a line older than this is old news in the lobby
+const LIFE_MEETING_MS = 2 * 60_000;  // and a meeting is over by then
+const LIFE_TALK_PER_FLOOR = 3;
+const LIFE_TALK_CHARS = 160;
 const GLYPH = { site: '◆', app: '▣', game: '▲', simulation: '◎', doc: '≡', research: '☍' };
 const KIND_WORD = { site: 'Site', app: 'App', game: 'Game', simulation: 'Simulation', doc: 'Doc', research: 'Research' };
 
@@ -25,15 +31,51 @@ export function installBuilding(ext) {
   // Everyone in the building, floor by floor, for the stacked cutaway in the lobby: name, look and whether they're at it. All of it
   // is on each floor's own page already. Hidden floors and closed ones stay out.
   GET('/api/building/staff', async ({ res }) => {
-    const rows = all(db, `SELECT f.number, a.name, a.role, a.look, a.state FROM agents a JOIN floors f ON f.id = a.floor_id
+    const rows = all(db, `SELECT f.number, a.id, a.name, a.role, a.title, a.look, a.state FROM agents a JOIN floors f ON f.id = a.floor_id
       WHERE f.status = 'active' AND f.hidden = 0 ORDER BY f.number DESC, a.id`);
     const floors = {};
     for (const r of rows) {
       let look = null; try { look = JSON.parse(r.look); } catch { /* a drawn face in the defaults */ }
-      (floors[r.number] ||= []).push({ name: r.name, role: r.role, look, busy: r.state !== 'idle' });
+      (floors[r.number] ||= []).push({ id: r.id, name: r.name, role: r.role, title: r.title || '', look, busy: r.state !== 'idle' });
     }
     json(res, 200, { floors, ts: now() });
   });
+
+  // What the little people in the stack's cutaways are up to: who is at it, the last few things said out loud, and whether a meeting
+  // is on. Small enough to ask for every few seconds, and judged by the same rules as each floor's own visitor stream (viewEvent), so
+  // the lobby never shows more than walking in would. Floors with nothing going on are left out.
+  let lifeCache = { at: 0, body: null };
+  function life() {
+    const t = now();
+    if (lifeCache.body && t - lifeCache.at < LIFE_TTL_MS && t >= lifeCache.at) return lifeCache.body;
+    const floors = new Map(all(db, "SELECT id, number, public_chat, default_private FROM floors WHERE status = 'active' AND hidden = 0").map((f) => [f.id, f]));
+    const out = {};
+    const slot = (f) => (out[f.number] ||= { busy: [], talk: [], meeting: null });
+    for (const a of all(db, "SELECT floor_id, id FROM agents WHERE state != 'idle' ORDER BY id")) { const f = floors.get(a.floor_id); if (f) slot(f).busy.push(a.id); }
+    const top = get(db, 'SELECT COALESCE(MAX(id), 0) n FROM events').n;
+    const rows = all(db, `SELECT id, floor_id, type, project, data, created_at FROM events WHERE id > ? AND type IN ('talk', 'meeting') AND created_at >= ?
+      ORDER BY id DESC`, top - LIFE_SCAN, t - LIFE_TALK_MS);
+    for (const r of rows) {
+      const f = floors.get(r.floor_id);
+      if (!f) continue;
+      let data; try { data = JSON.parse(r.data); } catch { continue; }
+      if (r.type === 'meeting') {
+        if (r.created_at < t - LIFE_MEETING_MS || out[f.number]?.meeting) continue;
+        const ids = [data.manager, ...(Array.isArray(data.staff) ? data.staff : [])].filter(Number.isInteger);
+        slot(f).meeting = { at: r.created_at, ids: [...new Set(ids)] };
+        continue;
+      }
+      if ((out[f.number]?.talk.length || 0) >= LIFE_TALK_PER_FLOOR) continue;
+      const v = viewEvent(db, { floorId: r.floor_id, type: 'talk', project: r.project, data, id: r.id, ts: r.created_at }, { owner: false, publicChat: !!f.public_chat, defaultPrivate: !!f.default_private });
+      const said = v?.data;
+      if (!said || said.kind === 'private' || !Number.isInteger(said.from) || !String(said.text || '').trim()) continue;
+      slot(f).talk.push({ id: r.id, from: said.from, to: Number.isInteger(said.to) ? said.to : null, kind: said.kind || '', text: String(said.text).trim().slice(0, LIFE_TALK_CHARS), ts: r.created_at });
+    }
+    for (const s of Object.values(out)) s.talk.reverse();  // oldest first, the order they were said in
+    lifeCache = { at: t, body: { floors: out, ts: t } };
+    return lifeCache.body;
+  }
+  GET('/api/building/life', async ({ res }) => { json(res, 200, life()); });
 
   // ---- the ticker ----
   // One scan of the newest events is cached briefly. Each cached line keeps the facts needed to re-check it later,

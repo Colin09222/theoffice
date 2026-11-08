@@ -29,12 +29,14 @@ function drawn(look = {}) {
 }
 
 /** A photo frame for this look. It fills itself in if the picture has to be taken first. */
-export function portrait(look, { accent = '#d9774a', name = '', develop = true } = {}) {
+export function portrait(look, { accent = '#d9774a', name = '', develop: shoot = true } = {}) {
   const el = h('span.portrait', { 'aria-hidden': 'true', title: name || null }, drawn(look));
   if (!look) return el;
   const key = keyOf(look);
   if (photos.has(key)) { el.append(h('img', { src: photos.get(key), alt: '', width: W, height: H })); return el; }
-  if (!stage.ok || !develop) return el;  // a photo already taken is used; otherwise the drawn face, with no renderer started for it
+  // A photo already taken is used; otherwise the drawn face, with no renderer started for it. (The option is renamed in here:
+  // as `develop` it hid the function below, and setTimeout was handed `true` to run as a string, which the CSP rightly refuses.)
+  if (!stage.ok || !shoot) return el;
   const job = waiting.get(key) || { look, accent, els: new Set() };
   job.els.add(el); waiting.set(key, job);
   if (!running) { running = true; setTimeout(develop, 500); }

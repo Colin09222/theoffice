@@ -229,3 +229,79 @@ describe('building: ticker and launched wall', () => {
     assert.equal(later.items[0].kind, 'feed');
   });
 });
+
+describe('building: the stack\'s staff, and what they are up to', () => {
+  let t, clock, visitor, open, hush, back;
+  before(async () => {
+    clock = Date.now();
+    t = await boot({}, { now: () => clock });
+    t.app.engine.tickFloor = () => {};  // nobody starts anything on their own: every line here is one the test said
+    visitor = new Client(t, { origin: null });
+    open = await claim(t, 'Open Plan');
+    hush = await claim(t, 'Quiet Corner');
+    back = await claim(t, 'Back Room');
+    assert.equal((await hush.post(`/api/floors/${hush.slug}/settings`, { defaultPrivate: true })).status, 200);
+    run(t.db, 'UPDATE floors SET hidden=1 WHERE slug=?', back.slug);
+  });
+  after(async () => { await t.close(); });
+  const row = (c) => get(t.db, 'SELECT id, number FROM floors WHERE slug=?', c.slug);
+  const crew = (c) => t.db.prepare('SELECT id, name, role FROM agents WHERE floor_id=? ORDER BY id').all(row(c).id);
+  const life = async () => { clock += 4000; return (await visitor.get('/api/building/life')).data; };  // each look is past the last one's cache
+  const say = (c, from, to, text, extra = {}) => t.app.engine.emit(row(c).id, 'talk', { from: from.id, to: to?.id ?? null, fromName: from.name, toName: to?.name || '', text, kind: 'ask', ...extra });
+
+  test('the staff list gives each person an id and a job title, and a hidden floor\'s people stay out', async () => {
+    const { floors } = (await visitor.get('/api/building/staff')).data;
+    const mine = floors[row(open).number];
+    assert.ok(mine.length >= 3, `only ${mine?.length}`);
+    for (const p of mine) { assert.ok(Number.isInteger(p.id)); assert.equal(typeof p.title, 'string'); }
+    assert.ok(mine.some((p) => p.role === 'manager' && p.title));
+    assert.equal(floors[row(back).number], undefined);
+  });
+
+  test('life: who is at it, the last three lines in the order they were said, and a meeting with whoever runs it first', async () => {
+    const [mgr, a, b] = crew(open);
+    run(t.db, "UPDATE agents SET state='thinking' WHERE id=?", a.id);
+    for (let i = 1; i <= 5; i++) say(open, a, b, `Line ${i}`);
+    t.app.engine.emit(row(open).id, 'meeting', { manager: mgr.id, staff: [a.id, b.id] });
+    const r = await visitor.get('/api/building/life');
+    assert.equal(r.status, 200);
+    const f = r.data.floors[row(open).number];
+    assert.deepEqual(f.busy, [a.id]);
+    assert.deepEqual(f.talk.map((l) => l.text), ['Line 3', 'Line 4', 'Line 5']);
+    for (const l of f.talk) { assert.equal(l.from, a.id); assert.equal(l.to, b.id); assert.ok(l.ts <= r.data.ts); }
+    assert.deepEqual(f.meeting.ids, [mgr.id, a.id, b.id]);
+    assert.equal(r.data.floors[row(hush).number], undefined, 'a floor with nothing going on is left out');
+  });
+
+  test('life keeps to the visitor stream\'s rules: nothing private, nothing the boss typed, nothing from a hidden floor', async () => {
+    const [, a, b] = crew(hush); say(hush, a, b, 'secret-plan for the quiet corner');
+    const [, c, d] = crew(back); say(back, c, d, 'Nobody in the lobby hears this');
+    t.app.engine.emit(row(back).id, 'meeting', { manager: c.id, staff: [d.id] });
+    const [, e, f] = crew(open); say(open, e, f, 'what the boss typed', { hush: true });
+    const body = JSON.stringify(await life());
+    assert.deepEqual(leaks(body), []);
+    for (const s of ['Nobody in the lobby', 'what the boss typed', 'Talking about something private']) assert.ok(!body.includes(s), s);
+    assert.ok(!(await life()).floors[row(back).number]);
+  });
+
+  test('one answer is shared for a few seconds, then it looks again', async () => {
+    const first = await life();
+    const [, a, b] = crew(open);
+    say(open, a, b, 'Just now');
+    const same = (await visitor.get('/api/building/life')).data;
+    assert.equal(same.ts, first.ts);
+    assert.ok(!JSON.stringify(same).includes('Just now'));
+    assert.ok(JSON.stringify(await life()).includes('Just now'));
+  });
+
+  test('old news drops out: a meeting after two minutes, the lines after three', async () => {
+    clock += 2 * 60_000;
+    let f = (await life()).floors[row(open).number];
+    assert.equal(f.meeting, null);
+    assert.ok(f.talk.length > 0);
+    clock += 70_000;
+    f = (await life()).floors[row(open).number];
+    assert.deepEqual(f.talk, []);
+    assert.deepEqual(f.busy, [crew(open)[1].id], 'still at it, so the floor is still listed');
+  });
+});
