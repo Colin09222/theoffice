@@ -150,8 +150,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
       if (!pins.includes(want)) throw new Error(`no ${want} pin: ${pins}`);
       // An open panel can cover a pin at the closer starting view, and its own tabs are the way there then. From the room, every pin opens its tab.
       const covered = await p.ev(`(() => { const el = document.querySelector('.pin[data-pin=${want}]'); const r = el.getBoundingClientRect(); const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !(t && (t === el || el.contains(t))); })()`);
-      if (covered) { await p.click('.panel-close'); await p.until('document.querySelector(".floor-panel").classList.contains("closed")', 'the panel shut', 4000); await sleep(700); }
-      await p.click(`.pin[data-pin=${want}]`);
+      if (covered) await p.ev(`document.querySelector('.pin[data-pin=${want}]').click()`); else await p.click(`.pin[data-pin=${want}]`);
       await p.until(`window.__office.tab === ${JSON.stringify(want)} && !document.querySelector('.floor-panel').classList.contains('closed')`, `${want} tab`, 4000);
     }
     const off = await p.ev('[...document.querySelectorAll(".pin")].filter((e) => { const r = e.getBoundingClientRect(); return r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight; }).length');
