@@ -1,6 +1,7 @@
 // Work modes in a real browser, against the real server in mock mode: the Hours tab under Customise sets the mode and the sign follows,
 // a visitor sees the sign but not the plan, set hours outside their time close the floor and send the staff home, and "work nonstop" in
-// the chat turns the floor 24/7 and fills the Work tab's goal and next-up list. MODES_SHOTS=dir saves four pictures.
+// the chat turns the floor 24/7 and fills the Work tab's goal and next-up list, and with no goal the team waits until the boss picks one
+// of the manager's in the chat. MODES_SHOTS=dir saves five pictures.
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { launch, sleep } from './cdp.mjs';
@@ -99,6 +100,23 @@ try {
     await p.until('[...window.__office.view.actors.values()].filter((a) => !a.isBoss).some((a) => a.group.visible)', 'the staff back in', 20000);
     if (/\$\d|budget/i.test(await p.ev('document.body.textContent'))) throw new Error('money words on the page');
     if (OUT) { await sleep(500); await p.shot(join(OUT, 'modes-3-nonstop-work-tab.jpg')); }
+  });
+
+  await step('with no goal the Work tab waits for one, the manager offers three in the chat, and the boss\'s pick shows above next up', async () => {
+    await c.post(`/api/floors/${c.slug}/work-mode`, { mode: 'nonstop', goal: '' });
+    await p.ev('document.querySelector(\'[data-tab="work"]\')?.click()');
+    await p.until('!!document.querySelector(".work-plan .plan-goal.wanted") && /waiting for a goal/.test(document.querySelector(".work-plan .plan-mode").textContent)', 'the goal is wanted', 15000);
+    const ask = await until(async () => ((await c.get(`/api/floors/${c.slug}`)).data.messages || []).find((m) => m.role === 'manager' && /we need one clear goal/.test(m.text)), { what: 'the goal question', timeout: 30000 });
+    if ((ask.text.match(/^\d\. /gm) || []).length !== 3) throw new Error(ask.text.slice(0, 200));
+    await p.until('/asked you in the chat/.test(document.querySelector(".work-plan .plan-goal").textContent)', 'the plan says it has asked', 15000);
+    if (OUT) { await sleep(400); await p.shot(join(OUT, 'modes-5-goal-wanted.jpg')); }
+    await p.ev('document.querySelector(\'[data-tab="chat"]\')?.click()');
+    await p.type('.chat-form textarea, .composer textarea, textarea', 'The first one please');
+    await p.press('Enter');
+    await p.ev('document.querySelector(\'[data-tab="work"]\')?.click()');
+    await p.until('/Get our first 100 visitors/.test(document.querySelector(".work-plan .plan-goal")?.textContent || "") && !document.querySelector(".work-plan .plan-goal.wanted")', 'the picked goal', 20000);
+    const above = await p.ev('(() => { const g = document.querySelector(".work-plan .plan-goal"), n = document.querySelector(".work-plan .plan-next"); return !!(g && n && (g.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING)); })()');
+    if (!above) throw new Error('the goal is not above next up');
   });
 
   await step('on a phone the Hours tab stacks and fits the screen', async () => {

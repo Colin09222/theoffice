@@ -94,9 +94,11 @@ const DEFS = {
     days: { type: 'array', items: { type: 'string' }, description: 'For hours: the days, such as ["mon","tue","wed","thu","fri"]' },
     start: S('For hours: opening time as HH:MM, 24-hour'), end: S('For hours: closing time as HH:MM, 24-hour'),
     tz: S('Optional IANA time zone such as Europe/London; the boss\'s own if left out'),
+    goal: S('Optional: the goal the boss gave with it, in one short sentence'),
   }, ['mode']),
-  update_backlog: fn('update_backlog', 'Keep the company\'s goal and the next-up list the team works from on its own, most useful first, and after a job say in a line or two what it did. The boss sees them in the Work tab.', {
-    goal: S('The company\'s goal, in one short sentence'),
+  update_backlog: fn('update_backlog', 'Keep the goal and the next-up list the team works from on its own, most useful first, and after a job say in a line or two what it did. The boss sees them in the Work tab.', {
+    goal: S('The goal, in one short concrete sentence: one the boss gave or picked in this chat, or with goal_reached, the next one you propose'),
+    goal_reached: { type: 'boolean', description: 'True when the current goal has been reached. Put the next goal you propose in goal: the boss is told, and the team keeps going on it' },
     next_up: { type: 'array', items: { type: 'string' }, description: 'The next pieces of work, most useful first, at most 8' },
     summary: S('A line or two for the boss on what the job you just finished did'),
   }, []),
@@ -561,13 +563,16 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (!engine.modes) throw new WorkspaceError('work modes are not available');
       if (!c.bossTurn) throw new WorkspaceError('the work mode only changes when the boss asks you to in this conversation. Nothing was changed.');
       let v;
-      try { v = engine.modes.set(c.floor, { mode: a.mode, days: a.days, start: str(a, 'start', 8, false) || undefined, end: str(a, 'end', 8, false) || undefined, tz: str(a, 'tz', 64, false) || undefined }, { by: 'manager' }); } catch (e) { if (e instanceof ModeError) throw new WorkspaceError(e.message); throw e; }
-      return `Work mode set: ${v.text}. The sign by the door says "${v.label}"${v.mode === 'ask' ? '' : ', and the team now picks its own next job whenever the floor is quiet'}. The boss can change it under Customise, Hours.`;
+      try { v = engine.modes.set(c.floor, { mode: a.mode, days: a.days, start: str(a, 'start', 8, false) || undefined, end: str(a, 'end', 8, false) || undefined, tz: str(a, 'tz', 64, false) || undefined, goal: str(a, 'goal', 300, false) || undefined }, { by: 'manager' }); } catch (e) { if (e instanceof ModeError) throw new WorkspaceError(e.message); throw e; }
+      const goal = v.needsGoal ? ' There is no goal yet, and nothing starts on its own until there is one. In your reply, ask the boss for one concrete goal you can tell has been reached, like "get the game to 1,000 plays" or "launch the shop with 10 products", or propose 2-3 that fit the company and ask them to pick. When they have, save it with update_backlog.'
+        : v.mode === 'ask' ? '' : ` Goal: ${v.goal}.`;
+      return `Work mode set: ${v.text}. The sign by the door says "${v.label}"${v.mode === 'ask' ? '' : ', and the team picks its own next job whenever the floor is quiet'}. The boss can change it under Customise, Hours.${goal}`;
     },
     update_backlog(c, a) {
       if (!engine.modes) throw new WorkspaceError('work modes are not available');
-      const v = engine.modes.updatePlan(c.floor, { goal: typeof a.goal === 'string' ? a.goal : undefined, nextUp: Array.isArray(a.next_up) ? a.next_up.filter((x) => typeof x === 'string') : undefined, summary: typeof a.summary === 'string' ? a.summary : undefined });
-      return `Saved. Goal: ${v.goal || 'none yet'}. Next up: ${v.nextUp.length ? v.nextUp.map((x, i) => `${i + 1}. ${x}`).join(' ') : 'nothing listed'}.`;
+      // A goal comes from the boss's own words, here or in their answer to your question. Past that, it moves on only once it's reached.
+      const v = engine.modes.updatePlan(c.floor, { goal: typeof a.goal === 'string' ? a.goal : undefined, nextUp: Array.isArray(a.next_up) ? a.next_up.filter((x) => typeof x === 'string') : undefined, summary: typeof a.summary === 'string' ? a.summary : undefined, goalReached: a.goal_reached === true, bossSaid: !!(c.bossTurn || c.bossAnswered) });
+      return `${v.refused ? `${v.refused} ` : ''}Saved. Goal: ${v.goal || 'none yet'}. Next up: ${v.nextUp.length ? v.nextUp.map((x, i) => `${i + 1}. ${x}`).join(' ') : 'nothing listed'}.`;
     },
     // The one way a floor can reach the owner's assistant. Everything it stores is untrusted, and it gets fenced every time it is listed.
     ask_buddehbot(c, a) {

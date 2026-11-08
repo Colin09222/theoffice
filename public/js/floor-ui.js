@@ -508,12 +508,17 @@ class FloorPage {
     const restart = async () => {
       try { await api(`/floors/${this.slug}/work-mode`, { method: 'POST', body: { mode: w.mode, days: w.dayList, start: w.start, end: w.end, tz: w.tz } }); toast('Back to work'); await this.reload(); } catch (e) { toast(e.message, 'bad'); }
     };
-    const head = w.mode === 'ask' ? 'On call: the team works when you ask.' : w.paused ? `Paused: ${w.pausedReason}.` : `${w.label}${w.days ? `, ${w.days}` : ''}: the team picks its own next job whenever the floor is quiet.`;
+    const where = `${w.label}${w.days ? `, ${w.days}` : ''}`;
+    const head = w.mode === 'ask' ? 'On call: the team works when you ask.' : w.paused ? `Paused: ${w.pausedReason}.` : w.needsGoal ? `${where}: waiting for a goal. Nothing starts on its own until there is one.` : `${where}: the team picks its own next job whenever the floor is quiet.`;
+    // The goal comes first, then the next-up list that works toward it.
+    const noGoal = w.mode === 'ask' ? 'None yet. Set one under Hours, or tell your manager.' : w.goalAsked ? 'Not set yet. Your manager has asked you in the chat: answer there, or set one under Hours.' : 'Not set yet. Your manager will ask you for one in the chat.';
+    const reached = w.goalsReached || [];
     return h('section.work-plan', { 'data-plan': w.mode },
       h('div.plan-head', {}, h('b', {}, 'Working on our own'), h('button.link', { type: 'button', 'data-plan-hours': '', onclick: () => this.openCustomise('hours') }, 'Hours')),
       h('p.plan-mode', {}, head, w.paused ? h('button.btn.ghost', { type: 'button', 'data-plan-restart': '', onclick: restart }, 'Start again') : null),
-      h('p.plan-goal', {}, h('span', {}, 'Goal'), w.goal || (w.mode === 'ask' ? 'None yet. Set one under Hours, or let your manager write one.' : 'Your manager writes one with the first job.')),
+      h(`p.plan-goal${w.needsGoal ? '.wanted' : ''}`, {}, h('span', {}, 'Goal'), w.goal || noGoal),
       w.nextUp.length ? h('div.plan-next', {}, h('span', {}, 'Next up'), h('ol', {}, ...w.nextUp.map((x) => h('li', {}, x)))) : null,
+      reached.length ? h('p.plan-reached', {}, h('span', {}, 'Reached'), reached.map((g) => g.goal).join(' · ')) : null,
       w.lastJob?.summary ? h('p.plan-last', {}, h('span', {}, 'Last job'), w.lastJob.summary) : null);
   }
   feedEl(f) { return h('li', { 'data-feed': f.id || '' }, h('b', {}, f.name), ` ${f.text}`, h('time', {}, timeAgo(f.ts))); }

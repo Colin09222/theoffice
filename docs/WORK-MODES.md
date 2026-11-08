@@ -27,7 +27,17 @@ Per floor, set under Customise, Hours, or by chat ("work nonstop", "work 9 to 5 
 - **Set hours** ("Open 9–5"): days of the week, start and end in the boss's time zone (learnt from their browser until they pick one). Hours that end before they start run overnight and belong to the day they start on. Outside the hours the floor shows Closed and the staff go home; the boss can still call the manager and the team comes in for it.
 - **Nonstop** ("Open 24/7").
 
-In set hours (inside them) and nonstop, whenever the floor has nothing that can go ahead, `server/modes.js` starts a job: a "Work mode:" note to the manager with the goal and the next-up list, then the ordinary engine and staff. The manager keeps the goal and list with `update_backlog`; the boss sees them in the Work tab. A task waiting on the boss's answer, anything queued behind it, and a request waiting for a Buy click don't count as work going ahead, so the team moves on. A due standing order goes first.
+In set hours (inside them) and nonstop, whenever the floor has nothing that can go ahead, `server/modes.js` starts a job: a "Work mode:" note to the manager with the goal and the next-up list, then the ordinary engine and staff. The manager keeps the list with `update_backlog`; the boss sees the goal in the Work tab, above the next-up list. A task waiting on the boss's answer, anything queued behind it, and a request waiting for a Buy click don't count as work going ahead, so the team moves on. A due standing order goes first.
+
+### A clear goal first
+
+Set hours and nonstop need a concrete goal, one you can tell has been reached ("get the game to 1,000 plays", "launch the shop with 10 products"). No job starts on its own until the floor has one.
+
+- The boss can type it under Customise, Hours, or say it with the mode ("work nonstop, our goal is ..."; `set_work_mode` takes a `goal`).
+- With no goal, the manager asks once, in the chat: it either asks for one or proposes 2-3 that fit the company and asks the boss to pick. Turned on by chat, it asks in its reply; turned on from the form, the runner wakes it with a "Goal needed:" note as soon as the floor is quiet, open or not. Taking the goal away asks again.
+- The goal comes from the boss's own words: their turn in the chat, or their answer to the manager's question. On any other turn `update_backlog` won't set or change it, and says why.
+- When the goal is reached, the manager calls `update_backlog` with `goal_reached` and the next goal it proposes. The chat gets "**Goal reached:** ... Next goal: ... The team keeps going on it, ... as before. Tell me if you'd rather aim for something else." The mode stays as it was, the next job works toward the new goal, and the Work tab lists the last few goals reached.
+- The Work tab says when it's waiting for a goal, and whether the manager has asked yet.
 
 After each job the manager posts a line or two in the chat ("On our own: ..."), and once a day (at closing time, or at midnight in the boss's zone) a recap for the boss alone. No figures about money anywhere.
 

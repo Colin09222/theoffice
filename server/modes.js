@@ -3,6 +3,8 @@
 // on the autonomous models (config/models.json). See docs/WORK-MODES.md.
 // It borrows the standing orders' machinery: their time zone maths, their list of reasons a floor can't start, and their before-and-after marks
 // that tell when a job is over. Nothing here can spend beyond the building's own limits, and a purchase still needs the boss's own click.
+// Nothing starts on its own without a clear goal. The boss gives one or picks one of the manager's, and when it's reached the manager says so,
+// proposes the next one and the team keeps going on it.
 import { get, all, run, tx } from './db.js';
 import { validTz, tzOffset, wallToUtc } from './orders.js';
 
@@ -10,15 +12,18 @@ const MODES = ['ask', 'hours', 'nonstop'];
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_WORDS = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 const WEEKDAYS = [1, 2, 3, 4, 5];
-const GOAL_MAX = 300, ITEM_MAX = 160, ITEMS_KEPT = 8, SUMMARY_MAX = 400;
+const GOAL_MAX = 300, ITEM_MAX = 160, ITEMS_KEPT = 8, SUMMARY_MAX = 400, GOALS_KEPT = 5;
 export const MODE_NOTE = 'Work mode:';
+export const GOAL_NOTE = 'Goal needed:';
+const GOAL_EXAMPLES = '"get the game to 1,000 plays" or "launch the shop with 10 products"';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS work_modes (
   floor_id INTEGER PRIMARY KEY, mode TEXT NOT NULL DEFAULT 'ask', days TEXT NOT NULL DEFAULT '[1,2,3,4,5]', start_at TEXT NOT NULL DEFAULT '09:00',
   end_at TEXT NOT NULL DEFAULT '17:00', tz TEXT NOT NULL DEFAULT 'UTC', tz_set INTEGER NOT NULL DEFAULT 0, goal TEXT NOT NULL DEFAULT '',
   backlog TEXT NOT NULL DEFAULT '[]', paused_reason TEXT NOT NULL DEFAULT '', fail_streak INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0,
-  recapped_run INTEGER NOT NULL DEFAULT 0, open_state INTEGER NOT NULL DEFAULT -1, updated_at INTEGER NOT NULL DEFAULT 0
+  recapped_run INTEGER NOT NULL DEFAULT 0, open_state INTEGER NOT NULL DEFAULT -1, updated_at INTEGER NOT NULL DEFAULT 0,
+  goal_asked INTEGER NOT NULL DEFAULT 0, goals_done TEXT NOT NULL DEFAULT '[]'
 );
 CREATE TABLE IF NOT EXISTS mode_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, day TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER,
@@ -121,18 +126,24 @@ export function describeMode(h) {
   return 'only when you ask';
 }
 const plain = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+const sentence = (s) => (/[.!?]$/.test(s) ? s : `${s}.`);
 
 export function installModes(ext) {
   const { db, cfg, engine, log, now, hooks, GET, POST, json, readJson, limit, requireOwner, HttpError } = ext;
   db.exec(SCHEMA);
+  const have = new Set(all(db, 'PRAGMA table_info(work_modes)').map((c) => c.name));
+  if (!have.has('goal_asked')) db.exec('ALTER TABLE work_modes ADD COLUMN goal_asked INTEGER NOT NULL DEFAULT 0');
+  if (!have.has('goals_done')) db.exec("ALTER TABLE work_modes ADD COLUMN goals_done TEXT NOT NULL DEFAULT '[]'");
   const seenRunning = new Set();  // runs a tick has already seen, so a run never finishes on the tick that started it
   let timer = null, stopped = false;
   const gapMs = () => Math.max(0, Number(cfg.autopilotGapMin ?? 5)) * 60000;
   const maxFails = () => Math.max(1, Number(cfg.autopilotMaxFails ?? 3));
 
   const rowOf = (floorId) => get(db, 'SELECT * FROM work_modes WHERE floor_id=?', floorId)
-    || { floor_id: floorId, mode: 'ask', days: '[1,2,3,4,5]', start_at: '09:00', end_at: '17:00', tz: 'UTC', tz_set: 0, goal: '', backlog: '[]', paused_reason: '', fail_streak: 0, next_at: 0, recapped_run: 0, open_state: -1, updated_at: 0 };
+    || { floor_id: floorId, mode: 'ask', days: '[1,2,3,4,5]', start_at: '09:00', end_at: '17:00', tz: 'UTC', tz_set: 0, goal: '', backlog: '[]', paused_reason: '', fail_streak: 0, next_at: 0, recapped_run: 0, open_state: -1, updated_at: 0, goal_asked: 0, goals_done: '[]' };
   const hoursOf = (row) => ({ mode: row.mode, days: JSON.parse(row.days || '[]'), start: row.start_at, end: row.end_at, tz: row.tz });
+  /** Set hours or nonstop with no goal yet: nothing starts on its own until the boss gives or picks one. */
+  const wantsGoal = (row) => row.mode !== 'ask' && !row.paused_reason && !row.goal;
   const patch = (floorId, fields) => {
     run(db, 'INSERT OR IGNORE INTO work_modes (floor_id) VALUES (?)', floorId);
     const keys = Object.keys(fields);
@@ -184,6 +195,7 @@ export function installModes(ext) {
     const last = get(db, "SELECT * FROM mode_runs WHERE floor_id=? AND status!='running' ORDER BY id DESC LIMIT 1", floorId);
     return {
       ...publicView(floorId), start: h.start, end: h.end, dayList: h.days, tz: h.tz, tzSet: !!row.tz_set, goal: row.goal, nextUp: JSON.parse(row.backlog || '[]'),
+      needsGoal: wantsGoal(row), goalAsked: !!row.goal_asked, goalsReached: JSON.parse(row.goals_done || '[]').slice(-3).reverse(),
       pausedReason: row.paused_reason, running: !!runningRun(floorId), text: describeMode(h),
       lastJob: last ? { status: last.status, summary: last.summary, finishedAt: last.finished_at } : null,
     };
@@ -202,10 +214,15 @@ export function installModes(ext) {
     const fields = { mode: h.mode, days: JSON.stringify(h.days), start_at: h.start, end_at: h.end, tz: h.tz, paused_reason: '', fail_streak: 0, next_at: fresh ? now() : row.next_at, open_state: -1 };
     if (input?.tz !== undefined && input?.tz !== null && input?.tz !== '') fields.tz_set = 1;
     if (typeof input?.goal === 'string') fields.goal = plain(input.goal, GOAL_MAX);
+    const goal = fields.goal ?? row.goal;
+    // Turned on with no goal, or the goal taken away: the manager asks the boss for one. When the boss turned it on by chat the manager asks in
+    // its reply (the tool tells it to); from the form, the runner wakes it to ask as soon as the floor is quiet.
+    const turnedOn = h.mode !== 'ask' && (was.mode === 'ask' || !!row.paused_reason);
+    if (h.mode === 'ask' || turnedOn || (row.goal && !goal)) fields.goal_asked = by === 'manager' && h.mode !== 'ask' && !goal ? now() : 0;
     patch(floor.id, fields);
     if (fresh) {
-      const line = h.mode === 'nonstop' ? 'Now working nonstop: whenever the floor is quiet, I pick the next most useful job toward our goal and the team gets on with it.'
-        : h.mode === 'hours' ? `Now working ${describeMode(h)}. Inside those hours I keep the team on the next most useful job; outside them everyone goes home, and you can still call me.`
+      const line = h.mode === 'nonstop' ? `Now working nonstop: whenever the floor is quiet, I pick the next most useful job toward our goal and the team gets on with it.${goal ? '' : ' First we need that goal: nothing starts on its own until there is one.'}`
+        : h.mode === 'hours' ? `Now working ${describeMode(h)}. Inside those hours I keep the team on the next most useful job${goal ? '' : ', once we have a goal: nothing starts on its own until there is one'}; outside them everyone goes home, and you can still call me.`
           : 'Back on call: the team works when you ask.';
       engine.officeNotice(floor.id, line);
       log('info', 'work mode', { floorId: floor.id, mode: h.mode, by });
@@ -214,16 +231,41 @@ export function installModes(ext) {
     engine.kick();
     return ownerView(floor.id);
   }
-  /** The manager's goal and next-up list, and its line on the job it just did. */
-  function updatePlan(floor, { goal, nextUp, summary } = {}) {
-    const fields = {};
-    if (typeof goal === 'string' && goal.trim()) fields.goal = plain(goal, GOAL_MAX);
+  /**
+   * The manager's next-up list and its line on the job it just did, and the goal. The goal is one the boss gave or picked (bossSaid: this turn
+   * reads their words), or, once the current one is reached, the next one the manager proposes. Returns the plan, and what wasn't taken and why.
+   */
+  function updatePlan(floor, { goal, nextUp, summary, goalReached = false, bossSaid = false } = {}) {
+    const row = rowOf(floor.id);
+    const fields = {}; let refused = '', reached = null;
+    const next = typeof goal === 'string' ? plain(goal, GOAL_MAX) : '';
+    if (goalReached) {
+      if (!row.goal) refused = 'There is no goal to reach yet: the boss gives one or picks one of yours.';
+      else if (!next || next === row.goal) refused = 'Put the next goal you propose in goal, so the team can keep going. The goal was not changed.';
+      else {
+        reached = { was: row.goal, next };
+        fields.goal = next;
+        fields.goals_done = JSON.stringify([...JSON.parse(row.goals_done || '[]'), { goal: row.goal, at: now() }].slice(-GOALS_KEPT));
+      }
+    } else if (next && next !== row.goal) {
+      if (bossSaid) fields.goal = next;
+      else refused = row.goal ? 'The goal changes only when the boss asks, or once it has been reached (goal_reached). It was not changed.'
+        : `The goal comes from the boss. Ask them for one, or propose 2–3 (like ${GOAL_EXAMPLES}) and let them pick; nothing starts on its own until they have.`;
+    }
     if (Array.isArray(nextUp)) fields.backlog = JSON.stringify(nextUp.map((x) => plain(x, ITEM_MAX)).filter(Boolean).slice(0, ITEMS_KEPT));
     if (Object.keys(fields).length) patch(floor.id, fields);
     const r = runningRun(floor.id);
     if (r && typeof summary === 'string' && summary.trim()) run(db, 'UPDATE mode_runs SET summary=? WHERE id=?', plain(summary, SUMMARY_MAX), r.id);
+    if (reached) {
+      // In the manager's voice, in the chat: it says so, proposes the next one, and the mode carries on as it was.
+      const h = hoursOf(row);
+      const on = h.mode !== 'ask' && !row.paused_reason;
+      const keepOn = h.mode === 'nonstop' ? 'nonstop as before' : `in our hours as before (${signLabel(h)}, ${daysLabel(h.days)})`;
+      engine.officeNotice(floor.id, `**Goal reached:** ${sentence(reached.was)} ${on ? `Next goal: ${sentence(reached.next)} The team keeps going on it, ${keepOn}.` : `Next goal I'd suggest: ${sentence(reached.next)}`} Tell me if you'd rather aim for something else.`);
+      log('info', 'work mode goal reached', { floorId: floor.id });
+    }
     planChanged(floor.id);
-    return ownerView(floor.id);
+    return { ...ownerView(floor.id), refused };
   }
   /** The boss's own time zone, learnt from their browser until they pick one. */
   function learnZone(floor, tz) {
@@ -238,7 +280,9 @@ export function installModes(ext) {
     const row = rowOf(floorId); const h = hoursOf(row);
     const list = JSON.parse(row.backlog || '[]');
     const mode = row.paused_reason ? `paused (${row.paused_reason})` : h.mode === 'ask' ? 'on call: the team works only when the boss asks' : `${describeMode(h)}${isOpen(h, now()) ? ', open now' : ', closed now'}`;
-    return `Work mode: ${mode}. Goal: ${row.goal || 'none yet'}. Next up: ${list.length ? list.map((x, i) => `${i + 1}. ${x}`).join(' ') : 'nothing listed'}.`;
+    const goal = row.goal || (wantsGoal(row) ? 'none yet, so nothing starts on its own: the boss gives one or picks one of 2–3 you propose' : 'none yet');
+    const reached = JSON.parse(row.goals_done || '[]').map((g) => g.goal);
+    return `Work mode: ${mode}. Goal: ${goal}.${reached.length ? ` Goals reached: ${reached.join('; ')}.` : ''} Next up: ${list.length ? list.map((x, i) => `${i + 1}. ${x}`).join(' ') : 'nothing listed'}.`;
   }
 
   // ---- the runner ----
@@ -253,13 +297,24 @@ export function installModes(ext) {
     });
     const list = JSON.parse(row.backlog || '[]');
     // In the manager's own reading, after the stable part of its prompt, so the cache holds. It is never shown as the boss's words.
-    engine.addMessage(floor.id, 'note', null, `${MODE_NOTE} the boss has set the team to work on its own (${signLabel(h)}), and the floor is quiet. Pick the next most useful piece of work toward the company's goal and get it done now, through your staff as usual. `
-      + `Goal: ${row.goal || 'not set yet: write one from what the company does and what the boss has asked for so far'}. Next up: ${list.length ? list.map((x, i) => `${i + 1}. ${x}`).join(' ') : 'nothing listed yet: start the list'}. `
+    engine.addMessage(floor.id, 'note', null, `${MODE_NOTE} the boss has set the team to work on its own (${signLabel(h)}), and the floor is quiet. Pick the next most useful piece of work toward the goal and get it done now, through your staff as usual. `
+      + `Goal: ${sentence(row.goal)} Next up: ${list.length ? list.map((x, i) => `${i + 1}. ${x}`).join(' ') : 'nothing listed yet: start the list'}. `
       + 'Make the calls yourself and say what you assumed. Only buying something (a request that waits for the boss\'s Buy click) and questions only the boss can answer go to the boss, and while one waits, the team moves on to other work. '
-      + 'Keep the job small enough to finish in one go. When it is done, call update_backlog with the goal, the next-up list and a line or two for the boss on what this job did.');
+      + 'Keep the job small enough to finish in one go. When it is done, call update_backlog with the next-up list and a line or two for the boss on what this job did. '
+      + 'If the goal has now been reached, say so with goal_reached, and put the next goal you propose in goal: the boss is told, and the team keeps going on it.');
     run(db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
     const mgr = get(db, "SELECT id,name FROM agents WHERE floor_id=? AND role='manager'", floor.id);
     engine.feed(floor.id, mgr, 'picked the next job to work on', '');
+    engine.kick();
+    planChanged(floor.id);
+  }
+  /** Set hours or nonstop with no goal: the manager asks the boss for one, once, in the chat. Nothing else starts until they've given or picked one. */
+  function askForGoal(floor, h) {
+    patch(floor.id, { goal_asked: now() });
+    engine.addMessage(floor.id, 'note', null, `${GOAL_NOTE} the boss has set the team to work on its own (${signLabel(h)}), but the floor has no goal yet, so nothing starts on its own. `
+      + `In plain chat, ask the boss for one concrete goal you can tell has been reached, like ${GOAL_EXAMPLES}, or propose 2–3 that fit the company and what the boss has asked for so far, and ask them to pick. `
+      + 'Assign no work for this. Once they have given or picked one, save it with update_backlog, and the team starts on it.');
+    run(db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
     engine.kick();
     planChanged(floor.id);
   }
@@ -337,6 +392,8 @@ export function installModes(ext) {
       return;
     }
     maybeRecap(floor, rowOf(floor.id), { closing });
+    // No goal, no job. The boss has just turned the mode on, so the manager asks straight away, open or not, once the floor is quiet.
+    if (wantsGoal(row)) { if (!row.goal_asked && !blocker(floor)) askForGoal(floor, h); return; }
     if (h.mode === 'ask' || row.paused_reason || !open || t < row.next_at) return;
     if (blocker(floor)) return;
     startRun(floor, rowOf(floor.id));
@@ -378,6 +435,7 @@ export function installModes(ext) {
   engine.modes = {
     set, updatePlan, learnZone, stateLine, tick, busy, publicView, ownerView,
     running: (floorId) => !!runningRun(floorId),
+    needsGoal: (floorId) => wantsGoal(rowOf(floorId)),
     // Staff go home outside set hours, unless the boss has brought them back in for something.
     closed: (floorId) => publicView(floorId).closed && !busy(floorId),
     brief: (floorId) => { const row = rowOf(floorId); return { goal: row.goal, nextUp: JSON.parse(row.backlog || '[]'), label: signLabel(hoursOf(row)) }; },

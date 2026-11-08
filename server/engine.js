@@ -361,6 +361,7 @@ export class Engine {
     return { messages: out, meta: {
       kind: 'manager', setup: !floor.name, floorId: floor.id, floorSlug: floor.slug, step: 0, lastBoss: bossMsgs[bossMsgs.length - 1]?.text || '', bossFiles: out.filter((m) => m.role === 'user' && m.files).flatMap((m) => m.files), allBoss: bossMsgs.map((m) => m.text).join(' '),
       autopilot: last?.role === 'note' && last.text.startsWith('Work mode:') && this.modes ? this.modes.brief(floor.id) : null,
+      goalNeeded: last?.role === 'note' && last.text.startsWith('Goal needed:'), needsGoal: !!this.modes?.needsGoal(floor.id),
       isFreshBoss: last?.role === 'boss', answered: last?.role === 'note' && /answered/.test(last.text), guidance: last?.role === 'help' ? last.text : '', helpDeadEnd: last?.role === 'note' && /buddehbot/.test(last.text),
       toReview, reviewsWaiting: counts.review, openCount: counts.n - counts.review, published,
       slugFor: (s) => slugify(String(s).replace(/\[[a-z]+\]/g, '').replace(ACT_WORDS, ' '), 'launch').slice(0, 30).replace(/-+$/, '') || 'launch',
@@ -381,10 +382,12 @@ export class Engine {
     const newestBoss = get(this.db, "SELECT MAX(id) n FROM messages WHERE floor_id=? AND role='boss'", floorId).n ?? 0;
     ctx.bossTurn = !!meta.isFreshBoss || newestBoss > (this.bossRead.get(floorId) ?? Infinity);
     this.bossRead.set(floorId, newestBoss);
+    // The boss's answer to the manager's own question is their word too, for the work-mode goal they picked.
+    ctx.bossAnswered = !ctx.bossTurn && !!meta.answered;
     // A job the team picked for itself in a work mode. A turn that reads something new from the boss is the boss's, whatever else is going on.
     ctx.autonomous = !ctx.bossTurn && !!this.modes?.running(floorId);
     meta.autonomous = ctx.autonomous;
-    if (ctx.autonomous) meta.modeList = this.modes.brief(floorId).nextUp;
+    if (ctx.autonomous) { const b = this.modes.brief(floorId); meta.modeList = b.nextUp; meta.modeGoal = b.goal; }
     const call = { floorId, agent: mgr, signal, project: '', autonomous: ctx.autonomous };
     const maxSteps = this.cfg.maxManagerSteps;
     const opening = messages.length;

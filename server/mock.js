@@ -3,6 +3,8 @@
 // Keywords in the boss's message pick scenarios: [ask] [mgrask] [buy] [hire] [fail] [private] [spendy] [slow] [ssrf] [traverse] [inject] [revise] [web] [standing] [cancelorder] [help] [lane:game] [colleague] [rename] [letgo] [logo].
 // Work modes: "work nonstop", "work 9 to 5 on weekdays" and "only when I ask" set the mode, and a "Work mode:" note runs the next job off the list.
 // A goal holding [ask] or [buy] passes it on to that job's brief, and [build] or [buy] hands the job to the builder or the researcher.
+// With no goal, a "Goal needed:" note (or turning the mode on by chat) gets three goals to pick from; the boss picks one by number or says their
+// own ("our goal is ..."). A goal holding [reach] is reached by the first job, and the mock proposes the next one.
 // A floor with no name yet is set up by chat: "called Something" or "you pick" makes the company.
 import { ProviderError } from './llm.js';
 import { voiced } from './mock-voice.js';
@@ -52,7 +54,22 @@ const MODE_SAID = /\b(work(?:ing)? nonstop|work(?:ing)? 24\/7|only when i ask|wo
 // What a mock manager thinks of next, in order, when the team works on its own.
 const NEXT_IDEAS = ['Write a one-page plan for the company', 'Draft the launch post', 'Make a pricing page', 'Write three customer stories', 'Plan a launch week', 'Tidy the shared drive'];
 const topUp = (list, done = '') => [...list, ...NEXT_IDEAS.filter((x) => x !== done && !list.includes(x))].slice(0, 3);
+// The goals a mock manager offers when a work mode has none, and the one it proposes when a goal is reached.
+const GOAL_IDEAS = ['Get our first 100 visitors', 'Publish three pages people come back to', 'Launch the shop with 10 products'];
+const NEXT_GOAL = 'Get our first 1,000 visitors';
+const proposeGoals = () => `Before the team works on its own, we need one clear goal. I'd suggest:\n${GOAL_IDEAS.map((g, i) => `${i + 1}. ${g}`).join('\n')}\nPick one, or tell me your own.`;
+function goalPicked(boss) {
+  const own = boss.match(/\bgoal\b\s*(?:is|:|-)?\s*(.+)$/i)?.[1]?.trim();
+  if (own) return own.slice(0, 200);
+  const n = Number(boss.match(/\b([1-3])\b/)?.[1]) || { first: 1, second: 2, third: 3 }[boss.match(/\b(first|second|third)\b/i)?.[1]?.toLowerCase()];
+  return n ? GOAL_IDEAS[n - 1] : boss.trim().slice(0, 200);
+}
+// A goal said with the mode ("work nonstop, our goal is ...") goes with it.
 function modeArgs(boss) {
+  const goal = /only when i ask/i.test(boss) ? '' : boss.match(/\bgoal\b\s*(?:is|:|-)?\s*(.+)$/i)?.[1]?.trim();
+  return { ...modeSaid(boss), ...(goal ? { goal } : {}) };
+}
+function modeSaid(boss) {
   if (/only when i ask/i.test(boss)) return { mode: 'ask' };
   if (/nonstop|24\/7/i.test(boss)) return { mode: 'nonstop' };
   const m = boss.match(/work(?:ing)? (\d{1,2})(?::(\d\d))? ?(?:to|-|–) ?(\d{1,2})(?::(\d\d))?/i);
@@ -90,7 +107,15 @@ function managerStep(meta, messages = []) {
   if (MODE_SAID.test(boss) && meta.isFreshBoss) {
     if (meta.step === 0) return { toolCalls: [call('set_work_mode', modeArgs(boss))] };
     const last = [...messages].reverse().find((m) => m.role === 'tool')?.content || '';
-    return { content: /^Error/.test(last) ? 'That did not work, boss.' : `Done, boss. ${last.replace(/^Work mode set: /, 'From now on: ').split('. The boss')[0]}.` };
+    return { content: /^Error/.test(last) ? 'That did not work, boss.' : `Done, boss. ${last.replace(/^Work mode set: /, 'From now on: ').split('. The boss')[0]}.${/no goal yet/.test(last) ? `\n\n${proposeGoals()}` : ''}` };
+  }
+  // A work mode with no goal: three to pick from, and nothing assigned. The boss's next words pick one, or are their own.
+  if (meta.goalNeeded && !meta.isFreshBoss) return { content: proposeGoals() };
+  if (meta.needsGoal && meta.isFreshBoss && !meta.toReview.length) {
+    const goal = goalPicked(boss);
+    if (meta.step === 0) return { toolCalls: [call('update_backlog', { goal })] };
+    const last = [...messages].reverse().find((m) => m.role === 'tool')?.content || '';
+    return { content: /^Saved/.test(last) ? `Great: our goal is now **${goal}**. The team starts on it now.` : 'That did not work, boss.' };
   }
   // A quiet floor in a work mode: the next job off the list.
   if (meta.autopilot && !meta.isFreshBoss && !meta.toReview.length) {
@@ -98,7 +123,7 @@ function managerStep(meta, messages = []) {
     const item = a.nextUp[0] || 'Write a one-page plan for the company';
     if (meta.step === 0) {
       const calls = [];
-      if (!a.goal || !a.nextUp.length) calls.push(call('update_backlog', { ...(a.goal ? {} : { goal: 'Get the company known' }), next_up: topUp(a.nextUp) }, 0));
+      if (!a.nextUp.length) calls.push(call('update_backlog', { next_up: topUp(a.nextUp) }, 0));
       const pass = ['[ask]', '[buy]'].filter((f) => (a.goal || '').includes(f)).join(' ');
       calls.push(call('assign_task', { to: /\[build\]/.test(a.goal || '') ? 'builder' : /\[buy\]/.test(a.goal || '') ? 'researcher' : 'writer', title: item, brief: `Do the next thing on our list: ${item}.${pass ? ` ${pass}` : ''}`, project: 'next-up' }, 1));
       return { toolCalls: calls };
@@ -127,7 +152,8 @@ function managerStep(meta, messages = []) {
     if (meta.autonomous && meta.step === 1 && !meta.openCount && !meta.toReview.some(sendBack)) {
       const list = meta.modeList || [];
       const doneTitle = meta.toReview[0].title;
-      return { toolCalls: [call('update_backlog', { next_up: topUp(list.filter((x) => x !== doneTitle), doneTitle), summary: `Finished "${doneTitle}" and put it on the drive.` })] };
+      const reached = /\[reach\]/.test(meta.modeGoal || '') ? { goal_reached: true, goal: NEXT_GOAL } : {};
+      return { toolCalls: [call('update_backlog', { next_up: topUp(list.filter((x) => x !== doneTitle), doneTitle), summary: `Finished "${doneTitle}" and put it on the drive.`, ...reached })] };
     }
     if (meta.openCount || meta.toReview.some(sendBack)) return { content: 'Sent one thing back for another pass. I will report when it returns.' };
     const links = meta.published.map((p) => `[${p.title}](${p.url})`).join(', ');

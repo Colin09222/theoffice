@@ -129,6 +129,12 @@ describe('setting the mode', () => {
       assert.equal(w.label, 'On call');
       w = await say('Actually, work nonstop', 'nonstop');
       assert.equal(w.label, 'Open 24/7');
+      // No goal yet: the manager asks for one in that same reply, so the runner doesn't wake it to ask again, and nothing starts.
+      assert.match(messagesOf(t, f, 'manager').at(-1), /we need one clear goal/);
+      assert.equal(w.needsGoal, true); assert.equal(w.goalAsked, true);
+      await sleep(150);
+      assert.ok(!messagesOf(t, f, 'note').some((m) => m.startsWith('Goal needed:')), 'asked once, in the reply');
+      assert.equal(runsOf(t, f).length, 0, 'no job without a goal');
       w = await say('No, only when I ask', 'ask');
       const lines = messagesOf(t, f, 'office');
       assert.ok(lines.some((m) => /^Now working nonstop/.test(m)) && lines.some((m) => /^Now working 9am to 5pm/.test(m)) && lines.some((m) => /^Back on call/.test(m)), lines.join(' | '));
@@ -245,6 +251,86 @@ describe('working on its own', () => {
       const visitor = await floorState(new Client(t), c.slug);
       assert.ok(!(visitor.messages || []).some((m) => /Recap/.test(m.text)));
       for (const m of [...messagesOf(t, f, 'report'), ...messagesOf(t, f, 'office')]) assert.ok(!/\$\d|budget/i.test(m), m);
+    } finally { await t.close(); }
+  });
+});
+
+describe('a clear goal first', () => {
+  const quiet = (t, f) => until(() => !t.app.engine.runs.size && !get(t.db, 'SELECT manager_wake w FROM floors WHERE id=?', f.id).w, { what: 'the manager to finish' });
+  const backlog = (t, f, args, extra = {}) => {
+    const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", f.id);
+    return t.app.engine.tools.exec({ ...t.app.engine.toolCtx(f, mgr, null, ['update_backlog']), bossTurn: false, ...extra }, 'update_backlog', JSON.stringify(args));
+  };
+
+  test('turned on with no goal: the manager offers 2-3 to pick from, nothing starts until the boss picks one, then the team works toward it', async () => {
+    const t = await mk({ autopilotGapMin: 600 });
+    try {
+      const c = await claim(t);
+      const f = floorOf(t, c);
+      const v = await setMode(c, { mode: 'nonstop' });
+      assert.equal(v.needsGoal, true); assert.equal(v.goal, '');
+      assert.ok(messagesOf(t, f, 'office').some((m) => /^Now working nonstop: .* First we need that goal: nothing starts on its own until there is one\.$/.test(m)));
+      // From the form, the runner wakes the manager to ask, in the chat, with three goals to pick from.
+      const ask = await until(() => messagesOf(t, f, 'manager').find((m) => /we need one clear goal/.test(m)), { what: 'the goal question' });
+      assert.equal((ask.match(/^\d\. /gm) || []).length, 3, ask);
+      await quiet(t, f);
+      await sleep(200);
+      assert.equal(messagesOf(t, f, 'note').filter((m) => m.startsWith('Goal needed:')).length, 1, 'asked once');
+      assert.equal(runsOf(t, f).length, 0, 'no job without a goal');
+      assert.equal(get(t.db, 'SELECT COUNT(*) n FROM tasks WHERE floor_id=?', f.id).n, 0, 'and no work handed out');
+      let plan = (await floorState(c)).workPlan;
+      assert.equal(plan.needsGoal, true); assert.equal(plan.goalAsked, true);
+      // The manager can't make up the first goal on its own turn: it comes from the boss.
+      assert.match(await backlog(t, f, { goal: 'Something I made up' }), /comes from the boss/);
+      assert.equal((await floorState(c)).workPlan.goal, '');
+      // The boss picks the second one in the chat, and the team starts on it.
+      assert.equal((await c.post(`/api/floors/${c.slug}/chat`, { text: "Let's go with 2" })).status, 202);
+      const [job] = await waitRuns(t, f, 1);
+      assert.equal(job.status, 'done', JSON.stringify(job));
+      plan = (await floorState(c)).workPlan;
+      assert.equal(plan.goal, 'Publish three pages people come back to'); assert.equal(plan.needsGoal, false);
+      assert.ok(plan.nextUp.length >= 1, 'with the next-up list under it');
+      assert.ok(messagesOf(t, f, 'note').some((m) => m.startsWith('Work mode:') && m.includes('Goal: Publish three pages people come back to.')), 'the job works toward the picked goal');
+      // Once set, it moves on only when the boss says so or it's reached; the list still saves.
+      assert.match(await backlog(t, f, { goal: 'A different goal', next_up: ['One thing'] }), /changes only when the boss asks/);
+      plan = (await floorState(c)).workPlan;
+      assert.equal(plan.goal, 'Publish three pages people come back to'); assert.deepEqual(plan.nextUp, ['One thing']);
+      assert.match(await backlog(t, f, { goal: 'Get the game to 1,000 plays' }, { bossTurn: true }), /^Saved\. Goal: Get the game to 1,000 plays\./, 'the boss\'s own words change it');
+      // Taking the goal away stops new jobs again, and the manager asks afresh.
+      await setMode(c, { mode: 'nonstop', goal: '' });
+      await until(() => messagesOf(t, f, 'note').filter((m) => m.startsWith('Goal needed:')).length === 2, { what: 'the second ask' });
+      // A goal given with the mode, by chat, starts the team straight away, with no question.
+      await quiet(t, f);
+      await setMode(c, { mode: 'ask' });
+      const asked = messagesOf(t, f, 'manager').filter((m) => /we need one clear goal/.test(m)).length;
+      assert.equal((await c.post(`/api/floors/${c.slug}/chat`, { text: 'Work nonstop, our goal is get the game to 1,000 plays' })).status, 202);
+      await until(() => runsOf(t, f).length === 2, { what: 'a job toward the goal said with the mode' });
+      assert.equal((await floorState(c)).workPlan.goal, 'get the game to 1,000 plays');
+      assert.equal(messagesOf(t, f, 'manager').filter((m) => /we need one clear goal/.test(m)).length, asked, 'no question this time');
+    } finally { await t.close(); }
+  });
+
+  test('a goal reached: the manager says so, proposes the next one, and the team keeps going in the same mode', async () => {
+    const t = await mk({ autopilotGapMin: 5 });
+    try {
+      const c = await claim(t);
+      const f = floorOf(t, c);
+      await setMode(c, { mode: 'nonstop', goal: '[reach] Publish our first page' });
+      const [first] = await waitRuns(t, f, 1);
+      assert.equal(first.status, 'done', JSON.stringify(first));
+      assert.ok(messagesOf(t, f, 'office').includes("**Goal reached:** [reach] Publish our first page. Next goal: Get our first 1,000 visitors. The team keeps going on it, nonstop as before. Tell me if you'd rather aim for something else."), messagesOf(t, f, 'office').join(' | '));
+      const plan = (await floorState(c)).workPlan;
+      assert.equal(plan.mode, 'nonstop'); assert.equal(plan.paused, false); assert.equal(plan.goal, 'Get our first 1,000 visitors');
+      assert.deepEqual(plan.goalsReached.map((g) => g.goal), ['[reach] Publish our first page']);
+      assert.match(t.app.engine.modes.stateLine(f.id), /Goals reached: \[reach\] Publish our first page\./, 'the manager remembers it');
+      // The mode carries on: after the gap, the next job works toward the new goal.
+      t.clock.t = first.finished_at + 5 * 60000;
+      await until(() => runsOf(t, f).length === 2, { what: 'the next job' });
+      assert.ok(messagesOf(t, f, 'note').filter((m) => m.startsWith('Work mode:')).at(-1).includes('Goal: Get our first 1,000 visitors.'));
+      // Reaching one needs the next goal to go on to.
+      assert.match(await backlog(t, f, { goal_reached: true }), /Put the next goal you propose/);
+      assert.equal((await floorState(c)).workPlan.goal, 'Get our first 1,000 visitors');
+      for (const m of messagesOf(t, f, 'office')) assert.ok(!/\$\d|budget/i.test(m), m);
     } finally { await t.close(); }
   });
 });

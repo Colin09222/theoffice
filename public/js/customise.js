@@ -154,7 +154,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
       pane.append(h('div.stack', {},
         h('p.lede', {}, 'When does the team work? On call is how it has always been. With set hours or nonstop, your manager picks the next most useful job toward the goal whenever the floor is quiet, and posts a line in the chat after each one.'),
         plate, modes, when,
-        field('The goal', area(work.goal, 300, 2, (v) => { work.goal = v; }, { name: 'hours-goal', placeholder: 'Get our first hundred players.' }), 'Your manager keeps this and a next-up list under Work. Leave it empty and they will write one.'),
+        field('The goal', area(work.goal, 300, 2, (v) => { work.goal = v; }, { name: 'hours-goal', placeholder: 'Get the game to 1,000 plays.' }), 'Something you can tell has been reached. It shows under Work, above the next-up list. Leave it empty and your manager will ask you for one in the chat, or suggest a few to pick from: nothing starts on its own until there is a goal. Once it is reached, they say so, suggest the next one and keep going.'),
         h('small.field-hint', {}, 'The team makes most calls itself. Anything that costs money still waits for your Buy click, and while a question waits for you they get on with something else. Outside set hours everyone goes home, but you can still call your manager.')));
     };
 
