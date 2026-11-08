@@ -49,7 +49,8 @@ The flow upgrades the existing pipeline rather than running beside it.
    | A pass fails twice in a row (`passes.failsBeforeAsking`) | It **asks the boss** instead of looping: Try again, Launch what works, or Stop. Also used when a Builder or Tester task fails twice |
    | Out of passes, or past `passes.maxJobTokens` model tokens since the start | Ready if something passed, otherwise ask the boss |
 
-6. **Launch** publishes the snapshot (`maker_snapshots`), never a pass still being built, through the same pre-publish checklist and gate as `publish_project`. After launch, each later pass that passes the Tester updates the live version, and the chat says so.
+6. **Before Launch**, nobody else publishes the project: the manager's "still not live" nudge skips it (`makers.holds`). A report counts only if it was written during that test, so a stale `TEST-REPORT.md` can't pass a new version.
+7. **Launch** publishes the snapshot (`maker_snapshots`), never a pass still being built, through the same pre-publish checklist and gate as `publish_project`. After launch, each later pass that passes the Tester updates the live version, and the chat says so.
 
 Tables: `maker_jobs`, `maker_tasks` and `maker_snapshots`, made at boot. Routes are for the boss only, with CSRF and rate limits:
 - `GET /api/floors/:slug/makers/ideas?type=`
@@ -75,7 +76,7 @@ These are in `config/makers.json`, per type.
 
 - **Games** are played at desktop and phone size:
   - menu, settings and back, then start;
-  - keyboard, gamepad and touch must each move the player (a fake gamepad is injected before the page loads);
+  - keyboard, gamepad and touch must each move the player (a fake gamepad is injected before the page loads). Each check starts from play and gets a second go, because a game can pause itself on a focus change;
   - pause and resume;
   - 60 s of scripted plus random input;
   - soft-locks: play frozen for 12 s, game over that won't restart, or stuck on a choice or settings screen;
@@ -114,7 +115,9 @@ All starters pass the pre-publish checklist with no errors or claims (unit-teste
   - every starter against the checklist;
   - the routes' owner checks;
   - a full mock run from three taps to Launch;
-  - a failing job that asks the boss and is stopped.
+  - a failing job that asks the boss and is stopped;
+  - "Stop all" mid-job becoming a question, and Try again starting over from the design doc;
+  - the manager never being nudged to publish a maker project before Launch.
 - `node test/browser/makers.mjs`, in real Chrome, mock mode:
   - the 3-tap launch on a phone and on a desktop, through Launch and a share link that opens;
   - each starter published to its own origin and put through the playtest: both games for 60 s at both sizes, saving and posting to Office Cloud;

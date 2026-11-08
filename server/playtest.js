@@ -49,16 +49,36 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
   await wait(400);
   // Input is only fair to judge while playing; a game that paused itself on start is noted and resumed.
   if ((await d.evaluate(STATE))?.scene === 'pause') { notes.push('It paused itself straight after starting.'); await d.evaluate('window.officeGame.resume()'); await wait(200); }
-  // Each device on its own: the player has to move.
+  // Each device on its own: the player has to move. A game can pause itself (focus, a stray key), so each check starts from play and gets a second go.
+  const ensurePlay = async () => {
+    for (let i = 0; i < 4; i++) {
+      const s = await d.evaluate(STATE);
+      if (s?.scene === 'play') return true;
+      if (s?.scene === 'pause') await d.evaluate('window.officeGame.resume()');
+      else if (s?.scene === 'settings') await d.evaluate(clickText('.kit-screen button', 'Back'));
+      else if (s?.scene === 'pick') await d.evaluate('document.querySelector("[data-pick]")?.click()');
+      else await d.evaluate('window.officeGame.start && window.officeGame.start()');
+      await wait(300);
+    }
+    return (await d.evaluate(STATE))?.scene === 'play';
+  };
+  const tryMove = async (act, after) => {
+    for (let k = 0; k < 2; k++) {
+      if (!(await ensurePlay())) { notes.push('The game would not stay in play long enough to test input.'); return false; }
+      const a = await d.evaluate(STATE); await act(); const b = await d.evaluate(STATE); if (after) await after();
+      if (moved(a, b)) return true;
+      if (b?.scene !== 'play' && k === 0) notes.push(`It left play (${b?.scene}) during an input check, so the check ran again.`);
+    }
+    return false;
+  };
   const input = {};
-  let s0 = await d.evaluate(STATE); await hold(d, 'ArrowRight', 500); let s1 = await d.evaluate(STATE);
-  input.keyboard = moved(s0, s1); await hold(d, 'ArrowLeft', 300);
-  s0 = await d.evaluate(STATE); await d.evaluate('window.__pt.padOn = true; window.__pt.pad.axes[0] = -1; window.__pt.pad.axes[1] = 0.3'); await wait(500); s1 = await d.evaluate(STATE);
-  input.gamepad = moved(s0, s1); await d.evaluate('window.__pt.pad.axes[0] = 0; window.__pt.pad.axes[1] = 0');
-  if (d.phone) { s0 = await d.evaluate(STATE); await d.drag(d.size.w * 0.22, d.size.h * 0.7, d.size.w * 0.22 + 70, d.size.h * 0.7 - 20, 600); s1 = await d.evaluate(STATE); input.touch = moved(s0, s1); }
+  input.keyboard = await tryMove(() => hold(d, 'ArrowRight', 500), () => hold(d, 'ArrowLeft', 300));
+  input.gamepad = await tryMove(async () => { await d.evaluate('window.__pt.padOn = true; window.__pt.pad.axes[0] = -1; window.__pt.pad.axes[1] = 0.3'); await wait(500); }, () => d.evaluate('window.__pt.pad.axes[0] = 0; window.__pt.pad.axes[1] = 0'));
+  if (d.phone) input.touch = await tryMove(() => d.drag(d.size.w * 0.22, d.size.h * 0.7, d.size.w * 0.22 + 70, d.size.h * 0.7 - 20, 600));
   rules.inputs = Object.values(input).every(Boolean);
   if (!rules.inputs) notes.push(`Input that did not move the player: ${Object.entries(input).filter(([, v]) => !v).map(([k]) => k).join(', ')}.`);
   // Pause and back.
+  await ensurePlay();
   await d.key('Escape', true); await d.key('Escape', false);
   const paused = !!(await until(d, `${STATE}?.scene === 'pause'`, 1500)); if (paused) scenes.add('pause');
   if (paused) shots.push(await d.shot('pause'));
