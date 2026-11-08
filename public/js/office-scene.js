@@ -12,6 +12,7 @@ import { officeTheme, manner, assignRooms } from './offices.js';
 import { textureSet, environmentMap, readyEnvironment, forgetEnvironment, repeating } from './textures.js';
 import { FloorLife, planProgress } from './life.js';
 import { tidyLabels } from './labels.js';
+import { cutaway, cutAmount, onWall, CUT } from './cutaway.js';
 
 stage.onRestored.add(forgetEnvironment);  // the shared panorama lived on the GPU
 
@@ -28,13 +29,17 @@ const ZOOM_MIN = 0.8, ZOOM_MAX = 3.6;
 const FLOOR_TEX = { wood: ['wood', 3.2], darkwood: ['darkwood', 3.0], parquet: ['parquet', 2.2], concrete: ['concrete', 5], tile: ['tile', 2.6], carpet: ['carpet', 2.4], terrazzo: ['terrazzo', 3.2] };
 const WALL_TEX = { paint: 'plaster', concrete: 'cast', brick: 'brick' };
 const ROLE_TITLE = { manager: 'Office Manager', researcher: 'Researcher', writer: 'Writer', builder: 'Builder', designer: 'Designer', analyst: 'Analyst', marketer: 'Marketer', tester: 'Tester', illustrator: 'Illustrator' };
+/** A person's job as their name tag and the staff list put it: the title they were hired with, else their role's. */
+export const jobTitle = (info, isBoss = false) => (isBoss ? 'Boss' : info.title || ROLE_TITLE[info.role] || (info.role ? info.role[0].toUpperCase() + info.role.slice(1) : 'Staff'));
 const ON_TABLE = new Set(['radio', 'televisionModern', 'televisionVintage', 'speakerSmall']);
 
 const box = new THREE.BoxGeometry(1, 1, 1);
 const cyl = new THREE.CylinderGeometry(1, 1, 1, 16);
 const cone = new THREE.ConeGeometry(1, 1, 12); const ico = new THREE.IcosahedronGeometry(0.5, 0);
 const sph = new THREE.SphereGeometry(0.5, 14, 10);
-const ROOM_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 });
+const ROOM_MAT = cutaway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 }), 'room');
+// The room's front and right walls: only the tower ever turns far enough round to see them, from behind (see cutaway.js).
+const FAR_MAT = cutaway(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.86, metalness: 0 }), 'far');
 const mats = new Map();
 /** A colour holder: every plain piece bakes into the shared vertex-coloured material, so the material object itself never draws. */
 function lam(color) { let m = mats.get(color); if (!m) { m = new THREE.MeshLambertMaterial({ color }); mats.set(color, m); } return m; }
@@ -284,7 +289,7 @@ function makeDesk(parent, detail, legacy, x, z, chairColor, brand, accent, { big
   piece(lg, '#2a2b33', 1.1, 0.74, 0.06, 0, 1.24, -0.58);
   let screenMat = null, glow = null, bar = null;
   if (live) {
-    screenMat = new THREE.MeshBasicMaterial({ color: '#1a2030' });
+    screenMat = new THREE.MeshBasicMaterial({ color: '#1a2030', toneMapped: false });
     const screen = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.64), screenMat);
     screen.position.set(0, 1.61, -0.545); g.add(screen);
     glow = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 1.4), new THREE.MeshBasicMaterial({ map: parent.userData.glowTex, color: '#000000', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
@@ -422,8 +427,10 @@ export class Actor {
     this.tag = document.createElement('div'); this.tag.className = 'char-tag';
     this.tag.dataset.side = view.actors.size % 2 ? 'left' : 'right';  // bubbles alternate sides, so a huddle stays readable
     this.nameEl = document.createElement('span'); this.nameEl.className = 'char-name'; this.nameEl.textContent = info.name;
+    // What they do, small on the line above their name, so a glance says who is who.
+    this.roleEl = document.createElement('span'); this.roleEl.className = 'char-role'; this.roleEl.textContent = jobTitle(info, isBoss);
     this.bubble = document.createElement('span'); this.bubble.className = 'char-bubble'; this.bubble.hidden = true;
-    this.tag.append(this.bubble, this.nameEl);
+    this.tag.append(this.bubble, this.roleEl, this.nameEl);
     if (view.host) { this.tagOff = true; this.tag.style.visibility = 'hidden'; }  // the tower shows it once the floor is in view
     view.labels.append(this.tag);
     // The kit's model takes over from the stand-in when it lands; a failed load changes nothing.
@@ -519,8 +526,9 @@ export class Actor {
     if (screen) {
       const v = this.view;
       const on = s !== 'idle';
-      if (s === 'typing') { screen.map = v.codeTex; screen.color.set('#ffffff'); }
-      else if (s === 'browsing' || s === 'reading') { screen.map = v.pageTex; screen.color.set('#ffffff'); }
+      // A screen at work glows a little past white, untouched by the tone curve, so the bloom picks it out: the room's own little lights.
+      if (s === 'typing') { screen.map = v.codeTex; screen.color.setScalar(1.3); }
+      else if (s === 'browsing' || s === 'reading') { screen.map = v.pageTex; screen.color.setScalar(1.18); }
       else if (on) { screen.map = v.pageTex; screen.color.set('#c9c4ba'); }
       else { screen.map = v.idleTex; screen.color.set('#ffffff'); }
       screen.needsUpdate = true;
@@ -652,8 +660,8 @@ export class Actor {
  * and lights, with no input of its own; promote() turns it into a floor page's view without rebuilding anything, people mid-stride and all.
  */
 export class OfficeView {
-  constructor({ state, labels, onSelect, onSmallTalk, keep = null, host = null }) {
-    this.labels = labels; this.onSelect = onSelect; this.host = host;
+  constructor({ state, labels, onSelect, onSmallTalk, keep = null, host = null, pace = null }) {
+    this.labels = labels; this.onSelect = onSelect; this.host = host; this.pace = pace;
     this.colors = state.floor.colors; this.decor = state.floor.decor; this.logoUrl = state.floor.logoUrl || null; this.companyName = state.floor.name;
     this.plan = planFor(this.decor.layout);
     this.staffCount = state.agents.filter((a) => a.role !== 'manager').length;
@@ -686,17 +694,18 @@ export class OfficeView {
     this.discMat = new THREE.MeshBasicMaterial({ map: canvasTex(64, 64, (x, w, h) => { const g = x.createRadialGradient(32, 32, 2, 32, 32, 32); g.addColorStop(0, 'rgba(20,24,40,.55)'); g.addColorStop(0.55, 'rgba(20,24,40,.24)'); g.addColorStop(1, 'rgba(20,24,40,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }), transparent: true, depthWrite: false });
     this.buildRoom();
     if (!host) this.buildWorld();
-    this.syncAgents(state);
+    // In the tower, or built ahead for the lift, the people come a step after the room, so the build is two short pieces and not one long one.
+    const staff = () => { if (!this.dead && !this.synced) { this.syncAgents(state); this.loadLooks(); } };
+    if (host || pace) Promise.resolve(this.turn()).then(staff); else staff();
     if (!host) this.bind();
-    this.loadLooks();
   }
   /**
    * In the tower a floor is put together a step at a time, each step when the tower gives it a turn: one a frame, and none while the
    * building is being ridden, so building rooms never lands in the middle of a swipe. On a floor page there is no waiting.
    */
-  turn() { return this.host?.turn ? this.host.turn() : null; }
+  turn() { return this.host?.turn ? this.host.turn() : this.pace ? this.pace() : null; }  // a room built ahead for the lift paces itself too
   bakeSoon() {
-    if (!this.host) { this.bakeFloor(); return; }
+    if (!this.host && !this.pace) { this.bakeFloor(); return; }
     if (this.bakeQueued) return;
     this.bakeQueued = true;
     Promise.resolve(this.turn()).then(() => { this.bakeQueued = false; if (!this.dead) this.bakeFloor(); });
@@ -938,7 +947,9 @@ export class OfficeView {
       this.pet.group.position.set(L.pet[0], 0, L.pet[1]);
       R.add(this.pet.group); this.petPath = []; this.petWait = 3;
     }
-    mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT); mergeColored(legacy, ROOM_MAT);
+    // Where a room is put together out of sight (the tower, or ahead for the lift), the merge is a step of its own. It comes before the steps queued below.
+    const merge = () => { if (this.dead) return; mergeColored(room, ROOM_MAT); mergeColored(detail, ROOM_MAT); mergeColored(legacy, ROOM_MAT); this.buildFarWalls(); this.cutWalls(); };
+    if (this.host || this.pace) Promise.resolve(this.turn()).then(merge); else merge();
     this.loading = { settled: false };
     this.loadModels().catch((e) => { console.warn('furniture models unavailable, keeping the stand-ins', e); }).finally(() => { this.loading.settled = true; });
   }
@@ -946,6 +957,58 @@ export class OfficeView {
    * The walls that make the rooms. Every pane on a floor goes into one mesh, so ten glass rooms cost one draw call, and the frames bake
    * in with the rest of the room. Door frames get a post each side and a beam over the gap; a screen is waist high and solid.
    */
+  /**
+   * The front and right walls, which a floor page never shows. In the tower, seen from behind, they close the room while the back and left
+   * ones are cut away (cutaway.js): painted like the others, with the same windows on the city. Nothing draws them until then.
+   */
+  buildFarWalls() {
+    const g = new THREE.Group(), L = this.plan, wall = this.decor.wall, trim = mix(wall, '#ffffff', 0.55), frame = '#2f343d';
+    const fz = ROOM_D / 2 + 0.15, fx = ROOM_W / 2 + 0.15, o = { cast: false, recv: false };
+    let at = -ROOM_W / 2;
+    for (const [a, b] of L.windows) {
+      if (a > at) piece(g, wall, a - at, WALL_H, 0.3, (at + a) / 2, 0, fz, o);
+      piece(g, wall, b - a, 1.0, 0.3, (a + b) / 2, 0, fz, o); piece(g, wall, b - a, 0.36, 0.3, (a + b) / 2, WALL_H - 0.36, fz, o);
+      piece(g, frame, b - a + 0.1, 0.08, 0.36, (a + b) / 2, 0.96, fz, o); piece(g, frame, b - a + 0.1, 0.08, 0.36, (a + b) / 2, WALL_H - 0.4, fz, o);
+      for (let mx = a; mx <= b + 0.01; mx += (b - a) / 4) piece(g, frame, 0.07, WALL_H - 1.36, 0.14, mx, 1, fz, o);
+      at = b;
+    }
+    if (at < ROOM_W / 2) piece(g, wall, ROOM_W / 2 - at, WALL_H, 0.3, (at + ROOM_W / 2) / 2, 0, fz, o);
+    piece(g, wall, 0.3, WALL_H, ROOM_D + 0.6, fx, 0, 0, o);
+    piece(g, trim, ROOM_W + 0.3, 0.22, 0.42, 0, WALL_H - 0.22, fz - 0.09, o); piece(g, trim, 0.42, 0.22, ROOM_D + 0.3, fx - 0.09, WALL_H - 0.22, 0, o);
+    mergeColored(g, FAR_MAT);
+    g.userData.keep = true; g.visible = false;
+    this.root.add(g); this.farWalls = g;
+  }
+  /**
+   * The cut goes into everything that stands in the back and left walls or hangs on them: geometry merged in the room's own space keeps its
+   * sill, anything placed on a wall goes with it. The room's shared material has it already; people and pets are never cut.
+   */
+  cutWalls() {
+    const R = this.root; R.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(R.matrixWorld).invert(), m = new THREE.Matrix4(), b = new THREE.Box3();
+    const skip = new Set([...this.actors.values()].map((a) => a.group)); if (this.pet) skip.add(this.pet.group); if (this.farWalls) skip.add(this.farWalls);
+    const shared = new Set(mats.values());
+    const walk = (o) => {
+      if (skip.has(o)) return;
+      if (o.isMesh && !o.isSkinnedMesh && !o.isInstancedMesh) {
+        const list = Array.isArray(o.material) ? o.material : [o.material];
+        if (!list.every((x) => x.userData.cut)) {
+          m.multiplyMatrices(inv, o.matrixWorld);
+          const own = m.elements.every((v, i) => Math.abs(v - (i % 5 === 0 ? 1 : 0)) < 1e-5);  // merged in the room's own space
+          if (own) list.forEach((x) => cutaway(x, 'room'));
+          else {
+            if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+            if (onWall(b.copy(o.geometry.boundingBox).applyMatrix4(m))) {
+              const mine = (x) => (x.userData.cut ? x : cutaway(shared.has(x) ? x.clone() : x, 'mount'));
+              o.material = Array.isArray(o.material) ? o.material.map(mine) : mine(o.material);
+            }
+          }
+        }
+      }
+      for (const c of o.children) walk(c);
+    };
+    walk(R);
+  }
   buildWalls(room, env) {
     const { primary, accent } = this.colors; const L = this.plan;
     const GH = 3.1, frame = L.frame || '#454852';
@@ -1177,8 +1240,10 @@ export class OfficeView {
     this.models = models; this.extraModels = [];
     this.kit = T;
     this.deskInto = (into, x, z, chairColor, ry) => { const keep = target; target = into; desk(x, z, chairColor, false, ry); target = keep; };
+    if (this.host || this.pace) { await this.turn(); if (this.dead) return; }  // laying the furniture out and merging it are two steps
     mergeColored(models, ROOM_MAT);
     this.root.add(models);
+    this.cutWalls();
     this.root.remove(this.legacy);
     for (const a of this.actors.values()) if (a.seated) a.sitDown();
     this.modelsOn = true;
@@ -1188,7 +1253,7 @@ export class OfficeView {
   /** The floor is one big texture: each room's own material (a CC0 photo-texture once it has loaded, a drawn tile until then), a darker rim along
    *  the walls, soft contact shadows under every piece of furniture, pools of window and lamp light, and each office's owner lettered by the door.
    *  The normal and roughness maps are baked the same way, so the lights catch the planks and the grout. It costs nothing per frame. */
-  bakeFloor() {
+  async bakeFloor() {
     // In the tower a floor is never wider than the screen and there are several, so a quarter of the pixels does. A room flown into from
     // there keeps its bake: baking it again on the floor page would stutter the room just landed in.
     const dens = stage.q?.density ?? 1; const W = this.host ? (dens >= 1 ? 1024 : 768) : dens >= 1 ? 2048 : dens >= 0.6 ? 1536 : 1024, H = Math.round(W * ROOM_D / ROOM_W);
@@ -1214,8 +1279,10 @@ export class OfficeView {
       }
     };
     const old = [this.floorMat.map, this.floorMat.normalMap, this.floorMat.roughnessMap];
-    const tex = canvasTex(W, H, (x) => {
+    // The painting comes in a few pieces, so a room built out of sight (the tower, or ahead for the lift) can take them over several frames.
+    const paint = function* (x) {
       paintRooms(x, 'map');
+      yield;
       // Window light: warm pools, leaning the way the sun does.
       for (const [a, b] of this.plan.windows) {
         const g = x.createLinearGradient(0, 0, 0, H * 0.32); g.addColorStop(0, 'rgba(255,236,200,.24)'); g.addColorStop(1, 'rgba(255,236,200,0)');
@@ -1231,6 +1298,7 @@ export class OfficeView {
       // A threshold strip in every doorway.
       x.fillStyle = 'rgba(40,32,24,.32)';
       for (const d of doorways(this.plan)) { const hw = (d.width / 2) * ppu, t = 0.14 * ppu; if (d.along) x.fillRect(px(d.x) - hw, pz(d.z) - t, hw * 2, t * 2); else x.fillRect(px(d.x) - t, pz(d.z) - hw, t * 2, hw * 2); }
+      yield;
       // Each room's name by the way in; an office carries its owner's name, like the lettering in an old office block.
       x.save(); x.textBaseline = 'bottom';
       for (const r of this.plan.rooms || []) {
@@ -1247,6 +1315,7 @@ export class OfficeView {
       x.strokeStyle = 'rgba(20,16,12,.34)'; x.lineWidth = 3 * k; x.beginPath(); for (const w of wallLines(this.plan)) { x.moveTo(px(w.x0), pz(w.z0)); x.lineTo(px(w.x1), pz(w.z1)); } x.stroke();
       const rim = (x0, y0, x1, y1, a) => { const g = x.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, `rgba(20,16,12,${a})`); g.addColorStop(1, 'rgba(20,16,12,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H); };
       rim(0, 0, 0, 70 * k, 0.34); rim(0, 0, 70 * k, 0, 0.34); rim(W, 0, W - 40 * k, 0, 0.12); rim(0, H, 0, H - 40 * k, 0.12);
+      yield;
       // Contact shadows under furniture, pulled slightly toward the camera side of the sun. Drawn an eighth the size and stretched, which
       // blurs them for nearly nothing: a canvas shadow blur on every piece was most of the cost of a bake.
       const sw = Math.ceil(W / 8), sh = Math.ceil(H / 8), small = shadowCanvas(sw, sh), s = small.getContext('2d');
@@ -1256,13 +1325,26 @@ export class OfficeView {
       x.save(); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high'; x.drawImage(small, 0, 0, sw, sh, -6 * k, 5 * k, sw * 8, sh * 8); x.restore();
       x.fillStyle = 'rgba(15,12,10,.18)';
       for (const [fx, fz, fw, fd] of this.nav.footprints) x.fillRect(px(fx - fw / 2) + 4 * k, pz(fz - fd / 2) + 4 * k, fw * ppu - 8 * k, fd * ppu - 8 * k);
-    });
+    };
+    const paced = this.host || this.pace, token = this.bakeToken = (this.bakeToken || 0) + 1;
+    const gone = () => this.dead || token !== this.bakeToken;
+    let tex;
+    if (paced) {
+      tex = canvasTex(W, H, () => {});
+      const x = tex.image.getContext('2d');
+      for (const _ of paint.call(this, x)) { await this.turn(); if (gone()) { tex.dispose(); return; } }  // eslint-disable-line no-unused-vars
+      tex.needsUpdate = true;
+    } else tex = canvasTex(W, H, (x) => { for (const _ of paint.call(this, x)); });  // eslint-disable-line no-unused-vars
+    let normal = null, rough = null;
+    if (pbr) {
+      if (paced) { await this.turn(); if (gone()) { tex.dispose(); return; } }
+      normal = canvasTex(W, H, (x) => paintRooms(x, 'normal')); normal.colorSpace = THREE.NoColorSpace;
+      if (paced) { await this.turn(); if (gone()) { tex.dispose(); normal.dispose(); return; } }
+      rough = canvasTex(W, H, (x) => paintRooms(x, 'rough')); rough.colorSpace = THREE.NoColorSpace;
+    }
     tex.anisotropy = 8; tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
     this.floorMat.map = tex;
-    if (pbr) {
-      const n = canvasTex(W, H, (x) => paintRooms(x, 'normal')); n.colorSpace = THREE.NoColorSpace; this.floorMat.normalMap = n; this.floorMat.normalScale.set(0.7, 0.7);
-      const r = canvasTex(W, H, (x) => paintRooms(x, 'rough')); r.colorSpace = THREE.NoColorSpace; this.floorMat.roughnessMap = r; this.floorMat.roughness = 1;
-    }
+    if (pbr) { this.floorMat.normalMap = normal; this.floorMat.normalScale.set(0.7, 0.7); this.floorMat.roughnessMap = rough; this.floorMat.roughness = 1; }
     this.floorMat.needsUpdate = true; this.baked = true;
     for (const t of old) if (t && t !== this.floorMat.map && t !== this.floorMat.normalMap && t !== this.floorMat.roughnessMap) t.dispose();
   }
@@ -1346,6 +1428,7 @@ export class OfficeView {
   }
   /** Staff arrive, and existing ones keep their place. Called for the snapshot and each hire. Everyone gets a room of their own. */
   syncAgents(state) {
+    this.synced = true;
     this.setFloorName(state.floor.name);
     const staff = state.agents.filter((a) => a.role !== 'manager');
     const fresh = staff.filter((a) => !this.actors.has(a.id));
@@ -1494,6 +1577,7 @@ export class OfficeView {
         g.add(place(T[t.m], { x: at.x, y, z: at.z, ry: at.ry, scale: FS * (t.s ?? 1), tint: t.rug ? tints(mix(o.theme.wall, '#f4efe6', 0.45)) : t.m.startsWith('chair') || t.m.startsWith('lounge') ? tints(o.theme.wall) : null }));
       }
     }
+    if (this.host || this.pace) { await this.turn(); if (this.dead || token < this.furnishedToken) return; }
     mergeColored(g, ROOM_MAT);
     if (!this.detailOn) g.traverse((m) => { if (m.isMesh) m.castShadow = false; });
     const old = this.officeModels; this.officeModels = g; this.root.add(g);
@@ -1639,7 +1723,7 @@ export class OfficeView {
       this.moved += Math.abs(dx) + Math.abs(dy);
       if (this.pts.size === 1) {
         if (this.targetZoom > 1.12 && !this.turning) slide(dx, dy);
-        else this.targetYaw = Math.max(-0.2, Math.min(1.25, this.targetYaw - dx * 0.006));
+        else this.targetYaw -= dx * 0.006;  // all the way round: the walls facing the camera are cut away (cutaway.js)
       } else if (this.pts.size === 2) {
         const other = [...this.pts.entries()].find(([k]) => k !== e.pointerId)[1];
         const before = Math.hypot(px - other[0], py - other[1]), after = Math.hypot(e.clientX - other[0], e.clientY - other[1]);
@@ -1681,11 +1765,14 @@ export class OfficeView {
   }
   enter() {
     const r = stage.renderer;
+    CUT.uCutOn.value = 1;  // the walls facing the camera are cut away, here as in the tower (none, from the front)
     r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true;  // the stage redraws it every other frame
     r.toneMappingExposure = 0.92;
     const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WORLD_SCALE); w.group.position.set(0, this.worldLift, 0);
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
   }
+  /** Nothing moving but the people: the stage may draw every other frame. */
+  idle() { return !this.host && this.intro >= 1 && !this.pts?.size && Math.abs(this.targetZoom - this.zoom) < 1e-3 && Math.abs(this.targetYaw - this.yaw) < 1e-3 && this.pan.distanceTo(this.targetPan) < 1e-3; }
   leave() { const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; r.toneMappingExposure = 0.84; }
   setTier(q) {
     this.detailOn = q.density >= 0.6;
@@ -1777,8 +1864,10 @@ export class OfficeView {
     this.camera.setViewOffset(w, h, (i.right - i.left) / 2, (i.bottom - i.top) / 2, w, h);
     this.camera.updateProjectionMatrix();
   }
-  placeCamera(dist, px = 0, pz = 0) {
-    const y = Math.sin(this.pitch) * dist, r = Math.cos(this.pitch) * dist;
+  /** Zoomed well in, the camera comes down toward eye level, so faces show rather than the tops of heads. The usual views keep their angle. */
+  tilt() { const t = Math.min(1, Math.max(0, (this.zoom - 1.6) / (ZOOM_MAX - 1.6))); return this.pitch - (this.pitch - 0.6) * t * t * (3 - 2 * t); }
+  placeCamera(dist, px = 0, pz = 0, pitch = this.pitch) {
+    const y = Math.sin(pitch) * dist, r = Math.cos(pitch) * dist;
     this.camera.position.set(px + Math.sin(this.yaw) * r, y, pz + Math.cos(this.yaw) * r);
     this.camera.lookAt(px, 0.8, pz + 0.3);
   }
@@ -1835,7 +1924,7 @@ export class OfficeView {
       // Fit the room to the free area at any aspect ratio, and let the intro pull back from close up.
       const dist = (this.fitDistance() / this.zoom) * (1.5 - 0.5 * e);
       this.camDist = dist;
-      this.placeCamera(dist, this.pan.x, this.pan.y);
+      this.placeCamera(dist, this.pan.x, this.pan.y, this.tilt());
       this.sun.position.set(SUN_DIR.x + drift * 0.05, SUN_DIR.y, SUN_DIR.z + Math.cos(this.time * 0.05) * 0.04).multiplyScalar(SUN_FAR);
       this.sun.intensity = 2.5 + drift * 0.25;
     }
@@ -1844,6 +1933,8 @@ export class OfficeView {
     this.pageTex.offset.y = (this.time * 0.05) % 1;
     if (this.arcadeScreen) this.arcadeScreen.material.color.setHSL((this.time * 0.1) % 1, 0.7, 0.62);
     this.winMat.opacity = 0.3 + drift * 0.04;
+    // The front and right walls are drawn only while the camera is round behind the room (see cutaway.js).
+    if (this.farWalls) { const c = this.camera.position, [cb, cl] = cutAmount(c.x, c.z); this.farWalls.visible = cb > 0.001 || cl > 0.001; }
     for (let i = 0; i < this.sway.length; i++) { const c = this.sway[i]; c.rotation.z = Math.sin(this.time * 0.9 + i * 2) * 0.035; c.rotation.x = Math.cos(this.time * 0.7 + i) * 0.025; }
     const sec = Math.floor(Date.now() / 1000);
     if (sec !== this.clockSec) { this.clockSec = sec; this.drawClock(this.clockTex.image.getContext('2d')); this.clockTex.needsUpdate = true; }
@@ -1892,11 +1983,15 @@ export class OfficeView {
     const p = this.tv.copy(a.group.position); p.y += (a.char.labelY ?? HEAD_TOP * CHAR_SCALE) + 0.2;
     if (this.host) {
       // In the tower: the root stands at its floor's height, and a tag off the screen, or on a floor the tower has quietened, is put away.
-      const wx = a.group.position.x;
-      p.add(this.root.position).project(this.camera);
-      // Hidden behind the slab of the floor above: the tower says where that slab's front edge falls on the screen (see TowerView).
+      p.add(this.root.position);
+      // Hidden behind the slab of the floor above (the tower says where it is): the line from the camera to the tag goes through it.
       let behind = false;
-      if (this.coverY !== undefined && p.z <= 1) { const e = this.tv2.set(wx, this.coverY, this.coverZ).project(this.camera); behind = p.y > e.y; }
+      const c = this.camera.position;
+      if (this.coverY !== undefined && c.y > this.coverY && p.y < this.coverY) {
+        const t = (this.coverY - c.y) / (p.y - c.y), x = c.x + (p.x - c.x) * t, z = c.z + (p.z - c.z) * t;
+        behind = Math.abs(x) < this.coverD && Math.abs(z) < this.coverD;
+      }
+      p.project(this.camera);
       const off = !this.tagsOn || behind || p.z > 1 || Math.abs(p.x) > 1.25 || Math.abs(p.y) > 1.25;
       if (off !== !!a.tagOff) { a.tagOff = off; a.tag.style.visibility = off ? 'hidden' : ''; }
       if (off) { a.tagX = undefined; return; }

@@ -258,4 +258,17 @@ body[data-tower="3d"] { background: #cfe0ec; }
 .tower-plaque.to-let b { background: #7d7466; }
 .tower-plaque.off { visibility: hidden; }
 body.tower-flying .tower-plaques, body.tower-flying #labels { opacity: 0; transition: opacity .25s; }
+/* Round, up, down, in and out: small buttons by the building, for anyone who'd rather press than drag. */
+.tower-ctrl { position: fixed; right: calc(min(430px, 34vw) + 14px); bottom: 140px; z-index: 5; display: grid; grid-template-columns: repeat(2, 40px); gap: 6px; justify-items: end; }
+.tower-btn { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 12px; background: rgba(28, 23, 18, .78); color: #fff8e6; cursor: pointer; box-shadow: 0 2px 0 rgba(28, 23, 18, .35); touch-action: manipulation; }
+.tower-btn svg { width: 22px; height: 22px; } .tower-btn svg path { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; } .tower-btn svg.flip { transform: scaleX(-1); }
+.tower-btn:hover, .tower-btn:focus-visible { outline: none; background: rgba(28, 23, 18, .94); box-shadow: 0 0 0 3px #d9774a; }
+.tower-btn.tb-whole { grid-column: 1 / -1; width: auto; height: 34px; font: 700 14px/1 var(--cond); padding: 0 10px; white-space: nowrap; }
+body.tower-flying .tower-ctrl { opacity: 0; pointer-events: none; transition: opacity .25s; }
+@media (max-width: 760px) {
+  .tower-ctrl { left: auto; right: 6px; bottom: auto; top: 70px; grid-template-columns: 34px; gap: 4px; }
+  .tower-btn { width: 34px; height: 34px; border-radius: 10px; background: rgba(28, 23, 18, .58); box-shadow: none; } .tower-btn svg { width: 19px; height: 19px; }
+  .tower-btn.tb-whole { grid-column: auto; width: 34px; height: 34px; font-size: 0; }
+  .tower-btn.tb-whole::before { content: ''; width: 14px; height: 20px; border: 2.5px solid currentColor; border-radius: 2px; background: linear-gradient(currentColor 0 0) center 5px / 6px 2.5px no-repeat, linear-gradient(currentColor 0 0) center 11px / 6px 2.5px no-repeat; }
+}
 @media (max-width: 760px) { .tower-plaque { min-height: 32px; max-width: 180px; font-size: 14px; } .tower-plaque b { min-width: 24px; height: 24px; font-size: 14px; } }

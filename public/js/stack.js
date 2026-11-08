@@ -57,6 +57,9 @@ export function buildStack({ onEnter }) {
     h('div.stack-roof', { 'aria-hidden': 'true' }, h('span', {}, 'The Office')), list,
     h('div.stack-ground', { 'aria-hidden': 'true' }, h('span', {}, 'Ground · the lobby')));
   let data = null, staff = {}, shown = false, staffAt = 0, restored = false;
+  // The spot being returned to, until the person scrolls for themselves: the staff faces arrive later and make the strips taller.
+  let wanted = 0;
+  for (const t of ['wheel', 'touchstart', 'pointerdown', 'keydown']) el.addEventListener(t, () => { wanted = 0; }, { passive: true });
 
   // Only what's on screen moves: the busy dots and faces pulse on strips in view, and nowhere else.
   const io = 'IntersectionObserver' in window ? new IntersectionObserver((es) => { for (const e of es) e.target.classList.toggle('live', e.isIntersecting); }, { root: el }) : null;
@@ -79,6 +82,7 @@ export function buildStack({ onEnter }) {
   const restore = () => {
     restored = true;
     let y = 0; try { y = Number(sessionStorage.getItem(SPOT_KEY)) || 0; } catch { /* private mode */ }
+    wanted = y;
     if (y) el.scrollTop = y;
     else { const first = list.querySelector('.stack-strip:not(.to-let)'); if (first) el.scrollTop = Math.max(0, first.offsetTop - 24); }
   };
@@ -86,7 +90,7 @@ export function buildStack({ onEnter }) {
     if (Date.now() - staffAt < 15000) return;
     staffAt = Date.now();
     const d = await api('/building/staff').catch(() => null);
-    if (d?.floors) { staff = d.floors; render(); }
+    if (d?.floors) { staff = d.floors; render(); if (wanted && el.scrollTop < wanted) el.scrollTop = wanted; }
   };
   const enter = (card) => {
     if (dragged) return;

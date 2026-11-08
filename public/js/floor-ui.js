@@ -13,7 +13,8 @@ import { lobbyMode } from './stack.js';
 import { muteButton, sfx } from './sfx.js';
 import { confetti, fanfare, mayParty } from './party.js';
 import { journeyBar, chipsRow, startButton, renderBusiness, businessActive, businessUnchanged } from './business-ui.js';
-import { handOver, peekHandoff, takeHandoff } from './handoff.js';
+import { handOver, takeHandoff } from './handoff.js';
+import { aheadState, isParked, lift, park, peekAhead, unpark } from './floorcache.js';
 import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } from './mail-ui.js';
 import { launchFlow, makerCard } from './launch-ui.js';
 import * as THREE from '../vendor/three/three.module.min.js';
@@ -46,7 +47,8 @@ class FloorPage {
   constructor(root, slug) { this.root = root; this.slug = slug; this.dead = false; this.tab = 'work'; this.seen = new Set(); this.streamBuf = ''; }
 
   async load() {
-    this.state = await api(`/floors/${this.slug}`);
+    // Fetched ahead while the floor below or above was looked at: the lift opens on it at once.
+    this.state = (await aheadState(this.slug)) || await api(`/floors/${this.slug}`);
     return this.state;
   }
   get owner() { return this.state.viewer.owner; }
@@ -160,6 +162,28 @@ class FloorPage {
     );
   }
 
+  /**
+   * The floors either side, their rooms built ahead while this one is left alone and kept for the lift (see floorcache.js): a desktop
+   * builds both, a phone the one the lift was last going towards. A room takes a moment to put together, so it waits for a quiet spell.
+   */
+  async buildAhead(above, below) {
+    const list = (isPhone() ? [lift.dir > 0 ? above || below : below || above] : [above, below]).filter(Boolean);
+    for (const f of list) {
+      for (let i = 0; i < 40 && !this.dead; i++) {
+        await new Promise((r) => setTimeout(r, 400));
+        if (stage.view === this.view && performance.now() - (stage.lastInput || 0) > 2500 && this.view?.loading?.settled) break;
+      }
+      if (this.dead || !stage.ok || isParked(f.slug)) continue;
+      const state = await peekAhead(f.slug);
+      if (!state || this.dead) continue;
+      // Its bake, furniture and people come a step at a time in the gaps between frames, like a floor in the tower.
+      const v = new OfficeView({ state, labels: document.createElement('div'), pace: () => new Promise((r) => (window.requestIdleCallback || setTimeout)(() => r(), { timeout: 400 })) });
+      park(f.slug, v, isPhone() ? 2 : 3);
+      // Its shaders compiled and its baked floor on the GPU now, so its first frame on screen has nothing left to do.
+      const r = stage.renderer;
+      try { r.compileAsync?.(v.scene, v.camera)?.catch(() => {}); if (v.floorMat?.map) r.initTexture(v.floorMat.map); } catch { /* compiled on first sight instead */ }
+    }
+  }
   makeView() { return new OfficeView({ state: this.viewState(), labels: this.labels, onSmallTalk: (line) => this.addLocalTalk(line) }); }
   /**
    * Flown in from the 3D building: the very room the camera landed in, people mid-stride and all, brought up to date with what this
@@ -167,7 +191,9 @@ class FloorPage {
    */
   adoptView() {
     const h = takeHandoff('in', this.slug);
-    const v = h?.view; if (!v || v.dead) return null;
+    // Flown in from the building, or back by the lift to a floor left a moment ago (see floorcache.js).
+    const v = h?.view || unpark(this.slug); if (!v || v.dead) return null;
+    if (!h) { v.bind(); v.labels = this.labels; v.pace = null; }
     const f = this.viewState().floor;
     if (JSON.stringify([v.decor, v.colors, v.companyName]) !== JSON.stringify([f.decor, f.colors, f.name])) { v.destroy(); return null; }
     v.tasks = this.state.tasks;
@@ -317,7 +343,7 @@ class FloorPage {
       const waiting = !busy && a.role === 'manager' && this.state.helpWaiting > 0;
       this.staffEl.append(h(`button.staff-chip${busy ? '.busy' : ''}`, { type: 'button', role: 'listitem', 'data-agent': a.id, title: a.activity || STATE_LABEL[a.state] || '', onclick: () => this.openAgent(a) },
         this.face(a),
-        h('span.staff-text', {}, h('b', {}, a.name), h('small', {}, a.title), h('span.staff-state', {}, busy ? (STATE_LABEL[a.state] || a.state) : waiting ? 'Waiting on buddehbot' : 'At desk'))));
+        h('span.staff-text', {}, h('small.staff-role', {}, a.title), h('b', {}, a.name), h('span.staff-state', {}, busy ? (STATE_LABEL[a.state] || a.state) : waiting ? 'Waiting on buddehbot' : 'At desk'))));
     }
   }
   /** A person's file: their badge, who they are, what they're on, and for the boss what they remember. Empty fields just aren't there. */
@@ -338,7 +364,7 @@ class FloorPage {
       body.append(h('div.profile', { 'data-profile': a.id },
         h('div.id-badge', {},
           h('div.id-band', { css: { '--brand': f.colors?.primary || 'var(--teal)' } }, `${f.name || 'The Office'} · Floor ${f.number}`),
-          this.face(a), h('div.id-name', {}, a.name), h('div.id-title', {}, a.title),
+          this.face(a), h('div.id-title', {}, a.title), h('div.id-name', {}, a.name),
           h(`div.id-state${busy ? '.busy' : ''}`, {}, busy ? (STATE_LABEL[a.state] || a.state) : 'At desk'),
           h('div.id-bars', { 'aria-hidden': 'true' })),
         h('div.file-rows', {},
@@ -1097,7 +1123,8 @@ class FloorPage {
     this.pinsEl?.remove();
     this.markSeen?.();
     this.es?.close();
-    this.view?.destroy();
+    // Off to the next floor by the lift: this room is kept a minute, so the way back is instant.
+    if (this.parkView && this.view && stage.ok && !this.preview) park(this.slug, this.view, isPhone() ? 2 : 3, this.parkView); else this.view?.destroy();
     if (this.labels) clear(this.labels);
     document.documentElement.style.removeProperty('--brand');
     document.documentElement.style.removeProperty('--brand-2');
@@ -1120,25 +1147,22 @@ export async function showFloor(root, slug) {
     root.append(h('div.notfound', {}, h('h1', {}, 'No such floor.'), h('p', {}, e.status === 404 ? 'That office isn\'t in the directory. It may never have opened, or it has closed.' : e.message), h('button.btn.primary', { type: 'button', onclick: () => window.officeGo('/') }, 'Back to the lobby')));
     return;
   }
-  const fade = $('#fade');
-  fade.dataset.title = `Floor ${page.state.floor.number}${page.state.floor.name ? ` · ${page.state.floor.name}` : ''}`;
-  // Flown in from the 3D building, the room is already on screen and stays there: no doors.
-  if (!peekHandoff('in', slug)) fade.classList.add('in');
+  // No doors and no curtain: the room's shell is on screen at once, and its furniture and people come in as they load.
   F = page;
   page.mount();
-  // The flash of light lifts once the room has its real furniture and people, so nobody watches them swap in. A slow line gets the stand-ins after a moment.
   page.ready = new Promise((done) => {
     const from = performance.now();
     const check = () => {
       const v = page.view;
       const there = !v || page.dead || (v.loading?.settled && [...v.actors.values()].every((a) => a.char.isModel));
-      if (there || performance.now() - from > 2200) { fade.classList.remove('in'); done(); } else requestAnimationFrame(check);
+      if (there || performance.now() - from > 2200) done(); else requestAnimationFrame(check);
     };
     requestAnimationFrame(check);
-    setTimeout(() => { fade.classList.remove('in'); done(); }, 2400);  // rAF sleeps in a hidden tab
+    setTimeout(done, 2400);  // rAF sleeps in a hidden tab
   });
   window.__office = page; // read by the browser e2e tests
 }
-export function hideFloor() {
+export function hideFloor({ next = '' } = {}) {
+  if (F && /^\/floor\//.test(next)) F.parkView = next.slice('/floor/'.length);
   F?.destroy(); F = null; window.__office = null;
 }

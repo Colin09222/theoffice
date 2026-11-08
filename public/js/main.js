@@ -3,7 +3,6 @@ import { stage } from './stage.js';
 import { BASE, refreshMe, clear, toast, $ } from './dom.js';
 import { showLobby, hideLobby } from './lobby-ui.js';
 import { wireSounds } from './sfx.js';
-import { peekHandoff } from './handoff.js';
 
 const ui = $('#ui');
 let current = null;
@@ -24,7 +23,7 @@ async function route() {
   const flyOut = leavingFloor && path === '/' && !!(await window.__office?.handBack?.());
   const doors = leavingFloor && !flyOut;
   if (doors) { fade.dataset.title = 'The Office'; fade.classList.add('in'); await new Promise((r) => setTimeout(r, 240)); }
-  current?.();
+  current?.({ next: path });
   current = null;
   clear(ui);
   document.body.dataset.page = '';
@@ -34,7 +33,6 @@ async function route() {
     if (floorMatch) {
       // The doors shut straight away, so a slow line never holds up on a frozen close-up of the glass. The floor opens them when its room is ready.
       // Flown in from the 3D building, the room is already on screen: no doors at all.
-      if (!peekHandoff('in', floorMatch[1])) { fade.dataset.title = 'Going up'; fade.classList.add('in'); }
       const { showFloor, hideFloor } = await import('./floor-ui.js'); current = hideFloor; await showFloor(ui, floorMatch[1]);
       return;
     }
@@ -80,7 +78,8 @@ async function boot() {
   try { await route(); } catch (e) { console.error(e); toast('Something broke on the way in. Try reloading.'); }
   // One clean reveal: the curtain lifts on the finished picture, not on a half-built one that then changes.
   // The admin page has no scene to wait for, so its curtain has nothing to hold out for.
-  await Promise.race([Promise.all([window.__office?.ready, stage.ok && document.body.dataset.page !== 'admin' ? stage.whenPainted(2600) : null]), new Promise((r) => setTimeout(r, 3400))]);
+  // A floor's curtain lifts on the room's first picture: its furniture and people fill in from there, with nothing in the way.
+  await Promise.race([stage.ok && document.body.dataset.page !== 'admin' ? stage.whenPainted(2600) : null, new Promise((r) => setTimeout(r, 3400))]);
   lift();
   // Once things are quiet, fetch the floor's code in the background, so the first walk in is instant. Not on a data-saving connection.
   if (document.body.dataset.page === 'lobby' && !navigator.connection?.saveData) {
