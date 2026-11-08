@@ -227,6 +227,23 @@ async function profile(kind) {
     if (Math.max(...warm) > 300) throw new Error(`warm switches ${warm.join(', ')} ms; ${times.map((x) => x.fr).join(' | ')}`);
     return `first ${times[0].ms} ms, then ${warm.join(', ')} ms, no doors`;
   });
+  if (!phone) await step(`${kind}: the floor page turns all the way round too, its far walls up from behind`, async () => {
+    await p.until(fullDetail, 'floor page', 20000);
+    await p.ev('(() => { const v = window.__office.view; v.targetZoom = 1; })()');
+    await sleep(800);
+    const y0 = await p.ev('window.__office.view.targetYaw');
+    await mouseDrag(p, 700, 500, 180, 505, 20);
+    await sleep(200);
+    await p.ev('(() => { const v = window.__office.view; v.targetYaw = Math.PI + 0.6; })()');
+    await sleep(2000);
+    const st = await p.ev('(() => { const v = window.__office.view; return { yaw: v.yaw, far: v.farWalls.visible, page: document.body.dataset.page }; })()');
+    if (!st.far) throw new Error(`from behind the far walls are down: ${JSON.stringify(st)}`);
+    const turned = await p.ev(`window.__office.view.targetYaw`);
+    if (OUT) await p.shot(join(OUT, `${kind}-floor-behind.jpg`));
+    await p.ev('window.__office.view.targetYaw = 0.5'); await sleep(1500);
+    if (await p.ev('window.__office.view.farWalls.visible')) throw new Error('far walls still up from the front');
+    return `drag turned from ${y0.toFixed(2)}; from behind (${turned.toFixed(2)} rad) the far walls stand, gone again from the front`;
+  });
   await step(`${kind}: a direct link to a floor draws its first 3D frame fast, with no spinner`, async () => {
     await p.send('Network.enable'); await p.send('Network.clearBrowserCache'); await p.send('Network.setCacheDisabled', { cacheDisabled: true });
     await p.goto('about:blank');

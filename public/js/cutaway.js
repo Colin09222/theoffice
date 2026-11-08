@@ -2,10 +2,10 @@
 // would stand between it and the people. Each wall that faces the camera is cut down to its sill, a dither at a time as the camera turns, and
 // the room's front and right walls, which only ever show from behind, come up as the others go. It all happens in the shaders, from the
 // camera's own position (every floor stands on the tower's axis), so it costs nothing per frame, and a floor in the tower draws with the very
-// programs its floor page uses: there the cut is simply off, and the walls stand as they always have.
+// programs its floor page uses. A floor page turns all the way round too; from the front, where it starts, nothing is cut.
 import { ROOM_W, ROOM_D } from './layouts.js';
 
-/** On in the tower, off on a floor page. Shared by every material the cut is patched into. */
+/** Shared by every material the cut is patched into. On wherever a room is shown. */
 export const CUT = { uCutOn: { value: 0 } };
 export const SILL = 1.02;               // a cut wall keeps everything up to its window sill
 const BAND = 0.75;                      // how far in from a wall's inside face counts as that wall (its trim, its clock, its pictures)

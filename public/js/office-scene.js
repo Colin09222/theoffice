@@ -974,7 +974,7 @@ export class OfficeView {
     piece(g, wall, 0.3, WALL_H, ROOM_D + 0.6, fx, 0, 0, o);
     piece(g, trim, ROOM_W + 0.3, 0.22, 0.42, 0, WALL_H - 0.22, fz - 0.09, o); piece(g, trim, 0.42, 0.22, ROOM_D + 0.3, fx - 0.09, WALL_H - 0.22, 0, o);
     mergeColored(g, FAR_MAT);
-    g.userData.keep = true; g.visible = !!this.host;
+    g.userData.keep = true; g.visible = false;
     this.root.add(g); this.farWalls = g;
   }
   /**
@@ -1701,7 +1701,7 @@ export class OfficeView {
       this.moved += Math.abs(dx) + Math.abs(dy);
       if (this.pts.size === 1) {
         if (this.targetZoom > 1.12 && !this.turning) slide(dx, dy);
-        else this.targetYaw = Math.max(-0.2, Math.min(1.25, this.targetYaw - dx * 0.006));
+        else this.targetYaw -= dx * 0.006;  // all the way round: the walls facing the camera are cut away (cutaway.js)
       } else if (this.pts.size === 2) {
         const other = [...this.pts.entries()].find(([k]) => k !== e.pointerId)[1];
         const before = Math.hypot(px - other[0], py - other[1]), after = Math.hypot(e.clientX - other[0], e.clientY - other[1]);
@@ -1743,7 +1743,7 @@ export class OfficeView {
   }
   enter() {
     const r = stage.renderer;
-    CUT.uCutOn.value = 0;  // a floor page's walls stand as they always have
+    CUT.uCutOn.value = 1;  // the walls facing the camera are cut away, here as in the tower (none, from the front)
     r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true;  // the stage redraws it every other frame
     r.toneMappingExposure = 0.92;
     const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WORLD_SCALE); w.group.position.set(0, this.worldLift, 0);
@@ -1909,8 +1909,8 @@ export class OfficeView {
     this.pageTex.offset.y = (this.time * 0.05) % 1;
     if (this.arcadeScreen) this.arcadeScreen.material.color.setHSL((this.time * 0.1) % 1, 0.7, 0.62);
     this.winMat.opacity = 0.3 + drift * 0.04;
-    // In the tower the front and right walls are drawn only while the camera is round behind the room (see cutaway.js).
-    if (this.farWalls) { const c = this.camera.position, [cb, cl] = this.host ? cutAmount(c.x, c.z) : [0, 0]; this.farWalls.visible = cb > 0.001 || cl > 0.001; }
+    // The front and right walls are drawn only while the camera is round behind the room (see cutaway.js).
+    if (this.farWalls) { const c = this.camera.position, [cb, cl] = cutAmount(c.x, c.z); this.farWalls.visible = cb > 0.001 || cl > 0.001; }
     for (let i = 0; i < this.sway.length; i++) { const c = this.sway[i]; c.rotation.z = Math.sin(this.time * 0.9 + i * 2) * 0.035; c.rotation.x = Math.cos(this.time * 0.7 + i) * 0.025; }
     const sec = Math.floor(Date.now() / 1000);
     if (sec !== this.clockSec) { this.clockSec = sec; this.drawClock(this.clockTex.image.getContext('2d')); this.clockTex.needsUpdate = true; }
