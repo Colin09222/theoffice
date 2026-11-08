@@ -21,7 +21,7 @@ import { createManagedClient } from './sessions.js';
 import { createMockSessions } from './mock-sessions.js';
 import { appLabel, appOrigin, appHostLabel, lookupLabel, appHeaders, previewCookie, previewCookieName } from './apps.js';
 import { handleData, DataError, DATA_LIMITS, clearProjectData } from './appdata.js';
-import { installCloud, SDK_JS, API_PREFIX } from './cloud/index.js';
+import { installCloud, CHAT_JS, CHAT_PANEL_JS, SDK_JS, API_PREFIX } from './cloud/index.js';
 import { recordVisit, projectStats, formEntries, formsCsv, formCount } from './launch.js';
 import { DomainRefused } from './domains.js';
 import { installOrders } from './orders.js';
@@ -835,6 +835,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (dir !== '_office' || segs.length < 2) return null;
     if (name === 'client.js') return { type: 'text/javascript; charset=utf-8', body: clientLib };
     if (name === 'office.js') return { type: 'text/javascript; charset=utf-8', body: SDK_JS };
+    if (name === 'chat.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_JS };
+    if (name === 'chat-panel.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_PANEL_JS };
     if (name === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
     if (name === 'phaser.min.js') return { type: 'text/javascript; charset=utf-8', body: phaserLib?.body };
     return null;
@@ -898,10 +900,10 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     }
     if (!hit) return miss();
     if (/^text\/html/.test(hit.type) && req.method === 'GET' && !pr.private) visit(req, f, pr, segs.join('/'));
-    const etag = `W/"${pr.published_at}"`;
+    const etag = `W/"${pr.published_at}${cloud.chat.tag(f, pr)}"`;
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ...HEAD, etag }); return res.end(); }
     res.writeHead(200, { ...HEAD, etag, 'content-type': hit.type });
-    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(hit.body, `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
+    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(cloud.chat.decorate(f, pr, hit.body, segs), `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
   }
   async function serveData(req, res, f, pr, label, rawUrl, HEAD) {
     const reply = (status, obj) => { res.writeHead(status, { ...HEAD, 'cache-control': 'no-store', 'content-type': 'application/json; charset=utf-8', ...(status === 429 ? { 'retry-after': '30' } : {}) }); res.end(JSON.stringify(obj)); };

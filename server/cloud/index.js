@@ -15,11 +15,13 @@ import { upgradeKey, handshake } from './ws.js';
 import { createPowers } from './powers.js';
 import { createAppAi } from './ai.js';
 import { createWebFetcher } from './web.js';
+import { createChat, CHAT_RATES, CHAT_JS, CHAT_PANEL_JS } from './chat.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 /** The browser library. Served on every project origin at /_office/office.js, and at /theoffice/sdk/office.js for reference. */
 export const SDK_JS = readFileSync(join(ROOT, 'server/app-client/sdk.js'));
 export const API_PREFIX = '/_office/cloud/';
+export { CHAT_JS, CHAT_PANEL_JS };
 
 // [requests, window ms]. Counted per key in a fixed window, like the rest of the building.
 export const CLOUD_RATES = {
@@ -52,7 +54,7 @@ const scryptAsync = (pw, salt, o) => new Promise((res, rej) => scrypt(pw, salt, 
 export function installCloud(ext) {
   const { db, cfg, engine, log, now, GET, POST, json, requireOwner, requireAdmin, floorBySlug, HttpError, ipOf, secret } = ext;
   const store = createStore(db, cfg.cloudLimits || {}, now);
-  const RATES = { ...CLOUD_RATES, ...(cfg.cloudRates || {}) };
+  const RATES = { ...CLOUD_RATES, ...CHAT_RATES, ...(cfg.cloudRates || {}) };
   const rates = new A.RateLimiter(cfg.cloudRateScale ?? cfg.rateScale, now);
   const hashing = gate(2, 64);
   const uploading = gate(4, 8);
@@ -70,6 +72,8 @@ export function installCloud(ext) {
   const powers = createPowers(db, cfg, now);
   const ai = createAppAi({ db, models: ext.models, engine, llm: ext.llm, log, powers, gate: gate(8, 16) });
   const web = createWebFetcher({ db, cfg, powers, gate: gate(8, 24), net: ext.cloudNet, now, log });
+  // Website chat: server/cloud/chat.js.
+  const chat = createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, engine });
   const counts = new Map();
   const count = (pk) => { if (counts.size < 5000 || counts.has(pk)) counts.set(pk, (counts.get(pk) || 0) + 1); };
   function flush() {
@@ -277,6 +281,7 @@ export function installCloud(ext) {
         const r = rooms.list(pk, Infinity).find((x) => x.name === b);
         return reply(200, { name: b, players: r ? r.players : 0, max: rooms.L.members });
       }
+      if (a === 'chat') return await chat.handle({ req, reply, f, pr, ip, pk, m, b, c });
       if (a === 'ai' && b === 'chat' && !c && m === 'POST') {
         const tooFast = 'You\'re asking very quickly. Give it a minute and try again.';
         limit('aiVisitor', `${pk}:${ip}`, tooFast); limit('aiVisitorDay', `${pk}:${ip}`, 'You\'ve used your AI requests here for today. Come back tomorrow.'); limit('aiProject', pk, tooFast);
@@ -414,12 +419,14 @@ export function installCloud(ext) {
     json(res, 200, { ok: true, removed: store.wipeProject(f.id, body.project) });
   });
 
+  chat.installRoutes({ GET, POST, json, requireOwner, HttpError, limit: ext.limit, readJson: ext.readJson, hooks: ext.hooks });
+
   let flushTimer = null, sweepTimer = null;
   return {
-    store, rooms, powers, serve, upgrade,
+    store, rooms, powers, chat, serve, upgrade,
     start() {
       flushTimer = setInterval(flush, 60000); flushTimer.unref?.();
-      sweepTimer = setInterval(() => { try { store.sweep(); powers.sweep(); } catch { /* next time */ } }, 3600000); sweepTimer.unref?.();
+      sweepTimer = setInterval(() => { try { store.sweep(); powers.sweep(); chat.sweep(); } catch { /* next time */ } }, 3600000); sweepTimer.unref?.();
     },
     stop() { clearInterval(flushTimer); clearInterval(sweepTimer); flush(); rooms.close(); rates.close(); },
     flush,

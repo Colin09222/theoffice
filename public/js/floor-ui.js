@@ -16,6 +16,7 @@ import { journeyBar, chipsRow, startButton, renderBusiness, businessActive, busi
 import { handOver, takeHandoff } from './handoff.js';
 import { aheadState, isParked, lift, park, peekAhead, unpark } from './floorcache.js';
 import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } from './mail-ui.js';
+import { onChatEvent } from './chat-ui.js';
 import { launchFlow, makerCard } from './launch-ui.js';
 import { recoveryBox } from './dom.js';
 import * as THREE from '../vendor/three/three.module.min.js';
@@ -1026,6 +1027,7 @@ class FloorPage {
     on('domain', async () => { await this.reload(); const n = (this.state.domains || []).filter((d) => d.status === 'awaiting_boss').length; if (n > lastWaiting) toast('A domain is waiting for your OK under Requests'); lastWaiting = n; });
     on('hired', () => this.reload());
     on('mail', (d) => onMailEvent(this, d));
+    on('sitechat', (d) => onChatEvent(this, d));
     on('reload', () => this.reload());
     on('floor', (d) => {
       if (d.status === 'gone') { toast('This floor has been closed.'); window.officeGo('/'); return; }
