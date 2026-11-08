@@ -21,7 +21,7 @@ const ACCESS = new Set(['active', 'trialing', 'past_due']);
 const REVOKED = new Set(['refunded', 'disputed']);
 const newToken = (prefix, n = 16) => `${prefix}_${randomBytes(n).toString('base64url')}`;
 const idOf = (v) => (v && typeof v === 'object' ? v.id : v) || '';
-const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f  ]+/g, ' ').trim().slice(0, max);
+const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').trim().slice(0, max);
 const MISSING = [
   [/^external_account/, 'A bank account for your payouts'], [/^tos_acceptance/, 'Accepting Stripe\'s terms'], [/^business_profile\.url/, 'Your website'],
   [/^business_profile\./, 'What your business does'], [/^business_type/, 'Your business type'], [/^(individual|representative|owners?|directors?|executives?|person)/, 'Your ID details'],
@@ -93,7 +93,7 @@ export function installPay(ext) {
     if (a.details_submitted) return { ...view, state: 'review', summary: missing.length ? 'Stripe needs a little more before you can take payments.' : 'Stripe is checking your details. This usually takes a few minutes.' };
     return { ...view, state: 'incomplete', summary: 'Almost there: finish the Stripe form.' };
   }
-  async function connect(f) {
+  async function connect(f, req) {
     if (!ready) throw new HttpError(503, 'not_ready', 'Payments are being set up.');
     let a = accountRow(f.id);
     if (!a) {
@@ -109,7 +109,7 @@ export function installPay(ext) {
       });
       a = accountRow(f.id);
     } else if (a.disconnected_at) { run(db, 'UPDATE pay_accounts SET disconnected_at=NULL, updated_at=? WHERE floor_id=? AND livemode=?', now(), f.id, LIVE); }
-    const back = `${cfg.publicOrigin || ''}/theoffice/floor/${f.slug}`;
+    const back = `${cfg.publicOrigin || `${req.socket.encrypted ? 'https' : 'http'}://${req.headers.host}`}/theoffice/floor/${f.slug}`;
     const link = await stripe.createAccountLink({ account: a.account, refresh_url: `${back}?pay=refresh`, return_url: `${back}?pay=return`, type: 'account_onboarding' });
     return { url: link.url };
   }
@@ -525,7 +525,7 @@ export function installPay(ext) {
   POST('/api/floors/:slug/pay/connect', async ({ req, res, p, ip }) => {
     const f = requireOwner(req, p.slug);
     ext.limit('mutate', ip);
-    try { json(res, 200, await connect(f)); } catch (e) {
+    try { json(res, 200, await connect(f, req)); } catch (e) {
       if (e instanceof HttpError) throw e;
       log('error', 'pay_connect_failed', { err: hideKeys(e?.message) });
       throw new HttpError(502, 'stripe_failed', 'Stripe didn\'t answer. Try again in a moment.');
