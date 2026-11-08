@@ -34,6 +34,7 @@ import { budgetReport } from './budget.js';
 import { installCustomise } from './customise.js';
 import { installModes } from './modes.js';
 import { installBusiness } from './business.js';
+import { installMail } from './mail.js';
 import { absoluteMeta } from './metaabs.js';
 
 const BASE = '/theoffice';
@@ -687,6 +688,9 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
   const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext)].filter(Boolean);
+  // Email: every company's own address. See docs/MAIL.md.
+  const mail = installMail(ext);
+  extensions.push(mail);
   // Their timers run with the engine's: started by whoever starts the engine, stopped on close.
   const engineStart = engine.start.bind(engine);
   engine.start = () => { engineStart(); for (const x of extensions) x.start?.(); };
@@ -899,8 +903,11 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       try { segments = m[1].split('/').filter(Boolean).map((s) => decodeURIComponent(s)); } catch { return reply(400, { error: 'bad_path' }); }
       // Counted once the path is really parsed, so no spelling of it slips past.
       if (segments[0] === 'form') limit('form', `${label}:${ip}`);
-      const [status, out] = await handleData({ db, req, floorId: f.id, project: pr.slug, segments, query: url.searchParams, body: () => readJson(req, DATA_LIMITS.bodyBytes), now });
+      let sent = null;
+      const [status, out] = await handleData({ db, req, floorId: f.id, project: pr.slug, segments, query: url.searchParams, body: () => readJson(req, DATA_LIMITS.bodyBytes).then((b) => (sent = b)), now });
       reply(status, out);
+      // A contact form on the company's own site also lands in its inbox.
+      if (segments[0] === 'form' && status === 200 && sent?.fields) { try { mail.formToInbox(f, pr.slug, segments[1], sent.fields); } catch (e) { log('error', 'mail_form', { err: scrub(e?.message, cfg) }); } }
     } catch (e) {
       if (e instanceof DataError || e instanceof HttpError) return reply(e.status, { error: e.code, message: e.message });
       log('error', 'data', { err: scrub(e?.message, cfg) });
@@ -974,6 +981,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
         if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...BASE_HEADERS, 'content-security-policy': SANDBOX_CSP, allow: 'GET, HEAD' }); return res.end(); }
         return serveSite(req, res, rawSegments(req.url));
       }
+      // Resend's signed webhook carries no Origin, so it is answered before the same-site checks every other call gets. See server/mail.js.
+      if (rest === '/api/mail/inbound' && req.method === 'POST') return mail.webhook(req, res, ip);
       if (rest.startsWith('/api/')) {
         const method = req.method;
         // A sibling subdomain counts as "same site", so SameSite=Lax alone would let a published page send the owner's cookie here.
