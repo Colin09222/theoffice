@@ -43,21 +43,22 @@ try {
       await p.until('document.body.dataset.page === "floor" && !!window.__office', 'straight to the floor', 15000);
       const unlockShown = await p.ev('!!document.querySelector(".modal")');
       check(`${label}: no Unlock or Go up step: the dialog closed itself`, !unlockShown);
-      await p.until('!!document.querySelector("[data-recovery-card] [data-recovery]")', 'the keys on the floor', 8000);
-      check(`${label}: the recovery code is on the floor`, /^RECOVER-/.test(await p.ev('document.querySelector("[data-recovery-card] [data-recovery]").textContent')));
-      await p.until('document.querySelectorAll("[data-launcher] [data-type]").length === 4', 'straight into the launcher', 15000);
-      check(`${label}: one tap and a paste land on the launcher`, true);
+      await p.until('!!document.querySelector("[data-setup-keys] [data-recovery]")', 'the keys, in Setup', 8000);
+      check(`${label}: the recovery code is on the Setup screen`, /^RECOVER-/.test(await p.ev('document.querySelector("[data-setup-keys] [data-recovery]").textContent')));
       await p.shot(join(SHOTS, `lobby-${label}.jpg`));
-      await p.click('[data-recovery-card] [data-recovery-done]');
+      await p.click('[data-setup-saved]');
+      await p.until('document.querySelectorAll("[data-launcher] [data-type]").length === 4', 'straight into Setup', 15000);
+      check(`${label}: one tap and a paste land on Setup`, true);
       await sleep(200);
-      check(`${label}: the code goes away only when saved`, !(await p.ev('!!document.querySelector("[data-recovery-card]")')));
+      check(`${label}: the code goes away only when saved`, !(await p.ev('!!document.querySelector("[data-setup-keys]")')));
       // After Go, the chat lands on the step the team is on.
       await p.click('[data-launcher] [data-type="website"]');
       await p.until('document.querySelectorAll("[data-launcher] [data-idea]").length === 3', 'ideas');
       await p.click('[data-launcher] [data-idea]');
+      await p.click('[data-next]');
       await p.until('!!document.querySelector("[data-go]")', 'Go');
       await p.click('[data-go]');
-      await p.until('!!document.querySelector("[data-maker]")', 'the maker card', 15000);
+      await p.until('!!document.querySelector("[data-maker]") && !document.querySelector(".setup")', 'the maker card', 15000);
       await sleep(500);
       const onStep = await p.ev(`(() => {
         const step = document.querySelector('[data-maker] [data-step-state="doing"], [data-maker] [data-step-state="todo"]');

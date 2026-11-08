@@ -48,7 +48,7 @@
 .setup-field.bad input { border-color: var(--brand); } .setup-field.bad small { color: #c4501f; font-weight: 700; }
 .setup-plan { padding: 4px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
 .setup-plan-row { display: flex; align-items: center; gap: 10px; min-height: 44px; } .setup-plan-row + .setup-plan-row { border-top: 1px solid var(--line); }
-.setup-plan input { flex: 1; min-width: 0; min-height: 40px; padding: 0; background: none; border: 0; }
+.setup-plan input { flex: 1; min-width: 0; min-height: 44px; padding: 0; background: none; border: 0; }
 .setup-plan input:focus { outline: none; }
 .setup-foot { flex: none; padding: 8px 20px calc(10px + env(safe-area-inset-bottom)); }
 .setup-foot:empty { display: none; }
@@ -65,5 +65,8 @@
 .setup-keys { margin-top: 14px; } .setup-keys .recovery { display: grid; gap: 10px; padding: 0; background: none; color: inherit; }
 .setup-keys code { display: block; padding: 14px; font: 700 16px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
 .setup-keys .btn { justify-self: start; min-height: 44px; padding: 0 20px; border: 0; border-radius: 999px; background: var(--brand-soft); color: var(--soft-ink); box-shadow: none; font: 600 15px var(--font); }
+/* The app's own fields have a heavy frame and an inner shadow. Not here. */
+.setup input, .setup textarea { box-shadow: none; appearance: none; -webkit-appearance: none; }
+.setup input:focus-visible, .setup textarea:focus-visible { outline: none; }
 body.kb-open .setup-fine, body.kb-open .setup-team { display: none; }
 @media (min-width: 761px) { .setup-main { padding-top: 3vh; } .setup-q { font-size: 30px; } }

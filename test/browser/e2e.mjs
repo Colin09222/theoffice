@@ -73,8 +73,8 @@ async function run(label, opts, t, adminCode) {
     await p.click('.modal button[type=submit]');
     // Straight up to the floor: the recovery code waits on a card there, until the boss says it's saved.
     await p.until('document.body.dataset.page === "floor" && !!window.__office', 'floor page');
-    await p.until('document.querySelector("[data-recovery-card] [data-recovery]") !== null', 'recovery code');
-    const rec = await p.ev('document.querySelector("[data-recovery]").textContent');
+    await p.until('document.querySelector("[data-setup-keys] [data-recovery]") !== null', 'recovery code in Setup');
+    const rec = await p.ev('document.querySelector("[data-setup-keys] [data-recovery]").textContent');
     if (!/^RECOVER-/.test(rec)) throw new Error('no recovery code');
     const ck = (await p.cookies()).find((c) => c.name === 'office_s');
     if (!ck || !ck.httpOnly || !ck.secure || ck.sameSite !== 'Lax' || ck.path !== '/theoffice') throw new Error(`cookie flags: ${JSON.stringify(ck && { h: ck.httpOnly, s: ck.secure, l: ck.sameSite, p: ck.path })}`);
@@ -82,24 +82,27 @@ async function run(label, opts, t, adminCode) {
     await sleep(2200);
     await shot('04-floor-new');
   });
-  await step(tag('a new floor starts in setup and lands in the manager chat'), async () => {
-    await p.until('window.__office.state.floor.setup === true && document.querySelector("[data-setup]") !== null && document.querySelector(".chat-input textarea") !== null', 'setup in the chat');
-  });
   const slug = await p.ev('window.__office?.slug');
-  await step(tag('a new floor asks what we are making, with four clear ways in, on screen and big enough to tap'), async () => {
-    await p.until('document.querySelectorAll("[data-launcher] .launch-type").length === 4', 'the launcher');
+  await step(tag('a new floor starts in the full-screen Setup, not the chat'), async () => {
+    await p.until('window.__office.state.floor.setup === true && !!document.querySelector(".setup [data-setup-saved]")', 'Setup, with the keys');
+    await p.click('[data-setup-saved]');
+    await p.until('document.querySelectorAll(".setup [data-type]").length === 4', 'the first question');
+  });
+  await step(tag('Setup asks what we are making, with four clear ways in, on screen and big enough to tap'), async () => {
     const info = await p.ev(`(() => {
-      const list = document.querySelector(".chat-list"); list.scrollTop = list.scrollHeight;
-      const panel = document.querySelector(".floor-panel").getBoundingClientRect();
-      const input = document.querySelector(".chat-input").getBoundingClientRect();
-      return { names: [...document.querySelectorAll(".launch-type b")].map((b) => b.textContent), boxes: [...document.querySelectorAll(".launch-type")].map((e) => { const r = e.getBoundingClientRect(); return { h: r.height, inPanel: r.left >= panel.left - 1 && r.right <= panel.right + 1, clearOfInput: r.bottom <= input.top + 1 || r.top >= input.bottom }; }), welcome: document.querySelector(".msg.manager").textContent, note: document.querySelector("[data-launcher] .fineprint").textContent };
+      const root = document.querySelector(".setup").getBoundingClientRect();
+      return { names: [...document.querySelectorAll(".setup [data-type] b")].map((b) => b.textContent), boxes: [...document.querySelectorAll(".setup [data-type]")].map((e) => { const r = e.getBoundingClientRect(); return { h: r.height, inside: r.left >= root.left - 1 && r.right <= root.right + 1 }; }), chat: !!document.elementFromPoint(root.x + root.width / 2, root.y + root.height / 2)?.closest(".setup") };
     })()`);
     if (info.names.join() !== 'Game,App / SaaS,Website,Business') throw new Error(`names: ${info.names}`);
-    if (!/Tap one below|our first job/.test(info.welcome)) throw new Error(`welcome: ${info.welcome}`);
-    if (!/Nobody here can post, run ads or spend money, and email to anyone new waits for your OK/.test(info.note)) throw new Error(`note: ${info.note}`);
-    for (const b of info.boxes) if (b.h < 44 || !b.inPanel || !b.clearOfInput) throw new Error(`a button is badly placed: ${JSON.stringify(b)}`);
+    if (!info.chat) throw new Error('Setup is not on top of the floor');
+    for (const b of info.boxes) if (b.h < 44 || !b.inside) throw new Error(`a button is badly placed: ${JSON.stringify(b)}`);
     await sleep(200);
     await p.shot(join(OUT, `lanes-new-floor-${label}.jpg`));
+  });
+  await step(tag('the way out goes straight to the manager chat, and the floor is still waiting for a name'), async () => {
+    await p.click('[data-setup-out]');
+    await p.until('!document.querySelector(".setup") && window.__office.state.floor.setup === true && document.querySelector("[data-setup]") !== null && document.querySelector(".chat-input textarea") !== null', 'the chat, with the note');
+    if (await p.ev('document.querySelector("[data-launcher]") !== null')) throw new Error('the launcher came back at them');
   });
   await step(tag('the manager makes the company by talking, and the floor updates live'), async () => {
     await p.type('.chat-input textarea', `A bakery that works through the night, called ${companyName}.`);

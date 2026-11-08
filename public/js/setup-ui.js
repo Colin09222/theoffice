@@ -111,7 +111,7 @@ function openSetup(page, { again = false } = {}) {
       q('What are we making?'),
       h('div.setup-list', {}, ...types.map(([id, label, blurb]) => h('button.setup-choice', { type: 'button', 'data-type': id, onclick: () => { Object.assign(S, { type: id, label, picked: '', own: '' }); render('which'); } },
         h('span.setup-tile', { css: { background: TILE[id] || '#FFF2D6' } }, typeIcon(id)), h('span', {}, h('b', {}, label), h('small', {}, blurb))))));
-    foot.replaceChildren(btn('ghost.wide.setup-out', { 'data-setup-out': '', onclick: toTheManager }, 'I\'d rather just tell the manager'));
+    foot.replaceChildren(...(again ? [] : [btn('ghost.wide.setup-out', { 'data-setup-out': '', onclick: toTheManager }, 'I\'d rather just tell the manager')]));
   }
   function which() {
     const who = (page.state.agents || []).find((a) => a.role === 'researcher')?.name;
@@ -150,6 +150,8 @@ function openSetup(page, { again = false } = {}) {
     });
   }
   function pick(card) {
+    // The same pick again, after a look back: what they've edited on Ready is still theirs.
+    if (S.card && S.card.id === card.id && S.card.pitch === card.pitch) { render('ready'); return; }
     S.card = card;
     Object.assign(S, { name: card.name, pitch: card.pitch, goal: card.goal, plan: (card.plan || []).join('\n') });
     if (!S.typedCompany) S.company = card.name;
