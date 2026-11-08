@@ -28,8 +28,8 @@ Server code is a separate, rare thing: see `docs/OFFICE-RUNNER.md`. A page finds
 - **CORS:** a request with an `Origin` must come from one of the project's own origins (its label and its live bought domains), or it gets 403 and
   no CORS headers. A sibling project is refused even though browsers call it "same site". Writes need an `Origin`; WebSockets check it on upgrade.
 - **Accounts:** scrypt (N=16384) in the thread pool, at most 2 at once; sessions are random 256-bit tokens stored as SHA-256 hashes, 30 days.
-  Log-ins are limited per account and address; a wrong password and an unknown name look the same. **No email is sent**, so there is no
-  password reset; the SDK guide tells the staff to say so.
+  Log-ins are limited per account and address; a wrong password and an unknown name look the same. An account may have an email
+  (optional); with one it gets a welcome email and can reset a forgotten password (see "Email for accounts" below).
 - **Ownership:** anyone can read a document unless it was added `{private: true}`; only its owner can change or delete it. Guests own things
   through a random token in their browser, and keep them when they sign up.
 - **Uploads** are typed from their bytes (images, sound, video only; never HTML, SVG or script) and served with `nosniff`, a `sandbox` CSP and
@@ -56,6 +56,39 @@ Request counts are kept in memory and written once a minute. Memory stays small:
 (20 MB) and 2 password hashes (32 MB) are in flight, and query responses stop at 512 KB.
 Measured: 300 live players in 19 full rooms, each setting 1 KB of state and sending ten 1 KB messages, added about 3 MB of heap
 (and 50 MB of RSS, test clients' sockets included); everything was released when they left.
+
+## Email for accounts
+Code: `server/cloud/auth-mail.js`, with small hooks in `server/cloud/index.js` (routes), `server/app.js` (the reset page), `server/mail.js`
+(`by: 'app'` and the held reset text) and `server/cloud/schema.js` (`cloud_resets`, `cloud_mail_days`). Tests: `test/auth-mail.test.js`, `npm run e2e:signup-mail`.
+
+- **From the company's own address.** Every email goes through `engine.mail.send(floor, { by: 'app', ... })`, the company's normal mail path,
+  so the From is whatever that path picks for the floor (today `<company>@MAIL_DOMAIN`; a company's own domain once that lands), with the
+  company's signature. `by: 'app'` skips the "new address needs the boss's tap" rule, because the visitor typed the address themselves and the
+  text is fixed by the building, not written by the staff.
+- **Welcome:** `POST auth/signup` with an `email` sends a short welcome after the account is made. The reply says `email: {welcome}`:
+  `sending`, `none` (no email given), `off` (email isn't on in the building, or paused) or `full` (the project's daily allowance is spent).
+  Sign-up never waits for or fails on the email.
+- **Forgot password:** `POST auth/forgot {email}` always answers `{ok: true, message}` with the same words whether or not the address has an
+  account, and the email is sent after the answer, so neither the words nor the timing tell. When email can't go out at all (not set up,
+  paused, today's allowance spent) it answers `{ok: false, emailAvailable: false, message}`, the same for every address. The link is
+  `<the project's own origin>/_office/reset#t=<token>`: the origin the request came from (its label or a live bought domain).
+- **Tokens:** 256 random bits; only the SHA-256 is stored (`cloud_resets`). One live link per account (a new one kills the old), 30 minutes,
+  single use: the token is spent in the same transaction that sets the password. A reset signs out every session of that account, kills
+  any other link, and signs this browser in. A token works only on its own project.
+- **The company's copy:** the company's outbox keeps the email with `[link left out of this copy]` in place of the link, so the boss and
+  the staff (`mail_inbox`, `mail_read`) never see a working link. The real text is held in memory until it is sent; a restart in between
+  sends nothing usable, and the visitor asks again.
+- **Reset page:** `/_office/reset` (with `reset.js` and `reset.css`) on every project's origin, under the page's own CSP (`script-src 'self'`),
+  `referrer-policy: no-referrer`, noindex. It takes the token out of the address bar at once and calls `office.auth.resetPassword`.
+- **Limits:** forgot per address 5 an hour and per project 60 an hour (429), per account 3 an hour (silently: the same answer, no email);
+  reset per address 20 and per project 200 an hour; `auth/email` changes 10 an hour per account. Each project may send `OFFICE_APP_MAIL_DAY`
+  (default 30) account emails a day (`appMailDaily` in config), and every one also counts against `MAIL_FLOOR_DAILY` and `MAIL_BUILDING_DAILY`.
+  An email the floor's or building's cap stops is handed back to the project's allowance.
+- **Older accounts:** `POST auth/email {email, password}` adds or changes the email (needs the password, so a stolen session can't redirect
+  resets; changing it kills any open link). `GET auth/email` says `{available}`.
+- SDK: `office.auth.forgotPassword(email)`, `resetPassword(token, password)`, `setEmail(email, password)`, `emailAvailable()`; `signUp` takes `email`.
+  The App starter asks for an optional email and has "Forgot password?" (`#/forgot`).
+- Not done: no email confirmation (an address is taken on trust, so a typo'd address just never gets mail), no "email changed" notice to the old address.
 
 ## AI (`office.ai`)
 `POST /_office/cloud/ai/chat`, handled by `server/cloud/ai.js`. A page sends `{prompt or messages, system, maxTokens, model: 'fast' | 'smart'}` and gets `{text, truncated, refused, model, tokens, left}`.
@@ -107,5 +140,5 @@ it is now scoped to the lobby's `section.stack`.
 
 ## Not done
 No streaming from `office.ai` and no per-floor total across a floor's projects (the building's daily ceiling is what bounds the money).
-No email (so no password reset or verification), no server-side code or per-collection rules beyond private/public and ownership,
+No email verification, no server-side code or per-collection rules beyond private/public and ownership,
 and rooms keep no state once empty. The container's `mem_limit` is still 700m in `docker-compose.yml`; the backend fits within it.
