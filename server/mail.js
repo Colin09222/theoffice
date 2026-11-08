@@ -113,7 +113,7 @@ export function installMail(ext) {
   const taken = (local) => RESERVED_LOCAL.has(local) || !!get(db, 'SELECT 1 x FROM mail_addresses WHERE address=?', local);
   const localOk = (local) => LOCAL_RE.test(local) && !taken(local);
   const primary = (floorId) => get(db, 'SELECT address FROM mail_addresses WHERE floor_id=? AND is_primary=1', floorId)?.address || '';
-  const addressOf = (floorId) => { const l = primary(floorId); return l ? `${l}@${domain}` : ''; };
+  const addressOf = (floorId) => { const l = primary(floorId) || ensureAddress(get(db, 'SELECT * FROM floors WHERE id=?', floorId)); return l ? `${l}@${domain}` : ''; };
   const baseFor = (f) => (/^floor-\d+$/.test(f.slug) && f.name ? slugify(f.name, f.slug) : f.slug);
   function ensureAddress(f) {
     if (!f || !f.name || f.filler) return '';
@@ -242,15 +242,15 @@ export function installMail(ext) {
   /** Works through received emails: fetch each one whole from the receiving API, then file it on the floor it was sent to. */
   function drain() {
     if (draining) return draining;
-    draining = (async () => {
-      try {
-        for (let round = 0; round < 20 && !stopped; round++) {
-          const rows = all(db, 'SELECT * FROM mail_inbound WHERE done_at IS NULL AND next_at<=? ORDER BY created_at LIMIT 5', now());
-          if (!rows.length) break;
-          for (const row of rows) await fetchOne(row);
-        }
-      } finally { draining = null; }
+    const work = (async () => {
+      for (let round = 0; round < 20 && !stopped; round++) {
+        const rows = all(db, 'SELECT * FROM mail_inbound WHERE done_at IS NULL AND next_at<=? ORDER BY created_at LIMIT 5', now());
+        if (!rows.length) break;
+        for (const row of rows) await fetchOne(row);
+      }
     })();
+    // Cleared after it is set, even when there was nothing to do and the work finished at once.
+    draining = work.finally(() => { draining = null; });
     return draining;
   }
   const finish = (row, outcomeText) => run(db, 'UPDATE mail_inbound SET done_at=?, outcome=? WHERE email_id=?', now(), outcomeText, row.email_id);
@@ -363,7 +363,7 @@ export function installMail(ext) {
 
   /** A contact form on the company's own site, through Office Cloud: it lands in the inbox, flagged as typed into a form, so its address is unchecked. */
   function formToInbox(f, project, form, fields) {
-    if (!f || f.status !== 'active' || !primary(f.id) || fields?.website || fields?._hp) return false;  // the hidden field only a bot fills in
+    if (!f || f.status !== 'active' || !(primary(f.id) || ensureAddress(f)) || fields?.website || fields?._hp) return false;  // the hidden field only a bot fills in
     const entries = Object.entries(fields || {}).filter(([k, v]) => typeof k === 'string' && (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'));
     if (!entries.length || !(FORM_NAMES.test(form) || entries.some(([k]) => FORM_FIELDS.test(k)))) return false;
     if (!capIn(f.id, true)) return false;
@@ -413,7 +413,7 @@ export function installMail(ext) {
     if (buildingPaused(db)) throw new MailError('Sending email is paused for the whole building right now. Nothing was sent.', 423, 'mail_paused');
     const fm = floorMail(f.id);
     if (fm.paused) throw new MailError('Sending email is paused for this company until the building manager has looked at it. Nothing was sent.', 423, 'mail_paused');
-    const from = primary(f.id);
+    const from = primary(f.id) || ensureAddress(f);
     if (!from) throw new MailError('This company has no email address yet.', 409, 'no_address');
     const toList = recipients(to); const ccList = cc && (Array.isArray(cc) ? cc.length : String(cc).trim()) ? recipients(cc) : [];
     const everyone = [...new Set([...toList, ...ccList])];
@@ -440,7 +440,7 @@ export function installMail(ext) {
       const headersInReplyTo = replyOf?.message_id || '';
       const refs = replyOf ? oneLine(`${replyOf.refs || ''} ${replyOf.message_id || ''}`, 2000) : '';
       const r = run(db, `INSERT INTO mail_messages (floor_id,thread_id,direction,source,from_addr,from_name,to_addrs,cc_addrs,subject,text,in_reply_to,refs,status,agent_id,by_boss,reason,created_at,updated_at)
-        VALUES (?,?,'out','email',?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, f.id, threadId, `${c.from}@${domain}`, f.name, JSON.stringify(c.toList), JSON.stringify(c.ccList), c.subj, c.body, headersInReplyTo, refs, c.reason ? 'awaiting_boss' : 'queued', agentId, by === 'boss' ? 1 : 0, c.reason, t, t);
+        VALUES (?,?,'out','email',?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, f.id, threadId, `${c.from}@${domain}`, f.name, JSON.stringify(c.toList), JSON.stringify(c.ccList), c.subj, c.body, headersInReplyTo, refs, c.reason ? 'awaiting_boss' : 'queued', agentId ?? null, by === 'boss' ? 1 : 0, c.reason, t, t);
       run(db, 'UPDATE mail_threads SET last_at=? WHERE id=?', t, threadId);
       return Number(r.lastInsertRowid);
     });
