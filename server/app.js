@@ -896,6 +896,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...HEAD, allow: 'GET, HEAD' }); return res.end(); }
     limit('publicSite', ipOf(req));
     if (segs[0] === '_office' && segs[1] === 'pay' && segs.length === 2) return servePay(res, pr, HEAD);
+    const resetPage = segs[0] === '_office' && segs.length === 2 && cloud.resetAsset(segs[1]);
+    if (resetPage) { res.writeHead(200, { ...HEAD, 'content-type': resetPage.type, 'referrer-policy': 'no-referrer', 'x-robots-tag': 'noindex, nofollow' }); return res.end(req.method === 'HEAD' ? undefined : resetPage.body); }
     const lib = sharedAsset(segs);
     if (lib) { res.writeHead(200, { ...HEAD, 'content-type': lib.type, ...(lib.cache ? { 'cache-control': lib.cache } : {}) }); return res.end(req.method === 'HEAD' ? undefined : lib.body); }
     let hit = publishedFile(f, pr, segs, raw.endsWith('/')), base = raw;

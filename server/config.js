@@ -82,6 +82,8 @@ export function loadConfig(env = process.env, overrides = {}) {
     officeFetchEnabled: !/^(0|false|no|off)$/i.test(String(env.OFFICE_FETCH_ENABLED ?? '').trim()),
     // The defaults are in server/cloud/powers.js; a setting here replaces one. The building's daily ceiling is for the admin's eyes only.
     cloudAiLimits: numbersOnly({ maxTokens: env.OFFICE_AI_MAX_TOKENS, dayFast: env.OFFICE_AI_DAY_FAST, daySmart: env.OFFICE_AI_DAY_SMART, buildingDayUsd: env.OFFICE_AI_BUILDING_DAY_USD }),
+    // Account emails (welcome, password reset) one published project may send a day, on top of the floor's and building's mail caps.
+    appMailDaily: Number.isFinite(Number(env.OFFICE_APP_MAIL_DAY)) && String(env.OFFICE_APP_MAIL_DAY ?? '').trim() !== '' ? Math.max(0, Number(env.OFFICE_APP_MAIL_DAY)) : 30,
     cloudFetchLimits: numbersOnly({ dayProject: env.OFFICE_FETCH_DAY, hostDelayMs: env.OFFICE_FETCH_HOST_DELAY_MS, cacheTtlMs: env.OFFICE_FETCH_CACHE_MS }),
     // A real computer for the Builder and Tester: Claude Managed Agents, one Anthropic-hosted container per task. Off until the deploy turns it on.
     computerEnabled: env.COMPUTER_ENABLED === '1',

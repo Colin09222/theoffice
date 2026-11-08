@@ -116,6 +116,19 @@
       setName: function (name) { return request('PATCH', 'auth/me', { name: name }).then(function (r) { setAuth(session, r.user); return r.user; }); },
       changePassword: function (current, next) { return request('POST', 'auth/password', { password: current, newPassword: next }).then(function () { return true; }); },
       deleteAccount: function (password) { return request('POST', 'auth/delete', { password: password }).then(function () { setAuth(null, null); return true; }); },
+      /** Emails a link to choose a new password. Resolves to {ok, message} whether or not the address has an account; show message as it is. */
+      forgotPassword: function (email) {
+        return request('POST', 'auth/forgot', { email: email }).then(function (r) { return { ok: !!r.ok, message: r.message }; }, function (e) {
+          if (e.code === 'local' || e.code === 'offline') return { ok: false, message: e.code === 'local' ? 'Password reset works once the site is published.' : e.message };
+          throw e;
+        });
+      },
+      /** The token from the reset link (the built-in page at /_office/reset does this already) and the new password. Signs the person in. */
+      resetPassword: function (token, password) { return request('POST', 'auth/reset', { token: token, password: password }).then(function (r) { setAuth(r.session, r.user); return r.user; }); },
+      /** Add or change the signed-in person's email (needs their password). Pass '' to remove it from an account that has a username. */
+      setEmail: function (email, password) { return request('POST', 'auth/email', { email: email, password: password }).then(function (r) { setAuth(session, r.user); return r.user; }); },
+      /** Whether this site can send account email right now (welcome and password reset). Resolves to true or false. */
+      emailAvailable: function () { return request('GET', 'auth/email').then(function (r) { return !!r.available; }, function () { return false; }); },
     };
 
     // ---- the database ----

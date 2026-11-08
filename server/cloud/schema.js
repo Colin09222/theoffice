@@ -15,6 +15,13 @@ CREATE TABLE IF NOT EXISTS cloud_sessions (
   hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, floor_id INTEGER NOT NULL, project TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS cloud_sessions_user ON cloud_sessions(user_id, created_at);
+CREATE TABLE IF NOT EXISTS cloud_resets (
+  hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, floor_id INTEGER NOT NULL, project TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS cloud_resets_user ON cloud_resets(user_id);
+CREATE TABLE IF NOT EXISTS cloud_mail_days (
+  floor_id INTEGER NOT NULL, project TEXT NOT NULL, day TEXT NOT NULL, sent INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (floor_id, project, day)
+);
 CREATE TABLE IF NOT EXISTS cloud_docs (
   floor_id INTEGER NOT NULL, project TEXT NOT NULL, coll TEXT NOT NULL, id TEXT NOT NULL, owner TEXT NOT NULL, owner_name TEXT NOT NULL DEFAULT '',
   private INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL, size INTEGER NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
@@ -70,6 +77,6 @@ CREATE TABLE IF NOT EXISTS chat_questions (
 CREATE INDEX IF NOT EXISTS chat_questions_waiting ON chat_questions(floor_id, status, id);
 `;
 // Child rows first, so a wipe never leaves orphans if it stops part way.
-export const CLOUD_TABLES = ['cloud_docs', 'cloud_saves', 'cloud_scores', 'cloud_file_chunks', 'cloud_files', 'cloud_sessions', 'cloud_users', 'cloud_usage', 'chat_messages', 'chat_questions', 'chat_conversations'];
+export const CLOUD_TABLES = ['cloud_docs', 'cloud_saves', 'cloud_scores', 'cloud_file_chunks', 'cloud_files', 'cloud_resets', 'cloud_sessions', 'cloud_users', 'cloud_usage', 'chat_messages', 'chat_questions', 'chat_conversations'];
 // Switches and today's AI and web counts. Clearing a project's data leaves these alone, or clearing it would hand back the day's allowance and lift a pause. They only go with the floor.
-export const CLOUD_POWER_TABLES = ['cloud_powers', 'cloud_power_days', 'chat_settings'];
+export const CLOUD_POWER_TABLES = ['cloud_powers', 'cloud_power_days', 'chat_settings', 'cloud_mail_days'];
