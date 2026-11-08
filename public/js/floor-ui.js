@@ -18,6 +18,7 @@ import { aheadState, isParked, lift, park, peekAhead, unpark } from './floorcach
 import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } from './mail-ui.js';
 import { renderServers, renderServerRequests, serverTab, serversPending } from './server-panel.js';
 import { payTab, payPending, renderPayRequests, renderPay, onPayLanding } from './pay-ui.js';
+import { renderNumbers } from './numbers-ui.js';
 import { launchFlow, makerCard } from './launch-ui.js';
 import { recoveryBox } from './dom.js';
 import * as THREE from '../vendor/three/three.module.min.js';
@@ -395,6 +396,7 @@ class FloorPage {
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
       tabs.push(['orders', 'Orders']);  // floors-plus: standing orders, after every existing tab
       const srv = serverTab(this); if (srv) tabs.push(srv);  // server slots (server-panel.js)
+      tabs.push(['numbers', 'Numbers']);  // the company dashboard: boss-only (numbers-ui.js)
     }
     if (isPhone()) tabs.push(['about', 'About']);  // on a phone the company card lives in the sheet
     return tabs;
@@ -430,6 +432,7 @@ class FloorPage {
     if (this.tab === 'inbox') renderInbox(this);
     if (this.tab === 'servers') renderServers(this);
     if (this.tab === 'pay') renderPay(this);
+    if (this.tab === 'numbers') renderNumbers(this);
   }
   renderBanner() {
     const f = this.state.floor;

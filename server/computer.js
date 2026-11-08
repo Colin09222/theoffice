@@ -615,6 +615,8 @@ export class Computer {
     if (st.agent.role === 'tester') throw new WorkspaceError('testers report back rather than publish');
     const slug = String(a.project ?? st.project);
     if (slug !== st.project) throw new WorkspaceError(`this computer can only publish its own project, "${st.project}"`);
+    const held = this.engine.daily?.publishHold(st.floor.id, slug, `${a.title ?? ''} ${a.description ?? ''}`);
+    if (held) throw new WorkspaceError(held);
     const kind = ['site', 'app', 'game', 'simulation', 'doc', 'research'].includes(a.kind) ? a.kind : 'site';
     const directory = cleanDirectory(a.directory);
     const entry = { project: slug, title: String(a.title || slug).slice(0, 120), description: String(a.description || '').slice(0, 300), kind, directory, reason: String(a.claims_ok_because || '').slice(0, 300) };

@@ -173,6 +173,7 @@ export function installModes(ext) {
     const state = engine.floorState(floor.id);
     if (state.budgetStopped) return 'gone home for today';
     if (engine.budget.out(engine.agentProvider({ role: 'manager' }))) return 'work has stopped for now';
+    if (engine.daily?.running(floor.id)) return 'busy';  // the day's run has the floor
     if (busy(floor.id)) return 'busy';
     // A standing order that has come due goes first. It needs the same quiet floor.
     if (get(db, "SELECT 1 x FROM standing_orders WHERE floor_id=? AND status='active' AND next_run_at<=?", floor.id, now())) return 'a standing order is due';
@@ -238,7 +239,7 @@ export function installModes(ext) {
   function updatePlan(floor, { goal, nextUp, summary, goalReached = false, bossSaid = false } = {}) {
     const row = rowOf(floor.id);
     const fields = {}; let refused = '', reached = null;
-    const next = typeof goal === 'string' ? plain(goal, GOAL_MAX) : '';
+    const next = typeof goal === 'string' ? plain(engine.daily ? engine.daily.clean(floor.id, goal) : goal, GOAL_MAX) : '';  // a proposed next goal gets said in the chat
     if (goalReached) {
       if (!row.goal) refused = 'There is no goal to reach yet: the boss gives one or picks one of yours.';
       else if (!next || next === row.goal) refused = 'Put the next goal you propose in goal, so the team can keep going. The goal was not changed.';
@@ -433,7 +434,7 @@ export function installModes(ext) {
   });
 
   engine.modes = {
-    set, updatePlan, learnZone, stateLine, tick, busy, publicView, ownerView,
+    set, updatePlan, learnZone, stateLine, tick, busy, blocker, publicView, ownerView,
     running: (floorId) => !!runningRun(floorId),
     needsGoal: (floorId) => wantsGoal(rowOf(floorId)),
     // Staff go home outside set hours, unless the boss has brought them back in for something.

@@ -146,6 +146,11 @@ export function loadConfig(env = process.env, overrides = {}) {
     autopilotMaxFails: Math.max(1, num(env.AUTOPILOT_MAX_FAILS, 3)),
     autopilotRunTimeoutMin: num(env.AUTOPILOT_RUN_TIMEOUT_MIN, 180),
     modesTickMs: num(env.MODES_TICK_MS, 5000),
+    // The daily run (docs/NUMBERS.md): off per floor until its boss turns it on. These limit it across the building and per run.
+    dailyMaxFloors: Math.max(0, num(env.DAILY_MAX_FLOORS, 5)),
+    dailyTokenCap: Math.max(1, num(env.DAILY_TOKEN_CAP, 5000000)),
+    dailyRunTimeoutMin: num(env.DAILY_RUN_TIMEOUT_MIN, 180),
+    dailyTickMs: num(env.DAILY_TICK_MS, 30000),
     // Filler companies (floors-plus): scripted floors that look busy and never call a model. Off unless asked for.
     fillerCompanies: env.FILLER_COMPANIES === '1',
     fillerTickMs: num(env.FILLER_TICK_MS, 9000),

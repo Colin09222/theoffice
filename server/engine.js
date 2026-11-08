@@ -347,6 +347,7 @@ export class Engine {
       ...(this.modes ? [this.modes.stateLine(floor.id)] : []),
       ...(this.business?.active(floor.id) ? [this.business.stateLine(floor.id)] : []),
       ...(this.mail ? [this.mail.stateLine(floor.id)] : []),
+      ...(this.daily ? this.daily.privateLines(floor.id) : []),
     ].join('\n');
     // 'office' notices (outage, stop) are for the boss only. If they reached the model it would lose the thread.
     // Reports stay out too: they quote what was found on pages, and the manager has the facts in the state message.
@@ -370,7 +371,8 @@ export class Engine {
       kind: 'manager', setup: !floor.name, floorId: floor.id, floorSlug: floor.slug, step: 0, lastBoss: bossMsgs[bossMsgs.length - 1]?.text || '', bossFiles: out.filter((m) => m.role === 'user' && m.files).flatMap((m) => m.files), allBoss: bossMsgs.map((m) => m.text).join(' '),
       business: this.business?.active(floor.id) ? { ...this.business.brief(floor.id), note: last?.role === 'note' && last.text.startsWith('Business mode:') ? last.text : '' } : null,
       autopilot: last?.role === 'note' && last.text.startsWith('Work mode:') && this.modes ? this.modes.brief(floor.id) : null,
-      goalNeeded: last?.role === 'note' && last.text.startsWith('Goal needed:'), needsGoal: !!this.modes?.needsGoal(floor.id),
+      goalNeeded: last?.role === 'note' && last.text.startsWith('Goal needed:'), needsGoal: !!(this.modes?.needsGoal(floor.id) || this.daily?.needsGoal(floor.id)),
+      daily: this.daily?.running(floor.id) ? { planning: last?.role === 'note' && last.text.startsWith('Daily run:') } : null,
       isFreshBoss: last?.role === 'boss', answered: last?.role === 'note' && /answered/.test(last.text), guidance: last?.role === 'help' ? last.text : '', helpDeadEnd: last?.role === 'note' && /buddehbot/.test(last.text),
       toReview, reviewsWaiting: counts.review, openCount: counts.n - counts.review, published,
       slugFor: (s) => slugify(String(s).replace(/\[[a-z]+\]/g, '').replace(ACT_WORDS, ' '), 'launch').slice(0, 30).replace(/-+$/, '') || 'launch',
@@ -397,7 +399,7 @@ export class Engine {
     // Woken to ask the boss for a work-mode goal: that turn asks, and hands out no work.
     ctx.goalAsk = !ctx.bossTurn && !!meta.goalNeeded;
     // A job the team picked for itself in a work mode. A turn that reads something new from the boss is the boss's, whatever else is going on.
-    ctx.autonomous = !ctx.bossTurn && !!this.modes?.running(floorId);
+    ctx.autonomous = !ctx.bossTurn && !!(this.modes?.running(floorId) || this.daily?.running(floorId));
     meta.autonomous = ctx.autonomous;
     if (ctx.autonomous) { const b = this.modes.brief(floorId); meta.modeList = b.nextUp; meta.modeGoal = b.goal; }
     const call = { floorId, agent: mgr, signal, project: '', autonomous: ctx.autonomous };
@@ -704,6 +706,7 @@ export class Engine {
     const open = get(this.db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked')", floor.id).n;
     if (open >= this.cfg.maxOpenTasks) throw new ToolError('too many open tasks; let some finish first');
     if (get(this.db, 'SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND created_at>=?', floor.id, this.now() - 86400000).n >= this.cfg.maxTasksPerDay) throw new ToolError('this floor has hit its task limit for today');
+    if (this.daily) ({ title, brief, plan } = this.daily.taskWords(floor.id, target.role, { title, brief, plan: plan ?? '' }));
     const project = wanted || (priv || floor.default_private ? 'private-work' : '');
     if (project) this.upsertProject(floor, project, { title: project, makePrivate: priv });
     const deps = dependsOn.map(Number).filter((n) => Number.isInteger(n)).slice(0, 10);
@@ -874,6 +877,8 @@ export class Engine {
     if (role !== 'note') this.emit(floorId, 'message', { id: Number(r.lastInsertRowid), role, agentId, text, createdAt: this.now(), ...attachments }, { chat: true, ownerOnly: role === 'budget' });
   }
   managerSays(floorId, text) {
+    // In a daily run the manager has the company's private numbers in front of it, so what it says then is the boss's alone, even with public chat on.
+    if (this.daily?.running(floorId)) { this.reportToBoss(floorId, text); return; }
     const mgr = get(this.db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", floorId);
     this.addMessage(floorId, 'manager', mgr?.id ?? null, text);
   }
@@ -891,7 +896,7 @@ export class Engine {
   /** Words passing between two people, cut down from the real thing. The room acts it out and the Talk tab keeps it, under the same privacy rules as the feed. */
   talk(floorId, from, to, text, { kind, project = '' }) {
     if (!from) return;
-    const said = scrub(text, this.cfg);
+    const said = scrub(this.daily ? this.daily.clean(floorId, text) : text, this.cfg);
     const line = talkLine(said);
     if (!line) return;
     // Only the cut is kept, and the cut can fall inside a private name, so what a visitor gets is worked out here. A name goes before cutting.

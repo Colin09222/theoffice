@@ -50,4 +50,6 @@ Pace and safety:
 
 Routes (boss only): `GET/POST /api/floors/:slug/work-mode`, `POST /api/floors/:slug/work-mode/zone`. Visitors get `floor.workMode` (the sign and whether it's closed); the boss also gets `workPlan`.
 
+The daily run ("Run my company every day", under Customise, Hours) follows the same goal-first rule. It's opt-in per floor and has its own guards: see `docs/NUMBERS.md`.
+
 Proof in mock mode: `AI_MODE=mock AUTOPILOT_GAP_MIN=0.05 node scripts/proof-modes.mjs` (output in `docs/proof-modes/mock-nonstop-3-jobs.txt`). Browser check: `node test/browser/modes.mjs`, `MODES_SHOTS=dir` for pictures.
