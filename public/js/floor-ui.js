@@ -9,11 +9,9 @@ import { renderCard, buildScrubber, buildPins, wirePins, tabIcon } from './floor
 import { icon } from './icons.js';
 import { attachTray, attachmentEl, ACCEPT } from './attach.js';
 import { portrait } from './portrait.js';
-import { lobbyMode } from './stack.js';
 import { muteButton, sfx } from './sfx.js';
 import { confetti, fanfare, mayParty } from './party.js';
 import { journeyBar, chipsRow, startButton, renderBusiness, businessActive, businessUnchanged } from './business-ui.js';
-import { handOver, takeHandoff } from './handoff.js';
 import { aheadState, isParked, lift, park, peekAhead, unpark } from './floorcache.js';
 import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } from './mail-ui.js';
 import { renderServers, renderServerRequests, serverTab, serversPending } from './server-panel.js';
@@ -188,7 +186,7 @@ class FloorPage {
     document.body.append(this.pinsEl);  // under the people's labels, so a pin never hides what someone is saying
     this.root.append(
       h('header.floor-top', {},
-        h('div.plaque-top', {}, h('button.btn.chrome.back', { type: 'button', 'aria-label': lobbyMode() === 'building' ? 'Back to building' : 'Back to the lobby', onclick: () => window.officeGo('/') }, icon('elevator'), h('span', {}, lobbyMode() === 'building' ? 'Back to building' : 'Lobby')), muteButton()),
+        h('div.plaque-top', {}, h('button.btn.chrome.back', { type: 'button', 'aria-label': 'Back to building', onclick: () => window.officeGo('/') }, icon('elevator'), h('span', {}, 'Back to building')), muteButton()),
         h('div.floor-title', {}, h('span.floor-num', {}, `Floor ${s.floor.number}`), this.logoEl, this.titleEl, this.tagEl),
         h('div.floor-meta', {}, this.statusEl, this.hoursEl = h('div.hours-sign', { 'data-hours': '' }, h('b'), h('small'))),
         this.cardEl),
@@ -223,15 +221,10 @@ class FloorPage {
     }
   }
   makeView() { return new OfficeView({ state: this.viewState(), labels: this.labels, onSmallTalk: (line) => this.addLocalTalk(line) }); }
-  /**
-   * Flown in from the 3D building: the very room the camera landed in, people mid-stride and all, brought up to date with what this
-   * viewer may see. A room that has changed since the building drew it is built afresh instead.
-   */
+  /** Back by the lift to a floor left a moment ago (see floorcache.js): the same room, brought up to date with what this viewer may see. */
   adoptView() {
-    const h = takeHandoff('in', this.slug);
-    // Flown in from the building, or back by the lift to a floor left a moment ago (see floorcache.js).
-    const v = h?.view || unpark(this.slug); if (!v || v.dead) return null;
-    if (!h) { v.bind(); v.labels = this.labels; v.pace = null; }
+    const v = unpark(this.slug); if (!v || v.dead) return null;
+    v.bind(); v.labels = this.labels; v.pace = null;
     const f = this.viewState().floor;
     if (JSON.stringify([v.decor, v.colors, v.companyName]) !== JSON.stringify([f.decor, f.colors, f.name])) { v.destroy(); return null; }
     v.tasks = this.state.tasks;
@@ -240,24 +233,6 @@ class FloorPage {
     v.syncAgents(this.viewState());
     for (const a of this.state.agents) v.agentEvent(a);
     return v;
-  }
-  /**
-   * Back to the 3D building: the room is handed back to the tower instead of being thrown away, and the frame on screen is held until
-   * the tower takes over, so the camera can fly out of it. False when the lobby will show the tower from outside, or on a page with no 3D.
-   */
-  handBack() {
-    const v = this.view;
-    if (!stage.ok || lobbyMode() !== 'building' || !v || this.dead || stage.view !== v || document.hidden) return false;
-    return new Promise((resolve) => {
-      const late = setTimeout(() => { stage.afterRender = null; resolve(false); }, 500);
-      stage.afterRender = () => {
-        clearTimeout(late);
-        stage.freezeFrame();
-        handOver('out', this.slug, { view: v, number: this.state.floor.number, state: this.state, camera: v.camera.clone(), yaw: null });
-        this.view = null;  // destroy() leaves it alone now
-        resolve(true);
-      };
-    });
   }
   /** A panel is open or it isn't; on a phone closed means just the tabs showing at the bottom. Either way the room is told what's left for it. */
   setPanel(open) { this.panelOpen = open; if (isPhone()) this.sheet = open ? this.openSize() : 'peek'; this.layout(); }

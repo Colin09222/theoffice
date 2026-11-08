@@ -54,10 +54,10 @@ A filler company is marked "filler" in the admin view with a "Remove" button. Fr
 
 ```sh
 node scripts/admin.mjs filler list
-node scripts/admin.mjs filler free --floor 37     # removes whatever filler sits on floor 37
-node scripts/admin.mjs filler remove --floor 37   # the same
-node scripts/admin.mjs filler seed                # put the set back (only the ones not removed by hand)
-node scripts/admin.mjs code --floor 37            # now a code can reserve it
+node scripts/admin.mjs filler free --floor 2      # removes whatever filler sits on floor 2
+node scripts/admin.mjs filler remove --floor 2    # the same
+node scripts/admin.mjs filler seed                # put the set back (only the ones not removed by hand, and only on the bottom two floors)
+node scripts/admin.mjs code --floor 2             # now a code can reserve it
 ```
 
 A removed filler stays removed across restarts; the seed never resurrects one that was taken away on purpose.

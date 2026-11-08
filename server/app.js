@@ -250,8 +250,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   });
   GET('/api/floors', async ({ res }) => {
     const rows = all(db, "SELECT * FROM floors WHERE status!='killed' ORDER BY number DESC");
-    // A hidden floor is left out of the directory and the lift, but its number is still taken.
-    const floors = rows.filter((f) => !f.hidden).map(floorCard);
+    // A hidden floor is left out of the directory and the lift, but its number is still taken. Only 1 to towerFloors are the building.
+    const floors = rows.filter((f) => !f.hidden && f.number <= cfg.towerFloors).map(floorCard);
     const taken = new Set(rows.map((f) => f.number));
     const reserved = new Set(all(db, 'SELECT floor_number n FROM codes WHERE claimed_at IS NULL AND floor_number IS NOT NULL').map((c) => c.n));
     // The floors that really are to let: a hidden floor's number and one a code is holding are neither listed nor offered.
@@ -264,12 +264,13 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const b = await readJson(req, 2048);
     const row = get(db, 'SELECT floor_number,claimed_at FROM codes WHERE hash=?', A.sha256(A.normalizeCode(b.code)));
     if (!row || row.claimed_at) throw new HttpError(404, 'bad_code', 'That code isn\'t valid, or it has already opened an office.');
-    json(res, 200, { ok: true, floor: row.floor_number ?? nextFreeFloor() });
+    json(res, 200, { ok: true, floor: row.floor_number && row.floor_number <= cfg.towerFloors ? row.floor_number : nextFreeFloor() });
   });
   function nextFreeFloor(wanted) {
     const taken = new Set(all(db, 'SELECT number FROM floors').map((f) => f.number));
     const reserved = new Set(all(db, 'SELECT floor_number n FROM codes WHERE claimed_at IS NULL AND floor_number IS NOT NULL').map((c) => c.n));
-    if (wanted) return taken.has(wanted) ? null : wanted;
+    // A code holding a floor beyond the building holds nothing: it takes the next free floor like any other.
+    if (wanted && wanted <= cfg.towerFloors) return taken.has(wanted) ? null : wanted;
     for (let n = 1; n <= cfg.towerFloors; n++) if (!taken.has(n) && !reserved.has(n)) return n;
     return null;
   }
@@ -453,7 +454,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // A floor opened with no name starts as floor-N. Once the company has a name, and while nothing has been published under the old slug, the slug
   // follows the name. The old slug stays reserved and keeps working, so a page already open and any link to it carry on.
   const adoptNameSlug = (f, name) => {
-    if (name.length < 2 || f.slug !== `floor-${f.number}`) return;
+    // floor-N-2 and so on: the plain floor-N can still be held by a company that has since moved to another number.
+    if (name.length < 2 || !new RegExp(`^floor-${f.number}(-\\d+)?$`).test(f.slug)) return;
     if (get(db, 'SELECT 1 x FROM projects WHERE floor_id=? AND published_at IS NOT NULL', f.id) || get(db, "SELECT 1 x FROM domain_orders WHERE floor_id=? AND status='live'", f.id)) return;
     const base = slugify(name, 'floor').slice(0, 36).replace(/-+$/, '');
     if (!base || /^floor-\d+$/.test(base)) return;

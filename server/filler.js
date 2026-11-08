@@ -130,11 +130,12 @@ CREATE TABLE IF NOT EXISTS filler_removed (key TEXT PRIMARY KEY, removed_at INTE
 }
 
 // ---- seeding ----
-// A free floor near the top, never floor 1, never one someone holds a code for, never one that exists already.
+// The demo floors: the bottom two and only those, so the top of the building stays empty and able to let. Never one someone holds a code for, never one that exists already.
+const DEMO_FLOORS = 2;
 function pickFloor(db, cfg) {
   const taken = new Set(all(db, 'SELECT number FROM floors').map((f) => f.number));
   const reserved = new Set(all(db, 'SELECT floor_number n FROM codes WHERE claimed_at IS NULL AND floor_number IS NOT NULL').map((c) => c.n));
-  for (let n = cfg.towerFloors - 3; n >= 2; n--) if (!taken.has(n) && !reserved.has(n)) return n;
+  for (let n = 1; n <= Math.min(DEMO_FLOORS, cfg.towerFloors); n++) if (!taken.has(n) && !reserved.has(n)) return n;
   return null;
 }
 function freeSlug(db, base) {
@@ -159,6 +160,8 @@ export function seedFillers(db, { cfg, models, engine = null, now = Date.now(), 
       run(db, 'INSERT OR REPLACE INTO filler_removed (key,removed_at) VALUES (?,?)', c.key, t);
     }
     if (!revive && get(db, 'SELECT 1 x FROM filler_removed WHERE key=?', c.key)) { out.skipped.push({ key: c.key, why: 'removed' }); continue; }
+    // Two demo companies at most, and one that was removed leaves its place free, not open to the next company on the list.
+    if (!revive && get(db, 'SELECT (SELECT COUNT(*) FROM filler_floors) + (SELECT COUNT(*) FROM filler_removed) n').n >= DEMO_FLOORS) { out.skipped.push({ key: c.key, why: 'no_floor' }); continue; }
     const number = pickFloor(db, cfg);
     if (!number) { out.skipped.push({ key: c.key, why: 'no_floor' }); continue; }
     // Nobody holds the recovery code: it is random bytes hashed and forgotten, so no login can ever succeed here.

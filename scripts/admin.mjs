@@ -5,6 +5,7 @@ import { openDb, all, get, run } from '../server/db.js';
 import { payMode } from '../server/cloud/pay.js';
 import { issueCode, createSession, sha256 } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
+import { parkHiddenFloors, moveFloor, holdFloorForCode, RenumberError } from '../server/renumber.js';
 import { createStore } from '../server/cloud/store.js';
 import { createPowers } from '../server/cloud/powers.js';
 import { lookupLabel } from '../server/apps.js';
@@ -29,6 +30,7 @@ const cfg = loadConfig();
 const usage = () => {
   console.log(['Usage:',
     '  node scripts/admin.mjs code [--floor N]       issue a one-time office code',
+    '  node scripts/admin.mjs code hold --issued-at MS --floor N   make the one unused code issued at that moment hold floor N. Prints no code',
     '  node scripts/admin.mjs mail status [--json]   email: sending and receiving, today\'s counts, each floor\'s address, pauses and alerts. No message text',
     '  node scripts/admin.mjs mail pause|resume [--floor N]   stop or restart sending for one floor, or for the whole building. Receiving carries on',
     '  node scripts/admin.mjs mail suppress <address>   never send to this address again, from any floor',
@@ -36,6 +38,8 @@ const usage = () => {
     '  node scripts/admin.mjs login revoke           end such a login now: give its cookie value on stdin',
     '  node scripts/admin.mjs floors                 list floors',
     '  node scripts/admin.mjs floors hide|show --floor N   hide floor N from the lobby, directory and lift, or show it again. It still opens by its own link',
+    '  node scripts/admin.mjs floors park --from A --to B --at N   move the hidden floors numbered A to B up out of the building, to N upward, in order. Safe to run again',
+    '  node scripts/admin.mjs floors move --slug SLUG --to N   move a company to an empty floor N inside the building. Safe to run again',
     '  node scripts/admin.mjs backend usage [--json]   every project\'s Office Cloud backend: accounts, documents, saves, scores, files and storage. Counts only',
     '  node scripts/admin.mjs backend export --floor N --project SLUG [--files] [--out FILE]   everything one project keeps, as JSON. Accounts leave without their passwords',
     '  node scripts/admin.mjs backend wipe --floor N --project SLUG --yes   delete everything one project keeps: accounts, documents, saves, scores and files',
@@ -70,18 +74,26 @@ const usage = () => {
   process.exit(1);
 };
 if (!cmd) usage();
-const floorArg = () => {
+// Naming a floor that exists takes any number, because hidden floors can sit above the building. Reserving one needs it to be inside.
+const floorArg = ({ inBuilding = false } = {}) => {
   const i = rest.indexOf('--floor');
   const n = i >= 0 ? Number(rest[i + 1]) : NaN;
-  if (!Number.isInteger(n) || n < 1 || n > cfg.towerFloors) { console.error(`--floor must be 1 to ${cfg.towerFloors}`); process.exit(1); }
+  if (!Number.isInteger(n) || n < 1 || (inBuilding && n > cfg.towerFloors)) { console.error(inBuilding ? `--floor must be 1 to ${cfg.towerFloors}` : '--floor must be a floor number'); process.exit(1); }
   return n;
 };
 const die = (text) => { console.error(text); process.exit(1); };
 const db = openDb(cfg.dataDir);
-if (cmd === 'code') {
+if (cmd === 'code' && rest[0] === 'hold') {
+  // The code is known only by when it was issued. Neither it nor its hash is printed.
+  const i = rest.indexOf('--issued-at');
+  try {
+    const r = holdFloorForCode(db, cfg, { issuedAt: i >= 0 ? Number(rest[i + 1]) : NaN, floor: floorArg({ inBuilding: true }) });
+    console.log(r.changed ? `That code now holds floor ${r.floor}.` : `That code already holds floor ${r.floor}.`);
+  } catch (e) { if (e instanceof RenumberError) die(e.message); throw e; }
+} else if (cmd === 'code') {
   let floor = null;
   if (rest.includes('--floor')) {
-    floor = floorArg();
+    floor = floorArg({ inBuilding: true });
     if (get(db, 'SELECT 1 x FROM floors WHERE number=?', floor)) { console.error(`Floor ${floor} is already taken.`); process.exit(1); }
   }
   console.log(issueCode(db, floor));
@@ -100,6 +112,19 @@ if (cmd === 'code') {
     if (!Number.isInteger(minutes) || minutes < 1 || minutes > 240) die('--minutes must be 1 to 240');
     console.log(createSession(db, 'owner', f.id, minutes * 60).token);
   }
+} else if (cmd === 'floors' && (rest[0] === 'park' || rest[0] === 'move')) {
+  // Works on the database file alone. The floor's id, links, published apps, mail and data don't change: only the number it sits at.
+  const valueOf = (flag) => { const i = rest.indexOf(flag); return i >= 0 ? rest[i + 1] : undefined; };
+  try {
+    if (rest[0] === 'park') {
+      const moved = parkHiddenFloors(db, cfg, { from: Number(valueOf('--from')), to: Number(valueOf('--to')), at: Number(valueOf('--at')) });
+      if (!moved.length) console.log('Nothing to move: no hidden floor in that range.');
+      for (const m of moved) console.log(`Floor ${m.from} is now floor ${m.to}.`);
+    } else {
+      const r = moveFloor(db, cfg, { slug: String(valueOf('--slug') ?? ''), to: Number(valueOf('--to')) });
+      console.log(r.moved ? `Floor ${r.from} is now floor ${r.to}.` : `Already on floor ${r.to}.`);
+    }
+  } catch (e) { if (e instanceof RenumberError) die(e.message); throw e; }
 } else if (cmd === 'floors' && (rest[0] === 'hide' || rest[0] === 'show')) {
   // Works on the database file alone. A running server leaves a hidden floor out of its next lobby reply.
   const n = floorArg();
@@ -329,7 +354,7 @@ if (cmd === 'code') {
   } else if (sub === 'run') {
     const given = rest.indexOf('--floor') >= 0 ? rest[rest.indexOf('--floor') + 1] : rest[1];
     const n = Number(given);
-    if (!Number.isInteger(n) || n < 1 || n > cfg.towerFloors) die(`Give a floor number from 1 to ${cfg.towerFloors}.`);
+    if (!Number.isInteger(n) || n < 1) die('Give a floor number.');
     const f = get(db, "SELECT id FROM floors WHERE number=? AND status!='killed'", n);
     if (!f) die(`Floor ${n} has no company on it.`);
     requestDailyRun(db, f.id);

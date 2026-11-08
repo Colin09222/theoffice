@@ -78,32 +78,19 @@ export function buildScrubber(page) {
     page.floorList = list;
   };
   load();
-  wireLiftKeys(page, el);
+  wireLiftKeys(page);
   return el;
 }
 
-/** The lift without aiming for it: PageUp and PageDown on a keyboard, and a quick upward or downward flick on a phone, over the room or
- *  the lift panel. A slow drag still moves the room; only a fast, mostly vertical flick changes floor. */
-function wireLiftKeys(page, panel) {
+/** The lift without aiming for it: PageUp and PageDown on a keyboard. Touching and dragging only ever moves the room. */
+function wireLiftKeys(page) {
   const typing = (t) => t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
   const onKey = (e) => {
     if (page.dead || e.altKey || e.ctrlKey || e.metaKey || typing(document.activeElement)) return;
     if (e.key === 'PageUp' || e.key === 'PageDown') { e.preventDefault(); page.liftGo?.(e.key === 'PageUp' ? 1 : -1); }
   };
-  let start = null;
-  const onDown = (e) => {
-    const t = e.target;
-    const free = t.id === 'scene' || panel.contains(t) || !t.closest('button, a, input, textarea, select, .floor-panel, .floor-top, .controls, .modal-back');
-    start = e.pointerType === 'touch' && e.isPrimary && free ? { x: e.clientX, y: e.clientY, at: performance.now() } : null;
-  };
-  const onUp = (e) => {
-    if (!start || page.dead || !e.isPrimary) return;
-    const dx = e.clientX - start.x, dy = e.clientY - start.y, ms = performance.now() - start.at; start = null;
-    if (ms < 700 && Math.abs(dy) > 70 && Math.abs(dy) > Math.abs(dx) * 2.2) page.liftGo?.(dy < 0 ? 1 : -1);
-  };
   window.addEventListener('keydown', onKey);
-  window.addEventListener('pointerdown', onDown, true); window.addEventListener('pointerup', onUp, true);
-  page.unwireLift = () => { window.removeEventListener('keydown', onKey); window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('pointerup', onUp, true); };
+  page.unwireLift = () => { window.removeEventListener('keydown', onKey); };
 }
 
 /** The map pins over the rooms. Each one is a shortcut to a panel tab and floats where that tab's work happens. */

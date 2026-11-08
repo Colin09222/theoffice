@@ -5,6 +5,7 @@ import { boot, Client, claim, adminClient, floorState, until, sse, sleep } from 
 import { seedFillers, removeFiller, listFillers, COMPANIES, DISCLAIMER } from '../server/filler.js';
 import { loadConfig, loadModels } from '../server/config.js';
 
+const DEMOS = 2;  // the bottom two floors are the only ones demos may have
 const fillerFloors = (t) => t.db.prepare('SELECT * FROM floors WHERE filler=1 ORDER BY number DESC').all();
 
 describe('filler companies', () => {
@@ -15,31 +16,32 @@ describe('filler companies', () => {
   before(async () => { t = await boot({ fillerCompanies: true, fillerTickMs: 20 }, { llm }); });
   after(() => t.close());
 
-  test('seeds the companies once, high up, never on floor 1, and seeding again is a no-op', () => {
+  test('seeds two demo companies once, on the bottom two floors and nowhere else, and seeding again is a no-op', () => {
     const rows = fillerFloors(t);
-    assert.equal(rows.length, COMPANIES.length);
+    assert.equal(rows.length, DEMOS);
+    assert.deepEqual(rows.map((f) => f.number).sort((a, b) => a - b), [1, 2]);
     for (const f of rows) {
-      assert.ok(f.number >= 2 && f.number <= t.cfg.towerFloors - 3, `floor ${f.number}`);
       assert.equal(f.public_chat, 0); assert.equal(f.status, 'active');
       assert.ok(f.recovery_hash.includes(':'));
     }
-    assert.equal(new Set(rows.map((f) => f.name)).size, COMPANIES.length);
+    assert.equal(new Set(rows.map((f) => f.name)).size, DEMOS);
     const again = seedFillers(t.db, { cfg: t.cfg, models: t.app.engine.models, engine: t.app.engine });
     assert.equal(again.seeded.length, 0);
-    assert.ok(again.skipped.every((s) => s.why === 'exists'));
-    assert.equal(fillerFloors(t).length, COMPANIES.length);
-    assert.equal(t.db.prepare('SELECT COUNT(*) n FROM agents a JOIN floors f ON f.id=a.floor_id WHERE f.filler=1').get().n, COMPANIES.length * Object.keys(loadModels().roles).length);
+    assert.equal(again.skipped.filter((s) => s.why === 'exists').length, DEMOS);
+    assert.ok(again.skipped.every((s) => s.why === 'exists' || s.why === 'no_floor'));  // the rest of the list has nowhere to go
+    assert.equal(fillerFloors(t).length, DEMOS);
+    assert.equal(t.db.prepare('SELECT COUNT(*) n FROM agents a JOIN floors f ON f.id=a.floor_id WHERE f.filler=1').get().n, DEMOS * Object.keys(loadModels().roles).length);
   });
 
-  test('the directory counts them as taken, marks them, and the vacant floor is still 1', async () => {
-    assert.equal((await new Client(t).get('/api/floors')).data.vacant, 1);
+  test('the directory counts them as taken, marks them, and the vacant floor is the one above them', async () => {
+    assert.equal((await new Client(t).get('/api/floors')).data.vacant, 3);
     const real = await claim(t, 'Real Co');
-    assert.equal(real.number, 1);
+    assert.equal(real.number, 3);
     const r = await new Client(t).get('/api/floors');
     assert.equal(r.status, 200);
     const cards = r.data.floors.filter((c) => c.filler === true);
-    assert.equal(cards.length, COMPANIES.length);
-    assert.equal(r.data.vacant, 2);
+    assert.equal(cards.length, DEMOS);
+    assert.equal(r.data.vacant, 4);
     assert.equal(r.data.towerFloors, t.cfg.towerFloors);
     const mine = r.data.floors.find((c) => c.slug === real.slug);
     assert.ok(mine && !('filler' in mine), 'a real floor carries no filler flag');
@@ -117,24 +119,24 @@ describe('filler companies', () => {
     const admin = await adminClient(t);
     const o = await admin.get('/api/admin/overview');
     const marked = o.data.floors.filter((r) => r.filler === true);
-    assert.equal(marked.length, COMPANIES.length);
+    assert.equal(marked.length, DEMOS);
     assert.ok(o.data.floors.filter((r) => !r.filler).every((r) => !('filler' in r)));
     const victim = marked[0];
     assert.equal((await new Client(t).post('/api/admin/filler/remove', { id: victim.id })).status, 401);
     assert.equal((await admin.post('/api/admin/filler/remove', { id: 999999 })).status, 404);
     const r = await admin.post('/api/admin/filler/remove', { id: victim.id });
     assert.equal(r.status, 200); assert.equal(r.data.removed.id, victim.id);
-    assert.equal(fillerFloors(t).length, COMPANIES.length - 1);
+    assert.equal(fillerFloors(t).length, DEMOS - 1);
     assert.equal(t.db.prepare('SELECT COUNT(*) n FROM floors WHERE id=?').get(victim.id).n, 0);
     assert.equal(t.db.prepare('SELECT COUNT(*) n FROM tasks WHERE floor_id=?').get(victim.id).n, 0);
     const direct = seedFillers(t.db, { cfg: t.cfg, models: t.app.engine.models, engine: t.app.engine });
     assert.equal(direct.seeded.length, 0); assert.ok(direct.skipped.some((s) => s.why === 'removed'));
     const plain = await admin.post('/api/admin/filler/seed', {});
     assert.equal(plain.status, 200); assert.equal(plain.data.seeded.length, 0);
-    assert.equal(fillerFloors(t).length, COMPANIES.length - 1);
+    assert.equal(fillerFloors(t).length, DEMOS - 1);
     const revived = await admin.post('/api/admin/filler/seed', { revive: true });
     assert.equal(revived.data.seeded.length, 1);
-    assert.equal(fillerFloors(t).length, COMPANIES.length);
+    assert.equal(fillerFloors(t).length, DEMOS);
     assert.notEqual(fillerFloors(t).find((f) => f.name === victim.name).id, victim.id);
   });
 
@@ -149,11 +151,13 @@ describe('filler companies', () => {
     assert.ok(!t.logs.some((l) => l.includes('"filler"') && l.includes('"error"')));
     assert.equal((await new Client(t).get(`/api/floors/${f.slug}`)).status, 404);
     const listed = listFillers(t.db);
-    assert.equal(listed.floors.length, COMPANIES.length - 1);
+    assert.equal(listed.floors.length, DEMOS - 1);
     assert.ok(listed.removed.some((x) => x.key === r.key && x.floorNumber === f.number));
     const admin = await adminClient(t);
     assert.equal((await admin.post('/api/admin/codes', { floor: f.number })).status, 201);
-    // The CLI's seed revives it, with no engine at hand, and lands it somewhere other than the floor that now has a code.
+    // With the other bottom floor free too, the CLI's seed revives one with no engine at hand, and never onto the floor that now has a code.
+    removeFiller(t.db, { number: fillerFloors(t).at(-1).number });
+    t.db.prepare('DELETE FROM codes WHERE claimed_at IS NULL AND floor_number != ?').run(f.number);  // the squatter's test above left a code holding the other one
     const back = seedFillers(t.db, { cfg: t.cfg, models: loadModels(), revive: true });
     assert.equal(back.seeded.length, 1);
     assert.notEqual(back.seeded[0].number, f.number);

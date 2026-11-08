@@ -27,9 +27,9 @@ const onFloor = (p, slug) => p.until(`document.body.dataset.page === "floor" && 
 const lift = (p) => p.until('!!document.querySelector(".scrub-btn .scrub-to") && document.querySelectorAll(".scrub-btn:not(:disabled)").length > 0', 'lift loaded');
 try {
   const p = await b.newPage({ width: 1440, height: 900 });
-  await step('desktop lobby with no WebGL has the Building | Outside toggle, on the Building', async () => {
+  await step('desktop lobby with no WebGL shows the strips, with no switch', async () => {
     await p.goto(`${base}/?q=low`);
-    await p.until('document.body.dataset.page === "lobby" && !!document.querySelector(".lobby-mode")', 'lobby');
+    await p.until('document.body.dataset.page === "lobby" && !document.querySelector(".lobby-mode, .mode-btn")', 'lobby');
     const m = await p.ev('JSON.stringify([document.body.dataset.lobby, !!window.__stage.ok, document.body.dataset.tower || ""])'); if (m !== '["building",false,""]') throw new Error(`mode ${m}`);
   });
   await step('Building shows every floor as a strip, hidden ones left out', async () => {
@@ -76,15 +76,12 @@ try {
     const y = await p.ev('document.querySelector(".stack").scrollTop'), saved = Number(await p.ev('sessionStorage.getItem("office:stack-y")'));
     if (!saved || Math.abs(y - saved) > 4) throw new Error(`scrollTop ${y}, saved ${saved}`);
   });
-  await step('Outside has nothing to show without WebGL, so the strips stay, and the directory still works', async () => {
+  await step('the strips stay and the directory still works', async () => {
     await p.until('!document.querySelector("#fade.in")', 'doors open');
     await sleep(500);
-    await p.click('.mode-btn[data-mode="outside"]');
-    await sleep(300);
     await p.until('document.body.dataset.lobby === "building" && !document.querySelector(".stack").hidden && document.querySelectorAll(".dir-row").length === 3', 'still the strips');
   });
 
-  await p.ev('localStorage.removeItem("office:lobby-mode")');  // one browser profile: the desktop's choice would carry over to the phone
   const m = await b.newPage({ mobile: true, width: 390, height: 844 });
   await step('a phone starts in the Building', async () => {
     await m.goto(`${base}/?q=low`);
@@ -108,18 +105,19 @@ try {
     await m.until('window.__office?.state?.floor?.number === 7 && location.pathname.includes("/floor/")', 'phone floor 7');
     await lift(m);
   });
-  // The flick is the floor page's own, so it is tried where the floor page has its 3D room.
+  // A flick over the room moves the room, never the floor: the lift's buttons do that. Tried where the floor page has its 3D room.
   const b3 = await launch();
   try {
     const m3 = await b3.newPage({ mobile: true, width: 390, height: 844 });
-    await step('phone with WebGL: flick up a floor', async () => {
+    await step('phone with WebGL: a flick does not change floor', async () => {
       await m3.goto(`${base}/floor/${t.db.prepare('SELECT slug FROM floors WHERE number=7').get().slug}?q=low`);
       await m3.until('window.__office?.state?.floor?.number === 7', 'floor 7');
       await lift(m3);
       await m3.until('!document.querySelector("#fade.in")', 'doors open');
       await sleep(800);
       await m3.drag(200, 560, 205, 330, true);
-      await m3.until('window.__office?.state?.floor?.number === 12 && location.pathname.includes("/floor/")', 'flick up to 12', 10000);
+      await sleep(1500);
+      if (await m3.ev('window.__office?.state?.floor?.number') !== 7) throw new Error('the flick changed floor');
       await lift(m3);
       if (OUT) await m3.shot(join(OUT, 'phone-floor.jpg'));
     });

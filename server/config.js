@@ -70,7 +70,7 @@ export function loadConfig(env = process.env, overrides = {}) {
     maxOpenTasks: workCap(env.MAX_OPEN_TASKS),
     maxTasksPerDay: workCap(env.MAX_TASKS_PER_DAY),
     maxRevisions: workCap(env.MAX_REVISIONS),
-    towerFloors: num(env.TOWER_FLOORS, 40),
+    towerFloors: num(env.TOWER_FLOORS, 10),
     quotaBytes: num(env.FLOOR_QUOTA_MB, 100) * 1024 * 1024,
     mockDelayMs: num(env.MOCK_DELAY_MS, 400),
     retryBaseMs: num(env.RETRY_BASE_MS, 1000),

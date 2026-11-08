@@ -256,6 +256,7 @@ function cellMap(spots) {
  * once per ground pixel, so it costs a weak phone almost nothing, and the streets still get the evening's long shadows.
  */
 const BAKE_SPAN = 150;
+let bakeFloors = 10;  // how tall a tower the baked shadows draw; the lobby knows the real number, and sets it before anything is baked
 function bakeGroundShadows(blocks) {
   const size = 1024, c = document.createElement('canvas'); c.width = c.height = size;
   const x = c.getContext('2d'); x.fillStyle = '#000'; x.fillRect(0, 0, size, size);
@@ -273,7 +274,7 @@ function bakeGroundShadows(blocks) {
     x.fillRect(px(cx - w / 2 + ox), px(cz - d / 2 + oz), (w / (BAKE_SPAN * 2)) * size, (d / (BAKE_SPAN * 2)) * size);
   };
   for (const b of blocks) drop(b.x, b.z, b.w, b.d, b.height);
-  drop(0, 0, TOWER_W + 1, TOWER_W + 1, GROUND + 40 * FLOOR_H);
+  drop(0, 0, TOWER_W + 1, TOWER_W + 1, GROUND + bakeFloors * FLOOR_H);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.NoColorSpace; t.magFilter = t.minFilter = THREE.LinearFilter; t.generateMipmaps = false; t.flipY = false;
   return t;
 }
@@ -765,6 +766,10 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   for (let i = 0; i < 3; i++) add(stone, 7, 0.1, 0.5, 0, 0.3 + i * 0.07, half + 3.2 + i * 0.45, false);
 
   if (stub) { mergeMeshes(group); return { group, floors, state, glass, height: H }; }
+  // A small TO LET board on each face of an empty floor. setFloors shows the ones that are really free.
+  const boards = new THREE.InstancedMesh(new THREE.PlaneGeometry(2.7, 0.62), new THREE.MeshBasicMaterial({ map: toLetTexture() }), Math.max(1, floorCount * 4));
+  boards.count = 0; boards.frustumCulled = false; group.add(boards);
+  const boardAt = (i, a) => { const ang = (a * Math.PI) / 2, r = half + 0.42; m.makeRotationY(ang); m.setPosition(Math.sin(ang) * r, GROUND + i * FLOOR_H + FLOOR_H * 0.5, Math.cos(ang) * r); return m; };
   // The crown: stepped terraces with greenery, a louvred plant screen, brass trim, the sign and a mast.
   let y = H;
   add(stone, TOWER_W + 0.6, 0.3, TOWER_W + 0.6, 0, y, 0); y += 0.3;
@@ -785,12 +790,24 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
     add(brass, w + 0.24, 0.1, w + 0.24, 0, y + hh, 0, false);
     y += hh + 0.1;
   });
-  const mast = new THREE.Mesh(new THREE.ConeGeometry(0.34, 6.4, 8), brass); mast.position.set(0, y + 3.2, 0); mast.castShadow = true; group.add(mast);
-  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: '#ff6a52' })); beacon.position.set(0, y + 6.55, 0); group.add(beacon);
+  // The mast keeps its proportion to the building: a tall one would dwarf a short tower.
+  const mastH = Math.min(6.4, Math.max(2.8, ph * 0.32));
+  const mast = new THREE.Mesh(new THREE.ConeGeometry(0.34, mastH, 8), brass); mast.position.set(0, y + mastH / 2, 0); mast.castShadow = true; group.add(mast);
+  const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: '#ff6a52' })); beacon.position.set(0, y + mastH + 0.15, 0); group.add(beacon);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial('#ff7a5a'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 }));
   glow.scale.setScalar(2.4); glow.position.copy(beacon.position); group.add(glow);
   mergeMeshes(group, (o) => o === beacon);
-  return { group, floors, state, beacon, glow, glass, height: y + 7, signTex };
+  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt };
+}
+
+function toLetTexture() {
+  const c = document.createElement('canvas'); c.width = 280; c.height = 64; const x = c.getContext('2d');
+  x.fillStyle = '#b52e1b'; x.fillRect(0, 0, 280, 64);
+  x.strokeStyle = '#fff8e6'; x.lineWidth = 4; x.strokeRect(4, 4, 272, 56);
+  x.fillStyle = '#fff8e6'; x.font = '600 38px Fraunces, Georgia, serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText('TO LET', 140, 34);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
 }
 
 function radial(color) {
@@ -873,8 +890,12 @@ export function getWorld() {
 }
 
 export class LobbyView {
-  constructor({ floorCount = 40, onHover, onPick } = {}) {
+  constructor({ floorCount = 10, onHover, onPick } = {}) {
     Object.assign(this, { floorCount, onHover, onPick });
+    if (bakeFloors !== floorCount) {  // the shadows on the ground are the height of this building, whoever baked them first
+      bakeFloors = floorCount;
+      const baked = worldCache?.land.userData.baked; if (baked?.uBaked.value) { baked.uBaked.value.dispose(); baked.uBaked.value = null; if (baked.uBakedOn.value) baked.uBaked.value = bakeGroundShadows(worldCache.city.blocks); }
+    }
     this.scene = new THREE.Scene();
     // Fog with a long start, so the near city keeps its full colour and everything far melts into the warm haze (see the fog chunks above).
     this.scene.fog = new THREE.Fog('#ffffff', 170, 1040);
@@ -897,8 +918,8 @@ export class LobbyView {
     const env = this.world.environment();
     this.scene.environment = env; this.scene.environmentIntensity = 0.42;
     this.tower = makeTower(floorCount, { env }); this.scene.add(this.tower.group);
-    this.startTheta = 0.72; this.theta = 0.72; this.targetTheta = 0.72; this.rideY = 26; this.targetRide = 26;
-    this.dist = 130; this.targetDist = 130; this.time = 0; this.spin = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.016; this.hover = -1; this.flying = null; this.shiftX = 0;
+    this.startTheta = 0.72; this.theta = 0.72; this.targetTheta = 0.72;
+    this.dist = this.frame(false); this.targetDist = this.dist; this.time = 0; this.spin = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 0.016; this.hover = -1; this.flying = null; this.shiftX = 0;
     this.ray = new THREE.Raycaster(); this.ptr = new THREE.Vector2();
     this.floorData = new Map();
     this.setTier(stage.q || { shadow: 2048, density: 1 });
@@ -923,13 +944,11 @@ export class LobbyView {
     this.onMove = (e) => {
       if (!this.active) return;
       if (this.drag && this.pointers.has(e.pointerId)) {
-        const dx = e.clientX - this.drag.x, dy = e.clientY - this.drag.y;
+        const dx = e.clientX - this.drag.x;
         this.drag.x = e.clientX; this.drag.y = e.clientY;
         if (Math.hypot(e.clientX - this.drag.sx, e.clientY - this.drag.sy) > 7) this.drag.moved = true;
         this.targetTheta -= dx * 0.0058;
-        this.targetRide += dy * 0.06;
         this.lastTouch = performance.now();
-        this.clampRide();
         return;
       }
       if (e.pointerType === 'mouse') this.pick(e.clientX, e.clientY, false);
@@ -940,21 +959,16 @@ export class LobbyView {
       this.drag = null;
       if (d && !d.moved && performance.now() - d.t < 500) this.pick(e.clientX, e.clientY, true);
     };
-    this.onWheel = (e) => {
-      if (!this.active || e.target !== el) return;
-      e.preventDefault();
-      this.targetRide -= e.deltaY * 0.022;
-      this.lastTouch = performance.now();
-      this.clampRide();
-    };
     el.addEventListener('pointerdown', this.onDown);
     window.addEventListener('pointermove', this.onMove);
     window.addEventListener('pointerup', this.onUp);
     window.addEventListener('pointercancel', this.onUp);
-    el.addEventListener('wheel', this.onWheel, { passive: false });
   }
-  clampRide() { this.targetRide = Math.min(GROUND + this.floorCount * FLOOR_H + 6, Math.max(6, this.targetRide)); }
-  rideTo(n) { this.targetRide = GROUND + (n - 0.5) * FLOOR_H; this.lastTouch = performance.now(); this.clampRide(); }
+  /** The whole building in frame, ground to mast, whatever its height: the same picture as a taller tower, brought closer. */
+  frame(phone) {
+    this.lookY = this.tower.height * 0.47;
+    return this.tower.height * (phone ? 3.12 : 2.42);
+  }
   enter() {
     this.active = true; this.flying = null; this.camera.clearViewOffset();
     this.scene.add(this.world.group); this.world.group.position.set(0, 0, 0); this.world.group.scale.setScalar(1);
@@ -968,15 +982,19 @@ export class LobbyView {
     const phone = w <= 760;
     // Frame the tower in the clear area: left of the desktop panel, above the phone's sheet.
     this.shiftX = phone ? 0 : -w * 0.055;
-    this.shiftY = phone ? h * 0.035 : 0;
-    this.targetDist = phone ? 168 : 130;
+    this.shiftY = phone ? h * 0.055 : 0;
+    this.targetDist = this.frame(phone);
     if (!this.framed) { this.dist = this.targetDist; this.framed = true; }  // the first picture is the right one, with no zoom into place
     this.camera.setViewOffset(w, h, this.shiftX, this.shiftY, w, h);
     this.camera.updateProjectionMatrix();
   }
-  setFloors(cards) {
+  setFloors(cards, toLet = []) {
     this.floorData = new Map(cards.map((c) => [c.number, c]));
     const col = new THREE.Color(); const f = this.tower.floors; const st = this.tower.state;
+    const free = new Set(toLet), { boards, boardAt } = this.tower;
+    let shown = 0;
+    for (let i = 0; i < this.floorCount; i++) if (free.has(i + 1)) for (let a = 0; a < 4; a++) boards.setMatrixAt(shown++, boardAt(i, a));
+    boards.count = shown; boards.instanceMatrix.needsUpdate = true;
     for (let i = 0; i < this.floorCount; i++) {
       const c = this.floorData.get(i + 1);
       col.set(c ? c.colors.primary : '#9fb1c4');
@@ -1019,7 +1037,7 @@ export class LobbyView {
     if (this.tower.glass.userData.shader) this.tower.glass.userData.shader.uniforms.uTime.value = this.time;
     this.tower.beacon.visible = this.tower.glow.visible = (this.time % 2.4) < 1.3;
     if (this.flying) {
-      const f = this.flying; f.t = Math.min(1, f.t + dt / 1.15);
+      const f = this.flying; f.t = Math.min(1, f.t + dt / 0.55);
       const e = f.t * f.t * (3 - 2 * f.t);
       const dir = new THREE.Vector3(Math.sin(this.theta), 0, Math.cos(this.theta));
       const to = dir.clone().multiplyScalar(TOWER_W / 2 + 1.4).setY(f.y);
@@ -1032,12 +1050,9 @@ export class LobbyView {
     if (!this.drag && (!this.lastTouch || performance.now() - this.lastTouch > 3500)) this.targetTheta += this.spin * dt;
     const k = 1 - Math.exp(-dt * 6);
     this.theta += (this.targetTheta - this.theta) * k;
-    this.rideY += (this.targetRide - this.rideY) * k;
     this.dist += (this.targetDist - this.dist) * k;
-    const lookY = this.rideY;
     // A raised, slightly oblique view: high enough to read the streets, low enough to look a floor in the eye.
-    const camY = lookY + 24 + (this.floorCount - lookY) * 0.12;
-    this.camera.position.set(Math.sin(this.theta) * this.dist, camY, Math.cos(this.theta) * this.dist);
-    this.camera.lookAt(0, lookY - 1, 0);
+    this.camera.position.set(Math.sin(this.theta) * this.dist, this.lookY + this.dist * 0.2, Math.cos(this.theta) * this.dist);
+    this.camera.lookAt(0, this.lookY, 0);
   }
 }

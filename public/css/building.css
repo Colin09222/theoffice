@@ -195,11 +195,7 @@ body.flying .ticker { opacity: 0; transition: opacity .2s; }
 .leaderboard .dir-empty { color: #fffdf4; }
 @media (max-width: 760px) { .board-toggle span { display: none; } .board-toggle { padding: 0 11px; } }
 
-/* ---- Building | Outside, and the stack: the whole tower as strips, every floor at once ---- */ /* section.stack only: a plain .stack is the forms' column everywhere else */
-.lobby-mode { position: absolute; top: max(18px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 2; display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--felt); box-shadow: 0 0 0 3px var(--brass), 0 5px 0 var(--brass-d), 0 10px 18px rgba(0, 0, 0, .3); }
-.mode-btn { min-height: 40px; padding: 0 18px; border: 0; border-radius: 999px; background: transparent; color: #f4dd97; font: 700 18px var(--cond); letter-spacing: .04em; cursor: pointer; }
-.mode-btn[aria-pressed="true"] { background: var(--sun); color: #1c1712; box-shadow: inset 0 -3px 0 var(--sun-d); }
-.mode-btn:focus-visible { outline: 3px solid #fff; outline-offset: 1px; }
+/* ---- The stack: no WebGL, the whole tower as strips, every floor at once ---- */ /* section.stack only: a plain .stack is the forms' column everywhere else */
 body[data-lobby="building"] { background: linear-gradient(#9cc7e4, #e9dcc0 70%); }
 body[data-lobby="building"] #scene { visibility: hidden; }
 body[data-lobby="building"] .hero, body[data-lobby="building"] .hints, body[data-lobby="building"] .floor-tip { display: none; }
@@ -234,9 +230,6 @@ section.stack[hidden] { display: none; }
 .stack-strip.to-let b { color: #8a7d6a; font: 700 15px var(--cond); letter-spacing: .12em; text-transform: uppercase; }
 @media (max-width: 1100px) and (min-width: 761px) { section.stack { right: 424px; left: 20px; } }
 @media (max-width: 760px) {
-  .lobby-mode { left: 12px; transform: none; top: calc(max(10px, env(safe-area-inset-top)) + 84px); }
-  body[data-lobby="building"] .lobby-mode { top: max(10px, env(safe-area-inset-top)); }
-  .mode-btn { min-height: 38px; padding: 0 14px; font-size: 17px; }
   /* The strips run on under the sheet's peek, the pill and the ticker, so they are the bottom layer: the sheet's grip stays tappable over them. */
   section.stack { left: 0; right: 0; top: calc(max(10px, env(safe-area-inset-top)) + 58px); bottom: 0; max-width: none; border-radius: 0; box-shadow: none; z-index: -1; }
   .stack-ground { margin-bottom: 190px; }
@@ -244,31 +237,3 @@ section.stack[hidden] { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .stack-strip.live .stack-dot, .stack-strip.live .portrait.busy { animation: none; } }
 
-/* The 3D building: the scene shows through, the strips stay away, and every floor in view has a plaque by it that also opens it. */
-body[data-tower="3d"] #scene { visibility: visible; }
-body[data-tower="3d"] #labels { display: block; }
-body[data-tower="3d"] { background: #cfe0ec; }
-.tower-plaques { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
-.tower-plaque { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 7px; max-width: 230px; min-height: 36px; padding: 4px 12px 4px 4px; border: 0; border-radius: 999px; background: rgba(28, 23, 18, .8); color: #fff8e6; font: 700 15px/1 var(--cond); white-space: nowrap; pointer-events: auto; cursor: pointer; will-change: transform; translate: 0 -50%; box-shadow: 0 2px 10px rgba(0, 0, 0, .2); }
-.tower-plaque b { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 6px; border-radius: 999px; background: var(--brand, #d9774a); color: #fff; font-size: 16px; }
-.tower-plaque span { overflow: hidden; text-overflow: ellipsis; }
-.tower-plaque i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #3fd06a; box-shadow: 0 0 0 3px rgba(63, 208, 106, .25); }
-.tower-plaque:hover, .tower-plaque:focus-visible { outline: none; background: rgba(28, 23, 18, .94); box-shadow: 0 0 0 3px var(--brand, #d9774a); }
-.tower-plaque.to-let { background: rgba(58, 54, 48, .72); color: #e8dcc4; font-size: 13px; }
-.tower-plaque.to-let b { background: #7d7466; }
-.tower-plaque.off { visibility: hidden; }
-body.tower-flying .tower-plaques, body.tower-flying #labels { opacity: 0; transition: opacity .25s; }
-/* Round, up, down, in and out: small buttons by the building, for anyone who'd rather press than drag. */
-.tower-ctrl { position: fixed; right: calc(min(430px, 34vw) + 14px); bottom: 140px; z-index: 5; display: grid; grid-template-columns: repeat(2, 40px); gap: 6px; justify-items: end; }
-.tower-btn { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 12px; background: rgba(28, 23, 18, .78); color: #fff8e6; cursor: pointer; box-shadow: 0 2px 0 rgba(28, 23, 18, .35); touch-action: manipulation; }
-.tower-btn svg { width: 22px; height: 22px; } .tower-btn svg path { fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; } .tower-btn svg.flip { transform: scaleX(-1); }
-.tower-btn:hover, .tower-btn:focus-visible { outline: none; background: rgba(28, 23, 18, .94); box-shadow: 0 0 0 3px #d9774a; }
-.tower-btn.tb-whole { grid-column: 1 / -1; width: auto; height: 34px; font: 700 14px/1 var(--cond); padding: 0 10px; white-space: nowrap; }
-body.tower-flying .tower-ctrl { opacity: 0; pointer-events: none; transition: opacity .25s; }
-@media (max-width: 760px) {
-  .tower-ctrl { left: auto; right: 6px; bottom: auto; top: 70px; grid-template-columns: 34px; gap: 4px; }
-  .tower-btn { width: 34px; height: 34px; border-radius: 10px; background: rgba(28, 23, 18, .58); box-shadow: none; } .tower-btn svg { width: 19px; height: 19px; }
-  .tower-btn.tb-whole { grid-column: auto; width: 34px; height: 34px; font-size: 0; }
-  .tower-btn.tb-whole::before { content: ''; width: 14px; height: 20px; border: 2.5px solid currentColor; border-radius: 2px; background: linear-gradient(currentColor 0 0) center 5px / 6px 2.5px no-repeat, linear-gradient(currentColor 0 0) center 11px / 6px 2.5px no-repeat; }
-}
-@media (max-width: 760px) { .tower-plaque { min-height: 32px; max-width: 180px; font-size: 14px; } .tower-plaque b { min-width: 24px; height: 24px; font-size: 14px; } }

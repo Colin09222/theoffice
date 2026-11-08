@@ -19,9 +19,7 @@ async function route() {
   // Stepping out of an office goes through the lift doors, the same ones that opened it.
   const fade = $('#fade');
   const leavingFloor = document.body.dataset.page === 'floor' && !path.startsWith('/floor/');
-  // Back to the 3D building: the room goes back into the stack and the camera flies out of it, so there are no doors to go through.
-  const flyOut = leavingFloor && path === '/' && !!(await window.__office?.handBack?.());
-  const doors = leavingFloor && !flyOut;
+  const doors = leavingFloor;
   if (doors) { fade.dataset.title = 'The Office'; fade.classList.add('in'); await new Promise((r) => setTimeout(r, 240)); }
   current?.({ next: path });
   current = null;
@@ -32,7 +30,6 @@ async function route() {
     if (path === '/admin') { const { showAdmin, hideAdmin } = await import('./admin-ui.js'); current = hideAdmin; await showAdmin(ui); return; }
     if (floorMatch) {
       // The doors shut straight away, so a slow line never holds up on a frozen close-up of the glass. The floor opens them when its room is ready.
-      // Flown in from the 3D building, the room is already on screen: no doors at all.
       const { showFloor, hideFloor } = await import('./floor-ui.js'); current = hideFloor; await showFloor(ui, floorMatch[1]);
       return;
     }
