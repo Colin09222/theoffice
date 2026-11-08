@@ -1,6 +1,6 @@
 // The lobby overlay: the sign out front, the felt directory board with its lift panel, the To Let board, and the news strip.
 import { stage } from './stage.js';
-import { h, api, session, isPhone, toast, clear, put } from './dom.js';
+import { h, api, session, isPhone, toast, clear, put, timeAgo } from './dom.js';
 import { LobbyView } from './lobby-scene.js';
 import { icon } from './icons.js';
 import { muteButton, sfx } from './sfx.js';
@@ -155,6 +155,7 @@ export async function showLobby(root) {
   };
   const toggle = h('button.wall-toggle', { type: 'button', 'data-wall': 'toggle', 'aria-pressed': 'false', title: 'Everything the building has launched' }, icon('rocket-launch'), 'Launched');
   const setWall = (on) => {
+    if (on && boardOn) setBoard(false);
     wallOn = on;
     toggle.setAttribute('aria-pressed', String(on));
     panel.classList.toggle('showing-wall', on);
@@ -163,6 +164,41 @@ export async function showLobby(root) {
     if (on) { if (isPhone()) panel.classList.add('open'); renderWall(); loadWall(); } else renderList();
   };
   toggle.addEventListener('click', () => setWall(!wallOn));
+
+  // The leaderboard: the most played games, the most visited sites and the newest launches, counted by the building.
+  const board = h('div.leaderboard', { 'data-board': 'board', hidden: true });
+  const boardHead = h('div.dir-head.board-head', { hidden: true }, h('span', {}, 'Leaderboard'), h('span.dir-count', {}, 'Last 30 days'));
+  let boardOn = false, boardData = null;
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const boardRow = (c, i, note) => h('li.board-row', { css: { '--brand': c.floor.colors.primary } },
+    h('span.board-rank', {}, String(i + 1)),
+    h('span.board-text', {},
+      h('a.board-title', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, c.title),
+      h('button.board-floor', { type: 'button', title: `Visit floor ${c.floor.number}`, onclick: () => { const f = keepFloors.find((x) => x.slug === c.floor.slug); if (f) enterFloor(f); } }, h('b', {}, String(c.floor.number)), c.floor.name || 'New company')),
+    h('span.board-count', {}, note));
+  const renderBoard = () => {
+    clear(board);
+    if (!boardData) { board.append(h('p.dir-empty', {}, 'Counting the visitors…')); return; }
+    const col = (title, items, note, none) => h('section.board-col', {}, h('h4', {}, title),
+      items.length ? h('ol', {}, items.map((c, i) => boardRow(c, i, note(c)))) : h('p.board-none', {}, none));
+    board.append(
+      col('Most played games', boardData.games, (c) => plural(c.count, 'play', 'plays'), 'No games played yet.'),
+      col('Most visited sites', boardData.sites, (c) => plural(c.count, 'visitor', 'visitors'), 'No visitors yet.'),
+      col('Newest launches', boardData.newest, (c) => timeAgo(c.publishedAt), 'Nothing launched yet.'));
+  };
+  const loadBoard = async () => {
+    try { boardData = await api('/building/leaderboard'); } catch { boardData = boardData || { games: [], sites: [], newest: [] }; }
+    if (boardOn) renderBoard();
+  };
+  const topBtn = h('button.wall-toggle.board-toggle', { type: 'button', 'data-board': 'toggle', 'aria-pressed': 'false', title: 'The leaderboard: most played, most visited and newest' }, icon('sparkle'), h('span', {}, 'Top'));
+  const setBoard = (on) => {
+    if (on && wallOn) setWall(false);
+    boardOn = on;
+    topBtn.setAttribute('aria-pressed', String(on));
+    list.hidden = on || wallOn; head.hidden = on || wallOn; board.hidden = !on; boardHead.hidden = !on;
+    if (on) { if (isPhone()) panel.classList.add('open'); renderBoard(); loadBoard(); } else if (!wallOn) renderList();
+  };
+  topBtn.addEventListener('click', () => setBoard(!boardOn));
   // On a phone the sheet is mostly tucked away. Tapping search brings it up, so the results and the field aren't left behind the keyboard.
   search.addEventListener('focus', () => { if (isPhone()) panel.classList.add('open'); });
   search.addEventListener('input', () => { if (wallOn) renderWall(); });
@@ -170,9 +206,9 @@ export async function showLobby(root) {
   const head = h('div.dir-head', {}, h('span', {}, 'Directory'), count);
   const panel = h('aside.directory', { 'aria-label': 'Floor directory' },
     h('button.sheet-grip', { type: 'button', 'aria-label': 'Show or hide the directory', onclick: () => panel.classList.toggle('open') }, h('i'), h('span.grip-label', {}, 'Directory')),
-    h('div.dir-search', {}, search, toggle),
-    head, wallHead,
-    list, wall,
+    h('div.dir-search', {}, search, toggle, topBtn),
+    head, wallHead, boardHead,
+    list, wall, board,
     h('p.dir-hint', {}, 'Anyone can walk in and watch'));
 
   const account = session.floor
@@ -224,6 +260,7 @@ export async function showLobby(root) {
       keepFloors = fresh.floors; view?.setFloors(fresh.floors);
       if (document.activeElement !== search) renderList();
       if (wallOn) loadWall();
+      if (boardOn) loadBoard();
     } catch { /* retried next time */ }
   }, 20000);
 }
