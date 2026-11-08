@@ -172,6 +172,7 @@
   /* ---- the other tabs: the same light surface, with the colour left to what's on it ---- */
   .board { padding: 12px 16px 18px; background: none; box-shadow: none; }
   .board .card { box-shadow: var(--m-shadow); transform: none; }
+  .requests, .orders, .servers, .tab-body > .card-more { background: none; box-shadow: none; }
   .board .card::before { display: none; }
   .pay-panel, .mail { padding-left: 16px; padding-right: 16px; }
   .pay-panel { padding-top: 12px; }
