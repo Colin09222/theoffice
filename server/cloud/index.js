@@ -1,6 +1,6 @@
 // Office Cloud: the backend every published project gets, with no server code of its own. See docs/OFFICE-CLOUD.md.
 // It answers on the project's own origin under /_office/cloud/, so the page's own CSP (connect-src 'self') already allows it,
-// and the project is whichever one the Host names. Nothing here reads The Office's cookies, and nothing a visitor sends reaches a model.
+// and the project is whichever one the Host names. Nothing here reads The Office's cookies. A visitor's words reach a model only through office.ai, which has no tools and sees nothing of the building.
 import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
