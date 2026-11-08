@@ -220,7 +220,7 @@ body[data-lobby="building"] .hero, body[data-lobby="building"] .hints, body[data
 .dh-floor { --k: 1.15; --col: 12px; --slab: 8px; position: relative; display: block; flex: none; width: 100%; height: 202px; margin: 0; padding: 0; border: 0; border-radius: 0; background: #30343a; color: #1c1712; text-align: left; font: inherit; cursor: pointer; contain: layout paint style; content-visibility: auto; contain-intrinsic-size: auto 202px; -webkit-tap-highlight-color: transparent; }
 .dh-floor::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: var(--slab); background: linear-gradient(#4b5059 0 2px, #30343a 2px); }
 .dh-floor::before { content: ""; position: absolute; z-index: 7; left: var(--col); right: var(--col); top: 0; bottom: var(--slab); pointer-events: none; }
-@media (hover: hover) { .dh-floor:hover::before { box-shadow: inset 0 0 0 3px var(--brand); } .dh-floor:hover .dh-go { display: block; } }
+@media (hover: hover) { button.dh-floor:hover::before { box-shadow: inset 0 0 0 3px var(--brand); } button.dh-floor:hover .dh-go { display: block; } }
 .dh-floor:focus-visible { outline: none; }
 .dh-floor:focus-visible::before { box-shadow: inset 0 0 0 4px var(--sun); }
 .dh-floor.to-let { height: 104px; contain-intrinsic-size: auto 104px; cursor: default; }

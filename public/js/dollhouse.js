@@ -212,7 +212,7 @@ export class Room {
     const q = pick(this.people.filter((o) => o !== p));
     if (!q) { this.wander(p); return; }
     const side = q.x > this.p.w / 2 ? -1 : 1;
-    this.place(p, { sx: Math.max(this.p.s(16), Math.min(this.p.w - this.p.s(50), q.x + side * this.p.s(22))), y: this.p.lane, sit: false, kind: 'lane' });
+    this.place(p, { sx: Math.max(this.p.s(16), Math.min(this.p.w - this.p.s(50), q.x + side * this.p.s(31))), y: this.p.lane, sit: false, kind: 'lane' });
   }
 
   think(now) {
