@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { get, all, run } from './db.js';
-import { ROOT } from './config.js';
+import { ROOT, routeFor } from './config.js';
 import { Limiter, pause } from './limiter.js';
 import { ProviderError, scrub } from './llm.js';
 import { MIN_ROOM_USD } from './budget.js';
@@ -61,11 +61,9 @@ process.exitCode = r.errors.length || r.claims.length ? 1 : 0;
 const CLIENT_JS = readFileSync(join(ROOT, 'server/app-client/office.js'));
 const THREE_JS = readFileSync(join(ROOT, 'public/vendor/three/three.module.min.js'));
 
-/** The model settings a role uses on a computer. Managed Agents runs Claude only, so a role on another provider names its Claude settings here. */
-export function computerRole(role) {
-  if (!role?.computer) return null;
-  const over = role.computer === true ? {} : role.computer;
-  return { model: over.model || role.model, effort: over.effort ?? role.effort, pricing: over.pricing || role.pricing };
+/** The model settings a role uses on a computer. Managed Agents runs Claude only, so a role on another provider names its Claude settings here. A job the team picked for itself runs on the autonomous model. */
+export function computerRole(models, roleKey, { autonomous = false } = {}) {
+  return routeFor(models, roleKey, { computer: true, autonomous });
 }
 
 function describeTool(ev) {
@@ -96,7 +94,7 @@ export class Computer {
     this.limiter = new Limiter(engine.cfg.maxSessionsFloor, engine.cfg.maxSessionsGlobal);
     this.fileWork = new Limiter(Infinity, FILE_WORK_AT_ONCE);
   }
-  handles(role) { return !!computerRole(this.engine.models.all[role]); }
+  handles(role) { return !!this.engine.models.all[role]?.computer; }
 
   // ---- control-plane objects: created once, kept by id, updated only when their definition changes ----
   setting(key) { const v = get(this.engine.db, 'SELECT value FROM settings WHERE key=?', key)?.value; return v ? JSON.parse(v) : null; }
@@ -111,18 +109,24 @@ export class Computer {
     this.saveSetting(key, { id: env.id, hash: h });
     return env.id;
   }
-  async agentRef(roleKey) {
+  /**
+   * One agent per role and model. A role's autonomous variant (Sonnet, say) is a separate agent from the one the boss's jobs use, so switching
+   * between them never rewrites either one, and each keeps its own stable prompt for the cache. When both settle on the same model they share one.
+   */
+  async agentRef(roleKey, { autonomous = false } = {}) {
     const { cfg, models } = this.engine;
-    const role = models.all[roleKey]; const comp = computerRole(role);
+    const role = models.all[roleKey]; const comp = computerRole(models, roleKey, { autonomous });
+    const own = computerRole(models, roleKey);
+    const variant = autonomous && (comp.model !== own.model || comp.effort !== own.effort) ? '-auto' : '';
     const tools = COMPUTER_TOOL_DEFS(cfg, roleKey);
     const def = {
-      name: `theoffice-${roleKey}`, model: { id: comp.model, ...(comp.effort ? { effort: comp.effort } : {}) }, system: computerPrompt(cfg, roleKey, role),
+      name: `theoffice-${roleKey}${variant}`, model: { id: comp.model, ...(comp.effort ? { effort: comp.effort } : {}) }, system: computerPrompt(cfg, roleKey, role),
       tools: [
         { type: 'agent_toolset_20260401', default_config: { enabled: true, permission_policy: { type: 'auto' } }, configs: [{ name: 'web_fetch', enabled: false }, { name: 'web_search', enabled: false }] },
         ...tools,
       ],
     };
-    const h = hash(def); const key = `ma_agent_${roleKey}`;
+    const h = hash(def); const key = `ma_agent_${roleKey}${variant}`;
     const have = this.setting(key);
     if (have?.hash === h) return { type: 'agent', id: have.id, version: have.version };
     const made = have ? await this.client.updateAgent(have.id, def) : await this.client.createAgent(def);
@@ -243,7 +247,7 @@ export class Computer {
 
   newState(floor, agent, task, signal) {
     const e = this.engine;
-    const comp = computerRole(e.models.all[agent.role]);
+    const comp = computerRole(e.models, agent.role, { autonomous: !!task.auto });
     return {
       id: task.session_id || '', floorId: floor.id, floor, agent, taskId: task.id, project: task.project, signal, room: null,
       // History counts towards the steps, so a restart can't reset them. A round of fixes the manager asked for gets its own, or the fix never fits; the dollar caps still hold.
@@ -321,7 +325,7 @@ export class Computer {
       this.pushMessage(task.id, 'Your earlier computer was lost. /workspace/project now holds everything that had been saved, so check what is still missing and finish the job.');
       st.id = ''; st.charged = 0;
     }
-    const agentRef = await this.agentRef(agent.role);
+    const agentRef = await this.agentRef(agent.role, { autonomous: !!task.auto });
     const vaulted = !!task.vault && !!e.cfg.iosEnabled && !!e.cfg.iosVaultId;
     const environment = vaulted ? await this.environmentId(IOS_HOSTS, 'ma_environment_ios') : await this.environmentId();
     let upload, baseline;

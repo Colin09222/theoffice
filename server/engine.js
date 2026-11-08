@@ -3,6 +3,7 @@ import { get, all, run, tx } from './db.js';
 import { Limiter, pause } from './limiter.js';
 import { ProviderError, scrub } from './llm.js';
 import { createBudget, providerForRole, providerOf, scrubOldSpend } from './budget.js';
+import { routeFor } from './config.js';
 import { createTools, toolDefs, toolsForRole, publicUrl, wrapUntrusted, mentionsPrivate, NOT_SEEN_AS_LINK } from './tools.js';
 import { createDomainBroker } from './domains.js';
 import { createIos } from './ios.js';
@@ -243,7 +244,8 @@ export class Engine {
   // ---- one LLM call: budget check, concurrency slot, retries, ledger ----
   async callLLM(ctx, { messages, tools, onToken, onToolCall, onReset, meta }) {
     const { floorId, agent, signal } = ctx;
-    const role = this.models.all[agent.role] || this.models.all.researcher;
+    // A job the team picked for itself in a work mode runs on the autonomous model. Anything the boss asked for runs on the role's own.
+    const role = routeFor(this.models, agent.role, { autonomous: !!ctx.autonomous });
     const provider = providerForRole(role);
     const paid = { ...ctx, provider };
     const pricing = { prompt: role.pricing?.prompt || 0, completion: role.pricing?.completion || 0, cacheRead: role.pricing?.cacheRead };
@@ -377,7 +379,9 @@ export class Engine {
     const newestBoss = get(this.db, "SELECT MAX(id) n FROM messages WHERE floor_id=? AND role='boss'", floorId).n ?? 0;
     ctx.bossTurn = !!meta.isFreshBoss || newestBoss > (this.bossRead.get(floorId) ?? Infinity);
     this.bossRead.set(floorId, newestBoss);
-    const call = { floorId, agent: mgr, signal, project: '' };
+    // A job the team picked for itself in a work mode. A turn that reads something new from the boss is the boss's, whatever else is going on.
+    ctx.autonomous = !ctx.bossTurn && !!this.modes?.running(floorId);
+    const call = { floorId, agent: mgr, signal, project: '', autonomous: ctx.autonomous };
     const maxSteps = this.cfg.maxManagerSteps;
     const opening = messages.length;
     try {
@@ -459,6 +463,7 @@ export class Engine {
     const defs = toolDefs(names, this.cfg, agent.role);
     const ctx = this.toolCtx(floor, agent, task, names);
     ctx.signal = signal;
+    ctx.autonomous = !!task.auto;
     let messages = task.transcript ? JSON.parse(task.transcript) : null;
     if (!messages) {
       messages = [
@@ -668,7 +673,7 @@ export class Engine {
     let ids = []; try { ids = JSON.parse(task.files || '[]'); } catch { /* none */ }
     return attachmentsOf(this.db, task.floor_id, ids);
   }
-  assignTask(floor, mgr, { to, title, brief, plan, project: wanted, private: priv, dependsOn, afterPrevious, lane = '', files = [] }) {
+  assignTask(floor, mgr, { to, title, brief, plan, project: wanted, private: priv, dependsOn, afterPrevious, lane = '', files = [], auto = false }) {
     const q = to.toLowerCase();
     const staff = all(this.db, "SELECT * FROM agents WHERE floor_id=? AND role!='manager'", floor.id);
     const target = staff.find((s) => s.role === q || s.name.toLowerCase() === q || s.title.toLowerCase() === q);
@@ -684,7 +689,7 @@ export class Engine {
       if (prev) deps.push(prev.id);
     }
     const t = this.now();
-    const r = run(this.db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,depends_on,created_at,updated_at,lane,files) VALUES (?,?,?,?,?,?,?,?,?,?,?)', floor.id, plan, title, brief, target.id, project, JSON.stringify([...new Set(deps)]), t, t, lane, JSON.stringify(files.map((f) => f.id)));
+    const r = run(this.db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,depends_on,created_at,updated_at,lane,files,auto) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', floor.id, plan, title, brief, target.id, project, JSON.stringify([...new Set(deps)]), t, t, lane, JSON.stringify(files.map((f) => f.id)), auto ? 1 : 0);
     const id = Number(r.lastInsertRowid);
     this.emitTask(id);
     this.feed(floor.id, mgr, `gave ${target.name} a task: "${title}"`, project);

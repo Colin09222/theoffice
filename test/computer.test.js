@@ -530,7 +530,7 @@ describe('control and recovery', () => {
     assert.equal(row.status, 'review');
     assert.match(seen.pub, /report back/);
     const def = h.sessions.calls.agents.find((a) => a.name === 'theoffice-tester');
-    assert.equal(def.model.id, 'claude-opus-5-5');
+    assert.equal(def.model.id, 'claude-sonnet-5-5'); assert.equal(def.model.effort, 'high');
     assert.ok(!def.tools.some((x) => x.name === 'publish_project'));
   });
 });

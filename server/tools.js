@@ -497,7 +497,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     ios_start(c, a) { return engine.ios.start(c, projectFor(c, a), str(a, 'app_name', 40)); },
     ios_request(c, a) { return engine.ios.request(c, projectFor(c, a), a.kind === 'submit' ? 'submit' : 'build', str(a, 'build_id', 80, false)); },
     assign_task(c, a) {
-      const t = engine.assignTask(c.floor, c.agent, { to: str(a, 'to', 60), title: str(a, 'title', 160), brief: str(a, 'brief', 6000), plan: str(a, 'plan', 120, false), project: slugify(str(a, 'project', 60, false), ''), private: a.private === true, dependsOn: Array.isArray(a.depends_on) ? a.depends_on : [], afterPrevious: a.after_previous === true, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files) });
+      const t = engine.assignTask(c.floor, c.agent, { to: str(a, 'to', 60), title: str(a, 'title', 160), brief: str(a, 'brief', 6000), plan: str(a, 'plan', 120, false), project: slugify(str(a, 'project', 60, false), ''), private: a.private === true, dependsOn: Array.isArray(a.depends_on) ? a.depends_on : [], afterPrevious: a.after_previous === true, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files) , auto: !!c.autonomous });
       c.assigned.push(t.agentId);
       return `Task #${t.id} assigned to ${t.assignee}.`;
     },
