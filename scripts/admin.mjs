@@ -18,6 +18,7 @@ import { adsListing, adsListingText, pauseAll } from '../server/ads-guard.js';
 import { ensureAdSpend, resumeAds } from '../server/business.js';
 import { scrub } from '../server/llm.js';
 import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, MailError } from '../server/mail.js';
+import { dailyStatus, dailyStatusText, requestDailyRun, setDailyPaused, ensureDailySchema } from '../server/daily.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -49,7 +50,10 @@ const usage = () => {
     '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick',
     '  node scripts/admin.mjs ads list [--json]        paid Google ads: approved against spent per campaign (Google\'s own figures), and this month against the cap',
     '  node scripts/admin.mjs ads pause-all            emergency stop: pause every enabled campaign in the Google Ads account now; no new paid campaign starts until ads resume',
-    '  node scripts/admin.mjs ads resume               lift the stop left by pause-all, the watchdog or the server\'s spend check, once you\'ve looked (paused campaigns stay paused)'].join('\n'));
+    '  node scripts/admin.mjs ads resume               lift the stop left by pause-all, the watchdog or the server\'s spend check, once you\'ve looked (paused campaigns stay paused)',
+    '  node scripts/admin.mjs daily status [--json]    the daily run: which floors have it on, when they run next, and how the last run went. No figures from a floor',
+    '  node scripts/admin.mjs daily run <floor>        force one run on that floor, to test it, on the server\'s next tick. The goal still comes first, and it counts as that day\'s run',
+    '  node scripts/admin.mjs daily pause|resume       stop or restart new daily runs across the building. A run under way finishes'].join('\n'));
   process.exit(1);
 };
 if (!cmd) usage();
@@ -250,6 +254,25 @@ if (cmd === 'code') {
     if (fl !== null) { const f = floorRow(); setFloorPause(db, f.id, on, 'building manager'); console.log(`Email sending ${on ? 'paused' : 'back on'} for floor ${f.number} ${f.name}.`); } else { setBuildingPause(db, on); console.log(`Email sending ${on ? 'paused' : 'back on'} for the whole building.`); }
   } else if (sub === 'suppress') {
     try { console.log(`${suppressAddress(db, rest[1], 'building manager')} will get no more email from the building.`); } catch (e) { if (e instanceof MailError) die(e.message); throw e; }
+  } else usage();
+} else if (cmd === 'daily') {
+  // Works on the database file alone. A running server sees a pause, or a run asked for here, on its next tick.
+  ensureDailySchema(db);
+  const sub = rest[0];
+  if (sub === 'status') {
+    const s = dailyStatus(db, cfg);
+    console.log(rest.includes('--json') ? JSON.stringify(s, null, 2) : dailyStatusText(s));
+  } else if (sub === 'run') {
+    const given = rest.indexOf('--floor') >= 0 ? rest[rest.indexOf('--floor') + 1] : rest[1];
+    const n = Number(given);
+    if (!Number.isInteger(n) || n < 1 || n > cfg.towerFloors) die(`Give a floor number from 1 to ${cfg.towerFloors}.`);
+    const f = get(db, "SELECT id FROM floors WHERE number=? AND status!='killed'", n);
+    if (!f) die(`Floor ${n} has no company on it.`);
+    requestDailyRun(db, f.id);
+    console.log(`Asked for a run on floor ${n}. The server starts it on its next tick, once the floor is free. A floor with no goal has its manager ask for one first.`);
+  } else if (sub === 'pause' || sub === 'resume') {
+    setDailyPaused(db, sub === 'pause');
+    console.log(sub === 'pause' ? 'Daily runs paused across the building. A run under way finishes.' : 'Daily runs back on.');
   } else usage();
 } else usage();
 db.close();

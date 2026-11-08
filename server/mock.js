@@ -321,7 +321,7 @@ function dailyStep(meta) {
   if (!m) return null;
   const dir = `projects/${meta.task.project}`, goal = m[3];
   const list = [];
-  if (m[1] === 'build') list.push(call('write_file', { path: `${dir}/index.html`, content: SITE(m[2], 'A page the team made clearer today.') }));
+  if (m[1] === 'build') list.push(call('write_file', { path: `${dir}/index.html`, content: SITE(m[2], 'A page the team made clearer today.') }), call('write_file', { path: `${dir}/style.css`, content: 'body{font-family:sans-serif}' }, 1), call('write_file', { path: `${dir}/app.js`, content: 'console.log("hello");' }, 2));
   else {
     const flunk = /\[flunk\]/.test(goal), major = /\[major\]/.test(goal);
     list.push(call('write_file', { path: `${dir}/TEST-REPORT.md`, content: `# Test report\n\nChecked it.\n\n\`\`\`office-verdict\n${JSON.stringify({ verdict: flunk ? 'fail' : 'pass', rules: {}, bugs: flunk ? [{ severity: 'blocker', text: 'The page is blank on a phone.' }] : major ? [{ severity: 'major', text: 'The sign-up button does nothing.' }] : [], regressions: [], summary: flunk ? 'Broken.' : 'Works.' })}\n\`\`\`\n` }));
