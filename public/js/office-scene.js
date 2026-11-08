@@ -467,7 +467,7 @@ export class Actor {
     if (!this.seated) return;
     const f = this.seatFace();
     this.seated = false; this.char.inChair = false;
-    this.group.position.x -= Math.sin(f) * 0.36; this.group.position.z -= Math.cos(f) * 0.36;
+    this.backStep = 0.36; this.backFace = f;  // the half step back is taken over the next moment, in update
   }
   goTo(x, z, then) {
     this.seated = false; this.char.inChair = false;
@@ -646,6 +646,7 @@ export class Actor {
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       g.rotation.y += diff * Math.min(1, dt * 10);
     }
+    if (this.backStep > 0) { const d = Math.min(this.backStep, dt * 2.2); g.position.x -= Math.sin(this.backFace) * d; g.position.z -= Math.cos(this.backFace) * d; this.backStep -= d; }
     // Onto the seat and off it at the pace the sitting pose blends, so the hips glide instead of jumping.
     g.position.y += ((this.seated ? this.seatY : 0) - g.position.y) * Math.min(1, dt * 9);
     this.shadow.position.set(g.position.x, 0.02, g.position.z);
