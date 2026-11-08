@@ -30,6 +30,8 @@ export const CLOUD_RATES = {
   query: [120, 60000], queryProject: [1200, 60000],
   // AI and the web, per visitor's address and per project. Small on purpose, because every one of these leaves the building.
   aiVisitor: [12, 60000], aiVisitorDay: [200, 86400000], aiProject: [240, 60000], webVisitor: [30, 60000], webVisitorDay: [600, 86400000], webProject: [240, 60000],
+  // Payments. Checkout creation talks to Stripe, so per address, per account and per project; the "has" check is cheap but asks Stripe about an open order.
+  payCheckoutIp: [10, 60000], payCheckoutAccount: [6, 60000], payCheckoutProject: [120, 60000], payHas: [240, 60000],
 };
 const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const BODY = { json: 96 * 1024, small: 8 * 1024 };
@@ -50,7 +52,7 @@ const drained = (res) => new Promise((r) => { const done = () => { res.off('drai
 const scryptAsync = (pw, salt, o) => new Promise((res, rej) => scrypt(pw, salt, 32, o, (e, k) => (e ? rej(e) : res(k))));
 
 export function installCloud(ext) {
-  const { db, cfg, engine, log, now, GET, POST, json, requireOwner, requireAdmin, floorBySlug, HttpError, ipOf, secret } = ext;
+  const { db, cfg, engine, log, now, GET, POST, json, requireOwner, requireAdmin, floorBySlug, HttpError, ipOf, secret, pay } = ext;
   const store = createStore(db, cfg.cloudLimits || {}, now);
   const RATES = { ...CLOUD_RATES, ...(cfg.cloudRates || {}) };
   const rates = new A.RateLimiter(cfg.cloudRateScale ?? cfg.rateScale, now);
@@ -205,7 +207,7 @@ export function installCloud(ext) {
           limit('loginAccount', `${pk}:uid:${w.uid}`);
           const body = await readBody(req, BODY.small);
           if (typeof body.password !== 'string' || !(await checkPassword(body.password, w.user.hash))) throw new CloudError(401, 'bad_login', 'That password is wrong.');
-          if (b === 'delete') { store.users.remove(w.user); return reply(200, { ok: true }); }
+          if (b === 'delete') { pay.assertCanDelete(F, p, w); store.users.remove(w.user); return reply(200, { ok: true }); }
           if (typeof body.newPassword !== 'string' || body.newPassword.length < 8 || Buffer.byteLength(body.newPassword) > 512) throw new CloudError(400, 'bad_password', 'A password is at least 8 characters.');
           store.users.setHash(w.user, await hashPassword(body.newPassword));
           // Anyone else holding this account's sessions is signed out; this device stays in.
@@ -217,6 +219,7 @@ export function installCloud(ext) {
 
       if (a === 'db' && b) {
         const w = who();
+        pay.guard(F, p, b, w);  // a collection a product opens stays shut without that purchase, whatever the page says
         if (!c) {
           if (m === 'GET') {
             limit('query', `${pk}:${ip}`); limit('queryProject', pk);
@@ -283,6 +286,10 @@ export function installCloud(ext) {
         const body = await readBody(req, BODY.json);
         // Two at once from one address and four from one project, so one busy site can't hold every place in the building.
         return reply(200, await atOnce(`ai:${ip}`, 2, () => atOnce(`aiP:${pk}`, 4, () => ai.chat({ F, p, pk, body }), 'The AI is busy on this site right now. Try again in a moment.')));
+      }
+      if (a === 'pay' && b && !c) {
+        const r = await pay.cloudRoute({ F, p, pk, ip, m, b, q, origin, who, limit, readBody: () => readBody(req, BODY.small) });
+        if (r) return reply(200, r);
       }
       if ((a === 'fetch' || a === 'scrape') && !b && m === 'POST') {
         limit('webVisitor', `${pk}:${ip}`); limit('webVisitorDay', `${pk}:${ip}`); limit('webProject', pk);
