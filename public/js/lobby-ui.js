@@ -51,7 +51,7 @@ function buildTicker() {
     paint(freshIds);
   };
   refresh(true).catch(() => paint(new Set()));
-  tickerPoll = setInterval(() => refresh(false).catch(() => { /* retried next time */ }), 10000);
+  tickerPoll = setInterval(() => { if (!document.hidden) refresh(false).catch(() => { /* retried next time */ }); }, 10000);
   return strip;
 }
 
@@ -303,9 +303,10 @@ export async function showLobby(root) {
     if (party && poll && mayParty(party.id)) celebrate(party);
   };
   setTimeout(() => checkParty().catch(() => { /* retried next time */ }), 1200);
-  partyPoll = setInterval(() => checkParty().catch(() => { /* retried next time */ }), 10000);
+  partyPoll = setInterval(() => { if (!document.hidden) checkParty().catch(() => { /* retried next time */ }); }, 10000);
 
   poll = setInterval(async () => {
+    if (document.hidden) return;  // a tab nobody is looking at asks for nothing
     try {
       const fresh = await api('/floors');
       keepFloors = fresh.floors; view?.setFloors(fresh.floors); stack?.update(fresh);
