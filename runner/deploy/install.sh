@@ -46,7 +46,10 @@ chmod 0600 $R/secrets/*.token
 install -m 0440 $R/secrets/api.token $R/shared/api.token
 chown root:$OFFICE_GID $R/shared/api.token
 
-[ -f $R/etc/runner.json ] || printf '{\n  "MAX_APPS": 4,\n  "MAX_BROWSER_APPS": 2,\n  "IDLE_MINUTES": 15\n}\n' > $R/etc/runner.json
+# gVisor's network stack can't reach Docker's embedded DNS (127.0.0.11), so apps get Hetzner's resolvers, the only DNS the firewall allows.
+[ -f $R/etc/resolv.conf ] || printf 'nameserver 185.12.64.1\nnameserver 185.12.64.2\noptions timeout:2 attempts:2\n' > $R/etc/resolv.conf
+chmod 0644 $R/etc/resolv.conf
+[ -f $R/etc/runner.json ] || printf '{\n  "MAX_APPS": 4,\n  "MAX_BROWSER_APPS": 2,\n  "IDLE_MINUTES": 15,\n  "APP_RESOLV_CONF": "/opt/office-runner/etc/resolv.conf"\n}\n' > $R/etc/runner.json
 chmod 0644 $R/etc/runner.json
 [ -f $R/etc/forbidden-secret-sha256 ] || install -m 0644 /dev/null $R/etc/forbidden-secret-sha256
 

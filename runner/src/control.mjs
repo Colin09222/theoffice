@@ -582,6 +582,9 @@ export function createControl({ cfg, docker, sys, tokens, now = Date.now, probe 
 
   async function boot() {
     for (const app of Object.values(state.apps)) {
+      // Traffic times are only in memory, so a restarted runner counts every app as just started;
+      // otherwise the next idle tick would put all of them to sleep and cut their live connections.
+      rt(app.label).startedAt = now();
       await sys.ensureVolume(app.label).catch((e) => log('volume.error', { app: app.label, err: e.message }));
       if (['queued', 'building'].includes(app.build?.status)) {
         app.build = { ...app.build, status: 'failed', error: 'the runner restarted during the build', finishedAt: now() };

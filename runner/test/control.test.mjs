@@ -193,6 +193,19 @@ test('idle apps sleep; a request wakes them', async () => {
   assert.equal(docker.c.get('office-app-delta').State.Running, true);
 });
 
+test('a runner restart gives running apps a full idle window before sleeping them', async () => {
+  await call('POST', '/internal/wake/delta', undefined, EDGE);
+  assert.equal(docker.c.get('office-app-delta').State.Running, true);
+  clock += (cfg.IDLE_MINUTES + 1) * 60000; // long past the idle window, but the restart comes first
+  const restarted = createControl({ cfg, docker, sys, tokens: { api: API, edge: EDGE }, now: () => clock, probe: async () => true });
+  await restarted.boot();
+  await restarted.idleTick();
+  assert.equal(docker.c.get('office-app-delta').State.Running, true);
+  clock += (cfg.IDLE_MINUTES + 1) * 60000;
+  await restarted.idleTick();
+  assert.equal(docker.c.get('office-app-delta').State.Running, false);
+});
+
 test('a scheduled job wakes a sleeping app and lets it sleep again when done', async () => {
   const r = await deploy('delta', {}, { 'server.js': 'x', 'office.json': { cron: [{ name: 'scrape', schedule: '*/30 * * * *', run: 'node job.js' }] } });
   assert.equal(r.status, 200, r.raw);
