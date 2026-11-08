@@ -118,7 +118,7 @@ export class TowerView {
     this.staticShadows = true;
     // Its shadow camera looks at a sliver of empty air by the sun, so even that one drawing holds nothing: every surface reads as lit.
     Object.assign(this.sun.shadow.camera, { left: -0.01, right: 0.01, top: 0.01, bottom: -0.01, near: 0.1, far: 0.2 }); this.sun.shadow.camera.updateProjectionMatrix();
-    const fill = new THREE.DirectionalLight('#bcd2f5', 0.55); fill.position.set(-17, 13, 23); this.scene.add(fill); this.fill = fill;
+    const fill = new THREE.DirectionalLight('#bcd2f5', 0.55); fill.position.set(-17, 13, 23); this.scene.add(fill);
     this.world = getWorld();
     this.env = this.world.environment(); this.scene.environment = this.env; this.scene.environmentIntensity = 0.35;
     // The room's own panorama where a floor page would use it, so a room carried between the two keeps its light.
@@ -135,7 +135,7 @@ export class TowerView {
     this.stand = new THREE.Group(); this.scene.add(this.stand);
     this.slots = []; this.byNumber = new Map(); this.staff = {}; this.rooms = {};
     this.full = new Map(); this.fade = new Float32Array(FADE_N * 4).fill(1);
-    this.ride = 0; this.target = 0; this.vel = 0; this.yaw = 0.35; this.targetYaw = 0.35; this.time = 0;
+    this.ride = 0; this.target = 0; this.yaw = 0.35; this.targetYaw = 0.35; this.time = 0;
     this.radius = 1; this.w = window.innerWidth; this.h = window.innerHeight; this.turns = []; this.stillFor = 0;
     this.plaques = new Map(); this.plaqueRoot = document.createElement('div'); this.plaqueRoot.className = 'tower-plaques';
     this.ray = new THREE.Raycaster(); this.box3 = new THREE.Box3(); this.v = new THREE.Vector3();
@@ -147,7 +147,6 @@ export class TowerView {
 
   /** A fresh /api/floors answer: which floors exist, in order. A hidden floor, or one a code is holding, isn't in the stack at all. */
   setFloors(data) {
-    this.data = data;
     const byNum = new Map(data.floors.map((f) => [f.number, f])); const toLet = new Set(data.toLet || []);
     const next = [];
     for (let n = 1; n <= data.towerFloors; n++) {
@@ -174,8 +173,8 @@ export class TowerView {
       if (keep) { this.ride = this.target = keep.k; }
       if (this.ride > next.length - 1) this.ride = this.target = Math.max(0, next.length - 1);
     } else next.forEach((s, k) => { this.slots[k].card = s.card; });
-    if (changed || !this.built) this.buildStandIns();
-    else this.paintStandIns();
+    // Busy screens and names change all the time and the pieces don't, but rebuilding them all takes a millisecond, so a poll just does.
+    this.buildStandIns();
     this.syncPlaques(true);
   }
   /** Who works where, and each floor's room, from /api/building/staff. */
@@ -247,13 +246,10 @@ export class TowerView {
     for (const [w, hh] of [[PLATE - 6, 5.2], [PLATE - 12, 4.4], [PLATE - 18, 3.8]]) { box.add(1000 + N, 0, cy + hh / 2, 0, w, hh, w, 0, '#e6d6be'); box.add(1000 + N, 0, cy + hh + 0.15, 0, w + 0.9, 0.3, w + 0.9, 0, '#c9a86a'); cy += hh + 0.3; }
     box.add(1000 + N, 0, cy + 11, 0, 0.9, 22, 0.9, 0, '#c9a86a');
     glow.add(1000 + N, 0, cy + 22.4, 0, 0.8, 0.8, 0.8, 0, '#ff6a52');
-    this.roofY = cy;
     for (const b of [box, glow, body, ball, sign]) this.stand.add(b.build());
     this.built = true;
     this.fadeAll();
   }
-  /** Busy screens and opening hours change all the time; the pieces don't. A poll just rebuilds, it takes a millisecond. */
-  paintStandIns() { this.buildStandIns(); }
   fadeAll() {
     const f = this.fade;
     for (let i = 0; i < FADE_N; i++) this.U.uFade.value[i].set(f[i * 4], f[i * 4 + 1], f[i * 4 + 2], f[i * 4 + 3]);
@@ -311,7 +307,7 @@ export class TowerView {
       if (this.dead || this.slots[k] !== slot) return;
       const view = new OfficeView({ state, labels: this.labels, host: this });
       this.place(view, k, state);
-      const f = { slot, view, state, show: 0, ready: false, born: performance.now(), lastId: state.lastEventId };
+      const f = { slot, view, state, show: 0, ready: false, lastId: state.lastEventId };
       view.root.visible = false;
       this.full.set(k, f);
     } catch (e) {
@@ -375,7 +371,7 @@ export class TowerView {
     const phone = this.w <= 760;
     return phone ? { left: 0, right: 0, top: 64, bottom: 200 } : { left: 24, right: Math.min(430, this.w * 0.34), top: 74, bottom: 128 };
   }
-  /** How far back the camera sits for this screen: a floor's width across the free area (a phone crops the terraces), at a gentle tilt. */
+  /** How far back the camera sits for this screen: a floor's width across the free area (a phone crops a little off the sides). */
   frame() {
     const i = this.insets(), w = this.w, h = this.h;
     const freeW = Math.max(120, w - i.left - i.right), freeH = Math.max(120, h - i.top - i.bottom);
@@ -407,7 +403,7 @@ export class TowerView {
     this.rideTo((s || top || this.slots[0] || { k: 0 }).k, { instant: true });
     if (spot?.yaw !== undefined) this.yaw = this.targetYaw = spot.yaw;
   }
-  rideTo(k, { instant = false } = {}) { this.target = this.clampTarget(k); this.vel = 0; if (instant) this.ride = this.target; }
+  rideTo(k, { instant = false } = {}) { this.target = this.clampTarget(k); if (instant) this.ride = this.target; }
   /** Rides to a floor by its number. */
   rideToFloor(n, opts) { const s = this.byNumber.get(n); if (s) this.rideTo(s.k, opts); }
 
@@ -427,7 +423,7 @@ export class TowerView {
     this.onDown = (e) => {
       if (!this.active || e.target !== el || this.flight) return;
       this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, t: performance.now(), ride: this.ride, yaw: this.targetYaw, moved: false, samples: [[performance.now(), this.ride]] };
-      this.target = this.ride; this.vel = 0;
+      this.target = this.ride;
       el.setPointerCapture?.(e.pointerId);
     };
     this.onMove = (e) => {
@@ -550,7 +546,7 @@ export class TowerView {
     if (!s || s.kind !== 'company' || this.flight) return;
     this.rideTo(s.k);
     let f = this.full.get(s.k);
-    if (!f) { this.flightPending = n; while (this.building !== null && this.building !== undefined) await new Promise((r) => setTimeout(r, 30)); if (!this.full.has(s.k)) await this.buildFloor(s.k); f = this.full.get(s.k); this.flightPending = null; }
+    if (!f) { while (this.building != null) await new Promise((r) => setTimeout(r, 30)); if (!this.full.has(s.k)) await this.buildFloor(s.k); f = this.full.get(s.k); }
     if (!f || this.dead) { this.onEnter?.(s.card, { seamless: false }); return; }
     f.pinned = true;
     // A floor still being put together finishes first: a flight into stand-ins would land on a room changing under the camera.
@@ -572,7 +568,7 @@ export class TowerView {
     view.demote(this);
     this.place(view, s.k, h.state);
     for (const a of view.actors.values()) this.labels.append(a.tag);
-    const f = { slot: s, view, state: h.state, show: 1, ready: true, born: performance.now(), lastId: h.state?.lastEventId, pinned: true };
+    const f = { slot: s, view, state: h.state, show: 1, ready: true, lastId: h.state?.lastEventId, pinned: true };
     view.root.visible = true; this.fade[s.k] = 0; this.full.set(s.k, f); this.listen(f);
     const lift = 150;
     this.U.uLiftFrom.value = s.k + 0.5; this.U.uLift.value = lift;
@@ -619,7 +615,7 @@ export class TowerView {
     for (const g of this.full.values()) g.view.root.position.y = slotY(g.slot.k) + this.offsetOf(g.slot.k);
   }
   /** The flight has landed: this frame is held on screen while the floor page takes the room, then fades into it. */
-  async handIn(fl) {
+  handIn(fl) {
     const f = fl.f, card = f.slot.card;
     if (this.dead) return;
     stage.afterRender = () => {
@@ -694,7 +690,6 @@ export class TowerView {
       f.view.update(dt);
       if (f.view.tagsOn) for (const [id, a] of f.view.actors) tags.set(`${f.slot.k}:${id}`, a);
     }
-    if (this.flight?.kind === 'in' && this.flight.t > 0.85) { const f = this.flight.f; f.view.tagsOn = true; }
     tidyLabels(tags, this.w);
     this.placePlaques();
   }
@@ -713,4 +708,4 @@ export class TowerView {
     document.body.classList.remove('tower-flying');
   }
 }
-export { takeHandoff, SPOT_KEY };
+export { takeHandoff };

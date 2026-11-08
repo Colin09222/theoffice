@@ -1189,7 +1189,8 @@ export class OfficeView {
    *  the walls, soft contact shadows under every piece of furniture, pools of window and lamp light, and each office's owner lettered by the door.
    *  The normal and roughness maps are baked the same way, so the lights catch the planks and the grout. It costs nothing per frame. */
   bakeFloor() {
-    // In the tower a floor is never wider than the screen and there are several, so a quarter of the pixels does; promote() bakes it again at full size.
+    // In the tower a floor is never wider than the screen and there are several, so a quarter of the pixels does. A room flown into from
+    // there keeps its bake: baking it again on the floor page would stutter the room just landed in.
     const dens = stage.q?.density ?? 1; const W = this.host ? (dens >= 1 ? 1024 : 768) : dens >= 1 ? 2048 : dens >= 0.6 ? 1536 : 1024, H = Math.round(W * ROOM_D / ROOM_W);
     const ppu = W / ROOM_W; const k = W / 1024;
     const px = (wx) => (wx + ROOM_W / 2) * ppu, pz = (wz) => (wz + ROOM_D / 2) * ppu;
