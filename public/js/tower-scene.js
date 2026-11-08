@@ -6,7 +6,7 @@
 import * as THREE from '../vendor/three/three.module.min.js';
 import { stage } from './stage.js';
 import { api, BASE, session, toast } from './dom.js';
-import { getWorld, makeTower, GROUND, TOWER_W } from './lobby-scene.js';
+import { getWorld, makeTower, GROUND, FLOOR_H, TOWER_W } from './lobby-scene.js';
 import { OfficeView } from './office-scene.js';
 import { planFor, seatOf, seatSpot, ROOM_W, ROOM_D, WALL_H } from './layouts.js';
 import { tidyLabels } from './labels.js';
@@ -29,6 +29,8 @@ const FINISH = { wood: '#b8895a', darkwood: '#6e4a33', parquet: '#a87a4c', concr
 const SPOT_KEY = 'office:tower-ride';
 const reduced = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 export const slotY = (k) => BASE_Y + k * FH;
+/** Where a floor page puts the city under floor n, relative to its room (see OfficeView.buildWorld). A flight carries the city there. */
+const pageGround = (n) => -(GROUND + (n - 1) * FLOOR_H) * WS - (n === 1 ? 0.9 : 0.35);
 
 // A 4x4 ordered dither: a stand-in dissolves pixel by pixel, with no transparency to sort.
 const BAYER = 'float bayer4(vec2 p){ int x = int(mod(p.x, 4.0)), y = int(mod(p.y, 4.0)); int i = x + y * 4; '
@@ -533,10 +535,14 @@ export class TowerView {
 
   // ---------- flying in and out ----------
 
-  /** The floor page's panels, as it will lay them out, so the camera ends where the floor page's own camera starts. */
+  /**
+   * The floor page's panels exactly as it will lay them out (floors2.css), so the camera ends where the floor page's own camera starts:
+   * the card is 268 wide at 12 from the left, the lift column takes 86 on the right, and the boss's own panel sits beside the lift.
+   */
   pageInsets(slug) {
     const owner = session.floor?.slug === slug, w = this.w, h = this.h;
-    return w <= 760 ? { left: 0, right: 0, top: 58, bottom: (owner ? h * 0.54 : 104) + 44 } : { left: Math.min(w * 0.3, 396), right: Math.min(w * 0.42, owner ? 452 : 84), top: 20, bottom: 56 };
+    if (w <= 760) return { left: 0, right: 0, top: 58, bottom: (owner ? h * 0.54 : 104) + 44 };
+    return { left: Math.min(w * 0.3, 286), right: Math.min(w * 0.42, owner ? 86 + Math.min(420, Math.max(340, w * 0.27)) + 6 : 82), top: 20, bottom: 56 };
   }
   /** Rides to a floor, builds it if it isn't yet, and flies into it. Resolves once the floor page has the room. */
   async flyInto(n) {
@@ -552,7 +558,7 @@ export class TowerView {
     if (this.dead || this.flight) return;
     const pose = f.view.homePose(this.w, this.h, this.pageInsets(s.card.slug));
     const to = pose.position.clone().add(new THREE.Vector3(0, slotY(s.k), 0));
-    this.flight = { kind: 'in', f, t: 0, dur: reduced() ? 0.35 : 1.45, from: { pos: this.camera.position.clone(), quat: this.camera.quaternion.clone(), view: { ...this.camera.view } }, to: { pos: to, quat: pose.quaternion.clone(), view: pose.view }, pose };
+    this.flight = { kind: 'in', f, ground: slotY(s.k) + pageGround(n), t: 0, dur: reduced() ? 0.35 : 1.45, from: { pos: this.camera.position.clone(), quat: this.camera.quaternion.clone(), view: { ...this.camera.view } }, to: { pos: to, quat: pose.quaternion.clone(), view: pose.view }, pose };
     this.U.uLiftFrom.value = s.k + 0.5;
     try { sessionStorage.setItem(SPOT_KEY, JSON.stringify({ n, yaw: this.targetYaw })); } catch { /* private mode */ }
     document.body.classList.add('tower-flying');
@@ -577,7 +583,7 @@ export class TowerView {
     this.ride = this.target = s.k; this.targetYaw = this.yaw = spot?.n === h.number && spot.yaw !== undefined ? spot.yaw : this.yaw;
     const from = { pos: h.camera.position.clone().add(new THREE.Vector3(0, slotY(s.k), 0)), quat: h.camera.quaternion.clone(), view: { ...h.camera.view } };
     this.placeCamera();
-    this.flight = { kind: 'out', f, t: 0, dur: reduced() ? 0.35 : 1.3, from, to: null };
+    this.flight = { kind: 'out', f, ground: slotY(s.k) + pageGround(s.n), t: 0, dur: reduced() ? 0.35 : 1.3, from, to: null };
     this.camera.position.copy(from.pos); this.camera.quaternion.copy(from.quat);
     return true;
   }
@@ -592,12 +598,15 @@ export class TowerView {
       c.position.lerpVectors(fl.from.pos, to.pos, e); c.quaternion.slerpQuaternions(fl.from.quat, to.quat, e);
       this.lerpView(fl.from.view, to.view, e);
       this.setLift(150 * (1 - e) ** 2);
+      this.world.group.position.y = fl.ground * (1 - e);
       if (fl.t >= 1) { this.flight = null; fl.f.pinned = false; this.U.uLiftFrom.value = 1e6; this.setLift(0); document.body.classList.remove('tower-flying'); }
       return;
     }
     c.position.lerpVectors(fl.from.pos, fl.to.pos, e); c.quaternion.slerpQuaternions(fl.from.quat, fl.to.quat, e);
     this.lerpView(fl.from.view, fl.to.view, e);
     this.setLift(150 * e * e);
+    // The city comes up to where the floor page has it under this floor, so the landing and the floor page share a background too.
+    this.world.group.position.y = fl.ground * e;
     if (fl.t >= 1 && !fl.done) { fl.done = true; this.handIn(fl); }
   }
   lerpView(a, b, e) {
@@ -626,7 +635,7 @@ export class TowerView {
 
   enter() {
     this.active = true;
-    const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WS); w.group.position.set(0, 0, 0);
+    const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WS); w.group.position.set(0, this.flight?.kind === 'out' ? this.flight.ground : 0, 0);
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
     const r = stage.renderer; r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true; r.toneMappingExposure = 0.92;
     document.body.append(this.plaqueRoot);

@@ -1719,6 +1719,7 @@ export class OfficeView {
     if (pose) {
       this.yaw = this.targetYaw = pose.yaw; this.zoom = this.targetZoom = pose.zoom; this.pan.set(pose.pan[0], pose.pan[1]); this.targetPan.copy(this.pan); this.sized = true;
       this.insets = { ...pose.insets }; this.insetNow = { ...pose.insets };
+      this.insetsHeldUntil = performance.now() + 600;  // whatever the page then asks for waits until the cross-fade is over
     }
     this.buildWorld(); this.bind();
     // The same light the tower gave it. Its materials are already the floor page's own, so nothing reloads or bakes again under the camera.
@@ -1858,7 +1859,7 @@ export class OfficeView {
     this.updatePet(dt);
   }
   easeInsets(dt) {
-    const want = this.insets; if (!want || !this.insetNow) return;
+    const want = this.insets; if (!want || !this.insetNow || performance.now() < (this.insetsHeldUntil || 0)) return;
     const now = this.insetNow, k = 1 - Math.exp(-dt * 7); let moved = false;
     for (const key of ['left', 'right', 'top', 'bottom']) {
       const d = want[key] - now[key];
