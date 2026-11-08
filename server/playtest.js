@@ -41,10 +41,10 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
   scenes.add('menu'); shots.push(await d.shot('menu'));
   const settingsOk = await d.eval(clickText('[data-screen="menu"] button', 'Settings')) && !!(await until(d, '!!document.querySelector(\'[data-screen="settings"]\')', 2000));
   if (settingsOk) await d.eval(clickText('[data-screen="settings"] button', 'Back'));
-  await until(d, '!!document.querySelector(\'[data-screen="menu"]\')', 2000);
+  if (!(await until(d, '!!document.querySelector(\'[data-screen="menu"]\')', 2000))) { notes.push('Back from settings did not return to the menu.'); await d.eval('window.officeGame.menu && window.officeGame.menu()'); await until(d, `${STATE}?.scene === 'menu'`, 2000); }
   await d.key('Enter', true); await d.key('Enter', false);
   if (!(await until(d, `${STATE}?.scene === 'play'`, 3000))) { await d.eval('document.querySelector("[data-kit-play]")?.click()'); }
-  if (!(await until(d, `${STATE}?.scene === 'play'`, 3000))) notes.push('Enter and the Play button did not start the game.');
+  if (!(await until(d, `${STATE}?.scene === 'play'`, 3000))) { notes.push('Enter and the Play button did not start the game.'); await d.eval('window.officeGame.start && window.officeGame.start()'); await until(d, `${STATE}?.scene === 'play'`, 3000); }
   scenes.add((await d.eval(STATE))?.scene);
   await wait(400);
   // Input is only fair to judge while playing; a game that paused itself on start is noted and resumed.
@@ -64,7 +64,7 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
   if (paused) shots.push(await d.shot('pause'));
   await d.key('Escape', true); await d.key('Escape', false); await until(d, `${STATE}?.scene === 'play'`, 1500);
   // The long run: scripted and random input, watched once a second.
-  let softlock = '', frozenFor = 0, lastT = -1, pickFor = 0, restarts = 0, restartOk = true;
+  let softlock = '', frozenFor = 0, lastT = -1, pickFor = 0, overlayFor = 0, restarts = 0, restartOk = true;
   const end = Date.now() + seconds * 1000; let midShot = false, lastSample = 0;
   while (Date.now() < end && !softlock) {
     const r = random();
@@ -93,6 +93,8 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
       if (pickFor > 3) await d.eval('document.querySelector("[data-pick]")?.click()');
       if (pickFor > 8) softlock = 'stuck on a choice screen';
     } else if (s.scene === 'menu') { await d.key('Enter', true); await d.key('Enter', false); }
+    else if (['settings', 'help', 'board'].includes(s.scene)) { overlayFor++; await d.eval(clickText('.kit-screen button', 'Back')); if (overlayFor > 5) softlock = `stuck on the ${s.scene} screen`; }
+    if (!['settings', 'help', 'board'].includes(s.scene)) overlayFor = 0;
     if (s.scene !== 'pick') pickFor = 0;
   }
   if (!midShot) shots.push(await d.shot('play'));
@@ -101,7 +103,9 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
   if ((await d.eval(STATE))?.scene === 'play') await d.eval('window.officeGame.forceOver && window.officeGame.forceOver()');
   const over = await until(d, `${STATE}?.scene === 'over'`, 4000);
   if (over) { scenes.add('over'); if (!shots.some((x) => /over/.test(x))) shots.push(await d.shot('over')); }
-  const cloud = await d.eval(`(async () => { const o = window.Office && window.Office.connect && window.Office.connect(); if (!o) return 'none'; await (o.ready || Promise.resolve()); if (o.mode !== 'live') return o.mode; const s = await o.saves.get('best', null); return s ? 'saved' : 'nosave'; })()`);
+  // The save is written as game over shows, so it is waited for rather than read once.
+  const mode = await d.eval(`(async () => { const o = window.Office && window.Office.connect && window.Office.connect(); if (!o) return 'none'; await (o.ready || Promise.resolve()); return o.mode; })()`);
+  const cloud = mode !== 'live' ? mode : (await until(d, `(async () => { const s = await window.Office.connect().saves.get('best', null); return s ? 'saved' : null; })()`, 6000, 300)) || 'nosave';
   let posted = false;
   if (over && cloud === 'saved') {
     await d.eval(clickText('[data-screen="over"] button', 'Post score'));

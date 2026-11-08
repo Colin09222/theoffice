@@ -84,15 +84,15 @@ async function run(label, opts, t, adminCode) {
     await p.until('window.__office.state.floor.setup === true && document.querySelector("[data-setup]") !== null && document.querySelector(".chat-input textarea") !== null', 'setup in the chat');
   });
   const slug = await p.ev('window.__office?.slug');
-  await step(tag('a new floor offers three clear ways in, on screen and big enough to tap'), async () => {
-    await p.until('document.querySelectorAll(".lanes .lane").length === 3', 'the lane buttons');
+  await step(tag('a new floor asks what we are making, with four clear ways in, on screen and big enough to tap'), async () => {
+    await p.until('document.querySelectorAll("[data-launcher] .launch-type").length === 4', 'the launcher');
     const info = await p.ev(`(() => {
       const list = document.querySelector(".chat-list"); list.scrollTop = list.scrollHeight;
       const panel = document.querySelector(".floor-panel").getBoundingClientRect();
       const input = document.querySelector(".chat-input").getBoundingClientRect();
-      return { names: [...document.querySelectorAll(".lane b")].map((b) => b.textContent), boxes: [...document.querySelectorAll(".lane")].map((e) => { const r = e.getBoundingClientRect(); return { h: r.height, inPanel: r.left >= panel.left - 1 && r.right <= panel.right + 1, clearOfInput: r.bottom <= input.top + 1 || r.top >= input.bottom }; }), welcome: document.querySelector(".msg.manager").textContent, note: document.querySelector(".lanes .fineprint").textContent };
+      return { names: [...document.querySelectorAll(".launch-type b")].map((b) => b.textContent), boxes: [...document.querySelectorAll(".launch-type")].map((e) => { const r = e.getBoundingClientRect(); return { h: r.height, inPanel: r.left >= panel.left - 1 && r.right <= panel.right + 1, clearOfInput: r.bottom <= input.top + 1 || r.top >= input.bottom }; }), welcome: document.querySelector(".msg.manager").textContent, note: document.querySelector("[data-launcher] .fineprint").textContent };
     })()`);
-    if (info.names.join() !== 'Game,Website,Business') throw new Error(`names: ${info.names}`);
+    if (info.names.join() !== 'Game,App / SaaS,Website,Business') throw new Error(`names: ${info.names}`);
     if (!/Tap one below|our first job/.test(info.welcome)) throw new Error(`welcome: ${info.welcome}`);
     if (!/Nobody here can send email, post, run ads or spend money/.test(info.note)) throw new Error(`note: ${info.note}`);
     for (const b of info.boxes) if (b.h < 44 || !b.inPanel || !b.clearOfInput) throw new Error(`a button is badly placed: ${JSON.stringify(b)}`);
@@ -135,7 +135,7 @@ async function run(label, opts, t, adminCode) {
     await p.type('.chat-input textarea', 'I have been thinking about tiny things');
     await p.click('.send');
     await p.until('[...document.querySelectorAll(".msg.boss")].some((m) => /tiny things/.test(m.textContent))', 'boss message shown');
-    await p.until('document.querySelector(".lanes") === null', 'the lane buttons go once the boss has spoken');
+    await p.until('document.querySelector("[data-launcher]") === null', 'the launcher goes once the boss has spoken');
     await p.until('[...document.querySelectorAll(".msg.manager")].some((m) => /Three angles/.test(m.textContent))', 'manager reply');
     await p.until('window.__office.state.agents.every((a) => a.state === "idle")', 'manager idle');
     if (await p.ev('window.__office.state.tasks.length !== 0')) throw new Error('brainstorm should not create tasks');
@@ -399,15 +399,16 @@ async function run(label, opts, t, adminCode) {
   const b3 = await launch(); const n = await b3.newPage(opts);
   let laneSlug = '';
   const shotN = (name) => n.shot(join(OUT, `lanes-${name}-${label}.jpg`));
-  await step(tag('tapping a lane starts a short conversation with the manager, and no work'), async () => {
+  await step(tag('typing instead of tapping starts a short conversation with the manager, and no work'), async () => {
     await n.goto(`${base}/robots.txt`);
     const made = await n.ev(`fetch('/theoffice/api/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:${q(await adminCode())},name:${q(`Lanes ${label}`)},bossName:'Sam'})}).then(r=>r.json())`);
     laneSlug = made.slug;
     await n.goto(`${base}/floor/${laneSlug}`);
-    await n.until('document.querySelectorAll(".lanes .lane").length === 3', 'the lane buttons');
-    await n.click('[data-lane=business]');
-    await n.until('[...document.querySelectorAll(".msg.boss")].some((m) => /small business/.test(m.textContent))', 'the tap became the boss\'s message');
-    await n.until('document.querySelector(".lanes") === null', 'the buttons went');
+    await n.until('document.querySelectorAll("[data-launcher] .launch-type").length === 4', 'the launcher');
+    await n.type('.chat-input textarea', "Let's do a small business. Help me work it out.");
+    await n.click('.send');
+    await n.until('[...document.querySelectorAll(".msg.boss")].some((m) => /small business/.test(m.textContent))', 'the boss\'s message');
+    await n.until('document.querySelector("[data-launcher]") === null', 'the launcher went');
     await n.until('[...document.querySelectorAll(".msg.manager")].some((m) => /What is the idea, and who is it for/.test(m.textContent) && /Nobody here can send email/.test(m.textContent))', 'the manager asks and says what nobody here can do');
     await n.until('window.__office.state.agents.every((a) => a.state === "idle")', 'manager idle');
     if (await n.ev('window.__office.state.tasks.length !== 0')) throw new Error('a tap should start no work');
@@ -416,7 +417,7 @@ async function run(label, opts, t, adminCode) {
     // Typing is still there, and a reload doesn't bring the buttons back.
     await n.goto(`${base}/floor/${laneSlug}`);
     await n.until('!!window.__office && !!document.querySelector(".chat-input textarea")', 'floor again');
-    if (await n.ev('document.querySelector(".lanes") !== null')) throw new Error('the buttons came back');
+    if (await n.ev('document.querySelector("[data-launcher]") !== null')) throw new Error('the launcher came back');
   });
   await step(tag('the help line shows in the feed and on the board, and a visitor sees only that it happened'), async () => {
     await n.type('.chat-input textarea', 'The checker keeps failing, please ask [help]');
@@ -438,7 +439,7 @@ async function run(label, opts, t, adminCode) {
     await v.until('!!window.__office', 'visitor floor');
     const seen = await v.ev('JSON.stringify(window.__office.state)');
     if (seen.includes('The checker keeps failing')) throw new Error('a visitor can read the question');
-    if (await v.ev('document.querySelector(".lanes") !== null')) throw new Error('a visitor got the lane buttons');
+    if (await v.ev('document.querySelector("[data-launcher], [data-maker]") !== null')) throw new Error('a visitor got the launcher');
     await v.ev('window.__office.setTab("tasks")');
     await v.until('document.querySelector(".card.help.pending") !== null', 'the plain card');
     if (/The checker keeps failing/.test(await v.ev('document.body.textContent'))) throw new Error('a visitor can see the question on the page');

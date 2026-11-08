@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { launch, sleep } from './cdp.mjs';
-import { get } from '../../server/db.js';
+import { get, all } from '../../server/db.js';
 import { writeFile, publishSnapshot } from '../../server/workspace.js';
 import { appLabel } from '../../server/apps.js';
 import { starterFiles } from '../../server/makers.js';
@@ -24,7 +24,7 @@ const step = async (name, fn) => { try { await fn(); } catch (e) { check(name, f
 
 // An OS-assigned port, known before boot so the apps domain can name it and project origins resolve to this server.
 const PORT = await new Promise((r) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => r(port)); }); });
-const t = await boot({ appsBaseDomain: `apps.localhost:${PORT}`, appsScheme: 'http', mockDelayMs: 30, peopleTalk: false }, {});
+const t = await boot({ appsBaseDomain: `apps.localhost:${PORT}`, appsScheme: 'http', mockDelayMs: 350, peopleTalk: false }, {});
 await new Promise((r) => t.app.server.close(r));
 await new Promise((r) => t.app.server.listen(PORT, '127.0.0.1', r));
 const main = `http://localhost:${PORT}`;
@@ -68,17 +68,28 @@ try {
       const filled = await p.ev('(() => { const q = (s) => document.querySelector(".launch-review " + s); return !!(q("input[name=name]").value && q("input[name=goal]").value && q("textarea[name=plan]").value.split("\\n").length >= 3); })()');
       check(`${label}: name, goal and plan are filled in and editable`, filled);
       await p.ev('document.querySelector(".launch-review input[name=name]").value = "Moth Patrol"');
+      // Whatever the card shows from now on is recorded, so a quick mock team can't finish before the check looks.
+      await p.ev('window.__seen = []; new MutationObserver(() => { const m = document.querySelector("[data-maker]"); if (m) window.__seen.push(m.textContent); }).observe(document.body, { subtree: true, childList: true, characterData: true }); true');
       await p.click('[data-go]'); taps++;
-      try { await p.until('!!document.querySelector("[data-maker]") && /Team is building/.test(document.querySelector("[data-maker]").textContent)', '"Team is building"', 15000); } catch (e) {
+      try { await p.until('(window.__seen || []).some((x) => /Team is building/.test(x))', '"Team is building"', 15000); } catch (e) {
         await p.shot(join(SHOTS, `fail-${label}.jpg`));
         throw new Error(`${e.message}: ${await p.ev('JSON.stringify({ tab: window.__office?.tab, panel: window.__office?.panelOpen, maker: !!document.querySelector("[data-maker]"), launcher: !!document.querySelector("[data-launcher]"), stage: window.__office?.state?.makers?.job?.stage, msgs: (window.__office?.state?.messages || []).length })')} ${p.errors.slice(0, 3).join(' | ')}`);
       }
       check(`${label}: "Team is building" after ${taps} taps`, taps === 3);
       const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
       check(`${label}: the name the boss typed is the job's name`, get(t.db, 'SELECT title FROM maker_jobs WHERE floor_id=?', fid)?.title === 'Moth Patrol');
-      await p.until('!!document.querySelector("[data-launch]")', 'the Launch button once the Tester passes a version', 30000);
+      try { await p.until('!!document.querySelector("[data-launch]")', 'the Launch button once the Tester passes a version', 30000); } catch (e) {
+        await p.shot(join(SHOTS, `fail-launch-${label}.jpg`));
+        const j = get(t.db, 'SELECT stage, pass, state FROM maker_jobs WHERE floor_id=?', fid);
+        const ts = all(t.db, 'SELECT t.status, a.role FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? ORDER BY t.id', fid).map((x) => `${x.role}:${x.status}`).join(',');
+        throw new Error(`${e.message}: job ${j?.stage}/${j?.pass} ${String(j?.state).slice(0, 160)} tasks ${ts} card ${await p.ev('document.querySelector("[data-maker]")?.textContent.slice(0, 160) || "none"')}`);
+      }
       await p.click('[data-launch]');
-      const url = await p.until('document.querySelector("[data-share-url]")?.href || null', 'a share link', 15000);
+      let url;
+      try { url = await p.until('document.querySelector("[data-share-url]")?.href || null', 'a share link', 15000); } catch (e) {
+        await p.shot(join(SHOTS, `fail-share-${label}.jpg`));
+        throw new Error(`${e.message}: launched ${get(t.db, 'SELECT launched_at l FROM maker_jobs WHERE floor_id=?', fid)?.l} card ${await p.ev('document.querySelector("[data-maker]")?.textContent.slice(0, 200) || "none"')} toast ${await p.ev('[...document.querySelectorAll(".toast")].map((x) => x.textContent).join(" | ")')}`);
+      }
       check(`${label}: Launch gives a share link on the project's own origin`, /^http:\/\/.+\.apps\.localhost:\d+\/$/.test(url), url);
       const live = await hostFetch(PORT, '/', { headers: { host: new URL(url).host } }); check(`${label}: the shared link opens the game`, live.status === 200 && /kit\.css/.test(await live.text()));
       if (label === 'desktop') await p.shot(join(SHOTS, 'launched-desktop.jpg'));
@@ -137,7 +148,8 @@ try {
       for (const k of ['loads', 'links', 'meta', 'form', ...(label === 'phone' ? ['mobile'] : [])]) check(`site ${label}: ${k}`, r.rules[k] === true);
       if (label === 'phone') kept.site = r.shots.find((s) => /-site\.jpg$/.test(s));
     }
-    check('website: the message reached the boss\'s forms', get(t.db, "SELECT COUNT(*) n FROM app_forms WHERE floor_id=? AND project='site'", floor.id).n >= 2);
+    // The same message twice is stored once, by design.
+    check('website: the message reached the boss\'s forms', get(t.db, "SELECT COUNT(*) n FROM app_forms WHERE floor_id=? AND project='site'", floor.id).n >= 1);
   });
 
   // Four pictures: the launcher, the two games mid-play, and the app beside the site.

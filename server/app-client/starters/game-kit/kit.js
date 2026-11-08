@@ -179,7 +179,8 @@ function settingsScreen(back) {
   const vol = el('input', { type: 'range', min: 0, max: 1, step: 0.05, value: settings.volume, oninput: (e) => { settings.volume = Number(e.target.value); saveSettings(); } });
   const check = (key, after) => { const c = el('input', { type: 'checkbox', onchange: (e) => { settings[key] = e.target.checked; saveSettings(); after?.(); } }); c.checked = !!settings[key]; return c; };
   const touch = el('select', { onchange: (e) => { settings.touch = e.target.value; saveSettings(); applyTouch(); } }, ...['auto', 'on', 'off'].map((v) => { const o = el('option', { value: v }, v); if (settings.touch === v) o.selected = true; return o; }));
-  screen('settings', el('h2', {}, 'Settings'), row('Volume', vol), row('Mute', check('muted')), row('Music', check('music', () => audio.music(settings.music))), row('Screen shake', check('shake')), row('Touch controls', touch), button('Back', () => { state.scene = prev; back(); }));
+  screen('settings', el('h2', {}, 'Settings'), row('Volume', vol), row('Mute', check('muted')), row('Music', check('music', () => audio.music(settings.music))), row('Screen shake', check('shake')), row('Touch controls', touch), button('Back', () => state.back()));
+  state.back = () => { state.back = null; state.scene = prev; back(); };
 }
 function applyTouch() { const show = settings.touch === 'on' || (settings.touch === 'auto' && (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window)); ui.classList.toggle('kit-has-touch', show); }
 async function startGame() {
@@ -191,7 +192,7 @@ async function startGame() {
 export function pause(on) {
   if (on && state.scene === 'play') {
     state.scene = 'pause'; document.body.dataset.scene = 'pause';
-    screen('pause', el('h2', {}, 'Paused'), button('Resume', () => pause(false)), button('Settings', () => settingsScreen(() => pause(true, true))), button('Quit to menu', () => { game.quit?.(); menu(); }));
+    screen('pause', el('h2', {}, 'Paused'), button('Resume', () => pause(false)), button('Settings', () => settingsScreen(() => { state.scene = 'play'; pause(true); })), button('Quit to menu', () => { game.quit?.(); menu(); }));
   } else if (!on && state.scene === 'pause') { screen(null); state.scene = 'play'; document.body.dataset.scene = 'play'; last = performance.now(); }
 }
 /** The game calls this when the run ends. It saves the best, posts the score and shows the game-over screen. */
@@ -238,6 +239,8 @@ function frame(now) {
   else if (state.scene === 'pause' && input.pressed('pause')) pause(false);
   else if (state.scene === 'over' && input.pressed('confirm')) startGame();
   else if (state.scene === 'menu' && input.pressed('confirm') && document.activeElement?.tagName !== 'BUTTON') startGame();
+  // Esc, or B on a pad or touch, leaves settings, so nobody is ever stuck on it.
+  else if (state.scene === 'settings' && state.back && (input.pressed('pause') || (input.pressed('alt') && input.device !== 'keyboard'))) state.back();
   if (state.scene !== 'play') navigate();
   juice.step(dt);
   if (state.scene === 'play' && !juice.stopped) { state.t += dt; state.frames++; game.update?.(dt, input); }

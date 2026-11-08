@@ -15,7 +15,7 @@ export function launchFlow(page) {
   function pickType() {
     step(1, h('h3.launch-q', {}, 'What are we making?'),
       h('div.launch-types', {}, ...types.map(([id, label, blurb]) => h('button.launch-type', { type: 'button', 'data-type': id, onclick: () => pickIdea(id, label) }, icon(TYPE_ICON[id] || 'sparkle'), h('b', {}, label), h('span', {}, blurb)))),
-      h('p.fineprint', {}, 'Your team designs it, builds it, plays it in a real browser and fixes it. You launch it with one tap. Nobody here can send email, post or spend money.'));
+      h('p.fineprint', {}, 'Your team designs it, builds it, plays it in a real browser and fixes it. You launch it with one tap. Nobody here can send email, post, run ads or spend money, so they will tell you what only you can do.'));
   }
   async function pickIdea(type, label, seed = 0) {
     const cards = h('div.launch-cards', {}, h('p.launch-loading', {}, 'Thinking of ideas...'));
