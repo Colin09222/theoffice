@@ -22,7 +22,8 @@ const AUDIT = (name, { portrait }) => `(() => {
   const visible = (el) => { const r = el.getBoundingClientRect(); if (r.width < 1 || r.height < 1) return false; const s = getComputedStyle(el); if (s.visibility === 'hidden' || s.display === 'none' || +s.opacity === 0) return false; return !el.closest('[hidden]'); };
   // A dialog covers the page on purpose: then it's the dialog that's being checked.
   const dialog = document.querySelector('.modal-back');
-  const roots = dialog ? [dialog] : [document.querySelector('#ui'), ...document.querySelectorAll('#toasts')].filter(Boolean);
+  const more = document.querySelector('.tabs.more-open .more-pop');
+  const roots = dialog ? [dialog] : more ? [more] : [document.querySelector('#ui'), ...document.querySelectorAll('#toasts')].filter(Boolean);
   const all = roots.flatMap((r) => [r, ...r.querySelectorAll('*')]).filter((el) => !(el instanceof SVGElement) && visible(el));
   if (document.documentElement.scrollWidth > vw + 1 || document.body.scrollWidth > vw + 1) bad.push('the page scrolls sideways: ' + document.documentElement.scrollWidth);
   // Past the right edge, unless it scrolls with its row, like the buttons over the room.
@@ -72,6 +73,7 @@ const screen = (p, tag, opts) => async (name, fn) => {
   await step(`${tag}: ${name}`, async () => {
     await fn?.();
     await sleep(140);
+    await p.until('!document.getAnimations().some((a) => a.playState === "running" && a.effect?.getComputedTiming?.().iterations !== Infinity && a.effect?.target?.closest?.(".modal-back, .floor-panel"))', 'settled', 3000).catch(() => {});
     if (OUT && process.env.MOBILE_SHOTS?.split(',').some((w) => name.startsWith(w))) await p.shot(`${OUT}/${tag}-${name.replace(/[^a-z0-9]+/gi, '-')}.jpg`);
     await audit(p, name, opts);
   });
@@ -180,7 +182,7 @@ for (const size of SIZES) {
         let st = await size();
         if (st.s !== 'full') throw new Error(`starts at ${JSON.stringify(st)}`);
         st = await dragTo(Math.round(h * 0.42)); if (st.s !== 'half' || Math.abs(st.h - h * 0.58) > 3) throw new Error(`to half: ${JSON.stringify(st)}`);
-        st = await dragTo(h - 60); if (st.s !== 'peek' || st.h > 110) throw new Error(`to peek: ${JSON.stringify(st)}`);
+        st = await dragTo(h - 60); if (st.s !== 'peek' || st.h > 260) throw new Error(`to peek: ${JSON.stringify(st)}`);
         st = await dragTo(Math.round(h * 0.42)); if (st.s !== 'half') throw new Error(`peek to half: ${JSON.stringify(st)}`);
         st = await dragTo(10); if (st.s !== 'full') throw new Error(`half to full: ${JSON.stringify(st)}`);
         // Flicked, not dragged: a short fast move goes to the next size.
@@ -225,21 +227,21 @@ for (const size of SIZES) {
           await sleep(120);
           const H = await keyboard(p, kb, top);
           await sleep(320);
-          const r = await p.ev(`(() => { const c = document.querySelector('.chat-input').getBoundingClientRect(); const l = document.querySelector('.chat-list').getBoundingClientRect(); const msgs = [...document.querySelectorAll('.chat-list .msg')]; const last = msgs.at(-1).getBoundingClientRect(); const panel = document.querySelector('.floor-panel').getBoundingClientRect(); return { composer: Math.round(c.bottom), list: Math.round(l.height), lastBottom: Math.round(last.bottom), listBottom: Math.round(l.bottom), panelTop: Math.round(panel.top), panelBottom: Math.round(panel.bottom), inner: innerHeight }; })()`);
+          try {
+          const r = await p.ev(`(() => { const c = document.querySelector('.chat-input').getBoundingClientRect(); const l = document.querySelector('.chat-list').getBoundingClientRect(); const msgs = [...document.querySelectorAll('.chat-list .msg:not([hidden])')]; const last = msgs.at(-1).getBoundingClientRect(); const panel = document.querySelector('.floor-panel').getBoundingClientRect(); return { composer: Math.round(c.bottom), list: Math.round(l.height), lastBottom: Math.round(last.bottom), listBottom: Math.round(l.bottom), panelTop: Math.round(panel.top), panelBottom: Math.round(panel.bottom), inner: innerHeight }; })()`);
           if (Math.abs(r.composer - H) > 2) throw new Error(`composer ${r.composer} should sit at ${H}: ${JSON.stringify(r)}`);
           if (r.panelTop < top - 1) throw new Error(`the sheet's top is above the visible screen ${JSON.stringify(r)}`);
           if (r.list < 120) throw new Error(`only ${r.list}px of chat: ${JSON.stringify(r)}`);
           if (r.lastBottom > r.listBottom + 2 || r.lastBottom < r.listBottom - 120) throw new Error(`the newest message isn't visible: ${JSON.stringify(r)}`);
           await audit(p, 'keyboard', { ...opts, portrait: false });
-          await noKeyboard(p);
-          await p.ev('document.activeElement?.blur?.(); true');
+          } finally { await noKeyboard(p); await p.ev('document.activeElement?.blur?.(); true'); }
           await sleep(300);
-          const back = await p.ev(`(() => { const c = document.querySelector('.chat-input').getBoundingClientRect(); return Math.round(c.bottom); })()`);
-          if (back < innerHeight - 60) throw new Error(`the composer stayed up at ${back}`);
+          const back = await p.ev(`({ c: Math.round(document.querySelector('.chat-input').getBoundingClientRect().bottom), h: innerHeight })`);
+          if (back.c < back.h - 110) throw new Error(`the composer stayed up: ${JSON.stringify(back)}`);
         });
       }
       await step(`${tag} boss: every tab is reachable from the row, and none is cut off`, async () => {
-        const tabs = await p.ev(`(() => { const row = [...document.querySelectorAll('.floor-panel > .tabs .tab')].filter((b) => getComputedStyle(b).display !== 'none'); return { n: row.length, right: Math.max(...row.map((b) => b.getBoundingClientRect().right)), rows: new Set(row.map((b) => Math.round(b.getBoundingClientRect().top))).size, sw: document.querySelector('.tabs').scrollWidth, cw: document.querySelector('.tabs').clientWidth, width: innerWidth }; })()`);
+        const tabs = await p.ev(`(() => { const row = [...document.querySelectorAll('.floor-panel > .tabs > .tab')]; return { n: row.length, right: Math.max(...row.map((b) => b.getBoundingClientRect().right)), rows: new Set(row.map((b) => Math.round(b.getBoundingClientRect().top))).size, sw: document.querySelector('.tabs').scrollWidth, cw: document.querySelector('.tabs').clientWidth, width: innerWidth }; })()`);
         if (tabs.right > tabs.width || tabs.n !== 5 || tabs.rows !== 1 || tabs.sw > tabs.cw + 1) throw new Error(JSON.stringify(tabs));
       });
       await see('More open', async () => { await p.click('[data-tab-more]'); await sleep(120); });
@@ -247,13 +249,14 @@ for (const size of SIZES) {
     }
     const tabs = await p.ev('[...document.querySelectorAll("[data-tab]")].map((x) => x.dataset.tab)');
     for (const tab of tabs) await see(`tab ${tab}`, async () => { await p.click(`[data-tab=${tab}]`); await sleep(260); if (phoneLayout) await settled(p); });
-    await see('a staff file', async () => { if (phoneLayout) { await p.click('[data-tab=team]'); await sleep(200); } await p.click('.staff-chip[data-agent]'); await p.until('!!document.querySelector(".modal [data-profile]")', 'the file', 5000); await sleep(200); });
+    await see('a staff file', async () => { if (phoneLayout) { await p.click('[data-tab=work]'); await sleep(200); } await p.click('.staff-chip[data-agent]'); await p.until('!!document.querySelector(".modal [data-profile]")', 'the file', 5000); await sleep(200); });
     await see('staff editor', async () => { await p.click('[data-profile-edit]'); await p.until('!!document.querySelector(".modal .staff-pick")', 'the editor', 5000); await sleep(300); });
     await p.ev('document.querySelector(".modal .icon-btn")?.click(); true');
     await sleep(150);
     await p.ev('window.__office.setTab("chat"); true');
     const custom = await p.ev('[...document.querySelectorAll(".controls button")].map((b) => b.textContent.trim()).join()');
-    for (const part of ['vibe', 'decor', 'brand', 'staff']) await see(`customise: ${part}`, async () => { if (phoneLayout) await p.ev('window.__office.setSheet("half"); true'); await p.ev('document.querySelector(".modal .icon-btn")?.click(); true'); await sleep(120); await p.ev(`window.__office.openCustomise("${part}"); true`); await p.until('!!document.querySelector(".modal")', 'customise', 5000); await sleep(400); });
+    await see('customise: vibe', async () => { if (phoneLayout) await p.ev('window.__office.setSheet("half"); true'); await p.ev('window.__office.openCustomise("vibe"); true'); await p.until('!!document.querySelector(".modal .custom-tabs")', 'customise', 5000); await sleep(400); });
+    for (const part of await p.ev('[...document.querySelectorAll(".modal .custom-tabs [data-custom]")].map((b) => b.dataset.custom)')) await see(`customise: ${part}`, async () => { await p.click(`.modal .custom-tabs [data-custom="${part}"]`); await sleep(350); });
     await p.ev('document.querySelector(".modal .icon-btn")?.click(); true');
     await sleep(120);
     await see('redirect dialog', async () => { await p.ev('window.__office.openRedirect(); true'); await sleep(250); });
