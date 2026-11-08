@@ -98,7 +98,8 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
         const dir = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/') + 1) : '';
         const parts = []; for (const seg of (ref.startsWith('/') ? ref.slice(1) : dir + ref).split('/')) { if (seg === '..') parts.pop(); else if (seg && seg !== '.') parts.push(seg); }
         const target = parts.join('/');
-        if (!target || map.has(target) || map.has(`${target}/index.html`) || !target.includes('.')) continue;
+        // The building serves _office/ itself (office.js, client.js, three.js, pay) at every depth.
+        if (!target || map.has(target) || map.has(`${target}/index.html`) || !target.includes('.') || /(^|\/)_office\//.test(target)) continue;
         errors.push(`${f.path}: points at ${ref}, which isn't in what's being published.`);
       }
       for (const m of h.matchAll(/<img\b[^>]{0,600}>/gi)) if (!/\balt\s*=/i.test(m[0])) { warnings.push(`${f.path}: an image has no alt text.`); break; }
@@ -109,7 +110,7 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
       for (const [re, what] of CLAIMS.slice(0, 2)) { const m = t.match(re); if (m && !fromBoss(m[0])) flag(what, f.path, m[0]); }
     }
     // A sign-up that looks right and goes nowhere is the commonest broken promise on a new site.
-    if (formPage && !files.some((f) => /\.(html?|m?js)$/i.test(f.path) && (f.data?.length ?? 0) <= MAX_PAGE && /submitForm\s*\(/.test(text(f.data)))) {
+    if (formPage && !files.some((f) => /\.(html?|m?js)$/i.test(f.path) && (f.data?.length ?? 0) <= MAX_PAGE && /submitForm\s*\(|forms\.submit\s*\(/.test(text(f.data)))) {
       warnings.push(`${formPage}: has a form, but nothing on the site calls Office.submitForm, so what visitors type there reaches nobody. Wire it to Office.submitForm, or drop the <form> if it only drives the page.`);
     }
     const home = map.has('index.html') ? text(map.get('index.html')).slice(0, MAX_PAGE) : '';

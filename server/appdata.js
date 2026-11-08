@@ -2,6 +2,7 @@
 // and it is only ever reached from a project's own origin, keyed by that project. Everything here is untrusted input from the open web.
 import { createHash } from 'node:crypto';
 import { get, all, run, tx } from './db.js';
+import { CLOUD_TABLES } from './cloud/schema.js';
 
 export const DATA_LIMITS = {
   valueBytes: 16 * 1024, bodyBytes: 32 * 1024, projectBytes: 5 * 1024 * 1024, floorBytes: 25 * 1024 * 1024, projectKeys: 5000,
@@ -179,11 +180,15 @@ export async function handleData({ db, req, floorId: f, project: p, segments: se
   throw new DataError(404, 'not_found');
 }
 
+// Counted the way the boss would count them: each saved thing once, not the pieces it is stored in.
+const COUNTED = new Set(['cloud_docs', 'cloud_saves', 'cloud_scores', 'cloud_files', 'cloud_users']);
 export function clearProjectData(db, floorId, project) {
-  return run(db, 'DELETE FROM app_kv WHERE floor_id=? AND project=?', floorId, project).changes + run(db, 'DELETE FROM app_scores WHERE floor_id=? AND project=?', floorId, project).changes + run(db, 'DELETE FROM app_forms WHERE floor_id=? AND project=?', floorId, project).changes;
+  let cloud = 0;
+  tx(db, () => { for (const t of CLOUD_TABLES) { const n = run(db, `DELETE FROM ${t} WHERE floor_id=? AND project=?`, floorId, project).changes; if (COUNTED.has(t)) cloud += n; } });
+  return cloud + run(db, 'DELETE FROM app_kv WHERE floor_id=? AND project=?', floorId, project).changes + run(db, 'DELETE FROM app_scores WHERE floor_id=? AND project=?', floorId, project).changes + run(db, 'DELETE FROM app_forms WHERE floor_id=? AND project=?', floorId, project).changes;
 }
 export function deleteFloorData(db, floorId) {
   run(db, 'DELETE FROM app_kv WHERE floor_id=?', floorId);
   run(db, 'DELETE FROM app_scores WHERE floor_id=?', floorId);
-  for (const t of ['app_forms', 'app_visits', 'app_visit_refs']) run(db, `DELETE FROM ${t} WHERE floor_id=?`, floorId);
+  for (const t of ['app_forms', 'app_visits', 'app_visit_refs', ...CLOUD_TABLES]) run(db, `DELETE FROM ${t} WHERE floor_id=?`, floorId);
 }
