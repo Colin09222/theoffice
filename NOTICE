@@ -1,0 +1,16 @@
+Third-party software and assets in The Office, with their licences.
+
+Vendored libraries (served to published projects as _office/<file>, and to the office itself)
+- three.js r186 (npm three@0.186.1), MIT License, Copyright 2010-2025 three.js authors. public/vendor/three/ (LICENSE there).
+  The addons bundle also holds n8ao 2.0.1, ISC License, https://github.com/N8python/n8ao.
+- Phaser 3.90.0 (npm phaser@3.90.0, dist/phaser.min.js, unmodified), MIT License, Copyright (c) 2024 Richard Davey, Phaser Studio Inc.
+  public/vendor/phaser/ (LICENSE there). Source: https://github.com/phaserjs/phaser
+
+Starters (server/app-client/starters/), copied into a project when a maker job starts
+- game-kit, game-2d, game-3d, app, website: written for The Office, no third-party code or art inside. They load Phaser or three.js
+  from _office/ above. Their sounds are synthesised in code; their icons and preview images are SVG drawn here.
+
+Sound and art used by the office and given to game builders on a computer (.office/assets/)
+- Kenney (www.kenney.nl) packs, CC0 1.0. Recorded in public/models/NOTICE.txt and public/assets/NOTICE.txt.
+
+Fonts and other assets of the office itself are recorded in public/assets/NOTICE.txt and public/models/NOTICE.txt.

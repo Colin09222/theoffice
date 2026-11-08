@@ -15,6 +15,7 @@ import { confetti, fanfare, mayParty } from './party.js';
 import { journeyBar, chipsRow, startButton, renderBusiness, businessActive, businessUnchanged } from './business-ui.js';
 import { handOver, peekHandoff, takeHandoff } from './handoff.js';
 import { renderInbox, mailTab, mailPending, renderMailRequests, onMailEvent } from './mail-ui.js';
+import { launchFlow, makerCard } from './launch-ui.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -424,7 +425,8 @@ class FloorPage {
       h('div.intercom-grille', { 'aria-hidden': 'true' }));
     this.intercomEl.classList.toggle('on-air', !!this.streamBuf);
     this.bodyEl.append(this.intercomEl, this.chatList);
-    this.lanesEl = this.isNewFloor() ? this.lanePicker() : null;
+    // The launcher (public/js/launch-ui.js): three taps to a building team, then the maker card with Launch.
+    this.lanesEl = this.isNewFloor() ? launchFlow(this) : makerCard(this);
     this.chatList.append(...(this.lanesEl ? [this.lanesEl] : []), this.questionsEl, this.streamEl);
     if (this.owner) {
       const input = h('textarea', { rows: 1, maxlength: 4000, placeholder: s.floor.setup ? 'What should this company be?' : `Tell ${this.manager?.name || 'your manager'} what you want...`, 'aria-label': 'Message your office manager', name: 'chat' });
@@ -469,7 +471,8 @@ class FloorPage {
       h('p.fineprint', {}, 'Your staff research, write, build and publish, and answer the company\'s email. Nobody here can post, run ads or spend money, and email to anyone new waits for your OK, so they will tell you what only you can do.'),
       this.state.floor.setup ? null : h('button.link.make-yours', { type: 'button', 'data-make-yours': '', onclick: () => this.openCustomise('vibe') }, 'First, make this office yours'));
   }
-  dropLanes() { this.lanesEl?.remove(); this.lanesEl = null; }
+  // Only the launcher goes once the boss has spoken; a maker card stays with its job.
+  dropLanes() { if (this.lanesEl && !this.lanesEl.matches('[data-maker]')) { this.lanesEl.remove(); this.lanesEl = null; } }
   messageEl(m) {
     const who = m.role === 'boss' ? this.state.floor.boss.name : m.role === 'help' ? 'buddehbot' : this.state.agents.find((a) => a.id === m.agentId)?.name || 'Office Manager';
     const body = h('div.msg-body');

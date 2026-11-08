@@ -1,0 +1,43 @@
+/* Office game kit: the screens and touch controls. Change the variables to give the game its own look. */
+:root { --kit-ink: #f4f1ff; --kit-bg: #120e24; --kit-panel: rgba(18, 14, 36, 0.86); --kit-hot: #ff5d8f; --kit-cool: #44e2ff; --kit-font: "Trebuchet MS", "Avenir Next", system-ui, sans-serif; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--kit-bg); color: var(--kit-ink); font-family: var(--kit-font); overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; overscroll-behavior: none; }
+#game { position: fixed; inset: 0; display: grid; place-items: center; }
+#game canvas { display: block; max-width: 100vw; max-height: 100dvh; }
+.kit-ui { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+.kit-ui > * { pointer-events: auto; }
+.kit-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; background: var(--kit-panel); text-align: center; backdrop-filter: blur(3px); }
+.kit-screen h1 { font-size: clamp(36px, 9vw, 76px); margin: 0 0 4px; letter-spacing: 0.02em; line-height: 1; text-shadow: 0 4px 0 var(--kit-hot); }
+.kit-screen h2 { font-size: clamp(28px, 6vw, 48px); margin: 0 0 6px; }
+.kit-pitch { max-width: 34ch; margin: 0 0 10px; opacity: 0.9; line-height: 1.4; }
+.kit-b { min-width: 220px; min-height: 48px; padding: 10px 22px; border: 3px solid var(--kit-ink); border-radius: 14px; background: transparent; color: var(--kit-ink); font: 700 18px var(--kit-font); cursor: pointer; transition: transform 0.08s, background 0.12s; }
+.kit-b:hover, .kit-b:focus-visible { background: var(--kit-ink); color: var(--kit-bg); outline: none; transform: scale(1.04); }
+.kit-b[data-kit-play], .kit-b[data-kit-again] { background: var(--kit-hot); border-color: var(--kit-hot); color: #fff; }
+.kit-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; min-width: min(320px, 90vw); }
+.kit-row input[type=text] { flex: 1; min-height: 44px; border-radius: 10px; border: 2px solid var(--kit-ink); background: transparent; color: var(--kit-ink); padding: 0 12px; font: 16px var(--kit-font); }
+.kit-row input[type=checkbox] { width: 26px; height: 26px; accent-color: var(--kit-hot); }
+.kit-row input[type=range] { width: 160px; accent-color: var(--kit-hot); }
+.kit-row select { min-height: 40px; font: 16px var(--kit-font); }
+.kit-score { font-size: 64px; font-weight: 800; margin: 0; color: var(--kit-cool); }
+.kit-best, .kit-rank, .kit-stat, .kit-keys { margin: 0; opacity: 0.85; }
+.kit-keys { max-width: 40ch; font-size: 14px; }
+.kit-board { list-style: none; padding: 0; margin: 0; min-width: min(320px, 90vw); counter-reset: r; }
+.kit-board li { display: flex; justify-content: space-between; padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.15); counter-increment: r; }
+.kit-board li::before { content: counter(r) "."; width: 2.2em; text-align: left; opacity: 0.6; }
+.kit-board li span { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.kit-board li.you { color: var(--kit-cool); font-weight: 700; }
+.kit-bar { width: min(280px, 70vw); height: 10px; border: 2px solid var(--kit-ink); border-radius: 6px; overflow: hidden; }
+.kit-bar i { display: block; height: 100%; width: 10%; background: var(--kit-hot); transition: width 0.2s; }
+.kit-mute { position: absolute; top: max(10px, env(safe-area-inset-top)); right: 10px; width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--kit-ink); background: var(--kit-panel); color: var(--kit-ink); font-size: 20px; z-index: 6; cursor: pointer; }
+.kit-mute[aria-pressed="true"] { opacity: 0.5; text-decoration: line-through; }
+.kit-toast { position: absolute; left: 50%; bottom: 18%; transform: translateX(-50%); background: var(--kit-panel); padding: 8px 16px; border-radius: 10px; font-weight: 700; }
+.kit-touch { position: absolute; inset: 0; display: none; }
+.kit-has-touch .kit-touch { display: block; }
+body:not([data-scene="play"]) .kit-touch { display: none; }
+.kit-stick { position: absolute; left: 22%; top: 72%; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.35); opacity: 0.45; }
+.kit-stick.on { opacity: 0.9; }
+.kit-stick i { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,0.75); }
+.kit-btn { position: absolute; width: 78px; height: 78px; border-radius: 50%; border: 3px solid var(--kit-ink); background: rgba(255,93,143,0.55); color: #fff; font: 800 24px var(--kit-font); touch-action: none; }
+.kit-a { right: 22px; bottom: calc(110px + env(safe-area-inset-bottom)); }
+.kit-bb { right: 112px; bottom: calc(40px + env(safe-area-inset-bottom)); background: rgba(68,226,255,0.5); }
+.kit-pause { top: max(10px, env(safe-area-inset-top)); left: 10px; width: 44px; height: 44px; font-size: 14px; background: var(--kit-panel); }

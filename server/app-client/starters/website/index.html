@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<meta name="description" content="{{PITCH}}">
+<meta property="og:title" content="{{TITLE}}">
+<meta property="og:description" content="{{PITCH}}">
+<meta property="og:type" content="website">
+<meta property="og:image" content="og.svg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#1b2a22">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <a class="brand" href="#top">{{TITLE}}</a>
+  <nav aria-label="Sections"><a href="#what">What it is</a><a href="#how">How it works</a><a href="#contact">Get in touch</a></nav>
+</header>
+<main id="main">
+  <section id="top" class="hero">
+    <h1>{{TITLE}}</h1>
+    <p class="lede">{{PITCH}}</p>
+    <a class="btn" href="#contact">Get in touch</a>
+  </section>
+  <section id="what" class="band">
+    <h2>What it is</h2>
+    <p>Placeholder text: say plainly what this is and who it is for, in the words from notes/copy.md.</p>
+  </section>
+  <section id="how" class="band alt">
+    <h2>How it works</h2>
+    <ol class="steps"><li><b>Get in touch.</b> Use the form below.</li><li><b>We talk it through.</b> Real answers from a real person.</li><li><b>Then it happens.</b> Placeholder text: say what happens next.</li></ol>
+  </section>
+  <section id="contact" class="band">
+    <h2>Get in touch</h2>
+    <form class="contact" data-office="contact-form" novalidate>
+      <label>Your name <input name="name" autocomplete="name" required maxlength="80"></label>
+      <label>Email <input name="email" type="email" autocomplete="email" required maxlength="120"></label>
+      <label>Message <textarea name="message" rows="4" required maxlength="2000"></textarea></label>
+      <label class="trap" aria-hidden="true">Website <input name="website" tabindex="-1" autocomplete="off"></label>
+      <button class="btn" type="submit">Send</button>
+      <p class="status" role="status" data-office="form-status"></p>
+    </form>
+  </section>
+</main>
+<footer class="foot"><p>{{TITLE}}</p></footer>
+<script src="_office/office.js"></script>
+<script src="site.js"></script>
+</body>
+</html>

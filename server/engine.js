@@ -544,6 +544,8 @@ export class Engine {
     for (const p of all(this.db, 'SELECT slug,published_at FROM projects WHERE floor_id=?', floorId)) {
       const t = get(this.db, "SELECT SUM(status IN ('todo','doing','blocked')) open, SUM(status IN ('done','review','failed')) finished FROM tasks WHERE floor_id=? AND project=?", floorId, p.slug);
       if (!t?.finished || t.open) continue;
+      // A maker job publishes only what its Tester passed, when the boss taps Launch (server/makers.js).
+      if (this.makers?.holds(floorId, p.slug)) continue;
       const prefix = `projects/${p.slug}/`;
       if (!p.published_at) {
         if (get(this.db, 'SELECT 1 x FROM files WHERE floor_id=? AND path IN (?,?,?,?)', floorId, `${prefix}index.html`, `${prefix}index.md`, `${prefix}dist/index.html`, `${prefix}build/index.html`)) out.push({ slug: p.slug, never: true });
@@ -603,6 +605,8 @@ export class Engine {
     const t = get(this.db, 'SELECT * FROM tasks WHERE id=?', taskId);
     if (t.status === 'cancelled') return;
     run(this.db, 'UPDATE tasks SET status=?, result=?, updated_at=? WHERE id=?', status, result, this.now(), taskId);
+    // A maker job runs its own passes (server/makers.js): it decides the next step, and the manager isn't woken for it.
+    const handled = !!this.makers?.afterTask(floor, agent, t, status, result);
     this.emitTask(taskId);
     this.feed(floor.id, agent, status === 'failed' ? `could not finish "${t.title}"` : `finished "${t.title}"`, t.project);
     const mgr = get(this.db, "SELECT id, name FROM agents WHERE floor_id=? AND role='manager'", floor.id);
@@ -610,7 +614,7 @@ export class Engine {
     this.emit(floor.id, 'handoff', { from: agent.id, to: mgr.id, kind: 'paper' }, { persist: true });
     const open = get(this.db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing')", floor.id).n;
     // Only wake the (more expensive) manager when the batch is finished. Failures always wake it.
-    if (status === 'failed' || open === 0) run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
+    if (!handled && (status === 'failed' || open === 0)) run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
     this.people.afterTask(floor, agent, t, status, result);
     if (open === 0) this.people.wrapMeeting(floor.id, t);
     this.progressNote(floor.id, agent, t, status);

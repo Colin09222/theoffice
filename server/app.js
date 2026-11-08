@@ -35,6 +35,7 @@ import { installCustomise } from './customise.js';
 import { installModes } from './modes.js';
 import { installBusiness } from './business.js';
 import { installMail } from './mail.js';
+import { installMakers } from './makers.js';
 import { absoluteMeta } from './metaabs.js';
 
 const BASE = '/theoffice';
@@ -84,6 +85,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // Same-origin copies every project can load, so nothing published needs a CDN or a shared host.
   const clientLib = readFileSync(join(ROOT, 'server/app-client/office.js'));
   const threeLib = statics.get('/vendor/three/three.module.min.js');
+  const phaserLib = statics.get('/vendor/phaser/phaser.min.js');
   const mainCsp = cfg.appsBaseDomain ? APP_CSP.replace("frame-src 'self'", `frame-src 'self' ${cfg.appsScheme}://*.${cfg.appsBaseDomain}`) : APP_CSP;
   const secret = A.serverSecret(db);
   const adminHash = cfg.adminPassword ? A.hashSecret(cfg.adminPassword) : '';
@@ -687,7 +689,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext)].filter(Boolean);
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext)].filter(Boolean);
   // Email: every company's own address. See docs/MAIL.md.
   const mail = installMail(ext);
   extensions.push(mail);
@@ -815,6 +817,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (name === 'client.js') return { type: 'text/javascript; charset=utf-8', body: clientLib };
     if (name === 'office.js') return { type: 'text/javascript; charset=utf-8', body: SDK_JS };
     if (name === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
+    if (name === 'phaser.min.js') return { type: 'text/javascript; charset=utf-8', body: phaserLib?.body };
     return null;
   }
 
