@@ -57,6 +57,7 @@ function accountBox(page, a) {
         h('li', {}, 'The money goes straight to your own Stripe account. The Office takes no cut.'),
         h('li', {}, 'You are the seller, so tax, refunds and any disputes are yours to handle. Your own Stripe dashboard is where you do that.')),
       connectButton(page, 'Connect Stripe'),
+      h('p.fineprint', { 'data-pay-terms': '' }, 'By connecting you agree to the ', h('a', { href: '/theoffice/terms', target: '_blank', rel: 'noopener' }, 'Terms'), ', and you\'re the seller.'),
       h('p.fineprint', {}, 'Stripe will ask for your details and a bank account. Have ID handy.'));
   }
   return h('section.card.pay-card', { 'data-pay-state': a.state },

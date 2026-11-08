@@ -1,4 +1,5 @@
 // The complete set of things an agent can do. There is no shell, no code execution and no real filesystem here.
+import { LAWYER_ROLE, LAWYER_TOOLS } from './legal-role.js';  // the Lawyer: no spending, no email out, no publishing
 import { writeFile, writeBinaryFile, readFile, listFiles, publishSnapshot, WorkspaceError, slugify, slugPattern, attachmentsOf } from './workspace.js';
 import { safeFetch, FetchBlocked } from './safefetch.js';
 import { get, all, run } from './db.js';
@@ -177,7 +178,7 @@ const ROLE_EXTRAS = {
   builder: ['generate_image', 'review_design', 'launch_check', ...SERVER_TOOLS], designer: ['generate_image', 'review_design'], illustrator: ['generate_image', 'review_design'],
   tester: ['review_design', 'launch_check', 'server_status', 'server_logs', 'server_check'], marketer: ['check_domain'],
 };
-export const toolsForRole = (role) => [...(role === 'manager' ? MANAGER_TOOLS : STAFF_TOOLS), ...(ROLE_EXTRAS[role] || []), ...mailToolsFor(role)];
+export const toolsForRole = (role) => role === LAWYER_ROLE ? [...LAWYER_TOOLS] : [...(role === 'manager' ? MANAGER_TOOLS : STAFF_TOOLS), ...(ROLE_EXTRAS[role] || []), ...mailToolsFor(role)];
 const serverSearch = (cfg) => !!(cfg.anthropicKey || cfg.searchMock);
 export const SEARCH_ROLES = new Set(['researcher', 'manager']);
 const mediaOn = (cfg) => !!(cfg.openrouterKey || cfg.mediaMock);
