@@ -835,8 +835,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (dir !== '_office' || segs.length < 2) return null;
     if (name === 'client.js') return { type: 'text/javascript; charset=utf-8', body: clientLib };
     if (name === 'office.js') return { type: 'text/javascript; charset=utf-8', body: SDK_JS };
-    if (name === 'chat.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_JS };
-    if (name === 'chat-panel.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_PANEL_JS };
+    if (name === 'chat.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_JS, cache: 'public, max-age=3600' };
+    if (name === 'chat-panel.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_PANEL_JS, cache: 'public, max-age=3600' };
     if (name === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
     if (name === 'phaser.min.js') return { type: 'text/javascript; charset=utf-8', body: phaserLib?.body };
     return null;
@@ -887,7 +887,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     limit('publicSite', ipOf(req));
     if (segs[0] === '_office' && segs[1] === 'pay' && segs.length === 2) return servePay(res, pr, HEAD);
     const lib = sharedAsset(segs);
-    if (lib) { res.writeHead(200, { ...HEAD, 'content-type': lib.type }); return res.end(req.method === 'HEAD' ? undefined : lib.body); }
+    if (lib) { res.writeHead(200, { ...HEAD, 'content-type': lib.type, ...(lib.cache ? { 'cache-control': lib.cache } : {}) }); return res.end(req.method === 'HEAD' ? undefined : lib.body); }
     let hit = publishedFile(f, pr, segs, raw.endsWith('/')), base = raw;
     // A path with no extension is a client-side route: hand it to the app's own page.
     if (!hit && !segs.at(-1).includes('.')) { hit = publishedFile(f, pr, [''], true); base = '/'; }

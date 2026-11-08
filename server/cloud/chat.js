@@ -517,7 +517,6 @@ export function createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, eng
       const f = requireOwner(req, p.slug);
       const v = conversationView(f, idOf(p.id));
       if (!v) throw new HttpError(404, 'not_found');
-      tell(f.id);
       json(res, 200, v);
     });
     POST('/api/floors/:slug/sitechat/conversations/:id/reply', async ({ req, res, p, ip }) => {

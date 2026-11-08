@@ -126,5 +126,6 @@ if (r.status === 200) render(r.json());                         // json() parses
 - `Office.submitForm('waitlist', { email, name })`: a form only the boss can read (`office.forms.submit` is the same).
 - `office.mode` is `'live'` on the published site and `'local'` on a preview with no Office server behind it. There, everything runs on that one device: accounts are pretend, nobody else is in a room, and nothing reaches the server. Say so rather than calling it saved.
 - Too many requests get `rate_limited`; a full project gets `quota`. Show the message and carry on.
+- Every launched site or app (not games) gets a small AI chat bubble for visitors, added by the building when the page is served. Don't build your own and don't remove it: it keeps off your fixed buttons by itself, the boss can turn it off per project, and the manager writes what it knows with `chat_faq`.
 
 The example in `.office/examples/cloud-game/index.html` uses all of the main parts in one small page.

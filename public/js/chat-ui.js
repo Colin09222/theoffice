@@ -11,8 +11,11 @@ export function onChatEvent(page, d) {
   page.state.sitechat = { ...(page.state.sitechat || {}), waiting: d.waiting };
   if (d.question) toast('A visitor asked something the chat couldn\'t answer. It\'s in your Inbox.');
   page.renderTabs();
-  if (page.tab === 'inbox' && page.chatBox?.isConnected && page.chatBox.dataset.open === 'yes') loadChat(page);
+  const box = page.chatBox;
+  if (page.tab === 'inbox' && box?.isConnected && box.dataset.open === 'yes' && !busyWithIt(box)) loadChat(page);
 }
+// A boss half-way through a reply, or reading a conversation, shouldn't have it swept away by the next question arriving.
+const busyWithIt = (box) => box.dataset.detail === 'yes' || [...box.querySelectorAll('textarea')].some((t) => t.value.trim());
 
 function reply(page, conversationId, done) {
   const text = h('textarea.sc-reply', { rows: 2, maxlength: 2000, placeholder: 'Write a reply. The visitor sees it in the chat.' });
@@ -50,6 +53,7 @@ function conversationsView(page, wrap, v) {
   }
 }
 async function showConversation(page, wrap, v, id) {
+  page.chatBox.dataset.detail = 'yes';
   clear(wrap).append(h('p.sc-empty', {}, 'Opening…'));
   let c;
   try { c = await api(`/floors/${page.slug}/sitechat/conversations/${id}`); } catch (e) { clear(wrap).append(h('p.sc-empty', {}, e.message)); return; }
@@ -86,6 +90,7 @@ async function loadChat(page) {
   const box = page.chatBox;
   if (!box) return;
   const body = box.querySelector('.sc-body');
+  box.dataset.detail = 'no';
   let v;
   try { v = await api(`/floors/${page.slug}/sitechat`); } catch (e) { clear(body).append(h('p.sc-empty', {}, e.message)); return; }
   if (!body.isConnected) return;

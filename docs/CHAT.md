@@ -55,6 +55,8 @@ Conversations are kept for 30 days from their last message (`sweep`, hourly), th
 | A message | 800 characters; 40 per conversation |
 | Conversations kept | 5,000 per project (oldest go first), 30 days |
 
+`OFFICE_CHAT_ENABLED=0` turns it off for the whole building, as a setting; the `chat pause --all` command below does the same without a restart.
+
 ## Admin
 ```
 node scripts/admin.mjs chat status [PROJECT] [--floor N] [--json]   # counts only, never what anyone said
