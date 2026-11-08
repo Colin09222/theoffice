@@ -1,6 +1,8 @@
 /* The boss's Servers tab (server-panel.js). Phone first: everything stacks and wraps, and nothing is wider than the screen. */
-.servers { display: flex; flex-direction: column; gap: 10px; }
-.server { display: flex; flex-direction: column; gap: 6px; }
+.servers { flex: 1 1 auto; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px; background: #d6c49c; display: flex; flex-direction: column; gap: 11px; }
+.servers .fineprint { color: var(--ink-2); }
+.server { position: relative; padding: 13px 13px 12px; background: var(--white); color: var(--ink); display: flex; flex-direction: column; gap: 6px; }
+.server > .row b { font: 400 19px/1.14 var(--display); overflow-wrap: anywhere; }
 .server-url { word-break: break-all; font-size: 14px; }
 .server-status { flex: none; padding: 2px 9px; border-radius: 999px; font-size: 13px; font-weight: 700; color: var(--ink); background: var(--paper-2); }
 .server-status.on { background: #c9eccb; }

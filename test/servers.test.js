@@ -1,7 +1,7 @@
 // Server slots against a stand-in runner: the off state, the boss's yes, slots and the kind full-building message, labels, secrets, build errors and project-scoped tokens.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import fs, { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -497,5 +497,50 @@ test('the admin\'s runner commands go through the socket and leave no live token
     const after = openDb(dir);
     assert.equal(after.prepare("SELECT status, token_hash FROM server_apps WHERE label='shop--f'").get().status, 'removed');
     after.close();
+  } finally { await h.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the starter really runs: health, CORS, AI through the real door, and its job', async () => {
+  const h = await setup();
+  const dir = mkdtempSync(join(tmpdir(), 'starter-data-'));
+  const net = await import('node:net');
+  const { spawn } = await import('node:child_process');
+  const http = await import('node:http');
+  const freePort = () => new Promise((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
+  const starter = join(process.cwd(), 'server/app-client/starters/node-server');
+  try {
+    const label = await allowed(h, 'shop');
+    const token = h.fake.apps[label].secrets.OFFICE_TOKEN;
+    const port = await freePort();
+    const env = { ...process.env, PORT: String(port), OFFICE_DATA_DIR: dir, OFFICE_CLOUD_URL: `http://127.0.0.1:${h.t.port}/theoffice/api/app-cloud`, OFFICE_TOKEN: token, OFFICE_SITE_ORIGINS: 'https://shop.example,https://www.shop.example' };
+    const child = spawn(process.execPath, ['server.js'], { cwd: starter, env, stdio: ['ignore', 'pipe', 'ignore'] });
+    try {
+      await new Promise((resolve, reject) => { child.stdout.on('data', (d) => { if (String(d).includes('listening')) resolve(); }); child.on('exit', () => reject(new Error('the starter exited'))); setTimeout(() => reject(new Error('the starter did not listen')), 8000); });
+      const call = (method, path, { headers = {}, body } = {}) => new Promise((resolve, reject) => {
+        const q = http.request({ host: '127.0.0.1', port, method, path, headers: { ...headers, ...(body ? { 'content-type': 'application/json' } : {}) } }, (r) => { let t = ''; r.on('data', (c) => { t += c; }); r.on('end', () => resolve({ status: r.statusCode, headers: r.headers, json: t ? JSON.parse(t) : null })); });
+        q.on('error', reject); if (body) q.write(JSON.stringify(body)); q.end();
+      });
+      const health = await call('GET', '/health');
+      assert.equal(health.status, 200); assert.equal(health.json.ok, true);
+      const ok = await call('OPTIONS', '/api/notes', { headers: { origin: 'https://www.shop.example', 'access-control-request-method': 'POST' } });
+      assert.equal(ok.status, 204); assert.equal(ok.headers['access-control-allow-origin'], 'https://www.shop.example');
+      assert.equal(ok.headers.vary, 'Origin');
+      const bad = await call('GET', '/health', { headers: { origin: 'https://not-allowed.example' } });
+      assert.equal(bad.headers['access-control-allow-origin'], undefined, 'only the project\'s own pages');
+      const posted = await call('POST', '/api/notes', { headers: { origin: 'https://shop.example' }, body: { text: 'bread is rising' } });
+      assert.equal(posted.status, 201); assert.equal(posted.json.summary, 'mock answer', 'through the real door, on the project\'s own ledger');
+      assert.equal((await call('GET', '/api/latest')).json.latest.note, 'bread is rising');
+      assert.equal(h.t.app.cloud.powers.counts(h.floor.id, 'shop').ai_calls, 1);
+    } finally { child.kill('SIGKILL'); }
+    // The scheduled job, against a stand-in for Office Cloud's reading of pages.
+    const seen = [];
+    const stub = http.createServer((q, r) => { let t = ''; q.on('data', (c) => { t += c; }); q.on('end', () => { seen.push({ path: q.url, auth: q.headers.authorization }); r.writeHead(q.url.endsWith('/scrape') ? 200 : 201, { 'content-type': 'application/json' }); r.end(JSON.stringify({ title: 'Example page', id: 'x' })); }); });
+    await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+    await promisify(execFile)(process.execPath, ['jobs/refresh.js'], { cwd: starter, env: { ...process.env, OFFICE_DATA_DIR: dir, OFFICE_CLOUD_URL: `http://127.0.0.1:${stub.address().port}`, OFFICE_TOKEN: token } });
+    stub.close();
+    assert.deepEqual(seen.map((x) => x.path), ['/scrape', '/db/updates']);
+    assert.equal(seen[0].auth, `Bearer ${token}`);
+    assert.match(fs.readFileSync(join(dir, 'latest.json'), 'utf8'), /Example page/);
+    await promisify(execFile)(process.execPath, ['--check', 'browser.js'], { cwd: starter });
   } finally { await h.close(); rmSync(dir, { recursive: true, force: true }); }
 });
