@@ -265,7 +265,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG 
     const role = DOC_ROLE[type];
     for (const r of [role, 'builder', 'tester']) ensure(floor, r);
     // A floor with no company yet gets one named after what it's making. The boss can rename it under Customise.
-    if (floor.setup && engine.company?.setCompany) { try { engine.company.setCompany(floor, { name: title, what_it_does: pitch.slice(0, 200) }); } catch { /* the name is a nicety */ } }
+    if (!floor.name && engine.company?.setCompany) { try { engine.company.setCompany(floor, { name: title, what_it_does: pitch.slice(0, 200) }); } catch { /* the name is a nicety */ } }
     const t = now();
     const id = Number(run(db, 'INSERT INTO maker_jobs (floor_id,project,type,title,pitch,goal,plan,starter,stage,pass,depth,state,started_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       floor.id, project, type, title, pitch, goal, JSON.stringify(plan), starter, 'doc', 0, depth, JSON.stringify({ fails: 0, best: {}, bugs: [], launchable: false, lastPassing: -1, mechanics: known?.mechanics || null, object: known?.object || null }), t, t).lastInsertRowid);

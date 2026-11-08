@@ -23,16 +23,34 @@ const KINDS = {
   shooter: { r: 14, hp: 2, speed: 70, score: 35 },
 };
 
-let scene, gfx, emitter, hud, world = null;
+let scene, gfx, emitter, hud, trail, stars = [], world = null;
 
 class Arena extends Phaser.Scene {
   constructor() { super('arena'); }
   create() {
     scene = this;
+    // Every sprite is drawn here in code, with a soft glow, a shape of its own and eyes, so the game has character before any art exists.
     const g = this.make.graphics({ x: 0, y: 0, add: false });
-    const disc = (key, color, r, ring = false) => { g.clear(); g.fillStyle(color, 1); g.fillCircle(r, r, r); if (ring) { g.lineStyle(3, 0xffffff, 0.9); g.strokeCircle(r, r, r - 2); } g.generateTexture(key, r * 2, r * 2); };
-    disc('player', PALETTE.player, 14, true); disc('chaser', PALETTE.chaser, 13); disc('dasher', PALETTE.dasher, 15, true); disc('splitter', PALETTE.splitter, 20); disc('shooter', PALETTE.shooter, 14, true);
-    disc('gem', PALETTE.gem, 6); disc('shot', PALETTE.shot, 4); disc('eshot', PALETTE.enemyShot, 5); disc('spark', 0xffffff, 4);
+    const sprite = (key, color, r, body, eyes = true) => {
+      const pad = Math.ceil(r * 0.7), c = r + pad; g.clear();
+      for (let i = 4; i >= 1; i--) { g.fillStyle(color, 0.06 * (5 - i)); g.fillCircle(c, c, r + pad * (i / 4)); }
+      g.fillStyle(color, 1); body(c, r); g.fillStyle(0xffffff, 0.35); g.fillCircle(c - r * 0.35, c - r * 0.4, r * 0.28);
+      if (eyes) { for (const s of [-1, 1]) { g.fillStyle(0xffffff, 1); g.fillCircle(c + s * r * 0.34, c - r * 0.05, r * 0.26); g.fillStyle(0x120e24, 1); g.fillCircle(c + s * r * 0.34 + r * 0.06, c, r * 0.13); } }
+      g.generateTexture(key, c * 2, c * 2);
+    };
+    const circle = (c, r) => g.fillCircle(c, c, r);
+    sprite('player', PALETTE.player, 14, (c, r) => { circle(c, r); g.lineStyle(3, 0xffffff, 0.95); g.strokeCircle(c, c, r - 1.5); });
+    sprite('chaser', PALETTE.chaser, 13, (c, r) => { circle(c, r); g.fillTriangle(c - r, c - r * 0.2, c - r * 0.55, c - r * 1.15, c - r * 0.15, c - r * 0.7); g.fillTriangle(c + r, c - r * 0.2, c + r * 0.55, c - r * 1.15, c + r * 0.15, c - r * 0.7); });
+    sprite('dasher', PALETTE.dasher, 15, (c, r) => g.fillPoints([{ x: c, y: c - r * 1.15 }, { x: c + r, y: c }, { x: c, y: c + r * 1.15 }, { x: c - r, y: c }], true));
+    sprite('splitter', PALETTE.splitter, 20, (c, r) => { circle(c, r); g.fillStyle(0xd6c8ff, 0.55); g.fillCircle(c + r * 0.3, c + r * 0.35, r * 0.32); g.fillCircle(c - r * 0.4, c + r * 0.45, r * 0.2); });
+    sprite('shooter', PALETTE.shooter, 14, (c, r) => { g.fillRoundedRect(c - r, c - r, r * 2, r * 2, r * 0.45); g.lineStyle(3, 0x120e24, 0.5); g.strokeCircle(c, c + r * 0.45, r * 0.3); });
+    sprite('gem', PALETTE.gem, 6, (c, r) => g.fillPoints([{ x: c, y: c - r * 1.3 }, { x: c + r, y: c }, { x: c, y: c + r * 1.3 }, { x: c - r, y: c }], true), false);
+    sprite('shot', PALETTE.shot, 4, circle, false); sprite('eshot', PALETTE.enemyShot, 5, circle, false); sprite('spark', 0xffffff, 4, circle, false);
+    // A night sky: a soft gradient and stars that twinkle.
+    const sky = this.textures.createCanvas('sky', 512, 512), ctx = sky.getContext(), grd = ctx.createRadialGradient(256, 230, 30, 256, 256, 380);
+    grd.addColorStop(0, '#2c2063'); grd.addColorStop(0.6, '#160f36'); grd.addColorStop(1, '#08061a'); ctx.fillStyle = grd; ctx.fillRect(0, 0, 512, 512); sky.refresh();
+    this.sky = this.add.image(0, 0, 'sky').setOrigin(0).setDepth(-10);
+    stars = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.6 + 0.4, p: Math.random() * 6 }));
     gfx = this.add.graphics();
     emitter = this.add.particles(0, 0, 'spark', { speed: { min: 60, max: 260 }, lifespan: { min: 250, max: 600 }, scale: { start: 1, end: 0 }, alpha: { start: 1, end: 0 }, emitting: false, blendMode: 'ADD' });
     hud = this.add.text(12, 10, '', { fontFamily: 'Trebuchet MS, system-ui', fontSize: '20px', color: '#f4f1ff', stroke: '#120e24', strokeThickness: 5 }).setDepth(10).setScrollFactor(0);
@@ -73,7 +91,7 @@ function kill(e, i) {
   if (e.kind === 'splitter' && e.r > 12) for (let n = 0; n < 2; n++) { spawn('chaser', e.x + rand(-12, 12), e.y + rand(-12, 12)); world.enemies[world.enemies.length - 1].r = 10; world.enemies[world.enemies.length - 1].img.setScale(0.75); }
 }
 async function end(won) {
-  const w = world; world = null;
+  const w = world; world = null; trail?.destroy(); trail = null;
   for (const e of w.enemies) e.img.destroy(); for (const b of [...w.shots, ...w.eshots, ...w.gems]) b.img.destroy(); w.player.img.destroy();
   gfx.clear(); hud.setText('');
   await gameOver({ won, stats: { Wave: w.wave, Gems: w.gemsGot } });
@@ -93,9 +111,11 @@ const game = {
     if (world) this.quit();
     world = { wave: 0, queue: [], spawnIn: 0, enemies: [], shots: [], eshots: [], gems: [], gemsGot: 0, meter: 0, combo: 0, comboT: 0, banner: null, picking: false,
       player: { x: W() / 2, y: H() / 2, r: 14, hp: 3, maxHp: 3, speed: 230, fireEvery: 0.32, fireT: 0, shots: 1, pierce: 0, magnet: 90, inv: 0, dashT: 0, dashCd: 0, img: sprite('player', W() / 2, H() / 2) } };
+    trail?.destroy(); trail = scene.add.particles(0, 0, 'spark', { follow: world.player.img, frequency: 35, lifespan: 320, speed: 0, scale: { start: 0.9, end: 0 }, alpha: { start: 0.45, end: 0 }, tint: PALETTE.player, blendMode: 'ADD' }).setDepth(-1);
     startWave();
   },
-  quit() { if (world) { const w = world; world = null; for (const e of w.enemies) e.img.destroy(); for (const b of [...w.shots, ...w.eshots, ...w.gems]) b.img.destroy(); w.player.img.destroy(); gfx.clear(); hud.setText(''); } },
+  quit() {
+    trail?.destroy(); trail = null; if (world) { const w = world; world = null; for (const e of w.enemies) e.img.destroy(); for (const b of [...w.shots, ...w.eshots, ...w.gems]) b.img.destroy(); w.player.img.destroy(); gfx.clear(); hud.setText(''); } },
   update(dt) {
     const w = world; if (!w || w.picking) return;
     const p = w.player, a = input.axis();
@@ -131,6 +151,7 @@ const game = {
         if (e.t > 1.8) { e.t = 0; w.eshots.push({ x: e.x, y: e.y, vx: Math.cos(ang) * 200, vy: Math.sin(ang) * 200, life: 4, img: sprite('eshot', e.x, e.y) }); }
       } else { const s = k.speed * (1 + w.wave * 0.05); e.vx = Math.cos(ang) * s; e.vy = Math.sin(ang) * s; }
       e.x += e.vx * dt; e.y += e.vy * dt; e.img.setPosition(e.x, e.y);
+      if (e.kind === 'dasher' && e.state !== 'move') e.img.setScale(e.state === 'aim' ? 1 + Math.sin(e.t * 40) * 0.08 : 1.15, e.state === 'aim' ? 1 - Math.sin(e.t * 40) * 0.08 : 0.85); else if (e.kind === 'dasher') e.img.setScale(1);
       if (dist2(e, p) < (e.r + p.r - 4) ** 2) hurtPlayer();
       if (!world) return;
     }
@@ -173,9 +194,11 @@ const game = {
   render() {
     const w = world, cam = scene?.cameras?.main; if (!cam) return;
     cam.setScroll(-juice.offset.x, -juice.offset.y);
-    gfx.clear();
-    // A background with some depth: a soft grid that drifts.
-    const t = performance.now() / 1000; gfx.lineStyle(1, 0x2c2350, 0.6);
+    gfx.clear(); scene.sky?.setDisplaySize(W(), H());
+    // A background with some depth: twinkling stars and a soft grid that drifts.
+    const t = performance.now() / 1000;
+    for (const s of stars) { gfx.fillStyle(0xffffff, 0.25 + 0.35 * Math.sin(t * 1.7 + s.p) ** 2); gfx.fillCircle(s.x * W(), s.y * H(), s.r); }
+    gfx.lineStyle(1, 0x3a2f6e, 0.35);
     for (let x = (t * 12) % 48; x < W(); x += 48) gfx.lineBetween(x, 0, x, H());
     for (let y = (t * 8) % 48; y < H(); y += 48) gfx.lineBetween(0, y, W(), y);
     if (!w) return;

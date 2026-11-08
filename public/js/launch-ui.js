@@ -10,7 +10,8 @@ const FALLBACK_TYPES = [['game', 'Game', 'A real game with levels, enemies and u
 export function launchFlow(page) {
   const root = h('div.launcher', { role: 'group', 'aria-label': 'Start something', 'data-launcher': '' });
   const types = page.state.makers?.types?.map((t) => [t.id, t.label, t.blurb]) || FALLBACK_TYPES;
-  const step = (n, ...kids) => { root.replaceChildren(h('p.launch-step', {}, `Step ${n} of 3`), ...kids); root.querySelector('button:not([disabled]), input, textarea')?.focus({ preventScroll: true }); };
+  // Each step starts at its question, so a phone shows the choices rather than the middle of the last list.
+  const step = (n, ...kids) => { root.replaceChildren(h('p.launch-step', {}, `Step ${n} of 3`), ...kids); root.querySelector('button:not([disabled]), input, textarea')?.focus({ preventScroll: true }); if (root.isConnected) root.scrollIntoView({ block: 'start', behavior: 'smooth' }); };
 
   function pickType() {
     step(1, h('h3.launch-q', {}, 'What are we making?'),

@@ -137,6 +137,7 @@ describe('isolation between floors and projects', () => {
     const box = unpackTgz(h.sessions.calls.uploads[0].buffer).files;
     const assets = box.filter((f) => f.path.startsWith('.office/assets/')).map((f) => f.path);
     assert.ok(assets.includes('.office/assets/sounds/ding.mp3')); assert.ok(assets.includes('.office/assets/models/Textures/colormap.png'));
+    assert.ok(box.some((f) => f.path === '.office/phaser.min.js' && f.data.length > 500000), 'Phaser for 2D games, as published games load it from _office/');
     assert.ok(assets.some((p) => /models\/character-.*\.glb$/.test(p)));
     const readme = box.find((f) => f.path === '.office/assets/README.txt').data.toString();
     assert.match(readme, /CC0/); assert.match(readme, /Kenney/); assert.match(readme, /Credit/);

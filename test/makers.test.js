@@ -161,6 +161,23 @@ describe('three taps to a team that is building, then Launch', () => {
   });
 });
 
+describe('a floor with no company yet', () => {
+  let t, c;
+  before(async () => { t = await boot(); c = await claim(t, 'Soon Named'); });
+  after(() => t.close());
+  test('is named after what it is making, and the app starter goes in', async () => {
+    const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
+    t.db.prepare("UPDATE floors SET name='' WHERE id=?").run(fid);
+    const r = await c.post(`/api/floors/${c.slug}/makers/start`, { type: 'app', name: 'Shift Swap', pitch: 'Teammates swap shifts in a tap.' });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(get(t.db, 'SELECT name FROM floors WHERE id=?', fid).name, 'Shift Swap');
+    const files = all(t.db, 'SELECT path FROM files WHERE floor_id=? AND path LIKE ?', fid, 'projects/shift-swap/%').map((f) => f.path);
+    assert.ok(files.includes('projects/shift-swap/app.js') && files.includes('projects/shift-swap/STARTER.md'));
+    const roles = all(t.db, 'SELECT a.role FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? ORDER BY t.id', fid).map((x) => x.role);
+    assert.deepEqual(roles.slice(0, 3), ['writer', 'builder', 'tester']);
+  });
+});
+
 describe('a job that keeps failing asks the boss, and the boss decides', () => {
   let t, c;
   before(async () => { t = await boot(); c = await claim(t, 'Broken Co'); });
