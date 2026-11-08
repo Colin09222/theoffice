@@ -14,6 +14,7 @@
     "e2e:launch": "node test/browser/launch.mjs",
     "e2e:resilience": "node test/browser/resilience.mjs",
     "e2e:attach": "node test/browser/attach.mjs",
+    "e2e:modes": "node test/browser/modes.mjs",
     "validate-models": "node scripts/validate-models.mjs"
   },
   "dependencies": {

@@ -168,6 +168,8 @@ describe('working on its own', () => {
       // The gap: nothing new until five minutes after the last job finished, then the next one starts.
       const row = get(t.db, 'SELECT next_at FROM work_modes WHERE floor_id=?', f.id);
       assert.equal(row.next_at, first.finished_at + 5 * 60000);
+      await setMode(c, { mode: 'nonstop', goal: '[build] Get the company known, and soon' });
+      assert.equal(get(t.db, 'SELECT next_at FROM work_modes WHERE floor_id=?', f.id).next_at, row.next_at, 'a new goal on the same mode keeps the gap');
       await sleep(150);
       assert.equal(runsOf(t, f).length, 1, 'still in the gap');
       t.clock.t = first.finished_at + 5 * 60000 - 1000; await sleep(100);

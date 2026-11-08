@@ -736,3 +736,24 @@ test('a database from before these features is brought up to date at boot', asyn
   db.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+describe('a computer on a job the team picked for itself', () => {
+  test('runs as its own Sonnet agent, charged at Sonnet\'s price; the boss\'s jobs keep the Opus agent', async () => {
+    const h = await start();
+    const auto = h.t.app.engine.assignTask(h.floor, h.mgr, { to: 'builder', title: 'Build the next thing', brief: 'Build it', plan: '', project: 'next', dependsOn: [], auto: true });
+    h.t.app.engine.kick();
+    const row = await h.settle(auto.id);
+    assert.equal(row.status, 'review');
+    assert.equal(h.taskRow(auto.id).auto, 1);
+    const def = h.sessions.calls.agents.find((a) => a.name === 'theoffice-builder-auto');
+    assert.ok(def, 'an agent of its own');
+    assert.equal(def.model.id, 'claude-sonnet-5-5'); assert.equal(def.model.effort, 'high');
+    assert.ok(!h.sessions.calls.agents.some((a) => a.name === 'theoffice-builder'), 'the Opus agent was never touched');
+    const { id } = await go(h, 'Build the boss\'s thing', { project: 'boss' });
+    await h.settle(id);
+    const boss = h.sessions.calls.agents.find((a) => a.name === 'theoffice-builder');
+    assert.equal(boss.model.id, 'claude-opus-5-5'); assert.equal(boss.model.effort, 'medium');
+    const brief = JSON.parse(get(h.t.db, 'SELECT transcript FROM tasks WHERE id=?', auto.id).transcript || '[]')[0]?.content || '';
+    assert.match(brief, /picked this job itself/, 'the job says it is the team\'s own, after the brief');
+  });
+});

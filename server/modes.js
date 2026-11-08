@@ -197,13 +197,13 @@ export function installModes(ext) {
     const r = parseMode({ mode: input?.mode, days: input?.days ?? was.days, start: input?.start ?? was.start, end: input?.end ?? was.end, tz: tzIn });
     if (r.error) throw new ModeError(400, 'bad_mode', r.error);
     const h = r.hours;
-    const fields = { mode: h.mode, days: JSON.stringify(h.days), start_at: h.start, end_at: h.end, tz: h.tz, paused_reason: '', fail_streak: 0, next_at: now(), open_state: -1 };
+    // A new mode or new hours start straight away; saving the same ones again (a new goal, say) keeps the gap after the last job.
+    const fresh = JSON.stringify(was) !== JSON.stringify({ mode: h.mode, days: h.days, start: h.start, end: h.end, tz: h.tz }) || !!row.paused_reason;
+    const fields = { mode: h.mode, days: JSON.stringify(h.days), start_at: h.start, end_at: h.end, tz: h.tz, paused_reason: '', fail_streak: 0, next_at: fresh ? now() : row.next_at, open_state: -1 };
     if (input?.tz !== undefined && input?.tz !== null && input?.tz !== '') fields.tz_set = 1;
     if (typeof input?.goal === 'string') fields.goal = plain(input.goal, GOAL_MAX);
-    const before = was; const wasPaused = !!row.paused_reason;
     patch(floor.id, fields);
-    const after = hoursOf(rowOf(floor.id));
-    if (JSON.stringify(before) !== JSON.stringify(after) || wasPaused) {
+    if (fresh) {
       const line = h.mode === 'nonstop' ? 'Now working nonstop: whenever the floor is quiet, I pick the next most useful job toward our goal and the team gets on with it.'
         : h.mode === 'hours' ? `Now working ${describeMode(h)}. Inside those hours I keep the team on the next most useful job; outside them everyone goes home, and you can still call me.`
           : 'Back on call: the team works when you ask.';
@@ -255,7 +255,7 @@ export function installModes(ext) {
     // In the manager's own reading, after the stable part of its prompt, so the cache holds. It is never shown as the boss's words.
     engine.addMessage(floor.id, 'note', null, `${MODE_NOTE} the boss has set the team to work on its own (${signLabel(h)}), and the floor is quiet. Pick the next most useful piece of work toward the company's goal and get it done now, through your staff as usual. `
       + `Goal: ${row.goal || 'not set yet: write one from what the company does and what the boss has asked for so far'}. Next up: ${list.length ? list.map((x, i) => `${i + 1}. ${x}`).join(' ') : 'nothing listed yet: start the list'}. `
-      + 'Make the calls yourself and say what you assumed. Only spending money (a request that waits for the boss\'s Buy click) and questions only the boss can answer go to the boss, and while one waits, the team moves on to other work. '
+      + 'Make the calls yourself and say what you assumed. Only buying something (a request that waits for the boss\'s Buy click) and questions only the boss can answer go to the boss, and while one waits, the team moves on to other work. '
       + 'Keep the job small enough to finish in one go. When it is done, call update_backlog with the goal, the next-up list and a line or two for the boss on what this job did.');
     run(db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
     const mgr = get(db, "SELECT id,name FROM agents WHERE floor_id=? AND role='manager'", floor.id);

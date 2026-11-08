@@ -208,8 +208,8 @@ describe('in-flight calls hold their money', () => {
     const releases = []; const started = []; let free = false;
     const inner = createMockClient({ mockDelayMs: 0 });
     const llm = { async chat(x) { started.push(x.meta.role); if (!free) await new Promise((r) => releases.push(r)); return inner.chat(x); } };
-    // Each call's worst case is about $0.25 to $0.35, so two of them speak for all of this.
-    const t = await start({ budgetAnthropicUsd: 0.4 }, { llm });
+    // On Sonnet each call's worst case is about $0.12 to $0.16, so two of them speak for all of this.
+    const t = await start({ budgetAnthropicUsd: 0.25 }, { llm });
     t.app.engine.runManager = async () => {};
     const c = await claim(t, 'Holds'); const floor = floorOf(t, c);
     try {
