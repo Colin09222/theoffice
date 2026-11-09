@@ -571,10 +571,11 @@ class FloorPage {
     const status = this.statusLine(), last = this.latestLine();
     const chips = this.owner ? (this.state.business?.active && this.state.business.chips?.length || 0) : 0;
     const plain = last?.text.replace(/[*_\x60#>\[\]]/g, '').replace(/\s+/g, ' ').trim();
+    // One short row: what is going on, and the last thing said under it. The room gets the rest of the screen.
+    const now = h('small.rest-now', {}, h('i.rest-dot'), h('span', {}, status.line), status.pct === null ? '' : h('em', {}, `${status.pct}%`));
     this.peekEl.replaceChildren(
-      h('div.rest-status', {}, h('i.rest-dot'), h('b', {}, 'Right now'), status.pct === null ? '' : h('small', {}, `${status.pct}% done`)),
-      h('p.rest-line', {}, status.line),
-      last ? h('button.rest-latest', { type: 'button', 'data-rest-latest': '', 'aria-label': 'Open the conversation', onclick: () => this.setTab(this.canSeeChat ? 'chat' : 'talk') }, this.face(last.person), h('span', {}, h('b', {}, `${last.who}: `), plain), icon('caret-right')) : '',
+      last ? h('button.rest-latest', { type: 'button', 'data-rest-latest': '', 'aria-label': 'Open the conversation', onclick: () => this.setTab(this.canSeeChat ? 'chat' : 'talk') }, this.face(last.person), h('span.rest-text', {}, now, h('span.rest-said', {}, h('b', {}, `${last.who}: `), plain)))
+        : h('div.rest-latest.rest-only', {}, h('span.rest-text', {}, now)),
       chips ? h('button.btn.soft.rest-reply', { type: 'button', 'data-rest-reply': '', onclick: () => this.setTab('chat') }, `Reply to ${this.manager?.name || 'your manager'} (${chips} options)`) : '');
     this.layout();
   }

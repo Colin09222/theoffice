@@ -34,6 +34,7 @@ for (const [w, h] of SIZES) {
       await p.goto(`${base}/floor/${slug}${Q}`);
       await p.until('document.body.dataset.page === "floor" && !!window.__office?.state && !document.querySelector("#boot")', 'floor', 60000);
       await sleep(Number(process.env.LOOK_WAIT || 9000));
+      if (process.env.LOOK_EVAL) { console.log('eval', JSON.stringify(await p.ev(process.env.LOOK_EVAL))); await sleep(2500); }
       await p.shot(join(OUT, `${TAG}floor${i || ''}-${w}x${h}.jpg`));
       console.log(w, h, JSON.stringify(await p.ev('({ tier: window.__stage?.tier, ok: !!window.__stage?.ok, dpr: window.__stage?.dpr, sheet: document.body.dataset.sheet })')));
     }
