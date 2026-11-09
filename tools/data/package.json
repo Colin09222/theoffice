@@ -1,0 +1,8 @@
+{
+  "name": "thirdpartyrising-data",
+  "private": true,
+  "type": "module",
+  "description": "Builds data/packs/*.json, *.geo.json and data/us.json from public sources. See ../../SOURCES.md",
+  "scripts": { "build": "node build.mjs", "check": "node check.mjs" },
+  "dependencies": { "adm-zip": "^0.5.16", "mapshaper": "^0.6.102", "shapefile": "^0.6.6" }
+}

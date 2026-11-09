@@ -1,0 +1,17 @@
+{
+  "note": "Scandals happen only to fictional politicians, at identical odds for every party. {name} is the politician. severity above 0.85 forces a resignation.",
+  "scandals": [
+    { "id": "expenses", "severity": 0.4, "text": "{name} billed the public for a long list of personal expenses." },
+    { "id": "residency", "severity": 0.5, "text": "{name} turns out not to live in the district they represent." },
+    { "id": "nepotism", "severity": 0.45, "text": "{name} put three relatives on the public payroll." },
+    { "id": "contract", "severity": 0.7, "text": "{name} steered a public contract to a business partner." },
+    { "id": "campaign_funds", "severity": 0.75, "text": "{name} spent campaign funds on a boat." },
+    { "id": "resume", "severity": 0.35, "text": "{name}'s resume lists a degree the university has no record of." },
+    { "id": "no_show", "severity": 0.3, "text": "{name} missed most of this year's votes while drawing a full salary." },
+    { "id": "kickback", "severity": 0.95, "text": "{name} is charged with taking kickbacks from a road contractor." },
+    { "id": "hot_mic", "severity": 0.4, "text": "{name} was recorded insulting their own constituents." },
+    { "id": "land_deal", "severity": 0.6, "text": "{name} bought land just before voting to rezone it." },
+    { "id": "ghost_staff", "severity": 0.9, "text": "{name} kept employees on the books who never existed." },
+    { "id": "plagiarism", "severity": 0.3, "text": "{name}'s signature bill was copied word for word from a lobbyist's draft." }
+  ]
+}

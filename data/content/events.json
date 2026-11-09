@@ -1,0 +1,130 @@
+{
+  "note": "Events for the player's party; AI parties meet the same list and choose for themselves. Effects: op is money | rep | heat | volunteers | awareness | buzz | donors | sigs | recognition; scope is 'home' (default) or 'state'. Conditions in 'when': minDay (days since founding), minHeat, minMoney, needsOffice, qualified, minSeats. Nothing here refers to a real person, party position or real election.",
+  "events": [
+    { "id": "diner_debate", "title": "The diner debate", "text": "A regular at the busiest diner in town challenges your leader to defend the platform, loudly, in front of the breakfast crowd.", "weight": 1.2, "when": {},
+      "choices": [
+        { "label": "Take the challenge", "result": "It goes well enough. People are talking.", "effects": [{ "op": "awareness", "v": 0.06 }, { "op": "recognition", "v": 0.03 }] },
+        { "label": "Buy the room coffee and listen", "result": "A few of them sign up to help.", "effects": [{ "op": "money", "v": -120 }, { "op": "volunteers", "v": 4 }] }
+      ] },
+    { "id": "local_paper", "title": "A call from the local paper", "text": "The editor wants an interview about why anyone would start a new party here. The piece could run long.", "weight": 1.0, "when": {},
+      "choices": [
+        { "label": "Give a careful, honest interview", "result": "A fair write-up on page three.", "effects": [{ "op": "awareness", "v": 0.07 }, { "op": "rep", "v": 0.02 }] },
+        { "label": "Go on the attack against both big parties", "result": "Front page. Not everyone liked it.", "effects": [{ "op": "awareness", "v": 0.14 }, { "op": "rep", "v": -0.03 }] }
+      ] },
+    { "id": "volunteer_burnout", "title": "Burnout", "text": "Your most reliable volunteers have been out every weekend for months. Two of them are talking about quitting.", "weight": 1.0, "when": { "minDay": 90 },
+      "choices": [
+        { "label": "Throw them a proper thank-you dinner", "result": "Spirits recover.", "effects": [{ "op": "money", "v": -400 }, { "op": "volunteers", "v": 3 }] },
+        { "label": "Ask for one more push", "result": "Some stay. Some do not.", "effects": [{ "op": "volunteers", "v": -5 }, { "op": "buzz", "v": 0.3 }] }
+      ] },
+    { "id": "small_business", "title": "The hardware store owner", "text": "A well-liked shop owner offers a donation and a window sign, and hints that she would like a say in your platform.", "weight": 0.9, "when": {},
+      "choices": [
+        { "label": "Take the donation, promise nothing", "result": "She gives a smaller cheque.", "effects": [{ "op": "money", "v": 900 }] },
+        { "label": "Welcome her as a founding donor", "result": "A regular backer joins.", "effects": [{ "op": "donors", "v": 1 }, { "op": "rep", "v": -0.01 }] },
+        { "label": "Decline politely", "result": "Word gets round that you cannot be bought.", "effects": [{ "op": "rep", "v": 0.03 }] }
+      ] },
+    { "id": "county_fair", "title": "County fair season", "text": "A booth at the county fair costs money and three days of volunteer time, and half the county walks past it.", "weight": 1.0, "when": {},
+      "choices": [
+        { "label": "Rent the booth", "result": "Hundreds of conversations.", "effects": [{ "op": "money", "v": -600 }, { "op": "awareness", "v": 0.10 }, { "op": "volunteers", "v": 3 }] },
+        { "label": "Skip it this year", "result": "Nothing ventured.", "effects": [] }
+      ] },
+    { "id": "petition_challenge", "title": "Signatures challenged", "text": "A lawyer files a challenge to a batch of your petition signatures, claiming bad addresses.", "weight": 1.3, "when": { "qualified": false, "minDay": 120 },
+      "choices": [
+        { "label": "Hire counsel and defend every line", "result": "Most of the batch survives.", "effects": [{ "op": "money", "v": -2500 }, { "op": "sigs", "v": -0.01 }] },
+        { "label": "Let the batch go and collect more", "result": "A setback.", "effects": [{ "op": "sigs", "v": -0.06 }] },
+        { "label": "Have a friend at the board make the challenge disappear", "result": "The challenge is withdrawn. Someone will remember why.", "effects": [{ "op": "money", "v": -1500 }, { "op": "heat", "v": 0.6 }] }
+      ] },
+    { "id": "ballot_day", "title": "A name on the ballot", "text": "Your party's line will appear on the ballot. Reporters who ignored you for years are suddenly calling.", "weight": 0.8, "when": { "qualified": true },
+      "choices": [
+        { "label": "Hold a press conference on the statehouse steps", "result": "Statewide coverage.", "effects": [{ "op": "awareness", "v": 0.05, "scope": "state" }, { "op": "money", "v": -800 }] },
+        { "label": "Celebrate at home with the people who did the work", "result": "A night to remember.", "effects": [{ "op": "volunteers", "v": 8 }, { "op": "rep", "v": 0.02 }] }
+      ] },
+    { "id": "defector", "title": "A defector", "text": "A fictional county chair from one of the established parties is fed up and wants to cross over, bringing a mailing list.", "weight": 0.8, "when": { "minDay": 200 },
+      "choices": [
+        { "label": "Welcome them publicly", "result": "A splash, and some grumbling from your old hands.", "effects": [{ "op": "awareness", "v": 0.08 }, { "op": "volunteers", "v": 10 }, { "op": "rep", "v": -0.01 }] },
+        { "label": "Take the help quietly", "result": "The list is useful.", "effects": [{ "op": "volunteers", "v": 6 }] }
+      ] },
+    { "id": "big_donor", "title": "The big cheque", "text": "A wealthy developer will fund a full year of operations. He expects his calls returned.", "weight": 0.9, "when": { "minDay": 150 },
+      "choices": [
+        { "label": "Take it, with a public disclosure", "result": "The money is real. So is the headline.", "effects": [{ "op": "money", "v": 12000 }, { "op": "rep", "v": -0.04 }] },
+        { "label": "Take it through a shell committee", "result": "Nobody knows. Yet.", "effects": [{ "op": "money", "v": 15000 }, { "op": "heat", "v": 0.8 }] },
+        { "label": "Turn it down", "result": "Small donors hear about it and chip in.", "effects": [{ "op": "rep", "v": 0.04 }, { "op": "money", "v": 1200 }] }
+      ] },
+    { "id": "storm", "title": "After the storm", "text": "A bad storm has left part of the county without power. Your volunteers could knock on doors with water and blankets instead of leaflets.", "weight": 0.8, "when": {},
+      "choices": [
+        { "label": "Send everyone out to help", "result": "People will remember who showed up.", "effects": [{ "op": "rep", "v": 0.04 }, { "op": "awareness", "v": 0.05 }, { "op": "money", "v": -500 }] },
+        { "label": "Stay on the campaign plan", "result": "The plan holds.", "effects": [{ "op": "buzz", "v": 0.2 }] }
+      ] },
+    { "id": "debate_invite", "title": "Left off the stage", "text": "The organisers of a candidate forum have invited only the two established parties.", "weight": 0.9, "when": { "minDay": 120 },
+      "choices": [
+        { "label": "Protest outside with signs", "result": "The cameras turn around.", "effects": [{ "op": "awareness", "v": 0.08 }, { "op": "rep", "v": -0.01 }] },
+        { "label": "Hold your own forum the same night", "result": "A smaller room, a warmer crowd.", "effects": [{ "op": "money", "v": -700 }, { "op": "volunteers", "v": 5 }, { "op": "recognition", "v": 0.04 }] }
+      ] },
+    { "id": "staff_mistake", "title": "A bad post", "text": "A volunteer posted something crude from the party's account at two in the morning.", "weight": 0.9, "when": { "minDay": 60 },
+      "choices": [
+        { "label": "Apologise and take it down", "result": "It passes in a day.", "effects": [{ "op": "rep", "v": -0.01 }] },
+        { "label": "Say nothing and hope", "result": "It does not pass in a day.", "effects": [{ "op": "rep", "v": -0.04 }, { "op": "awareness", "v": 0.03 }] }
+      ] },
+    { "id": "union_hall", "title": "An evening at the union hall", "text": "A local is willing to hear you out. They have been let down before.", "weight": 0.8, "when": {},
+      "choices": [
+        { "label": "Go, listen, promise only what the platform says", "result": "Respectful applause. A few cards filled in.", "effects": [{ "op": "volunteers", "v": 6 }, { "op": "rep", "v": 0.01 }] },
+        { "label": "Send regrets", "result": "The hall is not offended.", "effects": [] }
+      ] },
+    { "id": "chamber_lunch", "title": "Lunch with the chamber of commerce", "text": "The chamber wants to know whether your party is good for business. Lunch is on them.", "weight": 0.8, "when": {},
+      "choices": [
+        { "label": "Go, listen, promise only what the platform says", "result": "A couple of cheques follow.", "effects": [{ "op": "money", "v": 1500 }, { "op": "rep", "v": 0.01 }] },
+        { "label": "Send regrets", "result": "The chamber is not offended.", "effects": [] }
+      ] },
+    { "id": "audit", "title": "Campaign finance audit", "text": "The state elections office has selected your committee for a routine audit.", "weight": 1.0, "when": { "minDay": 300, "minHeat": 0.2 },
+      "choices": [
+        { "label": "Open the books fully", "result": "They find sloppiness, and note your cooperation.", "effects": [{ "op": "money", "v": -1500 }, { "op": "heat", "v": -0.2 }] },
+        { "label": "Tidy the records first", "result": "The audit closes. The tidying is its own risk.", "effects": [{ "op": "heat", "v": 0.4 }] }
+      ] },
+    { "id": "office_ribbon", "title": "Ribbon cutting", "text": "As an office-holder, your leader is asked to open a new community centre built with money they voted for.", "weight": 1.2, "when": { "needsOffice": true },
+      "choices": [
+        { "label": "Share the credit widely", "result": "Goodwill all round.", "effects": [{ "op": "rep", "v": 0.03 }, { "op": "recognition", "v": 0.02 }] },
+        { "label": "Make it a party event", "result": "Good pictures. Some eye-rolling.", "effects": [{ "op": "awareness", "v": 0.07 }, { "op": "recognition", "v": 0.04 }, { "op": "rep", "v": -0.01 }] }
+      ] },
+    { "id": "office_vote", "title": "A hard vote", "text": "A budget vote pits what your platform says against what a noisy room of constituents wants tonight.", "weight": 1.2, "when": { "needsOffice": true },
+      "choices": [
+        { "label": "Vote the platform", "result": "Consistent. The room is unhappy.", "effects": [{ "op": "rep", "v": 0.03 }, { "op": "buzz", "v": -0.3 }] },
+        { "label": "Vote with the room", "result": "Cheers tonight, questions later.", "effects": [{ "op": "buzz", "v": 0.5 }, { "op": "rep", "v": -0.03 }] }
+      ] },
+    { "id": "office_favor", "title": "A favour asked", "text": "A contractor would be grateful, in cash, if a permit moved faster. Your leader's office could make that happen.", "weight": 0.9, "when": { "needsOffice": true },
+      "choices": [
+        { "label": "Show him the door", "result": "He leaves. Staff notice.", "effects": [{ "op": "rep", "v": 0.02 }] },
+        { "label": "Report the offer", "result": "A small story, a clean name.", "effects": [{ "op": "rep", "v": 0.05 }, { "op": "heat", "v": -0.1 }] },
+        { "label": "Take the envelope", "result": "The permit moves.", "effects": [{ "op": "money", "v": 8000 }, { "op": "heat", "v": 1.0 }] }
+      ] },
+    { "id": "youth_wing", "title": "Students want in", "text": "A group at the community college wants to start a campus chapter.", "weight": 0.9, "when": { "minDay": 100 },
+      "choices": [
+        { "label": "Fund a chapter", "result": "Energy, and pizza receipts.", "effects": [{ "op": "money", "v": -500 }, { "op": "volunteers", "v": 9 }] },
+        { "label": "Give them a logo and good wishes", "result": "A few stick around.", "effects": [{ "op": "volunteers", "v": 2 }] }
+      ] },
+    { "id": "rumor", "title": "A whisper campaign", "text": "Someone is spreading a false story about your leader. You could answer it, or offer to trade one of your own.", "weight": 0.8, "when": { "minDay": 200 },
+      "choices": [
+        { "label": "Answer it plainly, once", "result": "It fades.", "effects": [{ "op": "rep", "v": -0.01 }] },
+        { "label": "Ignore it", "result": "It lingers a while.", "effects": [{ "op": "rep", "v": -0.02 }, { "op": "buzz", "v": -0.2 }] },
+        { "label": "Pay a blogger to muddy the water", "result": "Everybody looks worse. You look a little less worse.", "effects": [{ "op": "money", "v": -1000 }, { "op": "buzz", "v": 0.4 }, { "op": "heat", "v": 0.3 }] }
+      ] },
+    { "id": "statewide_profile", "title": "A statewide profile", "text": "A public radio programme wants to spend a day with the party that keeps winning seats.", "weight": 1.0, "when": { "minSeats": 3 },
+      "choices": [
+        { "label": "Open the doors", "result": "A long, fair segment heard across the state.", "effects": [{ "op": "awareness", "v": 0.06, "scope": "state" }, { "op": "rep", "v": 0.02 }] },
+        { "label": "Decline; keep the focus local", "result": "Home turf appreciates it.", "effects": [{ "op": "buzz", "v": 0.4 }] }
+      ] },
+    { "id": "merger_talk", "title": "Coffee with a rival", "text": "An organiser from another small party suggests sharing volunteer lists for a season.", "weight": 0.7, "when": { "minDay": 250 },
+      "choices": [
+        { "label": "Share lists", "result": "More doors knocked on both sides.", "effects": [{ "op": "volunteers", "v": 7 }, { "op": "rep", "v": -0.01 }] },
+        { "label": "Keep your own counsel", "result": "No hard feelings.", "effects": [] }
+      ] },
+    { "id": "windfall", "title": "A bequest", "text": "A retired schoolteacher who never missed a meeting has left the party a modest sum in her will.", "weight": 0.5, "when": { "minDay": 365 },
+      "choices": [
+        { "label": "Put it into organising", "result": "She would have approved.", "effects": [{ "op": "money", "v": 5000 }] },
+        { "label": "Name a volunteer award after her", "result": "The room stands.", "effects": [{ "op": "money", "v": 3000 }, { "op": "volunteers", "v": 6 }, { "op": "rep", "v": 0.02 }] }
+      ] },
+    { "id": "fine", "title": "Late paperwork", "text": "The quarterly finance report went in four days late. The fine is automatic.", "weight": 0.7, "when": { "minDay": 120, "minMoney": 1000 },
+      "choices": [
+        { "label": "Pay it", "result": "Paid.", "effects": [{ "op": "money", "v": -450 }] },
+        { "label": "Backdate the filing", "result": "No fine. A small lie on a public record.", "effects": [{ "op": "heat", "v": 0.3 }] }
+      ] }
+  ]
+}

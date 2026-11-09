@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["crates/sim", "crates/headless", "crates/wasm"]
+# src-tauri is its own workspace so that `cargo test` here never needs a webview toolchain.
+exclude = ["src-tauri"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4

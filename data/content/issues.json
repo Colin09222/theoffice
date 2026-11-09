@@ -1,0 +1,19 @@
+{
+  "note": "Game abstraction. Eight policy axes, each from -2 to +2. Neither end is 'better': a party scores with a county by standing close to where that county's residents sit. 'w' estimates a county's position from real data as [partisan lean from presidential returns, population density, median income, median age, college share]; these weights are design choices, not measurements. 'platforms' are broad-brush starting positions for the four established parties, simplified from their published platforms for game purposes only.",
+  "issues": [
+    { "id": "taxes", "name": "Taxes & spending", "neg": "Lower taxes, leaner budgets", "pos": "Higher taxes, more public services", "w": [0.55, 0.10, -0.10, 0.00, 0.05], "salience": 1.2 },
+    { "id": "health", "name": "Health care", "neg": "Market-based coverage", "pos": "Publicly run coverage", "w": [0.55, 0.05, -0.10, 0.05, 0.00], "salience": 1.1 },
+    { "id": "energy", "name": "Energy & environment", "neg": "Production and jobs first", "pos": "Conservation and climate first", "w": [0.45, 0.15, 0.05, -0.10, 0.20], "salience": 1.0 },
+    { "id": "safety", "name": "Public safety", "neg": "More enforcement", "pos": "More prevention and reform", "w": [0.45, 0.10, 0.00, -0.15, 0.15], "salience": 1.0 },
+    { "id": "immigration", "name": "Immigration", "neg": "Tighter limits", "pos": "Easier entry", "w": [0.50, 0.15, 0.05, -0.15, 0.10], "salience": 1.0 },
+    { "id": "schools", "name": "Education", "neg": "School choice and vouchers", "pos": "Fund district public schools", "w": [0.40, -0.10, -0.05, 0.05, 0.05], "salience": 0.9 },
+    { "id": "labor", "name": "Labor & business", "neg": "Flexibility for employers", "pos": "Protections for workers", "w": [0.45, 0.05, -0.20, 0.00, -0.10], "salience": 0.9 },
+    { "id": "housing", "name": "Housing & growth", "neg": "Local control over building", "pos": "Build more, zone less", "w": [0.05, 0.45, 0.10, -0.25, 0.10], "salience": 0.8 }
+  ],
+  "platforms": {
+    "D": [1, 1, 1, 1, 1, 1, 1, 0],
+    "R": [-1, -1, -1, -1, -1, -1, -1, 0],
+    "L": [-2, -2, -1, 1, 1, -2, -2, 1],
+    "G": [2, 2, 2, 2, 1, 1, 2, 1]
+  }
+}
