@@ -39,6 +39,20 @@ no model call, no server change, no new request. Planning meetings are untouched
 redraws when a task changes hands. I saw it drawn once, on the demo floor at 1280x800. The request itself never reached this session, only
 the note about it, so if more was meant than the board, it has not been done.
 
+### The planning meeting happens in the meeting room
+Asked for after the board. When a project is handed out the team already walked to the meeting room and the manager read the plan out;
+the team's own words about it then trickled out afterwards, one pair at a time. Now the meeting stays in session after the plan is read:
+each person says their line from their place at the table, and nobody goes back to a desk until the talk runs dry (it waits about seven
+seconds for a first word and ends after a short silence, so a floor with nothing to say is not held up).
+
+- **Cost:** no new model call. The words are the one short huddle the server already writes on the talk model for every new plan. Its
+  instruction gained six words ("the best way to go about it"), in `server/people.js`, the only server line touched in this branch.
+- **Not held back for real:** the work itself still starts on the server straight away. What changed is what you see: people stay in the
+  room until the talk is over, then go and do it. Making the work truly wait would be an engine change that slows every job; not done.
+- **Checked:** the 71 tests that touch talk, people and the room pass. In a real browser I saw the team gather at the board with their
+  lines queued for the meeting. I did **not** see the lines spoken there: this machine's software renderer runs the room at a small
+  fraction of real time and the session was restarted during the last watch. That step needs one look on a real GPU.
+
 ### Floor chrome
 - **Desktop:** the lift's floor buttons are quiet paper discs with only the current floor lit, and a long list fades out at the ends
   instead of slicing a number in half. The whole team is kept in frame (a wide screen gives up a little bean size for it, and the margin

@@ -5,6 +5,7 @@ import { roomOfKind, roomAt } from './layouts.js';
 
 const READ_MIN = 2.6, READ_MAX = 8, CHARS_PER_SEC = 15;   // long enough to read, short enough to keep up with a busy floor
 const QUEUE_MAX = 3;    // lines someone can have waiting to act out; beyond that the oldest stays in the Talk tab only
+const HUDDLE_WAIT = 7, HUDDLE_LULL = 2.6;  // how long a planning meeting waits for the team's first word about the plan, and how long a silence ends it
 const HOLD_ASSIGN = 0.9;  // a batch of assignments waits this long, in room time, for the meeting that usually follows it
 const CARRIES = new Set(['assign', 'handoff', 'findings', 'review']);
 
@@ -50,6 +51,8 @@ export class FloorLife {
     if (!speaker) return;
     this.seen.add(`${ev.from}>${ev.to}`);
     const beat = beatOf(ev);
+    // The team's own words about the plan belong to the planning meeting while it is on: said round the table, not one pair at a time afterwards.
+    if (this.huddle && ev.kind === 'meeting' && this.huddle.members.has(ev.from)) { this.huddle.pending.push(ev); return; }
     if (beat === 'assign' || beat === 'plan') { this.held.push(ev); this.holdUntil = this.view.time + HOLD_ASSIGN; return; }
     this.enqueue(ev);
   }
@@ -65,6 +68,17 @@ export class FloorLife {
   /** Someone finished a scene or a step list and is free for the next line. */
   release(actor) { this.view.claims.delete(actor); }
   update() {
+    const h = this.huddle;
+    // A meeting that was cut short never reaches its end: its words go back to the ordinary way of saying them.
+    if (h && this.view.time > h.born + 150) { this.huddle = null; for (const ev of h.pending) this.enqueue(ev); }
+    else if (h?.open) {
+      const t = this.view.time;
+      if (h.speaker && t >= h.busyUntil) { h.speaker.hush(); if (!h.speaker.dead) h.speaker.char.setAnim('listen'); h.speaker = null; }
+      if (!h.speaker && h.pending.length) {
+        const ev = h.pending.shift(), a = this.people.get(ev.from);
+        if (a && !a.dead) { const hold = readingTime(ev.text); a.char.setAnim('talk'); a.speak(ev.text, ev.to, false, hold); h.speaker = a; h.busyUntil = t + hold + 0.35; h.deadline = h.busyUntil + HUDDLE_LULL; }
+      }
+    }
     if (this.held.length && this.view.time >= this.holdUntil) { for (const ev of this.held) if (ev.to || beatOf(ev) === 'plan') this.enqueue(ev); this.held = []; }
     for (const [id, q] of this.queues) {
       if (!q.length) { this.queues.delete(id); continue; }
@@ -142,17 +156,22 @@ export class FloorLife {
     const places = crew.map((a, i) => [a, spots[i % spots.length]]);
     const gathered = () => places.every(([a, at]) => here(a, at)) && (!m || here(m, stand));
     const talkTime = lines.reduce((n, e) => n + readingTime(e.text), 0) || 6;
-    const finish = { run: () => { over = true; } };
+    // Once the plan is read out, the floor is the team's: whatever they have to say about how to go about it is said here, each from their place,
+    // and nobody goes back to a desk until the talk runs dry. The words are the huddle the server already writes for a new plan; nothing more is asked for.
+    const h = this.huddle = { members: new Set([managerId, ...staffIds]), pending: this.huddle?.pending || [], born: this.view.time, open: false, speaker: null, busyUntil: 0, deadline: Infinity };
+    const opens = { run: () => { h.open = true; h.deadline = this.view.time + HUDDLE_WAIT; } };
+    const talkedOut = () => !h.speaker && !h.pending.length && this.view.time >= h.deadline;
+    const finish = { run: () => { over = true; h.speaker?.hush(); if (this.huddle === h) this.huddle = null; for (const ev of h.pending) this.enqueue(ev); } };
     if (m) {
       const steps = [{ walk: stand }, { anim: 'stand', hold: 26, until: gathered, face: toTeam }];
       if (lines.length) for (const e of lines) steps.push({ anim: 'talk', say: e.text, to: e.to, hold: readingTime(e.text), face: toTeam });
       else steps.push({ anim: 'talk', hold: 2.4, face: toTeam }, { anim: 'talk', hold: 1.6, face: toBoard }, { anim: 'talk', hold: 2.0, face: toTeam });
-      steps.push(finish);
+      steps.push(opens, { anim: 'listen', hold: 90, until: talkedOut, face: toTeam }, finish);
       m.perform(steps, { scene: true });
-    } else over = true;
+    } else { over = true; this.huddle = null; }
     for (const [a, sp] of places) {
       const face = Math.atan2(stand[0] - sp[0], stand[1] - sp[1]);
-      a.perform([{ walk: sp }, { anim: 'listen', hold: 30 + talkTime, until: () => over, face }], { scene: true });
+      a.perform([{ walk: sp }, { anim: 'listen', hold: 130 + talkTime, until: () => over, face }], { scene: true });
     }
   }
 

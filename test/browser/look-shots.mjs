@@ -10,7 +10,7 @@ const SIZES = (process.env.LOOK_SIZES || '390x844,360x640,430x932,844x390,1280x8
 const ONLY = process.env.LOOK_ONLY || '';
 const TAG = process.env.LOOK_TAG || '';
 const Q = process.env.LOOK_Q ? `?q=${process.env.LOOK_Q}` : "";
-const t = await boot({ mockDelayMs: 2500, peopleTalk: true, towerFloors: 30, fillerCompanies: true, fillerTickMs: 2500 });
+const t = await boot({ mockDelayMs: 2500, peopleTalk: true, towerFloors: 30, fillerCompanies: true, fillerTickMs: Number(process.env.LOOK_TICK || 2500) });
 const base = `http://localhost:${t.port}/theoffice`;
 const PALETTE = [['#2f6f62', '#f4c95d'], ['#6a4c93', '#f4c95d'], ['#c8392b', '#ffd27a'], ['#1d5fb8', '#9be3c8'], ['#d9774a', '#2a3a4a'], ['#37b679', '#1f2a44']];
 const owners = {};
