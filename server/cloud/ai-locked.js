@@ -31,7 +31,7 @@ const PRICE = /[$€£]\s*\d|\b\d+(?:\.\d+)?\s*(?:dollars?|bucks|usd)\b/i;
 const DOSE = [
   /\b\d[\d.,]*\s*(?:mgs?|mcg|µg|ug|iu|ml|cc|units?|tablets?|pills?|capsules?)\b/i,
   /\b(?:mgs?|mcg|iu|cc)\s+(?:a|per|each)\b/i,
-  /\b(?:per|a|each|every|every\s+other)\s+(?:week|wk|day|month)\b/i, /\b(?:twice|once|three\s+times)\s+(?:a|per)\b/i, /\beod\b/i, /\be[23]d\b/i,
+  /\b(?:per|each|every|every\s+other)\s+(?:week|wk|day|month)\b/i, /\b\d+\s*(?:x|times)\s+a\s+(?:week|wk|day|month)\b/i, /\b(?:twice|once|three\s+times)\s+(?:a|per)\s+(?:week|wk|day|month)\b/i, /\beod\b/i, /\be[23]d\b/i,
   /\bdos(?:e|es|ed|ing|age|ages)\b/i, /\bmicro-?dos\w*/i, /\bcycl(?:e|es|ing)\b/i, /\bstack(?:s|ing|ed)?\b/i, /\bprotocols?\b/i, /\bpct\b/i, /\bpost[-\s]cycle\b/i,
   /\binject\w*/i, /\bpin(?:s|ning|ned)?\b/i, /\bneedles?\b/i, /\bsyringes?\b/i, /\bsub-?q\b/i, /\bintramuscular\b/i, /\breconstitut\w*/i, /\bbac\s+water\b/i, /\bvials?\b/i,
   /\btitrat\w*/i, /\btaper\w*/i, /\bblast(?:s|ing)?\b/i, /\bcruis(?:e|ing)\b/i,
