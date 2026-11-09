@@ -7,3 +7,4 @@ dist/
 tools/data/cache/
 *.log
 .shots-tmp/
+src-tauri/gen/
