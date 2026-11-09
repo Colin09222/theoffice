@@ -44,9 +44,9 @@ function renderProducts() {
 
 function renderBasket() {
   const list = $('cart-lines'); list.textContent = '';
-  let total = 0;
+  let total = 0, currency;
   for (const { p, quantity } of lines()) {
-    total += centsOf(p) * quantity;
+    total += centsOf(p) * quantity; currency = currencyOf(p);
     const li = el('li'); li.dataset.key = p.key;
     const qty = el('span', 'qty');
     const less = el('button', '', '-'); less.type = 'button'; less.setAttribute('aria-label', `One fewer ${p.name}`);
@@ -60,7 +60,7 @@ function renderBasket() {
   const any = count() > 0;
   $('cart-count').textContent = String(count());
   $('cart-empty').hidden = any; $('cart-sum').hidden = !any;
-  $('cart-total').textContent = money(total);
+  $('cart-total').textContent = money(total, currency);
   // Stripe can take it: one button. It can't yet: an honest line and a way to ask for the order anyway.
   $('checkout').hidden = !any || !pay.ready;
   $('order-request').hidden = !any || pay.ready;

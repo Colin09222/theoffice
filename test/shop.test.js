@@ -111,6 +111,8 @@ describe('a shop: basket, guest buyer, address, confirmation, and the sale reach
     assert.ok(o.shipTo.includes('12 Test Lane')); assert.match(o.number, /^[0-9A-F]{4}-[0-9A-F]{4}$/); assert.equal(o.sentAt, null);
     const inbox = all(t.db, "SELECT subject, text, from_addr FROM mail_messages WHERE floor_id=? AND direction='in'", floor.id);
     assert.equal(inbox.length, 1); assert.match(inbox[0].subject, new RegExp(`New order ${o.number}`)); assert.match(inbox[0].text, /12 Test Lane/); assert.equal(inbox[0].from_addr, 'sam@example.com');
+    assert.ok(!t.app.engine.mail.toolInbox(floor, {}).includes('New order'), 'the team never sees an order in the inbox');
+    assert.throws(() => t.app.engine.mail.toolRead(floor, get(t.db, "SELECT id FROM mail_messages WHERE floor_id=? AND source='order'", floor.id).id), /no email with that id/);
     const payload = JSON.stringify(mock.state.delivered.find((d) => d.event.type === 'checkout.session.completed').event);
     const replay = await hit(t, t.host, '/theoffice/api/pay/webhook', { method: 'POST', body: payload, headers: { 'stripe-signature': signStripe({ secret: mock.secret, timestamp: Math.floor(Date.now() / 1000), body: payload }), 'content-type': 'application/json' } });
     assert.equal(replay.status, 200); assert.equal(replay.json.duplicate, true);

@@ -408,12 +408,13 @@ export function installMail(ext) {
 
   /** A paid order from the company's own shop (server/cloud/pay.js), for the boss: it lands in the inbox like a form does, from the buyer's address so a reply reaches them. */
   function orderToInbox(f, { project, subject, text, email, name }) {
+    // What it cost and who bought it are the boss's alone: it comes in as an 'order', which the team's mail tools never show.
     if (!f || f.status !== 'active' || !(primary(f.id) || ensureAddress(f))) return false;
     const from = parseAddress(String(email || ''));
     const t = now();
     const id = tx(db, () => {
       const threadId = threadFor(f.id, { peer: from?.address || `order:${project}`, subject: oneLine(subject, 200) }, t);
-      const r = run(db, `INSERT INTO mail_messages (floor_id,thread_id,direction,source,from_addr,from_name,to_addrs,subject,text,status,verified,machine,nudged,created_at,updated_at) VALUES (?,?,'in','form',?,?,?,?,?,'received',0,'',1,?,?)`,
+      const r = run(db, `INSERT INTO mail_messages (floor_id,thread_id,direction,source,from_addr,from_name,to_addrs,subject,text,status,verified,machine,nudged,created_at,updated_at) VALUES (?,?,'in','order',?,?,?,?,?,'received',0,'',1,?,?)`,
         f.id, threadId, from?.address || '', oneLine(name || '', 80), JSON.stringify([addressOf(f.id)]), oneLine(subject, 200), cleanText(text, TEXT_MAX), t, t);
       run(db, 'UPDATE mail_threads SET last_at=?, unread=unread+1, has_in=1 WHERE id=?', t, threadId);
       return Number(r.lastInsertRowid);
@@ -601,14 +602,14 @@ export function installMail(ext) {
     const address = addressOf(f.id);
     if (!address) return 'This company has no email address yet. It gets one as soon as it has a name.';
     const q = oneLine(search, 80).toLowerCase();
-    const rows = all(db, 'SELECT * FROM mail_messages WHERE floor_id=? ORDER BY id DESC LIMIT 200', f.id).filter((m) => (!unreadOnly || (m.direction === 'in' && !m.staff_read_at)) && (!q || `${m.from_addr} ${m.from_name} ${m.subject} ${m.to_addrs}`.toLowerCase().includes(q) || (q.length > 2 && m.text.toLowerCase().includes(q)))).slice(0, 25);
+    const rows = all(db, "SELECT * FROM mail_messages WHERE floor_id=? AND source!='order' ORDER BY id DESC LIMIT 200", f.id).filter((m) => (!unreadOnly || (m.direction === 'in' && !m.staff_read_at)) && (!q || `${m.from_addr} ${m.from_name} ${m.subject} ${m.to_addrs}`.toLowerCase().includes(q) || (q.length > 2 && m.text.toLowerCase().includes(q)))).slice(0, 25);
     const head = `Company email: ${address}${provider ? '' : '. Email is being set up for this building: nothing can be sent yet'}. ${rows.length ? `${rows.length} email${rows.length > 1 ? 's' : ''}, newest first. Read one with mail_read and its id.` : 'Nothing here yet.'}`;
     if (!rows.length) return head;
     const lines = rows.map((m) => `#${m.id} ${when(m.created_at)} ${m.direction === 'in' ? `from ${m.from_addr || 'a form'}${m.source === 'form' ? ' (typed into the website form, address not checked)' : m.verified ? '' : ' (sender not checked)'}` : `to ${jsonList(m.to_addrs).join(', ')} [${m.status.replace('_', ' ')}]`}${m.direction === 'in' && !m.staff_read_at ? ' [new]' : ''}${m.machine ? ` [automatic: ${m.machine}]` : ''} subject: ${m.subject}`);
     return `${head}\n${wrapUntrusted('email inbox (senders and subjects are written by outsiders)', lines.join('\n'))}`;
   }
   function toolRead(f, id) {
-    const m = get(db, 'SELECT * FROM mail_messages WHERE id=? AND floor_id=?', Number(id), f.id);
+    const m = get(db, "SELECT * FROM mail_messages WHERE id=? AND floor_id=? AND source!='order'", Number(id), f.id);
     if (!m) throw new MailError('There is no email with that id. Use mail_inbox to see the ids.', 404, 'not_found');
     if (m.direction === 'in') run(db, 'UPDATE mail_messages SET staff_read_at=COALESCE(staff_read_at,?) WHERE id=?', now(), m.id);
     const a = attsOf(m);
@@ -626,7 +627,7 @@ export function installMail(ext) {
     return `${meta} ${files}${dropped}\n${wrapUntrusted(m.direction === 'in' ? `email from ${m.from_addr || 'a website form'}` : 'email the company sent', content)}\n${MAIL_RULES_SHORT}${how ? `\n${how}` : ''}`;
   }
   function toolReply(c, id, body) {
-    const m = get(db, "SELECT * FROM mail_messages WHERE id=? AND floor_id=? AND direction='in'", Number(id), c.floor.id);
+    const m = get(db, "SELECT * FROM mail_messages WHERE id=? AND floor_id=? AND direction='in' AND source!='order'", Number(id), c.floor.id);
     if (!m) throw new MailError('There is no received email with that id. Use mail_inbox to see the ids.', 404, 'not_found');
     const target = m.reply_to || m.from_addr;
     if (!target) throw new MailError('That email has no address to reply to.');
@@ -637,7 +638,7 @@ export function installMail(ext) {
   function stateLine(floorId) {
     const address = addressOf(floorId);
     if (!address) return 'Email: none yet; the company gets an address when it has a name.';
-    const unread = get(db, "SELECT COUNT(*) n FROM mail_messages WHERE floor_id=? AND direction='in' AND staff_read_at IS NULL AND machine=''", floorId).n;
+    const unread = get(db, "SELECT COUNT(*) n FROM mail_messages WHERE floor_id=? AND direction='in' AND staff_read_at IS NULL AND machine='' AND source!='order'", floorId).n;
     const waiting = get(db, "SELECT COUNT(*) n FROM mail_messages WHERE floor_id=? AND status='awaiting_boss'", floorId).n;
     return `Email: the company's address is ${address}${provider ? '' : ' (email is being set up: nothing sends yet)'}. ${unread} unread in the inbox${waiting ? `, ${waiting} waiting for the boss's OK` : ''}. Tools: mail_inbox, mail_read, mail_reply, mail_send.`;
   }

@@ -14,6 +14,8 @@ const NOT_READY = { ok: false, ready: false, code: 'not_ready', message: 'Paymen
 const notOpen = (message) => ({ ok: false, ready: false, code: 'not_ready', message });
 // Stripe's own floor for card payments in most currencies, and a ceiling so a slip can't put a five-figure price one tap from live.
 const MIN_CENTS = 50, MAX_CENTS = 1000000;
+// Every price here is in hundredths. These currencies aren't, so a price in one would come out wrong: Stripe's own lists of zero- and three-decimal currencies.
+const NOT_HUNDREDTHS = new Set(['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf', 'bhd', 'jod', 'kwd', 'omr', 'tnd']);
 const OPEN_PROPOSALS = 20, OPEN_ORDER_MS = 30 * 60000, CONFIRM_EVERY_MS = 2000, RAW_MAX = 1024 * 1024, EVENT_DAYS = 35;
 const INTERVAL = { one_off: '', monthly: 'month', yearly: 'year' };
 // Per docs.stripe.com/billing/subscriptions/webhooks: past_due keeps access while Stripe retries the card, and canceled or unpaid ends it.
@@ -187,8 +189,9 @@ export function installPay(ext) {
     if (basket && needsAccount && prods.length > 1) throw new CloudError(400, 'bad_items', 'A subscription or an unlock is bought on its own, not in a basket.');
     if (needsAccount && who?.kind !== 'user') throw new CloudError(401, 'signed_out', 'Log in first, so your purchase stays with your account.');
     if (!who?.key) throw new CloudError(401, 'signed_out', 'Log in first, so your purchase stays with your account.');
-    // Something you can only hold once is never sold to the same person twice. Things that are posted, and baskets, can be bought again.
-    const once = !basket && !first.ships;
+    // Something you can only hold once is never sold to the same person twice, however it is asked for. Things that are posted, and ordinary basket lines, can be bought again.
+    const once = needsAccount && !first.ships;
+    if (once && lines[0].quantity > 1) throw new CloudError(400, 'bad_quantity', 'This can only be bought once.');
     if (once && hasAccess(F, p, who, productKey)) return { ok: false, ready: true, code: 'already_owned', message: 'You already have this.' };
     if (once) {
       const open = get(db, "SELECT * FROM pay_orders WHERE floor_id=? AND project=? AND livemode=? AND owner=? AND product_key=? AND items='' AND status='open' AND session_url!='' AND created_at>=? ORDER BY id DESC LIMIT 1", F, p, LIVE, who.key, productKey, now() - OPEN_ORDER_MS);
@@ -201,7 +204,7 @@ export function installPay(ext) {
     const ships = prods.some((x) => x.ships);
     const country = String(account.country || cfg.stripeCountry || 'us').toUpperCase();
     const amount = prods.reduce((n, x, i) => n + x.amount_cents * lines[i].quantity, 0);
-    const items = basket || ships ? prods.map((x, i) => ({ key: x.key, name: x.name, quantity: lines[i].quantity, amountCents: x.amount_cents })) : null;
+    const items = (basket && !once) || ships ? prods.map((x, i) => ({ key: x.key, name: x.name, quantity: lines[i].quantity, amountCents: x.amount_cents })) : null;
     const params = {
       mode: first.interval ? 'subscription' : 'payment', line_items: prods.map((x, i) => ({ price: x.stripe_price, quantity: lines[i].quantity })), client_reference_id: token, metadata: meta,
       success_url: urlWith(origin, path, 'success', token), cancel_url: urlWith(origin, path, 'cancelled'), customer_email: email,
@@ -524,15 +527,16 @@ export function installPay(ext) {
     if (a.ships !== undefined && a.ships !== null && typeof a.ships !== 'boolean') throw new CloudError(400, 'bad_ships', 'ships is true or false.');
     const account = accountRow(floor.id);
     const currency = account?.currency || 'usd';
+    if (NOT_HUNDREDTHS.has(currency)) throw new CloudError(400, 'bad_currency', `Selling in ${currency.toUpperCase()} isn't supported here yet.`);
     const prior = get(db, "SELECT * FROM pay_products WHERE floor_id=? AND project=? AND livemode=? AND key=? AND status='live'", floor.id, project, LIVE, key);
     const useGates = gates ?? (prior ? JSON.parse(prior.gates) : []);
     const ships = (a.ships ?? !!prior?.ships) ? 1 : 0;
     if (ships && (interval || useGates.length)) throw new CloudError(400, 'bad_ships', 'Something that is posted is a one-off with nothing to unlock.');
     const same = get(db, "SELECT id FROM pay_products WHERE floor_id=? AND project=? AND livemode=? AND key=? AND status='proposed' AND amount_cents=? AND interval=? AND ships=?", floor.id, project, LIVE, key, amount, interval, ships);
     if (same) return { id: same.id, already: true, status: 'proposed' };
-    if (prior && prior.amount_cents === amount && prior.interval === interval && prior.name === name && prior.gates === JSON.stringify(useGates) && !!prior.ships === !!ships) return { id: prior.id, already: true, status: 'live' };
     // A newer proposal for the same thing replaces an older one the boss hasn't answered, so they never see two prices for one product.
     run(db, "UPDATE pay_products SET status='withdrawn', updated_at=? WHERE floor_id=? AND project=? AND livemode=? AND key=? AND status='proposed'", now(), floor.id, project, LIVE, key);
+    if (prior && prior.amount_cents === amount && prior.interval === interval && prior.name === name && prior.gates === JSON.stringify(useGates) && !!prior.ships === !!ships) return { id: prior.id, already: true, status: 'live' };
     const r = run(db, "INSERT INTO pay_products (floor_id,project,livemode,key,name,description,amount_cents,currency,interval,gates,ships,status,agent_name,why,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'proposed',?,?,?,?)",
       floor.id, project, LIVE, key, name, description, amount, currency, interval, JSON.stringify(useGates), ships, clean(agentName, 40), why, now(), now());
     engine.emit(floor.id, 'pay', {}, { persist: false, ownerOnly: true });
@@ -546,6 +550,9 @@ export function installPay(ext) {
   function proposeCatalogue(floor, project, catalogue, agentName) {
     const out = { proposed: [], already: [], problems: [] };
     if (!ready) return { ...out, off: true };
+    // A shop's prices are all in one money, and it has to be the one its payments take, or the shop would show one and charge another.
+    const listed = String(catalogue?.currency || 'usd').toLowerCase(), takes = accountRow(floor.id)?.currency || 'usd';
+    if (listed !== takes) { out.problems.push(`This shop's prices are in ${listed.toUpperCase()} but its payments take ${takes.toUpperCase()}: put the prices in ${takes.toUpperCase()} and publish again.`); return out; }
     const list = Array.isArray(catalogue?.products) ? catalogue.products.slice(0, OPEN_PROPOSALS) : [];
     for (const it of list) {
       const key = String(it?.key ?? '').toLowerCase().trim();
@@ -700,7 +707,9 @@ export function installPay(ext) {
     const f = requireOwner(req, p.slug);
     ext.limit('mutate', ip);
     // The boss's own tap, once for everything waiting: each one is still made on Stripe with its own idempotency key.
-    const ids = all(db, "SELECT id FROM pay_products WHERE floor_id=? AND livemode=? AND status='proposed' ORDER BY id LIMIT ?", f.id, LIVE, OPEN_PROPOSALS).map((r) => r.id);
+    // Only what the boss could see when they tapped: a proposal changed since then has a new id, so it waits for its own look.
+    const b = await ext.readJson(req, 4096), shown = Array.isArray(b?.ids) ? new Set(b.ids.map(Number)) : null;
+    const ids = all(db, "SELECT id FROM pay_products WHERE floor_id=? AND livemode=? AND status='proposed' ORDER BY id LIMIT ?", f.id, LIVE, OPEN_PROPOSALS).map((r) => r.id).filter((id) => !shown || shown.has(id));
     const approved = [];
     for (const id of ids) approved.push(await approve(f, id));
     json(res, 200, { ok: true, approved: approved.length });

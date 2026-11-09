@@ -1985,7 +1985,7 @@ export class OfficeView {
     const { w, h, visW, visH } = this;
     const tallPhone = w <= 760 && h > w;
     const yaw = tallPhone ? TALL_YAW : HOME_YAW;
-    const seats = [...this.actors.values()].map((a) => a.seat.at);
+    const seats = [...this.actors.values()].filter((a) => !a.extra).map((a) => a.seat.at);
     const spots = seats.length ? seats : [seatOf(this.plan.manager).at, seatOf(this.plan.boss).at];
     const tan = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2);
     const tall = CHAR_SCALE * 0.6 * 2.35;

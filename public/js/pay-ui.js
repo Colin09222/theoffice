@@ -32,7 +32,7 @@ export function renderPayRequests(page, list) {
       h('p.fineprint', {}, 'Check each price below. Approve them one by one, or all together.'),
       h('div.row', {}, h('button.btn.primary', { type: 'button', 'data-pay-approve-all-yes': '', onclick: async (e) => {
         e.target.disabled = true;
-        try { const r = await api(`/floors/${page.slug}/pay/products/approve-all`, { method: 'POST', body: {} }); toast(`${r.approved} products are on sale`); } catch (err) { toast(err.message, 'bad'); }
+        try { const r = await api(`/floors/${page.slug}/pay/products/approve-all`, { method: 'POST', body: { ids: waiting.map((x) => x.id) } }); toast(`${r.approved} products are on sale`); } catch (err) { toast(err.message, 'bad'); }
         page.reload();
       } }, `Approve all ${waiting.length}`))));
   }
