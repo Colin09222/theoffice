@@ -457,6 +457,8 @@ describe('control and recovery', () => {
     await until(() => texts.length === 2 && h.taskRow(id).status === 'review' && !h.t.app.engine.runs.size, { what: 'revision' });
     assert.match(texts[1], /ball bigger/);
     assert.equal(h.sessions.calls.sessions.length, 1);
+    // It came back with the very same file, and the manager is told so before it sends the same notes again.
+    assert.match(h.t.app.engine.managerContext(h.floor, h.mgr).messages.at(-1).content, new RegExp(`#${id} \\[review\\].*It came back with no file in projects/[a-z0-9-]+/ changed since you sent it back\\.`, 's'));
   });
   test('a round of fixes gets its own steps, so a first round that used most of them can still fix what the Tester found', async () => {
     let turns = 0;
@@ -466,6 +468,7 @@ describe('control and recovery', () => {
     h.t.app.engine.reviewTask(h.floor, h.mgr, id, 'revise', 'Fix the bugs');
     await until(() => turns === 2 && h.taskRow(id).status === 'review' && !h.t.app.engine.runs.size, { what: 'the fix round' });
     assert.equal(h.taskRow(id).revisions, 1);
+    assert.doesNotMatch(h.t.app.engine.managerContext(h.floor, h.mgr).messages.at(-1).content, /It came back with no file/, 'a round that changed something says nothing of the kind');
     assert.doesNotMatch(h.taskRow(id).result, /Ran out of steps/);
     assert.equal(h.sessions.calls.sessions.length, 1, 'the same computer');
   });

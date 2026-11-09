@@ -70,6 +70,23 @@ export const listFiles = (db, floorId, prefix = '') => all(db, 'SELECT path,size
 // Working papers stay on the shared drive. They were written for the staff, so they never go live with the project.
 export const goesLive = (relPath) => !/^notes\//.test(relPath) && relPath !== 'TEST-REPORT.md' && relPath !== 'STARTER.md';
 
+/**
+ * One short fingerprint of a project's files as they stand: every path with its bytes, in path order. Two fingerprints are equal only when the
+ * project is byte-for-byte the same. liveOnly leaves out what never goes live (notes/, TEST-REPORT.md, STARTER.md), so a Tester writing up its
+ * report does not make a tested version look like a new one.
+ */
+export function projectSum(db, floorId, slug, { liveOnly = false } = {}) {
+  const prefix = `projects/${slug}/`;
+  const h = createHash('sha256');
+  for (const f of all(db, 'SELECT path,content FROM files WHERE floor_id=? AND path>=? AND path<? ORDER BY path', floorId, prefix, `projects/${slug}0`)) {
+    const rel = f.path.slice(prefix.length);
+    if (liveOnly && !goesLive(rel)) continue;
+    const body = typeof f.content === 'string' ? Buffer.from(f.content, 'utf8') : Buffer.from(f.content);
+    h.update(`${rel}\0${body.length}\0`).update(body);
+  }
+  return h.digest('hex').slice(0, 32);
+}
+
 /** Snapshot projects/<slug>/ (or one directory inside it, such as a build's dist/) into the published set. Quota is re-checked and the swap is atomic. */
 const SERVER_MARKERS = new Set(['server/package.json', 'server/office.json', 'server/server.js', 'server/index.js', 'server/app.js']);
 export function publishSnapshot(db, floorId, slug, quotaBytes, directory = '') {

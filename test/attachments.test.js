@@ -273,9 +273,11 @@ describe('what the model sees', () => {
     // Any other provider is told the paths and given no bytes.
     const plain = withFiles(t.db, f.id, msgs, 'openrouter');
     assert.ok(!JSON.stringify(plain).includes(PNG.toString('base64')) && !plain[1].files);
-    // Only the newest few go along.
+    // One file brought up many times is sent once, where it first came up; later mentions only say it is the same one.
     const many = Array.from({ length: MAX_FILE_BLOCKS + 3 }, () => ({ role: 'user', content: 'x', files: [p1] }));
-    assert.equal(withFiles(t.db, f.id, many, 'anthropic').filter((m) => m.office_blocks).length, 1, 'one path counts once');
+    const out = withFiles(t.db, f.id, many, 'anthropic');
+    assert.deepEqual(out.map((m) => (m.office_blocks || []).filter((b) => b.type === 'image').length), [1, ...Array(MAX_FILE_BLOCKS + 2).fill(0)], 'one path counts once, at its first message');
+    assert.match(out[1].office_blocks[0].text, /same file you were shown earlier/);
   });
 
   test('view_file sends a note, never a picture Claude would refuse, so the turn carries on', async () => {

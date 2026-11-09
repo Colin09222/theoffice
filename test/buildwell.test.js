@@ -133,6 +133,32 @@ describe('the design review', () => {
     await review({ file: 'projects/teacups/shot.png', phone_file: 'projects/teacups/phone.png' });
     const s = stored(h); assert.equal(s.verdict, 'ship'); assert.equal(s.score, 8); assert.equal(s.rounds, 2);
   });
+  test('the same screenshots again get the last review back: no paid call, no extra look, and new pictures are a new review', async () => {
+    const { h, calls, review } = await reviewer(['1. [broken] The button is too small.\n3. Score: 5/10. Verdict: FIX FIRST', '1. [better] Spacing.\n3. Score: 8/10. Verdict: SHIP']);
+    const paid = () => get(h.t.db, "SELECT COUNT(*) n, COALESCE(SUM(cost_usd),0) usd FROM ledger WHERE floor_id=? AND kind='review'", h.f.id);
+    const both = { file: 'projects/teacups/shot.png', phone_file: 'projects/teacups/phone.png' };
+    const first = await review(both);
+    assert.equal(calls.length, 1); assert.equal(paid().n, 1);
+    // Nothing was changed, and the same pictures are sent in again.
+    const again = await review({ ...both, about: 'the same page, described differently' });
+    assert.equal(calls.length, 1, 'nothing went to the other lab'); assert.deepEqual({ ...paid() }, { n: 1, usd: 0.01 }, 'and nothing went on the ledger');
+    assert.match(again, /nothing has changed since the last review/); assert.match(again, /\[broken\] The button is too small/, 'the last review, whole');
+    assert.match(again, /^<untrusted_data source="design review from another lab">/, 'still data');
+    assert.ok(first.includes('[broken] The button is too small'));
+    assert.equal(stored(h).rounds, 1, 'it does not count as another look'); assert.equal(stored(h).verdict, 'fix first');
+    assert.equal(get(h.t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0);
+    // The page was changed, so the screenshot is different: that is a real second review.
+    const changed = Buffer.concat([TINY, Buffer.from([0])]);
+    run(h.t.db, "UPDATE files SET content=?, size=? WHERE floor_id=? AND path='projects/teacups/shot.png'", new Uint8Array(changed), changed.length, h.f.id);
+    const second = await review(both);
+    assert.equal(calls.length, 2); assert.equal(paid().n, 2);
+    assert.match(second, /Verdict: SHIP/); assert.doesNotMatch(second, /nothing has changed/);
+    assert.equal(stored(h).rounds, 2); assert.equal(stored(h).verdict, 'ship');
+    // What the boss's page is sent has the verdict, not the stored copy of the whole review.
+    run(h.t.db, "UPDATE projects SET published_at=1 WHERE floor_id=? AND slug='teacups'", h.f.id);
+    const view = (await h.c.get(`/api/floors/${h.c.slug}`)).data.projects.find((p) => p.slug === 'teacups');
+    assert.equal(view.designReview.verdict, 'ship'); assert.equal(view.designReview.full, undefined); assert.equal(view.designReview.shots, undefined);
+  });
   test('the Tester is handed it, and the manager reads the verdict', async () => {
     const { h } = await reviewer(['x']);
     run(h.t.db, "UPDATE projects SET design_review=? WHERE floor_id=? AND slug='teacups'", JSON.stringify({ at: 1, model: 'm', verdict: 'fix first', score: 6, rounds: 2, text: '[broken] The hero is cut off on a phone.' }), h.f.id);

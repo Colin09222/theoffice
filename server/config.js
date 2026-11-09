@@ -165,6 +165,8 @@ export function loadConfig(env = process.env, overrides = {}) {
     peopleTalk: env.PEOPLE_TALK !== '0',
     // The last look before a first publish (server/shipcheck.js). SHIP_CHECK=0 switches it off.
     shipCheck: env.SHIP_CHECK !== '0',
+    // While a long reply is still being written, the prompt cache behind it is kept from expiring (server/anthropic.js). CACHE_KEEP_WARM=0 turns that off.
+    cacheKeepWarm: env.CACHE_KEEP_WARM !== '0',
     talkGapMs: num(env.TALK_GAP_MS, env.AI_MODE === 'mock' ? 1 : 2200),
     meetingGapMs: num(env.MEETING_GAP_MS, env.AI_MODE === 'mock' ? 0 : 45000), meetingsPerFloorDay: num(env.MEETINGS_PER_FLOOR_DAY, 40),
     banterEveryMs: num(env.BANTER_EVERY_MS, 180000), banterTickMs: num(env.BANTER_TICK_MS, 20000), banterPerFloorDay: num(env.BANTER_PER_FLOOR_DAY, 60),

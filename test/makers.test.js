@@ -2,7 +2,7 @@
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { boot, claim, floorState, until, Client } from './helpers.js';
-import { get, all } from '../server/db.js';
+import { get, all, run } from '../server/db.js';
 import { ideaCards, companyCards, surprise, fromWords, parseReport, decide, loadMakersConfig, starterFiles, buildBrief, testBrief, MAKER_TYPES } from '../server/makers.js';
 import { checkSite } from '../server/launch-check.js';
 
@@ -335,6 +335,58 @@ describe('a major bug found once is fixed before Launch comes back', () => {
     assert.equal(get(t.db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND title LIKE 'Fix the serious bugs%'", fid).n, 1);
     assert.equal(get(t.db, "SELECT COUNT(*) n FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='tester'", fid).n, 5, 'first test, re-test, three depth passes');
     assert.equal((await c.post(`/api/floors/${c.slug}/makers/launch`, {})).status, 200);
+  });
+});
+
+describe('a test of files the Tester has already been through is not run again', () => {
+  let t, c;
+  before(async () => { t = await boot(); c = await claim(t, 'Idle Co'); });
+  after(() => t.close());
+  test('a pass whose build changed nothing live gets the last report back, and the loop carries on from it', async () => {
+    assert.equal((await c.post(`/api/floors/${c.slug}/makers/start`, { type: 'game', name: 'Still Hive', pitch: 'Bugs versus bees [idle]' })).status, 200);
+    const j = await until(async () => { const s = await floorState(c); return s.makers?.job?.stage === 'ready' ? s.makers.job : null; }, { what: 'ready', timeout: 30000 });
+    const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', c.slug).id;
+    const tests = all(t.db, "SELECT t.id, t.title, t.status, t.result, t.cost_usd, m.pass FROM tasks t JOIN maker_tasks m ON m.task_id=t.id WHERE t.floor_id=? AND m.step='test' ORDER BY t.id", fid);
+    assert.deepEqual(tests.map((x) => x.pass), [0, 1, 2, 3], 'every pass still has its test on the board');
+    assert.ok(tests.every((x) => x.status === 'done'));
+    // Only the first one was played. The Builder's depth passes changed nothing that goes live, so the others had nothing new to test.
+    assert.ok(tests[0].cost_usd > 0); assert.doesNotMatch(tests[0].result, /has changed since the last test/);
+    for (const x of tests.slice(1)) { assert.equal(x.cost_usd, 0, `pass ${x.pass} cost nothing`); assert.match(x.result, /Nothing that goes live in Still Hive has changed since the last test/); }
+    const tester = get(t.db, "SELECT id FROM agents WHERE floor_id=? AND role='tester'", fid).id;
+    const first = get(t.db, "SELECT COUNT(*) n FROM ledger WHERE floor_id=? AND agent_id=? AND kind='model'", fid, tester).n;
+    assert.ok(first > 0);
+    assert.equal(get(t.db, "SELECT COUNT(*) n FROM ledger l WHERE l.floor_id=? AND l.agent_id=? AND l.kind='model' AND l.created_at>(SELECT updated_at FROM tasks WHERE id=?)", fid, tester, tests[0].id).n, 0, 'the Tester\'s model was never called again');
+    // The verdict it stands on is the one the Tester really gave: a pass, so the job is launchable, with the same rules still unmet.
+    assert.equal(j.launchable, true); assert.equal(j.pass, 3); assert.equal(j.report.verdict, 'pass');
+    assert.equal((await c.post(`/api/floors/${c.slug}/makers/launch`, {})).status, 200);
+  });
+  test('a version that did change is always played, and so is one the live check has found a problem in', async () => {
+    const d = await boot(); const co = await claim(d, 'Busy Co');
+    try {
+      assert.equal((await co.post(`/api/floors/${co.slug}/makers/start`, { type: 'game', name: 'Busy Hive', pitch: 'Bugs versus bees' })).status, 200);
+      await until(async () => { const s = await floorState(co); return s.makers?.job?.stage === 'ready'; }, { what: 'ready', timeout: 30000 });
+      const fid = get(d.db, 'SELECT id FROM floors WHERE slug=?', co.slug).id;
+      const tests = all(d.db, "SELECT t.result, t.cost_usd FROM tasks t JOIN maker_tasks m ON m.task_id=t.id WHERE t.floor_id=? AND m.step='test'", fid);
+      assert.ok(tests.length >= 2 && tests.every((x) => x.cost_usd > 0 && !/has changed since the last test/.test(x.result)), 'every changed version was really tested');
+      // The hook itself: same files as tested, so the report would stand, unless the live link check has found something the report never saw.
+      const job = get(d.db, 'SELECT * FROM maker_jobs WHERE floor_id=?', fid);
+      const floor = get(d.db, 'SELECT * FROM floors WHERE id=?', fid);
+      const { id } = d.app.engine.assignTask(floor, get(d.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", fid), { to: 'tester', title: 'Play-test again', brief: 'x', plan: '', project: job.project, dependsOn: [] });
+      d.app.engine.cancelTask(floor, id);
+      run(d.db, "UPDATE maker_jobs SET stage='test' WHERE id=?", job.id);
+      run(d.db, 'INSERT INTO maker_tasks (task_id, job_id, step, pass) VALUES (?,?,?,?)', id, job.id, 'test', job.pass);
+      assert.match(d.app.engine.makers.sameAsTested(floor, { id }), /office-verdict/);
+      const st = JSON.parse(job.state);
+      run(d.db, 'UPDATE maker_jobs SET state=? WHERE id=?', JSON.stringify({ ...st, liveBugs: [{ severity: 'major', text: 'The live link check failed: blank page' }] }), job.id);
+      assert.equal(d.app.engine.makers.sameAsTested(floor, { id }), null, 'a live problem is new, so it is tested for real');
+      run(d.db, 'UPDATE maker_jobs SET state=? WHERE id=?', JSON.stringify(st), job.id);
+      run(d.db, "UPDATE files SET content=content || ' ', size=size+1, updated_at=updated_at+1 WHERE floor_id=? AND path=?", fid, `projects/${job.project}/build.js`);
+      assert.equal(d.app.engine.makers.sameAsTested(floor, { id }), null, 'one byte different is a different version');
+      // A file that never goes live does not make it a new version.
+      run(d.db, "UPDATE files SET content=?, size=size-1, updated_at=updated_at+1 WHERE floor_id=? AND path=?", st.tested ? get(d.db, 'SELECT content c FROM files WHERE floor_id=? AND path=?', fid, `projects/${job.project}/build.js`).c.slice(0, -1) : '', fid, `projects/${job.project}/build.js`);
+      run(d.db, "UPDATE files SET content=content || 'more notes', size=size+10, updated_at=updated_at+5 WHERE floor_id=? AND path LIKE ?", fid, `projects/${job.project}/notes/%`);
+      assert.match(d.app.engine.makers.sameAsTested(floor, { id }), /office-verdict/);
+    } finally { await d.close(); }
   });
 });
 
