@@ -14,7 +14,7 @@
     "claude-sonnet-5-5": {
       "prompt": 2,
       "completion": 10,
-      "cacheRead": 0.2
+      "cacheRead": 0.1
     },
     "claude-haiku-5-5": {
       "prompt": 0.1,

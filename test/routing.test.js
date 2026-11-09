@@ -45,14 +45,15 @@ describe('routing', () => {
   });
 
   test('prices live in one table by model, and the ledger charges what the model that ran costs', () => {
-    assert.deepEqual(m.prices[SONNET], { prompt: 2, completion: 10, cacheRead: 0.2 });
+    // Cache reads are 0.05 times the input price on both 5.5 models (the pricing table on the prompt caching page): a tenth of a dollar on Sonnet, two tenths on Opus.
+    assert.deepEqual(m.prices[SONNET], { prompt: 2, completion: 10, cacheRead: 0.1 });
     assert.deepEqual(m.prices[OPUS], { prompt: 4, completion: 20, cacheRead: 0.2 });
     assert.deepEqual(m.all.manager.pricing, m.prices[OPUS]);
     assert.deepEqual(m.all.builder.pricing, m.prices[OPUS]);
     assert.deepEqual(m.tools.search.pricing, m.prices[SONNET]);
     assert.deepEqual(computerRole(m, 'tester').pricing, m.prices[OPUS], 'the Tester\'s computer runs on Opus, charged at Opus\'s price, not Gemini\'s');
     const u = costOf({ input_tokens: 1e6, cache_read_input_tokens: 1e6, output_tokens: 1e6 }, m.prices[SONNET]);
-    assert.ok(Math.abs(u.cost - (2 + 0.2 + 10)) < 1e-9, `cost ${u.cost}`);
+    assert.ok(Math.abs(u.cost - (2 + 0.1 + 10)) < 1e-9, `cost ${u.cost}`);
   });
 });
 
