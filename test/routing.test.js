@@ -11,19 +11,19 @@ const m = loadModels();
 const OPUS = 'claude-opus-5-5', SONNET = 'claude-sonnet-5-5';
 
 describe('routing', () => {
-  test('jobs the boss asks for: Builder, Designer and Illustrator on Opus at their own efforts, the rest on Sonnet at high', () => {
+  test('jobs the boss asks for: every role that shapes the work is on Opus at high or above', () => {
     const at = (role) => { const r = routeFor(m, role); return `${r.model} ${r.effort}`; };
     assert.equal(at('builder'), `${OPUS} xhigh`);
-    assert.equal(at('designer'), `${OPUS} medium`);
-    assert.equal(at('illustrator'), `${OPUS} high`);
-    for (const role of ['manager', 'researcher', 'writer', 'analyst', 'marketer']) assert.equal(at(role), `${SONNET} high`, role);
+    assert.equal(at('designer'), `${OPUS} xhigh`);
+    for (const role of ['manager', 'researcher', 'writer', 'analyst', 'marketer', 'illustrator']) assert.equal(at(role), `${OPUS} high`, role);
+    assert.equal(at('lawyer'), `${SONNET} medium`, 'the Lawyer stays as it was');
     // The Tester's review is another lab's eye, through OpenRouter.
     const tester = routeFor(m, 'tester');
     assert.equal(tester.model, 'google/gemini-3.1-pro-preview'); assert.equal(tester.provider, 'openrouter');
   });
 
-  test('computers: the Builder runs Opus at high for the boss, and the Tester\'s computer is Opus at high too', () => {
-    assert.deepEqual(pick(computerRole(m, 'builder')), { model: OPUS, effort: 'high' });
+  test('computers: the Builder runs Opus at xhigh for the boss, and the Tester\'s computer is Opus at high', () => {
+    assert.deepEqual(pick(computerRole(m, 'builder')), { model: OPUS, effort: 'xhigh' });
     assert.deepEqual(pick(computerRole(m, 'tester')), { model: OPUS, effort: 'high' });
     assert.equal(computerRole(m, 'writer'), null);
   });
@@ -47,7 +47,7 @@ describe('routing', () => {
   test('prices live in one table by model, and the ledger charges what the model that ran costs', () => {
     assert.deepEqual(m.prices[SONNET], { prompt: 2, completion: 10, cacheRead: 0.2 });
     assert.deepEqual(m.prices[OPUS], { prompt: 4, completion: 20, cacheRead: 0.2 });
-    assert.deepEqual(m.all.manager.pricing, m.prices[SONNET]);
+    assert.deepEqual(m.all.manager.pricing, m.prices[OPUS]);
     assert.deepEqual(m.all.builder.pricing, m.prices[OPUS]);
     assert.deepEqual(m.tools.search.pricing, m.prices[SONNET]);
     assert.deepEqual(computerRole(m, 'tester').pricing, m.prices[OPUS], 'the Tester\'s computer runs on Opus, charged at Opus\'s price, not Gemini\'s');

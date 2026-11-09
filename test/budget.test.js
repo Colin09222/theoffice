@@ -208,8 +208,8 @@ describe('in-flight calls hold their money', () => {
     const releases = []; const started = []; let free = false;
     const inner = createMockClient({ mockDelayMs: 0 });
     const llm = { async chat(x) { started.push(x.meta.role); if (!free) await new Promise((r) => releases.push(r)); return inner.chat(x); } };
-    // On Sonnet each call's worst case is about $0.12 to $0.16, so two of them speak for all of this.
-    const t = await start({ budgetAnthropicUsd: 0.25 }, { llm });
+    // On Opus each call's worst case is about a third of a dollar, so two of them speak for all of this.
+    const t = await start({ budgetAnthropicUsd: 0.5 }, { llm });
     t.app.engine.runManager = async () => {};
     const c = await claim(t, 'Holds'); const floor = floorOf(t, c);
     try {
@@ -573,7 +573,7 @@ describe('leak tests: what bots can see', () => {
         }
         scanPrompt(computerPrompt(cfg, key, role), `${key} computer prompt`);
       }
-      assert.match(managerPrompt(floor, { name: 'Boss' }, { manager: 'Mo' }, cfg), /costs real money/, 'it is still told to be careful');
+      assert.doesNotMatch(managerPrompt(floor, { name: 'Boss' }, { manager: 'Mo' }, cfg), /real money|every call costs/i, 'nobody here is told what anything costs');
     }
     scanPrompt(GUIDANCE_LABEL, 'the guidance label');
   });

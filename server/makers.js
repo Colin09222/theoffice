@@ -270,6 +270,17 @@ function walk(dir, base = '') {
 // The game starters share the kit (screens, input, audio, saves, juice); each game adds its own index.html and game.js.
 export const starterFiles = (name) => (name && /^[a-z0-9-]+$/.test(name) ? [...(name.startsWith('game-') ? walk(join(STARTERS_DIR, 'game-kit')) : []), ...walk(join(STARTERS_DIR, name))] : []);
 
+/** A game or app asked for in chat gets the same working starter as one from the maker cards. Only a project with nothing in it yet: a change to an existing one never overwrites anything. */
+export function seedStarter(db, floor, project, type, text, cfg) {
+  if (get(db, 'SELECT 1 x FROM files WHERE floor_id=? AND path LIKE ?', floor.id, `projects/${project}/%`)) return false;
+  // 3D only when it's asked for by name: words like "race" or "fly" in a brief shouldn't pick the harder starter.
+  const files = starterFiles(type === 'game' ? (/\b(3d|three\.?js|first[- ]person)\b/i.test(text) ? 'game-3d' : 'game-2d') : starterFor(type, text));
+  const title = String(project).replace(/-+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  // The pitch stays empty: the launch checklist then asks the Builder for a real description instead of shipping a guess.
+  for (const f of files) writeFile(db, floor.id, `projects/${project}/${f.path}`, f.data.replaceAll('{{TITLE}}', title).replaceAll('{{PITCH}}', ''), null, cfg.quotaBytes);
+  return files.length > 0;
+}
+
 // ---- the server side ----
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS maker_jobs (

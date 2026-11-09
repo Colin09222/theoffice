@@ -51,8 +51,9 @@ function assertWellFormed(messages) {
 describe('the settings', () => {
   test('every work cap is off by default', () => {
     const c = loadConfig({});
-    for (const k of ['floorDailyUsd', 'globalDailyUsd', 'taskMaxUsd', 'sessionMaxUsd', 'maxStaff', 'maxStaffSteps', 'maxManagerSteps', 'maxOpenTasks', 'maxTasksPerDay', 'maxRevisions', 'sessionMaxSteps', 'sessionMaxMinutes', 'maxSessionsFloor', 'maxSessionsGlobal', 'maxFixTurns', 'imagesPerFloorDay', 'imagesPerTask', 'reviewsPerFloorDay', 'searchesPerFloorDay', 'ordersPerFloor', 'ordersMaxFails']) assert.equal(c[k], Infinity, k);
-    assert.equal(c.sessionWrapUp, false);
+    for (const k of ['floorDailyUsd', 'globalDailyUsd', 'sessionMaxUsd', 'maxStaff', 'maxStaffSteps', 'maxManagerSteps', 'maxOpenTasks', 'maxTasksPerDay', 'maxRevisions', 'sessionMaxSteps', 'sessionMaxMinutes', 'maxSessionsFloor', 'maxSessionsGlobal', 'maxFixTurns', 'imagesPerFloorDay', 'imagesPerTask', 'reviewsPerFloorDay', 'searchesPerFloorDay', 'ordersPerFloor', 'ordersMaxFails']) assert.equal(c[k], Infinity, k);
+    assert.equal(c.sessionWrapUp, undefined, 'nothing can tell a job to stop polishing any more');
+    assert.equal(c.taskMaxUsd, 40, 'the safety net is the one money limit left on by default');
   });
   test('what was kept on purpose is still on', () => {
     const c = loadConfig({});
@@ -89,9 +90,9 @@ describe('prompts and pages with no caps', () => {
   test('no prompt mentions a limit that isn\'t there, or the word Infinity', () => {
     const cfg = loadConfig({ AI_MODE: 'mock' });
     const p = computerPrompt(cfg, 'builder', models.all.builder);
-    assert.doesNotMatch(p, /Infinity|undefined|about \d+ steps/);
-    assert.match(p, /Every step costs real money/);
-    assert.match(computerPrompt({ ...cfg, sessionMaxSteps: 40 }, 'builder', models.all.builder), /about 40 steps/);
+    assert.doesNotMatch(p, /Infinity|undefined|about \d+ steps|real money/);
+    assert.match(p, /can stop without warning, so save as you go/);
+    assert.doesNotMatch(computerPrompt({ ...cfg, sessionMaxSteps: 40 }, 'builder', models.all.builder), /40|about \d+ steps|real money/, 'a set cap stays out of the prompt too');
     assert.doesNotMatch(managerPrompt({ name: 'A', number: 1, tagline: '' }, { name: 'B' }, { manager: 'M' }, cfg), /Infinity/);
   });
   test('the manager\'s state message has no staff limit in it unless one is set', async () => {
@@ -144,7 +145,7 @@ describe('staff and managers with no step limit', () => {
     const { id } = assign(h); h.e.kick();
     await until(() => statusOf(h, id) === 'failed', { what: 'it to stop' });
     assert.equal(llm.calls.filter((c) => c.meta.kind === 'staff').length, 5);
-    assert.ok(llm.calls.some((c) => c.messages.some((m) => /three steps left/.test(String(m.content)))));
+    assert.ok(llm.calls.some((c) => c.messages.some((m) => /Save your work now/.test(String(m.content)))));
   });
   test('sending work back has no limit by default, and has one when set', async () => {
     const h = await floor(scripted({ staff: () => ({ content: 'Again.' }), manager: () => ({ content: 'ok' }) }));
@@ -400,7 +401,7 @@ describe('computers with no limits of their own', () => {
     const events = [...h.sessions.sessions.values()][0].events;
     assert.ok(!events.some((e) => e.stop_reason?.type === 'budget_reached'), 'it never reached its cap');
     assert.ok(!h.sessions.calls.sends.some((s) => s.ev.type === 'user.interrupt'));
-    assert.ok(!h.sessions.calls.sends.some((s) => /nearly up|Stop polishing|steps left/.test(JSON.stringify(s.ev))));
+    assert.ok(!h.sessions.calls.sends.some((s) => /Save your work now|nearly up|Stop polishing|steps left/.test(JSON.stringify(s.ev))));
     assert.ok(row.session_charged >= 5.9, 'and all of it is on the ledger');
     assert.equal(get(h.t.db, "SELECT COUNT(*) n FROM budget_holds").n, 0, 'nothing is left held');
   });
@@ -454,7 +455,7 @@ describe('computers with no limits of their own', () => {
     const row = await h.settle(h.go().id);
     assert.equal(row.status, 'failed'); assert.match(row.result, /reached its limit/);
     assert.ok(row.session_charged <= 5.51, `spent ${row.session_charged}`);
-    assert.ok(h.sessions.calls.sends.some((s) => /nearly up/.test(JSON.stringify(s.ev))), 'and it is told to save before the real end');
+    assert.ok(h.sessions.calls.sends.some((s) => /Save your work now/.test(JSON.stringify(s.ev))), 'and it is told to save before the real end');
   });
   test('going back in line for a slice can\'t reset a set session limit', async () => {
     let steps = 0;
@@ -522,8 +523,8 @@ describe('computers with no limits of their own', () => {
     await until(() => !h.e.runs.size, { what: 'the run to stop' });
     assert.equal(statusOf(h, id), 'todo', 'the task is waiting, not failed');
     assert.ok(h.e.budget.spent('anthropic') <= 1.21, `spent ${h.e.budget.spent('anthropic')}`);
-    assert.ok(h.sessions.calls.sends.some((s) => /nearly up/.test(JSON.stringify(s.ev))));
-    assert.equal(h.sessions.calls.sends.filter((s) => /nearly up/.test(JSON.stringify(s.ev))).length, 1);
+    assert.ok(h.sessions.calls.sends.some((s) => /Save your work now/.test(JSON.stringify(s.ev))));
+    assert.equal(h.sessions.calls.sends.filter((s) => /Save your work now/.test(JSON.stringify(s.ev))).length, 1);
   });
   test('two sessions near the limit can\'t both be promised the same dollars', async () => {
     let most = 0; let h;
@@ -534,16 +535,12 @@ describe('computers with no limits of their own', () => {
     assert.ok(most <= 3.25, `promised ${most}`);
     assert.ok(h.e.budget.spent('anthropic') <= 3.25, `spent ${h.e.budget.spent('anthropic')}`);
   });
-  test('the wrap-up nudge only comes when it is switched on', async () => {
-    const turn = async (api) => { for (let i = 0; i < 25; i++) await api.step(); finished(api); };
-    const off = await computerFloor({ onTurn: turn });
-    const a = off.e.assignTask(off.f, off.mgr, { to: 'builder', title: 'Go', brief: 'b', plan: '', project: 'game', dependsOn: [], afterPrevious: false, lane: 'website' }); off.e.kick();
-    await off.settle(a.id);
-    assert.ok(!off.sessions.calls.sends.some((s) => /Stop polishing/.test(JSON.stringify(s.ev))));
-    const on = await computerFloor({ onTurn: turn }, { sessionWrapUp: true });
-    const b = on.e.assignTask(on.f, on.mgr, { to: 'builder', title: 'Go', brief: 'b', plan: '', project: 'game', dependsOn: [], afterPrevious: false, lane: 'website' }); on.e.kick();
-    await on.settle(b.id);
-    assert.ok(on.sessions.calls.sends.some((s) => /Stop polishing/.test(JSON.stringify(s.ev))));
+  test('nothing tells a job to stop at a step count, however long it runs', async () => {
+    const turn = async (api) => { for (let i = 0; i < 40; i++) await api.step(); finished(api); };
+    const h = await computerFloor({ onTurn: turn });
+    const a = h.e.assignTask(h.f, h.mgr, { to: 'builder', title: 'Go', brief: 'b', plan: '', project: 'game', dependsOn: [], afterPrevious: false, lane: 'website' }); h.e.kick();
+    await h.settle(a.id);
+    assert.ok(!h.sessions.calls.sends.some((s) => s.ev.type === 'system.message'));
   });
   test('a save that won\'t go through keeps getting another try by default, and gets a set number when set', async () => {
     let tries = 0;

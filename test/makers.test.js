@@ -140,7 +140,8 @@ describe('loop control', () => {
     const cheatRule = decide(job(), test0({ ...browserOnly('game'), nocheats: false }));
     assert.equal(cheatRule.fix, true, 'a cheat left in the build is a major bug even if the Tester forgot to list it');
     assert.ok(cheatRule.bugs.some((b) => b.severity === 'major' && /cheat/.test(b.text)));
-    assert.equal(decide(job({ tokens: CFG.passes.maxJobTokens }), report()).action, 'ask', 'out of work with a serious bug open is the boss\'s call');
+    const tokenCap = { ...CFG, passes: { ...CFG.passes, maxJobTokens: 1000 } };
+    assert.equal(decide(job({ tokens: 1000 }), report(), tokenCap).action, 'ask', 'out of work with a serious bug open is the boss\'s call');
   });
   test('the brief for a fix pass lists the bugs and the re-test checks them', () => {
     const d = decide(job(), { step: 'test', ok: true, report: { verdict: 'pass', rules: browserOnly('game'), bugs: [{ severity: 'major', text: 'Save is lost on reload' }], regressions: [] } });
@@ -151,8 +152,11 @@ describe('loop control', () => {
   test('passes and tokens are capped', () => {
     assert.equal(decide(job({ pass: 3, launchable: true }), test0(browserOnly('game'))).action, 'ready');
     assert.equal(decide(job({ depth: 0 }), test0(browserOnly('game'))).action, 'ready');
-    assert.equal(decide(job({ tokens: CFG.passes.maxJobTokens }), test0(browserOnly('game'))).action, 'ready');
-    assert.equal(decide(job({ tokens: CFG.passes.maxJobTokens }), { step: 'test', ok: true, report: { verdict: 'fail', rules: {}, bugs: [], regressions: [] } }).action, 'ask');
+    assert.equal(CFG.passes.maxJobTokens, 0, 'no job is stopped at a count of tokens by default');
+    assert.equal(decide(job({ tokens: 1e12 }), test0(browserOnly('game'))).action, 'build', 'and a very long job carries on');
+    const tokenCap = { ...CFG, passes: { ...CFG.passes, maxJobTokens: 1000 } };
+    assert.equal(decide(job({ tokens: 1000 }), test0(browserOnly('game')), tokenCap).action, 'ready');
+    assert.equal(decide(job({ tokens: 1000 }), { step: 'test', ok: true, report: { verdict: 'fail', rules: {}, bugs: [], regressions: [] } }, tokenCap).action, 'ask');
     assert.equal(decide(job({ depth: 9 }), test0(browserOnly('game'))).pass, 1);
   });
   test('the Tester\'s brief holds the verdict template, the done-rules and the quality bars from config', () => {
