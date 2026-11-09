@@ -68,7 +68,7 @@ describe('the settings change what the bots write', () => {
 
     // And that came from the prompt, not from the floor's name: every agent on the floor read it, and only its own floor's.
     const sf = floorRow(t, silly).id, rf = floorRow(t, serious).id;
-    const sillyCalls = llm.calls.filter((c) => c.floorId === sf && c.kind !== 'talk'), seriousCalls = llm.calls.filter((c) => c.floorId === rf && c.kind !== 'talk');
+    const sillyCalls = llm.calls.filter((c) => c.floorId === sf && c.kind !== 'talk' && c.kind !== 'shipcheck'), seriousCalls = llm.calls.filter((c) => c.floorId === rf && c.kind !== 'talk' && c.kind !== 'shipcheck');
     for (const role of ['researcher', 'writer', 'builder', 'designer']) assert.ok(sillyCalls.some((c) => c.role === role), `${role} ran`);
     for (const c of sillyCalls) { assert.equal(voiceOf([{ content: c.system }]).tone, 'silly', `${c.kind} ${c.role || ''}`); assert.match(c.system, /tiny games about pigeons/); assert.doesNotMatch(c.system, /advise small firms/); }
     for (const c of seriousCalls) { assert.equal(voiceOf([{ content: c.system }]).tone, 'serious'); assert.doesNotMatch(c.system, /pigeons/); }
@@ -118,7 +118,7 @@ describe('the settings change what the bots write', () => {
     await waitDone(a);
     const doc = await page(t, `/f/${a.slug}/ruler-brief/`);
     assert.doesNotMatch(doc, /Enjoy the thing/);
-    for (const c of llm.calls.filter((x) => x.floorId === floorRow(t, a).id && x.kind !== 'talk')) { assert.match(c.system, /House rules: Metric units only\./); assert.match(c.system, /Always avoid: Enjoy the thing/); }
+    for (const c of llm.calls.filter((x) => x.floorId === floorRow(t, a).id && x.kind !== 'talk' && x.kind !== 'shipcheck')) { assert.match(c.system, /House rules: Metric units only\./); assert.match(c.system, /Always avoid: Enjoy the thing/); }
     assert.doesNotMatch(doc, /Metric units only/, 'house rules are not quoted in published work');
   });
 

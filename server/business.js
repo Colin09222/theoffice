@@ -145,7 +145,7 @@ export const moneyOk = (amount, cfg = CONFIG) => Number.isInteger(amount) && cfg
 // ---- the journey's shape ----
 const stepIndex = (id) => CONFIG.steps.findIndex((s) => s.id === id);
 const TASK_ITEMS = CONFIG.tracks.flatMap((t) => t.items.filter((i) => i.task));
-// An item marked selling belongs to the journey that ends in a working checkout (true), or to the older notify-me page (false). Unmarked items are in both.
+// An item marked selling belongs to the journey that ends in somewhere a customer can pay (true), or to the older notify-me page (false). Unmarked items are in both.
 const inJourney = (it, selling) => it.selling === undefined || it.selling === selling;
 
 export function installBusiness(ext) {
@@ -296,7 +296,7 @@ export function installBusiness(ext) {
     const slug = uniqueSlug(floor.id, idea.name);
     const selling = sellingOn();
     if (selling && !has(floor.id, 'tester')) { try { engine.hireStaff(floor, 'tester'); } catch { /* the Builder's own check stands */ } }
-    // The shop starter goes in first, outside the transaction below: a working basket and checkout are there before anyone starts.
+    // The shop starter goes in first, outside the transaction below: a working basket and a way to pay are there before anyone starts.
     if (selling) { engine.upsertProject(floor, slug, { title: idea.name, description: idea.sell.slice(0, 200) }); seedStarter(db, floor, slug, 'shop', '', cfg); }
     const briefs = buildBriefs(floor, idea, slug, selling);
     const plan = `Business mode: build ${idea.name}`;
@@ -340,7 +340,7 @@ export function installBusiness(ext) {
         return files.some((f) => typeof f.content === 'string' ? f.content.includes('Office.submitForm') : Buffer.from(f.content).includes('Office.submitForm')) ? 'done' : 'attention';
       }
       if (name === 'email') return engine.mail?.ready?.() && engine.mail.addressOf?.(floor.id) ? 'done' : 'off';
-      if (name === 'checkout') {
+      if (name === 'canbuy') {
         if (!live) return 'waiting';
         return get(db, "SELECT 1 x FROM published_files WHERE floor_id=? AND project=? AND path='shop.json'", floor.id, slug) ? 'done' : 'attention';
       }

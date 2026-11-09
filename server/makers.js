@@ -103,8 +103,8 @@ export function surprise(type, { seed = Date.now(), cfg = CONFIG, floor = null, 
   return card;
 }
 export const starterFor = (type, text = '') => (type === 'game' ? (/\b(3d|three|first[- ]person|fly|flying|drive|driving|planet|race|racing|island|glide)\b/i.test(text) ? 'game-3d' : 'game-2d') : type === 'app' ? 'app' : type === 'website' ? (SELLS.test(text) ? 'shop' : 'website') : type === 'shop' ? 'shop' : '');
-// A website whose whole point is selling things starts on the shop starter: a basket, card checkout and an order confirmation that already work.
-export const SELLS = /\b(shop|store|sell|sells|selling|for sale|buy|checkout|merch)\b/i;
+// A website whose whole point is selling things starts on the shop starter: a basket, card payment and an order confirmation that already work.
+export const SELLS = /\b(shop|store|sell|sells|selling|for sale|buy|merch)\b/i;
 /** The boss's own words: a name made from them, the type's goal and plan, and the words themselves as the pitch. */
 export function fromWords(type, text, cfg = CONFIG) {
   const said = clip(text, 400);
@@ -242,7 +242,7 @@ const STARTER_HAS = {
   game: 'boot, menu, play, pause and game over; keyboard, touch and gamepad; a responsive canvas; audio with mute; settings; saves and a leaderboard through Office Cloud; and juice helpers (shake, particles, tweens, hit-stop)',
   app: 'a landing page and a signed-in app shell on Office Cloud accounts and the database, with create, edit and delete, empty, loading and error states, settings and a paid-plan section on office.pay that is honest about whether payments are open yet',
   website: 'fast accessible sections, full search and social meta, and a contact form that posts to Office Cloud',
-  shop: 'a product grid drawn from shop.json, a basket, card checkout on Stripe\'s own page through office.pay, a thank-you with the order number, an order request by email for before payments are on, full search and social meta, and a contact form. Put every product from notes/products.md in shop.json with its picture and price, as STARTER.md says, and take the example products out',
+  shop: 'a product grid drawn from shop.json, a basket, card payment on Stripe\'s own page through office.pay, a thank-you with the order number, an order request by email for before payments are on, full search and social meta, and a contact form. Put every product from notes/products.md in shop.json with its picture and price, as STARTER.md says, and take the example products out',
 };
 export function testBrief(job, pass, { computer = false, recheck = [] } = {}, cfg = CONFIG) {
   const doc = job.type === 'game' ? 'notes/design.md' : job.type === 'app' ? 'notes/spec.md' : 'notes/copy.md';

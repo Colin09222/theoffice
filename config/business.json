@@ -23,7 +23,7 @@
     ] },
     { "id": "payments", "label": "Payments", "note": "No card payments yet: there is no Stripe here. A notify-me sign-up collects the people who want it instead.", "sellingNote": "Card payments go through your own Stripe account, straight to you. Until you connect it and approve the products, the shop takes order requests by email.", "items": [
       { "check": "signup", "label": "Notify-me sign-up", "selling": false },
-      { "check": "checkout", "label": "Checkout on the shop", "selling": true },
+      { "check": "canbuy", "label": "Checkout on the shop", "selling": true },
       { "check": "stripe", "label": "Connect your Stripe", "yours": true, "selling": true },
       { "check": "products", "label": "Approve the products", "yours": true, "selling": true }
     ] },
