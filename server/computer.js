@@ -314,7 +314,7 @@ export class Computer {
       charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Map(), newestEvent: 0, listFrom: 0, steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), warned: false, limit: '', lastText: '', lastFeed: '',
       pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
       publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
-      ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'ask_colleague', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design' || n === 'deploy_server' || n.startsWith('server_'))]), signal },
+      ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'ask_colleague', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design' || n === 'deploy_server' || n.startsWith('server_'))]), signal, autonomous: !!task.auto },
     };
   }
 
