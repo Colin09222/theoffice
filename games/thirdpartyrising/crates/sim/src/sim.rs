@@ -431,7 +431,8 @@ fn complete_op(w: &mut World, p: usize, op: Op) {
         }
         _ => {}
     }
-    if p == PLAYER && !w.ai_only && op.kind != OP_DONOR {
+    // Only completions with something to report go in the log; routine canvassing would drown it.
+    if p == PLAYER && !w.ai_only && matches!(op.kind, OP_RECRUIT | OP_FUNDRAISE | OP_PETITION) {
         w.push_log(L_OP_DONE, op.kind as i32, if op.kind == OP_CAMPAIGN { op.arg } else { op.target }, p as i32, amount);
     }
 }

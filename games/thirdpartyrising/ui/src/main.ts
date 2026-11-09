@@ -32,7 +32,7 @@ let snap: any = null, costs: any = null, seats: any[] = [], county: any = null, 
 let map: GLMap | null = null;
 let meshes: { counties: Mesh; house: Mesh | null; senate: Mesh | null } | null = null;
 let proj: (lon: number, lat: number) => [number, number];
-const ui = { tab: "desk", mode: "lead", speed: 0, sel: -1, repeat: false, lastLog: -1, busy: false, acc: 0, won: false, lastYear: 0, tick: 0 };
+const ui = { tab: "desk", mode: "lead", speed: 0, sel: -1, repeat: false, lastLog: -1, busy: false, acc: 0, won: false, lastYear: 0, tick: 0, reminded: 0 };
 let timer: any = null;
 
 function toast(html: string, cls = "") {
@@ -281,6 +281,7 @@ async function refresh(full = false) {
     try { localStorage.setItem(AUTOSAVE, await be.save()); } catch { /* storage full or unavailable: file saves still work */ }
   }
   news();
+  remind();
   if (snap.pending.length && !modalOpen()) showEvent(snap.pending[0]);
   const ls = snap.parties[PLAYER].leader;
   if (!ui.won && ls && ls.seat >= 0 && seats[ls.seat]?.kind === 5 && ls.seat === snap.govSeat) {
@@ -288,6 +289,18 @@ async function refresh(full = false) {
     modal(`<h2>Governor of ${esc(pack.name)}</h2><p>${esc(ls.name)} takes the oath. A party that began in ${esc(pack.places[snap.arenas[snap.homeArena].place].name)} now runs the state.</p><p class="dim">The national map comes in a later version. Until then the state is yours to keep, if you can.</p><div class="choices"><button class="primary" data-act="closemodal">Keep governing</button></div>`);
   }
   render();
+}
+
+/** One warning per election when filing is about to close and the party has nobody on a ballot. */
+function remind() {
+  const left = snap.electionDay - snap.day - snap.fileDeadline;
+  if (left > 14 || left <= 0 || ui.reminded === snap.electionDay || snap.races.length) return;
+  const me = party(PLAYER), hc = snap.arenas[snap.homeArena].county;
+  const open = seats.some((s) => s.electionDay === snap.electionDay && ((s.kind <= 1 && s.area === snap.homeArena) || (s.kind >= 2 && me.qualified && (s.kind === 5 || s.counties.includes(hc)))));
+  if (!open) return;
+  ui.reminded = snap.electionDay;
+  if (ui.speed > 1) ui.speed = 1;
+  toast(`Filing closes in ${left} days and you have no candidates. See <b>Offices</b>.`, "bad");
 }
 
 async function refreshCounty() { if (ui.sel >= 0) county = await be.detail({ t: "county", i: ui.sel }); }
@@ -350,7 +363,20 @@ const visible = (e: any) => !(e.kind === 16 && e.a !== PLAYER) && !(e.kind === 1
 function news() {
   const fresh = snap.log.filter((e: any) => e.n > ui.lastLog).reverse();
   if (snap.log.length) ui.lastLog = snap.log[0].n;
+  // Election night: one summary of every race the party was in.
+  const results = fresh.filter((e: any) => (e.kind === 4 || e.kind === 5) && e.c === PLAYER);
+  if (results.length) {
+    ui.speed = 0;
+    const wins = results.filter((e: any) => e.kind === 4).length;
+    const gov = fresh.find((e: any) => e.kind === 4 && seats[e.a]?.kind === 5);
+    modal(`<h3 style="margin-top:0">${esc(dateOf(results[0].day))}</h3><h2>Election night</h2>
+      <p>${wins ? `${wins} of your ${results.length} candidate${results.length > 1 ? "s" : ""} won.` : results.length > 1 ? "None of your candidates won this time." : "Not this time."} ${wins ? "Winners take office on 1 January." : "The work you did is still there: the roots, the volunteers, the name."}</p>
+      ${results.map((e: any) => `<div class="row"><div class="l"><b>${esc(seatNameI(e.a))}</b><small>${esc(e.name)}</small></div><b class="${e.kind === 4 ? "good" : "bad"}">${e.kind === 4 ? "Won" : "Lost"} · ${pct(e.f)}</b></div>`).join("")}
+      ${gov && gov.c !== PLAYER ? `<p class="dim">Governor: ${esc(gov.name)} (${esc(party(gov.c).name)}) wins with ${pct(gov.f)}.</p>` : ""}
+      <div class="choices"><button class="primary" data-act="closemodal">Continue</button></div>`);
+  }
   for (const e of fresh) {
+    if (results.includes(e)) continue;
     if (!visible(e)) continue;
     const mine = (e.kind <= 3 || e.kind === 6 || e.kind === 7 || e.kind === 8 || e.kind === 17 ? e.a : e.c) === PLAYER;
     if (e.kind === 12) continue; // routine completions go to the News tab only

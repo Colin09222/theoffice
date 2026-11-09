@@ -71,7 +71,7 @@ try {
         continue;
       }
       const s = await state();
-      if (s.ops < 2) { await click("[data-act=tab][data-t=desk]"); await sleep(60); (await clickOp(8)) || (await clickOp(2)) || (await clickOp(3)) || (await clickOp(1)); if (await T(() => window.__tpr.ui.speed === 0)) await click("[data-act=speed][data-s='30']"); }
+      if (s.ops < 2) { await click("[data-act=tab][data-t=desk]"); await sleep(60); (s.money < 900 && (await clickOp(4))) || (await clickOp(2)) || (await clickOp(8)) || (await clickOp(3)) || (await clickOp(1)); if (await T(() => window.__tpr.ui.speed === 0)) await click("[data-act=speed][data-s='30']"); }
       await sleep(150);
     }
   };
