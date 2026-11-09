@@ -114,11 +114,31 @@ All starters pass the pre-publish checklist with no errors or claims (unit-teste
 ## Cost sense
 
 - **Models.** Opus only where `config/models.json` says: Builder, Designer, Illustrator. The Writer and Tester are on Sonnet. Starting a job costs no model call.
-- **Prompt caching.** Prompt caching is on for every Claude call (`buildRequest` in `server/anthropic.js`). The per-type playbook text sits in the cached system prompt (`laneBrief`, now with an `app` lane). Only the per-task brief changes between calls.
+- **Prompt caching.** Prompt caching is on for every Claude call (`buildRequest` in `server/anthropic.js`). The per-type playbook text sits in the cached system prompt (`laneBrief`, now with an `app` lane). Only the per-task brief changes between calls. See "Not paying twice" below for where the breakpoints go.
+- **A test of unchanged files is not run.** When a pass's build changed nothing that goes live, the Tester's last report is handed back as that test's result (`sameAsTested` in `server/makers.js`, asked by the engine before it starts a test). The loop goes on from that report exactly as from a fresh one. A live-link problem found since always gets a real test.
 - **Caps.** Passes are capped by `passes.depth` and `passes.max`, and model tokens by `passes.maxJobTokens`. Each task keeps the existing per-task limits. A pass that fails twice asks the boss.
+
+## Not paying twice
+
+None of this is in any prompt, and none of it lowers a bar: it only stops the building paying for the same thing again.
+
+- **Cache breakpoints** (`buildRequest`). Two per call: one on the system prompt, so tools and system are read back by any later call that shares them, whatever its messages are; and the API's own moving breakpoint (top-level `cache_control`), which lands on the newest turn, so step N of a tool loop reads steps 1 to N-1 at the cache price. `cache: 'system'` keeps only the first, for a one-off question; `cache: false` keeps neither, for chatter whose prompt is new every time.
+- **History stays as it was sent** (`withFiles` in `server/attachments.js`). A picture is shown where it was first looked at and stays there; looking again adds a line, not a second copy; and older pictures are let go a batch at a time (after 12, down to 6), not one for every new picture. A file saved again under the same name does not change what an earlier step is shown to have seen. Before this, every picture after the sixth rewrote an early message, and the next call paid the write price for most of the conversation.
+- **A long reply keeps its cache** (`KEEP_WARM_MS`). A cache entry lasts five minutes from the start of the request, and a long think can outlast it. While a reply is still being written, the same request is sent again every four minutes with `max_tokens: 0`, which reads the prefix (restarting its five minutes) and writes no reply. It is charged on the ledger with the call. `CACHE_KEEP_WARM=0` turns it off.
+- **The same screenshots get the same review** (`review_design`). Screenshots that are byte for byte the ones reviewed last time get that review back, with a note saying so. Nothing is sent to the other lab, nothing goes on the ledger, and it does not count as another look.
+- **A send-back that changed nothing is named.** When a task comes back from `review_task` with every file in its project as it was, the manager's state message says so, next to the report.
+- **A colleague's answer** (`ask_colleague`) runs on the asked colleague's own model, capped at high effort, with who they are and what they know as the cached part of the prompt. Chatter stays on `tools.talk`.
+
+To see the cache working against the real API (a few cents): `ANTHROPIC_KEY_FILE=... node scripts/proof-cache.mjs`. It prints the usage meters of a first call, the next step of the same loop, a call with other messages, and a keep-alive, and exits 1 if the cache was not read where it should have been.
+
+Things that were looked at and left alone, and why:
+
+- **Shortening old tool results in history.** On Opus 5.5 and Sonnet 5.5 a thinking block is only valid while everything sent before it is unchanged, so editing an earlier turn throws away the model's reasoning from there on (and is refused outright on accounts made since 31 August 2026), as well as costing the cache. Results are sized once, when they are made (`read_file` 40,000 characters, `fetch_url` 20,000), and never touched again. The one edit a long job still makes is `trimSteps`, which drops whole old steps in one go, well below its trigger so it is rare.
+- **The one-hour cache.** It doubles the write price on every step to guard against a gap that the keep-alive covers for a twentieth of the input price, and only when the gap actually happens.
 
 ## Tests
 
+- `test/cache.test.js`: the request for step N of a loop is step N-1's plus the new turn, with the breakpoint on the newest turn; pictures never rewrite an earlier step; the keep-alive is sent, charged and switched off.
 - `test/makers.test.js`, in the node suite:
   - ideas, tailoring, Surprise me and own words;
   - parsing the verdict;
