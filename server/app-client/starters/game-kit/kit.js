@@ -1,6 +1,7 @@
 // Office game kit: screens, input, audio, settings, saves, leaderboard and juice for any canvas game. No engine inside, so the 2D
 // (Phaser) and 3D (three.js) starters share it. The game plugs in with kit.run({ start, update, render, state }) and reads kit.input.
-// Test hook: window.officeGame.state() is what the Tester's playtest reads. Keep it working when you change the game.
+// Test hook: window.officeGame.state() is what the Tester's playtest reads. Keep it working when you change the game. The playtest also
+// times a run with no input, so state() says when the player is hurt: lives (or health) from the game, and hurts from playerHurt().
 const $ = (sel, root = document) => root.querySelector(sel);
 const el = (tag, attrs = {}, ...kids) => { const n = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else if (v !== false && v != null) n.setAttribute(k, v === true ? '' : v); } for (const c of kids.flat()) n.append(c?.nodeType ? c : document.createTextNode(String(c ?? ''))); return n; };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -147,7 +148,7 @@ export const juice = {
 };
 
 // ---- screens ----
-const state = { scene: 'boot', score: 0, best: 0, frames: 0, fps: 0, t: 0, game: null, title: document.title };
+const state = { scene: 'boot', score: 0, best: 0, frames: 0, fps: 0, t: 0, hurts: 0, won: false, game: null, title: document.title };
 let ui, game, last = 0, fpsAcc = 0, fpsN = 0;
 export function toast(text) { const t = el('div', { class: 'kit-toast', role: 'status' }, text); ui?.append(t); setTimeout(() => t.remove(), 2600); }
 function screen(name, ...kids) {
@@ -185,7 +186,7 @@ function settingsScreen(back) {
 function applyTouch() { const show = settings.touch === 'on' || (settings.touch === 'auto' && (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window)); ui.classList.toggle('kit-has-touch', show); }
 async function startGame() {
   if (state.scene === 'play') return;
-  screen(null); state.scene = 'play'; document.body.dataset.scene = 'play'; state.score = 0; state.t = 0;
+  screen(null); state.scene = 'play'; document.body.dataset.scene = 'play'; state.score = 0; state.t = 0; state.hurts = 0; state.won = false;
   audio.unlock(); audio.music(settings.music);
   await game.start?.();
 }
@@ -198,7 +199,7 @@ export function pause(on) {
 /** The game calls this when the run ends. It saves the best, posts the score and shows the game-over screen. */
 export async function gameOver({ score = state.score, won = false, stats = {} } = {}) {
   if (state.scene !== 'play') return;
-  state.scene = 'over'; document.body.dataset.scene = 'over'; state.score = Math.floor(score);
+  state.scene = 'over'; document.body.dataset.scene = 'over'; state.score = Math.floor(score); state.won = !!won;
   audio.sfx(won ? 'win' : 'lose');
   const isBest = state.score > state.best; if (isBest) state.best = state.score;
   const name = el('input', { type: 'text', maxlength: 24, value: settings.name || '', placeholder: 'Your name', 'aria-label': 'Your name for the leaderboard' });
@@ -211,6 +212,8 @@ export async function gameOver({ score = state.score, won = false, stats = {} } 
   await cloud.save('best', { best: state.best, at: Date.now() });
 }
 export const addScore = (n) => { state.score += n; };
+/** The game calls this each time the player is hurt or set back (a life, a chunk of health, a lamp lost). The playtest's idle run reads the count. */
+export const playerHurt = (n = 1) => { state.hurts += n; };
 /** A choice mid-run, such as an upgrade between waves. Play waits until one is picked. Resolves with the index. */
 export function choose(title, options) {
   return new Promise((resolve) => {
@@ -250,7 +253,8 @@ function frame(now) {
 
 /**
  * Starts everything. game: {title, pitch, howTo, start(), update(dt, input), render(dt, scene), quit(), state()}.
- * state() returns what the Tester's playtest compares as it plays: {score, lives, level, wave, player: {x, y}, ...}.
+ * state() returns what the Tester's playtest compares as it plays: {score, lives, level, wave, player: {x, y}, ...}. lives (or health) has to
+ * go down when the player is hurt: the playtest times how long a player who does nothing lasts.
  */
 export async function run(g) {
   game = g; state.title = g.title || document.title;
@@ -260,7 +264,7 @@ export async function run(g) {
   const boot = screen('boot', el('h1', {}, state.title), el('div', { class: 'kit-bar' }, el('i')));
   try { await g.boot?.((p) => { const i = boot.querySelector('.kit-bar i'); if (i) i.style.width = `${Math.round(p * 100)}%`; }); } catch (e) { console.error(e); }
   const saved = await cloud.load('best', null); state.best = saved?.best || 0;
-  window.officeGame = { version: 1, state: () => ({ scene: state.scene, score: state.score, best: state.best, t: Math.round(state.t * 10) / 10, frames: state.frames, fps: state.fps, device: input.device, inputs: input.events, cloud: cloud.live ? 'live' : cloud.office ? cloud.office.mode : 'none', ...(g.state?.() || {}) }), start: startGame, pause: () => pause(true), resume: () => pause(false), menu, forceOver: () => gameOver({}) };
+  window.officeGame = { version: 2, state: () => ({ scene: state.scene, score: state.score, best: state.best, hurts: state.hurts, won: state.won, t: Math.round(state.t * 10) / 10, frames: state.frames, fps: state.fps, device: input.device, inputs: input.events, cloud: cloud.live ? 'live' : cloud.office ? cloud.office.mode : 'none', ...(g.state?.() || {}) }), start: startGame, pause: () => pause(true), resume: () => pause(false), menu, forceOver: () => gameOver({}) };
   menu();
   requestAnimationFrame(frame);
 }

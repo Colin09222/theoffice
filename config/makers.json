@@ -24,7 +24,8 @@
       "doneRules": [
         { "id": "loads", "text": "Loads with 0 console errors", "check": "browser" },
         { "id": "inputs", "text": "Keyboard, touch and gamepad input change the game state", "check": "browser" },
-        { "id": "nosoftlock", "text": "No soft-lock over 60 s of scripted plus random input, and restart always works", "check": "browser" },
+        { "id": "nosoftlock", "text": "No soft-lock over 60 s of idle, scripted and random input, and restart always works", "check": "browser" },
+        { "id": "pressure", "text": "A player who does nothing is hurt within 30 s and has lost within 60 s, and nobody loses in the first 10 s", "check": "browser" },
         { "id": "fps", "text": "Frame rate stays playable", "check": "browser" },
         { "id": "screens", "text": "Menu, play, pause, game over and settings are all reachable", "check": "browser" },
         { "id": "cloud", "text": "Progress saves and scores post to the leaderboard through Office Cloud", "check": "browser" },
@@ -36,7 +37,7 @@
         { "id": "lategame", "text": "The late game holds up: the final boss or last level and the win screen work, checked every pass on a debug copy", "check": "judge" },
         { "id": "nocheats", "text": "No cheat or debug hook in the shipped build: no ?wave= style links, god mode, test keys or debug panels", "check": "judge", "serious": "major" }
       ],
-      "bars": { "maxConsoleErrors": 0, "softlockSeconds": 60, "frozenSeconds": 12, "minFps": 30, "headlessMinFps": 18, "minMechanics": 3, "minPlayMinutes": 10 }
+      "bars": { "maxConsoleErrors": 0, "softlockSeconds": 60, "frozenSeconds": 12, "idleHurtSeconds": 30, "idleLoseSeconds": 60, "idleSafeSeconds": 10, "minFps": 30, "headlessMinFps": 18, "minMechanics": 3, "minPlayMinutes": 10 }
     },
     "app": {
       "label": "App / SaaS",

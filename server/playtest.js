@@ -23,14 +23,90 @@ async function until(d, expr, ms = 5000, every = 100) {
 const KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'ShiftLeft', 'KeyA', 'KeyD', 'KeyW', 'KeyS'];
 async function hold(d, code, ms) { await d.key(code, true); await wait(ms); await d.key(code, false); }
 const median = (a) => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
-const STATE = 'window.officeGame ? window.officeGame.state() : null';
+// In brackets, so that `${STATE}?.scene === 'play'` tests the scene. Without them the test was swallowed by the conditional and was always true.
+const STATE = '(window.officeGame ? window.officeGame.state() : null)';
 const clickText = (sel, text) => `(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.textContent.trim() === ${JSON.stringify(text)}); if (b) b.click(); return !!b; })()`;
+const lifeOf = (s) => ['lives', 'health', 'hp'].map((k) => s?.[k]).find((v) => typeof v === 'number');
+const tenths = (ms) => Math.round(ms / 100) / 10;
 const moved = (a, b) => !!(a?.player && b?.player && (Math.abs(a.player.x - b.player.x) + Math.abs(a.player.y - b.player.y)) > 0.5);
 
+/** The numbers the browser half holds a game to. config/makers.json carries the same ones in the game's bars (unit-tested), so the briefs and this file agree. */
+export const GAME_BARS = { frozenSeconds: 12, headlessMinFps: 18, idleHurtSeconds: 30, idleLoseSeconds: 60, idleSafeSeconds: 10 };
+
+/**
+ * The "pressure" rule from an idle run's numbers. idle: {hurt, lose, won, watched, tellsHurt}, all times in seconds of play, null when it
+ * didn't happen while watched. True, false, or null when the run was too short to say. A hook with no lives, health or hurts can't say when
+ * the player was first hurt, so then only the time to game over is judged.
+ */
+export function idleVerdict(idle, bars = GAME_BARS) {
+  const hurtBar = bars.idleHurtSeconds ?? GAME_BARS.idleHurtSeconds, loseBar = bars.idleLoseSeconds ?? GAME_BARS.idleLoseSeconds, safe = bars.idleSafeSeconds ?? GAME_BARS.idleSafeSeconds;
+  const notes = [];
+  if (!idle) return { ok: null, notes };
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const hurt = num(idle.hurt), lose = num(idle.lose), watched = num(idle.watched) ?? 0;
+  let bad = false, unknown = false;
+  if (idle.won) { bad = true; notes.push(`A player who did nothing won the run${lose !== null ? ` after ${lose} s` : ''}.`); }
+  else if (lose !== null) {
+    if (lose < safe) { bad = true; notes.push(`A player who did nothing lost after ${lose} s. Nobody should lose in the first ${safe} s.`); }
+    else if (lose > loseBar) { bad = true; notes.push(`A player who did nothing lasted ${lose} s. The bar is game over within ${loseBar} s.`); }
+  } else if (watched >= loseBar) { bad = true; notes.push(`A player who did nothing was still alive after ${watched} s. The bar is game over within ${loseBar} s.`); }
+  else unknown = true;
+  if (hurt !== null) { if (hurt > hurtBar) { bad = true; notes.push(`A player who did nothing was first hurt after ${hurt} s. The bar is ${hurtBar} s.`); } }
+  else if (lose !== null && lose <= hurtBar) { /* lost inside the bar, so hurt inside it too */ }
+  else if (idle.tellsHurt && Math.max(watched, lose ?? 0) >= hurtBar) { bad = true; notes.push(`A player who did nothing was not hurt in the first ${hurtBar} s.`); }
+  else if (!idle.tellsHurt && !idle.won && (lose !== null || watched >= hurtBar)) notes.push('The test hook has no lives, health or hurts, so the time to first hurt is unknown and only the time to game over was judged.');
+  else if (!idle.won) unknown = true;
+  return { ok: bad ? false : unknown ? null : true, notes };
+}
+
+/**
+ * One run with no input at all, from its start: how long until the player is first hurt (lives, health or hp going down, or the hook's
+ * hurts count going up) and until game over. Time is counted only while the game is in play, so a choice screen, which waits for the
+ * player by design, costs nothing: its first option is picked and the run goes on. The clock is the game's own (the hook's t, seconds
+ * of play) when it has one that behaves, so a slow test machine, where the game runs slower than real time, doesn't make a game look
+ * gentler than it is. Otherwise it is real time spent in play.
+ */
+export async function idleRun(d, { maxSeconds = GAME_BARS.idleLoseSeconds, frozenSeconds = GAME_BARS.frozenSeconds, every = 200, fps = [], now: clock = Date.now, sleep = wait } = {}) {
+  const out = { hurt: null, lose: null, won: false, watched: 0, tellsHurt: false, picks: 0, clock: 'real', speed: 1, wallMs: 0, softlock: '' };
+  const began = clock(), wallEnd = began + maxSeconds * 2500;
+  let playMs = 0, last = began, prevScene = 'play', prevLife, prevHurts, lastT = null, frozenMs = 0, fpsAt = 0, away = 0, t0 = null, gameClock = true, clockMs = 0;
+  for (;;) {
+    await sleep(every);
+    let s; try { s = await d.evaluate(STATE); } catch { out.softlock = 'the page stopped answering'; break; }
+    if (!s) { out.softlock = 'the game\'s state went away'; break; }
+    const now = clock(), step = now - last; last = now;
+    if (prevScene === 'play') playMs += step;
+    prevScene = s.scene;
+    // The game's clock, checked against real time: it may run slower (a slow machine), never faster or backwards.
+    if (gameClock && (s.scene === 'play' || s.scene === 'over')) {
+      if (typeof s.t !== 'number') gameClock = false;
+      else { if (!t0) t0 = { t: s.t, at: playMs }; const g = t0.at + (s.t - t0.t) * 1000; if (g < clockMs - 150 || g > playMs * 1.1 + 1000) gameClock = false; else clockMs = Math.max(clockMs, g); }
+    }
+    if (!gameClock) clockMs = playMs;
+    if (s.scene === 'over') { out.lose = tenths(clockMs); out.won = s.won === true; break; }
+    if (s.scene === 'play') {
+      away = 0;
+      const life = lifeOf(s), hurts = typeof s.hurts === 'number' ? s.hurts : undefined;
+      if (life !== undefined || hurts !== undefined) out.tellsHurt = true;
+      if (out.hurt === null && ((life !== undefined && prevLife !== undefined && life < prevLife) || (hurts !== undefined && hurts > (prevHurts ?? 0)))) out.hurt = tenths(clockMs);
+      prevLife = life; prevHurts = hurts;
+      frozenMs = s.t === lastT ? frozenMs + step : 0; lastT = s.t;
+      if (typeof s.t === 'number' && frozenMs >= frozenSeconds * 1000) { out.softlock = `play froze for ${frozenSeconds} s`; break; }
+      if (s.fps && now - fpsAt >= 1000) { fpsAt = now; fps.push(s.fps); }
+    } else if (s.scene === 'pick') { out.picks++; if (++away > 20) { out.softlock = 'stuck on a choice screen'; break; } await d.evaluate('document.querySelector("[data-pick]")?.click()'); }
+    else if (s.scene === 'pause') { if (++away > 20) break; await d.evaluate('window.officeGame.resume && window.officeGame.resume()'); }
+    else if (++away > 10) break;
+    if (clockMs >= maxSeconds * 1000 || now > wallEnd) break;
+  }
+  out.watched = tenths(clockMs); out.wallMs = clock() - began;
+  out.clock = gameClock && t0 ? 'game' : 'real'; out.speed = playMs > 2000 ? Math.round((clockMs / playMs) * 100) / 100 : 1;
+  return out;
+}
+
 /** A game: boot, menu, settings, play, every input device, pause, a long random run, game over, restart, saves and the leaderboard. */
-export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 18, random = Math.random } = {}) {
+export async function playGame(d, { seconds = 60, frozenSeconds = GAME_BARS.frozenSeconds, minFps = GAME_BARS.headlessMinFps, random = Math.random, idle: idleOn = true, bars = GAME_BARS } = {}) {
   const notes = [], shots = [], scenes = new Set(), fps = [];
-  const rules = { loads: null, inputs: null, nosoftlock: null, fps: null, screens: null, cloud: null };
+  const rules = { loads: null, inputs: null, nosoftlock: null, pressure: null, fps: null, screens: null, cloud: null };
   const hooked = await until(d, 'window.officeGame && window.officeGame.state().scene === "menu"', 20000);
   if (!hooked) {
     notes.push('No window.officeGame hook reached the menu, so the game could not be driven. Keep the starter\'s test hook.');
@@ -62,6 +138,23 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
     }
     return (await d.evaluate(STATE))?.scene === 'play';
   };
+  // The idle run comes first, on a fresh run: nothing is pressed, and the clock runs until the player is hurt and until game over.
+  let idle = null, idleSoftlock = '', idleRestartOk = true;
+  // A game can pause itself as it starts (a focus change), and the time on pause is not counted.
+  if (idleOn && (await ensurePlay())) {
+    idle = await idleRun(d, { maxSeconds: bars.idleLoseSeconds ?? GAME_BARS.idleLoseSeconds, frozenSeconds, fps });
+    idleSoftlock = idle.softlock;
+    const v = idleVerdict(idle, bars); rules.pressure = idle.softlock ? null : v.ok;
+    if (idle.speed < 0.8) notes.push(`The game ran at about ${Math.round(idle.speed * 100)}% of real speed on this machine, so the idle times are in the game's own clock.`);
+    if (v.ok === null && !idle.softlock) notes.push(`The idle run was watched for ${idle.watched} s of play, too short to judge the pressure rule.`);
+    notes.push(`Idle run, no input: first hurt ${idle.hurt !== null ? `after ${idle.hurt} s` : idle.tellsHurt ? `not in ${idle.watched} s` : 'unknown'}, game over ${idle.lose !== null ? `after ${idle.lose} s${idle.won ? ' (a win)' : ''}` : `not in ${idle.watched} s`}.`, ...v.notes);
+    if (idle.lose !== null) {
+      scenes.add('over'); shots.push(await d.shot('over'));
+      await d.key('Enter', true); await d.key('Enter', false);
+      if (!(await until(d, `${STATE}?.scene === 'play'`, 3000))) idleRestartOk = false;
+      await wait(400);
+    }
+  }
   const tryMove = async (act, after) => {
     for (let k = 0; k < 2; k++) {
       if (!(await ensurePlay())) { notes.push('The game would not stay in play long enough to test input.'); return false; }
@@ -84,8 +177,10 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
   if (paused) shots.push(await d.shot('pause'));
   await d.key('Escape', true); await d.key('Escape', false); await until(d, `${STATE}?.scene === 'play'`, 1500);
   // The long run: scripted and random input, watched once a second.
-  let softlock = '', frozenFor = 0, lastT = -1, pickFor = 0, overlayFor = 0, restarts = 0, restartOk = true;
-  const end = Date.now() + seconds * 1000; let midShot = false, lastSample = 0;
+  // The idle run is part of the watched time, so the random run is shorter by it, though never under half.
+  let softlock = idleSoftlock, frozenFor = 0, lastT = -1, pickFor = 0, overlayFor = 0, restarts = 0, restartOk = idleRestartOk;
+  if (!idleRestartOk && !softlock) softlock = 'game over did not restart';
+  const runMs = Math.max(seconds * 500, seconds * 1000 - (idle?.wallMs || 0)), end = Date.now() + runMs; let midShot = false, lastSample = 0;
   while (Date.now() < end && !softlock) {
     const r = random();
     if (r < 0.55) await hold(d, KEYS[Math.floor(random() * KEYS.length)], 80 + Math.floor(random() * 220));
@@ -101,7 +196,7 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
       if (s.fps) fps.push(s.fps);
       frozenFor = s.t === lastT ? frozenFor + 1 : 0; lastT = s.t;
       if (frozenFor >= frozenSeconds) softlock = `play froze for ${frozenSeconds} s`;
-      if (!midShot && Date.now() > end - seconds * 500) { midShot = true; shots.push(await d.shot('play')); }
+      if (!midShot && Date.now() > end - runMs / 2) { midShot = true; shots.push(await d.shot('play')); }
     } else if (s.scene === 'over') {
       if (!shots.some((x) => /over/.test(x))) shots.push(await d.shot('over'));
       await d.key('Enter', true); await d.key('Enter', false); restarts++;
@@ -144,7 +239,7 @@ export async function playGame(d, { seconds = 60, frozenSeconds = 12, minFps = 1
   rules.screens = ['menu', 'play', 'pause', 'over'].every((x) => scenes.has(x)) && settingsOk;
   if (!rules.screens) notes.push(`Screens reached: ${[...scenes].filter(Boolean).join(', ')}${settingsOk ? ', settings' : ''}.`);
   const errors = await errorsOf(d); rules.loads = !errors.length;
-  return { rules, notes, shots, errors, fps: f, restarts, scenes: [...scenes].filter(Boolean), input };
+  return { rules, notes, shots, errors, fps: f, restarts, scenes: [...scenes].filter(Boolean), input, idle: idle ? { hurt: idle.hurt, lose: idle.lose, won: idle.won, watched: idle.watched, tellsHurt: idle.tellsHurt, clock: idle.clock, speed: idle.speed } : null };
 }
 
 async function errorsOf(d) { let page = []; try { page = (await d.evaluate('window.__pt ? window.__pt.errors : []')) || []; } catch { /* gone */ } return [...new Set([...(d.errors?.() || []), ...page])].slice(0, 20); }
