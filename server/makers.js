@@ -102,7 +102,7 @@ export function surprise(type, { seed = Date.now(), cfg = CONFIG, floor = null, 
   const { ownProject, ...card } = pool[Math.floor(rng(seed)() * pool.length)] || cardFor(type, bank[0], cfg);
   return card;
 }
-export const starterFor = (type, text = '') => (type === 'game' ? (/\b(3d|three|first[- ]person|fly|flying|drive|driving|planet|race|racing|island|glide)\b/i.test(text) ? 'game-3d' : 'game-2d') : type === 'app' ? 'app' : type === 'website' ? 'website' : '');
+export const starterFor = (type, text = '') => (type === 'game' ? (/\b(3d|three|first[- ]person|fly|flying|drive|driving|planet|race|racing|island|glide)\b/i.test(text) ? 'game-3d' : 'game-2d') : type === 'app' ? 'app' : type === 'website' ? 'website' : type === 'shop' ? 'shop' : '');
 /** The boss's own words: a name made from them, the type's goal and plan, and the words themselves as the pitch. */
 export function fromWords(type, text, cfg = CONFIG) {
   const said = clip(text, 400);

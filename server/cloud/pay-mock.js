@@ -123,11 +123,25 @@ export async function startMockStripe({ apiKey = 'sk_test_mock_key', connectedSe
     if (p.mode === 'payment' && p.subscription_data) return invalid('You can only set `subscription_data` in `subscription` mode.');
     if (p.mode === 'subscription' && p.payment_intent_data) return invalid('You can only set `payment_intent_data` in `payment` mode.');
     if (p.mode === 'subscription' && p.customer_creation) return invalid('`customer_creation` can only be set in `payment` and `setup` mode.');
+    // Every line is checked the way the first is, and a basket's total is the sum of its lines.
+    let total = 0; const lineList = [];
+    for (const li of p.line_items) {
+      const pr = d.prices.get(li?.price);
+      if (!pr) return invalid(`No such price: '${li?.price}'`, { code: 'resource_missing' });
+      if (!pr.active) return invalid('The price specified is inactive. This field only accepts active prices.');
+      if (p.mode === 'payment' && pr.recurring) return invalid('You must specify `mode` to be `subscription` for recurring prices.');
+      const q = Number(li.quantity || 1);
+      if (!Number.isInteger(q) || q < 1) return invalid('quantity must be a positive integer.');
+      total += pr.unit_amount * q; lineList.push({ price: li.price, quantity: q });
+    }
+    const sac = p.shipping_address_collection;
+    if (sac !== undefined && !(Array.isArray(sac?.allowed_countries) && sac.allowed_countries.length && sac.allowed_countries.every((c) => /^[A-Z]{2}$/.test(c)))) return invalid('shipping_address_collection.allowed_countries must be a list of two-letter country codes.');
+    if (sac && p.mode !== 'payment') return invalid('shipping_address_collection is for payment mode.');
     if (p.payment_intent_data?.application_fee_amount !== undefined || p.subscription_data?.application_fee_percent !== undefined) return invalid('Mock: this platform never takes an application fee.');
     if (!p.success_url || !/^https?:\/\//.test(p.success_url)) return invalid('success_url must be a URL.');
     const id = `cs_test_${rid(40)}`;
     const session = {
-      id, object: 'checkout.session', amount_subtotal: price.unit_amount * Number(item.quantity || 1), amount_total: price.unit_amount * Number(item.quantity || 1), client_reference_id: p.client_reference_id || null, created: now(),
+      id, object: 'checkout.session', amount_subtotal: total, amount_total: total, lines: lineList, shipping_address_collection: sac || null, collected_information: null, client_reference_id: p.client_reference_id || null, created: now(),
       currency: price.currency, customer: p.customer || null, customer_creation: p.customer_creation || null, customer_details: null, customer_email: p.customer_email || null, expires_at: now() + 86400, livemode: false,
       metadata: p.metadata || {}, mode: p.mode, payment_intent: null, payment_intent_data: p.payment_intent_data || null, payment_status: 'unpaid', status: 'open', subscription: null, subscription_data: p.subscription_data || null,
       success_url: p.success_url, cancel_url: p.cancel_url || null, url: `${base}/hosted/checkout/${id}?a=${acct}`, invoice: null, line_price: item.price,
@@ -154,6 +168,11 @@ export async function startMockStripe({ apiKey = 'sk_test_mock_key', connectedSe
     if (!customer) { customer = `cus_${rid(14)}`; d.customers.set(customer, { id: customer, object: 'customer', email, created: now() }); }
     s.customer = customer;
     s.customer_details = { email, name: 'Test Buyer', address: null, tax_exempt: 'none', tax_ids: [] };
+    if (s.shipping_address_collection) {
+      const address = { line1: '12 Test Lane', line2: null, city: 'Testville', state: 'CA', postal_code: '94000', country: s.shipping_address_collection.allowed_countries[0] };
+      s.customer_details.address = address;
+      s.collected_information = { shipping_details: { name: 'Test Buyer', address } };
+    }
     s.status = 'complete';
     if (s.mode === 'subscription') {
       const sub = `sub_${rid(24)}`;
@@ -332,7 +351,7 @@ export async function startMockStripe({ apiKey = 'sk_test_mock_key', connectedSe
       const s = acct && db(acct).sessions.get(m[1]);
       if (!s) { res.writeHead(404); return res.end('No such session'); }
       const price = db(acct).prices.get(s.line_price);
-      if (req.method === 'GET' && !m[2]) return send(page('Pay with Stripe', `<p id="what">${esc(db(acct).products.get(price.product)?.name)}</p><p id="amount">${(price.unit_amount / 100).toFixed(2)} ${esc(price.currency.toUpperCase())}${price.recurring ? ` / ${esc(price.recurring.interval)}` : ''}</p><form method="post" action="/hosted/checkout/${esc(m[1])}/pay?a=${esc(acct)}"><input name="email" value="buyer@example.com" aria-label="Email"><button id="pay" type="submit">Pay</button></form>${s.cancel_url ? `<a id="cancel" href="${esc(s.cancel_url)}">Cancel</a>` : ''}`));
+      if (req.method === 'GET' && !m[2]) return send(page('Pay with Stripe', `<p id="what">${(s.lines || [{ price: s.line_price, quantity: 1 }]).map((l) => { const pr = db(acct).prices.get(l.price); return `${l.quantity > 1 ? `${l.quantity} x ` : ''}${esc(db(acct).products.get(pr.product)?.name)}`; }).join('<br>')}</p>${s.shipping_address_collection ? '<p id="ship">Shipping address: collected here, on Stripe\'s page.</p>' : ''}<p id="amount">${(s.amount_total / 100).toFixed(2)} ${esc(price.currency.toUpperCase())}${price.recurring ? ` / ${esc(price.recurring.interval)}` : ''}</p><form method="post" action="/hosted/checkout/${esc(m[1])}/pay?a=${esc(acct)}"><input name="email" value="buyer@example.com" aria-label="Email"><button id="pay" type="submit">Pay</button></form>${s.cancel_url ? `<a id="cancel" href="${esc(s.cancel_url)}">Cancel</a>` : ''}`));
       if (req.method === 'POST' && m[2]) { const f = parseForm(body); await payCheckout(acct, m[1], { email: f.email || 'buyer@example.com' }); return go(s.success_url.replace('{CHECKOUT_SESSION_ID}', m[1])); }
     }
     if ((m = /^\/hosted\/onboard\/([^/]+)(\/finish)?$/.exec(path))) {

@@ -707,6 +707,8 @@ export class Engine {
     if (!had) run(this.db, 'INSERT INTO projects (floor_id,slug,title,created_at,private) VALUES (?,?,?,?,?)', floor.id, slug, title || slug, this.now(), floor.default_private || makePrivate ? 1 : 0);
     if (makePrivate) run(this.db, 'UPDATE projects SET private=1 WHERE floor_id=? AND slug=?', floor.id, slug);
     if (published) run(this.db, 'UPDATE projects SET title=?,description=?,kind=?,sources=?,published_at=? WHERE floor_id=? AND slug=?', title || slug, description || '', kind, JSON.stringify(sources || []), this.now(), floor.id, slug);
+    // A shop that goes live asks the boss to put its catalogue on sale (server/shop.js).
+    if (published) this.shopPublished?.(floor, slug);
   }
   /** The boss's files the manager handed to this task. */
   taskFiles(task) {
@@ -724,8 +726,8 @@ export class Engine {
     if (this.daily) ({ title, brief, plan } = this.daily.taskWords(floor.id, target.role, { title, brief, plan: plan ?? '' }));
     const project = wanted || (priv || floor.default_private ? 'private-work' : '');
     if (project) this.upsertProject(floor, project, { title: project, makePrivate: priv });
-    // A game or app asked for in chat starts on the same tested starter as one from the maker cards.
-    if (project && (lane === 'game' || lane === 'app') && this.cfg.computerEnabled) seedStarter(this.db, floor, project, lane, `${title} ${brief}`, this.cfg);
+    // A game, app or shop asked for in chat starts on the same tested starter as one from the maker cards.
+    if (project && (lane === 'game' || lane === 'app' || lane === 'shop') && this.cfg.computerEnabled) seedStarter(this.db, floor, project, lane, `${title} ${brief}`, this.cfg);
     const deps = dependsOn.map(Number).filter((n) => Number.isInteger(n)).slice(0, 10);
     if (afterPrevious) {
       const prev = get(this.db, "SELECT id FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked') ORDER BY id DESC LIMIT 1", floor.id);

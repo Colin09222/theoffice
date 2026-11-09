@@ -147,6 +147,9 @@ const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: '
   projects: { payment_link: "TEXT NOT NULL DEFAULT ''", launch_check: "TEXT NOT NULL DEFAULT ''", launch_report: "TEXT NOT NULL DEFAULT ''", design_review: "TEXT NOT NULL DEFAULT ''", indexable: 'INTEGER NOT NULL DEFAULT 0' },
 };
 Object.assign(ADDED.tasks, { vault: 'INTEGER NOT NULL DEFAULT 0' });
+// Selling: whether a product is posted to the buyer, and what the boss needs to send an order (what was in the basket, who bought it, where it goes).
+ADDED.pay_products = { ships: 'INTEGER NOT NULL DEFAULT 0' };
+ADDED.pay_orders = { items: "TEXT NOT NULL DEFAULT ''", email: "TEXT NOT NULL DEFAULT ''", buyer_name: "TEXT NOT NULL DEFAULT ''", ship_to: "TEXT NOT NULL DEFAULT ''", told: 'INTEGER NOT NULL DEFAULT 0', told_buyer: 'INTEGER NOT NULL DEFAULT 0', fulfilled_at: 'INTEGER' };
 // floors-plus: filler companies are flagged in the row itself, and the last time the boss opened the floor decides whether standing orders keep running.
 ADDED.floors = { filler: 'INTEGER NOT NULL DEFAULT 0', last_opened_at: 'INTEGER NOT NULL DEFAULT 0' };
 // lanes: which playbook a task belongs to (game, website or business), so the person doing it gets their part of that playbook.

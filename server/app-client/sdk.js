@@ -422,7 +422,7 @@
     var payLocal = { ok: false, ready: false, code: 'local', message: 'Payments work once this site is published.' };
     var payFailed = function (e) { return { ok: false, ready: true, code: (e && e.code) || 'failed', message: (e && e.message) || 'That did not work. Try again in a moment.' }; };
     // Always a page on this site: the server refuses anything else, and these are the only kinds it builds a Stripe URL back to.
-    var herePath = function () { return location.pathname + location.search.replace(/([?&])office_pay=[^&]*(&|$)/, function (m, a, b) { return b ? a : ''; }); };
+    var herePath = function () { return location.pathname + location.search.replace(/([?&])office_(pay|order)=[^&]*(&|$)/g, function (m, a, k, b) { return b ? a : ''; }); };
     // Stripe's pages refuse to open in a frame, so inside a preview frame they go to a new tab.
     var inFrame = function () { try { return window.top !== window.self; } catch (e) { return true; } };
     var leave = function (url) { if (inFrame()) window.open(url, '_blank', 'noopener'); else location.assign(url); };
@@ -432,18 +432,29 @@
         if (self.mode === 'local') return Promise.resolve({ ready: false, testMode: false, message: payLocal.message, products: [] });
         return request('GET', 'pay/status').catch(function () { return { ready: false, testMode: false, message: payNotReady.message, products: [] }; });
       },
-      /** Sends the visitor to Stripe's own checkout page for this product. Resolves to {ok: true, url} just before leaving (or stays when {redirect: false}); {ok: false, message} when it can't. */
+      /** Sends the visitor to Stripe's own checkout page: for one product ({product}), or a whole basket ({items: [{product, quantity}]}). Resolves to {ok: true, url} just before leaving (or stays when {redirect: false}); {ok: false, message} when it can't. */
       checkout: function (o) {
         o = o || {};
         var redirect = o.redirect !== false;
         if (self.mode === 'local') return Promise.resolve(payLocal);
-        return request('POST', 'pay/checkout', { product: o.product, returnPath: o.returnPath || herePath() }, { timeout: 25000 })
+        var what = o.items ? { items: o.items } : { product: o.product };
+        what.returnPath = o.returnPath || herePath();
+        return request('POST', 'pay/checkout', what, { timeout: 25000 })
           .then(function (r) { if (r.ok && r.url && redirect) leave(r.url); return r; }, payFailed);
       },
       /** True when this signed-in person has paid for this product and it hasn't lapsed or been refunded. Decided on the server each time. */
       has: function (product) {
         if (self.mode === 'local') return Promise.resolve(false);
         return request('GET', 'pay/has?product=' + enc(product)).then(function (r) { return !!r.has; }, function () { return false; });
+      },
+      /** 'success' or 'cancelled' when the visitor has just come back from Stripe's page, otherwise ''. */
+      returned: function () { var m = /[?&]office_pay=(success|cancelled)/.exec(location.search); return m ? m[1] : ''; },
+      /** The order this visitor has just placed, for a thank-you: {ok, number, paid, status, items: [{name, quantity, amountCents}], totalCents, currency, emailed, testMode}. {ok: false} when there is none. Never throws. */
+      order: function (token) {
+        if (self.mode === 'local') return Promise.resolve({ ok: false, code: 'local', message: payLocal.message });
+        var m = /[?&]office_order=([A-Za-z0-9_-]+)/.exec(location.search);
+        var t = token || (m ? m[1] : '');
+        return request('GET', 'pay/order' + (t ? '?token=' + enc(t) : '')).catch(function (e) { return { ok: false, code: (e && e.code) || 'failed', message: (e && e.message) || 'That order could not be found.' }; });
       },
       /** Sends a subscriber to Stripe's own page to cancel or update. Resolves like checkout. */
       manage: function (o) {
