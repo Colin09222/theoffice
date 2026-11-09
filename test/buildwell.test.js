@@ -156,6 +156,17 @@ const person = (role) => ({ name: 'S', title: 'T', role });
 // Everything a bot is told before and during a job, on each path.
 const everyPrompt = (cfg) => [managerPrompt(floor, BOSS, ROSTER, cfg), managerPrompt(floor, BOSS, ROSTER, BARE), ...STAFF.flatMap((r) => [staffPrompt(floor, person(r), {}, { lane: '' }, cfg), computerPrompt(cfg, r, {}), computerBriefing(floor, person(r), {}, { id: 1, title: 'x', brief: 'y', project: 'p', lane: '' }, cfg)]), ...LANES.flatMap((lane) => STAFF.flatMap((r) => [laneBrief(lane, r, cfg), computerBriefing(floor, person(r), {}, { id: 1, title: 'x', brief: 'y', project: 'p', lane }, cfg)]))];
 
+test('a screenshot saved again while it is being read is looked for again, instead of stopping the floor', async () => {
+  const { Computer } = await import('../server/computer.js');
+  let tries = 0;
+  const client = { listOutputs: async () => [{ filename: 'review-2.png', id: tries ? 'new' : 'old', size: 9, createdAt: String(tries) }], download: async (id) => { tries++; if (id === 'old') throw Object.assign(new Error('not found'), { status: 404 }); return Buffer.from('picture'); } };
+  const computer = new Computer({ cfg: { maxSessionsFloor: 1, maxSessionsGlobal: 1 } }, client);
+  computer.outputWaitMs = 5000;
+  const st = { id: 'sesn_1', ctx: {} };
+  computer.equip(st);
+  assert.equal(String(await st.ctx.readOutput('review-2.png')), 'picture'); assert.equal(tries, 2);
+});
+
 test('a model that thinks for a long time is not taken for a dead connection', () => {
   assert.ok(STREAM_QUIET_MS >= 15 * 60_000, `${STREAM_QUIET_MS}`);
 });

@@ -639,7 +639,11 @@ export class Computer {
       const until = Date.now() + (this.outputWaitMs ?? OUTPUT_WAIT_MS);
       for (;;) {
         const hit = (await this.client.listOutputs(st.id)).filter((f) => f.filename === file).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
-        if (hit) return hit.size > MAX_ARCHIVE_BYTES ? null : this.client.download(hit.id);
+        if (hit) {
+          if (hit.size > MAX_ARCHIVE_BYTES) return null;
+          // Saved again a moment ago, the listing can still name the copy that replaced: that one is gone, and the new one shows up shortly. Never a reason to stop the floor.
+          try { return await this.client.download(hit.id); } catch (err) { if (err?.status !== 404) throw err; }
+        }
         if (Date.now() > until) return null;
         await sleep(2000);
       }
