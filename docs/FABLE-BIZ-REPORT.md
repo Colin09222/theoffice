@@ -188,12 +188,36 @@ publishes, comparing what it flags with what the outside reviewers flag. If it m
 
 ## Test results
 
-- `AI_MODE=mock npm test` on the merged branch: see the last section.
-- Browser, real Chrome: `shop.mjs` all passed; `business.mjs` 18 of 18; `pay.mjs` passed.
-- One test fails in this container and on main alike: `test/domains.test.js` "the key only travels over TLS… over IPv4" needs IPv6
-  (`listen EAFNOSUPPORT ::1`).
-- Tests changed because the behaviour legitimately changed: `pay.test.js` (products carry `ships`), `lanes.test.js` (a fifth lane),
-  `customise.test.js` (the outside reviewer is not company staff, so it doesn't carry the company's voice).
+All on the final merged branch, Node 22, `AI_MODE=mock`, in a cloud container.
+
+- **`npm test`: 1,542 of 1,543 pass.** The one failure is `test/domains.test.js`, "the key only travels over TLS… over IPv4": it listens on
+  `::1` and this container has no IPv6 (`listen EAFNOSUPPORT`). It fails the same way on main here.
+- **New test files:** `test/shop.test.js` (18), `test/shipcheck.test.js` (8), `test/cache.test.js`, `test/pressure.test.js` (28), and
+  `test/browser/shop.mjs`.
+- **Browser, real Chrome:**
+  - `shop.mjs`: all passed, phone and desktop.
+  - `business.mjs`: 18 of 18.
+  - `pay.mjs`: passed.
+  - `makers.mjs`, full 60 s runs: 56 of 56 (run on the games work before the final merge; the node suite covers the merge).
+  - `e2e.mjs`: **not a clean run.** One step fails here, "owner: pause, resume, redirect and stop controls work from the UI" (timed out
+    waiting for old tasks cancelled), and the run is too slow in this container to finish. The same step fails the same way on untouched
+    main in this container, and the same redirect through the API cancels the tasks as it should, so I believe it is the container and
+    not this branch. In the one run that got furthest, 64 checks passed and that was the only failure. **Please run `e2e.mjs` on the
+    integration machine before merging.**
+- **Tests changed because behaviour legitimately changed:** `pay.test.js` (products carry `ships`), `lanes.test.js` (a fifth lane),
+  `customise.test.js` (the outside reviewer is not company staff, so it doesn't carry the company's voice), and the mock Builder now
+  writes a live file each maker pass, as a real build does. No test was weakened.
+
+## For whoever deploys it
+
+- Nothing new is required. Tables and columns are added at boot.
+- The ship check uses the building's Claude key with `claude-fable-5-2`. That model needs 30-day data retention on the account. If the
+  account can't use it the call fails quietly and publishes go on. `SHIP_CHECK=0` switches it off; `CACHE_KEEP_WARM=0` switches off the
+  cache keep-alive.
+- The buyer's confirmation email needs the building's mail to be on.
+- For the judged builds: the building needs its Stripe test key and webhook secret set (docs/PAYMENTS.md, "Going live"), and each test
+  boss connects Stripe and taps **Approve all** under Requests. Until both are done a shop says it can't take cards and takes order
+  requests instead, which is the designed behaviour, not a failure.
 
 ## What I'd do next
 
