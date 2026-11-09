@@ -44,6 +44,18 @@ export function buildStatics(pub, base) {
   // Stylesheets name fonts by absolute path, the page names everything by absolute path.
   const stampPaths = (text) => text.replace(new RegExp(`${base}(/[A-Za-z0-9_./-]+\\.[a-z0-9]+)`, 'g'), (whole, path) => (versions.has(path) ? `${whole}?v=${versions.get(path)}` : whole));
   for (const [p, body] of raw) if (p.endsWith('.css')) { const b = Buffer.from(stampPaths(body.toString('utf8'))); versions.set(p, version(b)); bodies.set(p, b); }
+  // The page's stylesheets go out as one file, in their own order so the cascade is the same: a slow phone waits on each request before it can paint.
+  const page = raw.get('/index.html')?.toString('utf8');
+  if (page) {
+    const tags = [...page.matchAll(new RegExp(`<link rel="stylesheet" href="${base}/css/([a-z0-9-]+)\\.css">\\n?`, 'g'))];
+    if (tags.length > 1 && tags.every((m) => bodies.has(`/css/${m[1]}.css`))) {
+      const all = Buffer.from(tags.map((m) => bodies.get(`/css/${m[1]}.css`).toString('utf8')).join('\n'));
+      versions.set('/css/all.css', version(all)); bodies.set('/css/all.css', all);
+      let rewritten = page.replace(tags[0][0], `<link rel="stylesheet" href="${base}/css/all.css">\n`);
+      for (const m of tags.slice(1)) rewritten = rewritten.replace(m[0], '');
+      raw.set('/index.html', Buffer.from(rewritten));
+    }
+  }
   for (const [p, body] of raw) if (p.endsWith('.html')) { const b = Buffer.from(stampPaths(body.toString('utf8'))); versions.set(p, version(b)); bodies.set(p, b); }
 
   const map = new Map();

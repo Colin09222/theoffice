@@ -155,8 +155,9 @@ body.flying .ticker { opacity: 0; transition: opacity .2s; }
 .dir-hours.closed { opacity: .6; }
 
 /* ---- launch parties ---- */
-.confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 60; }
-.confetti i { position: absolute; top: -16px; width: 9px; height: 14px; border-radius: 2px; opacity: .95; animation: confetti-fall 3s cubic-bezier(.25, .6, .45, 1) both; }
+/* Under #ui, so the header, the lift and the sheet are never covered: the party happens in the room. */
+.confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
+.confetti i { position: absolute; top: -16px; width: 9px; height: 14px; border-radius: 2px; opacity: .95; animation: confetti-fall 1.7s cubic-bezier(.25, .6, .45, 1) both; }
 .confetti i:nth-child(3n) { width: 7px; height: 7px; border-radius: 50%; }
 .confetti i:nth-child(4n) { width: 12px; height: 5px; }
 @keyframes confetti-fall { 0% { transform: translate3d(0, 0, 0) rotate(0); } 100% { transform: translate3d(var(--dx, 0), 106vh, 0) rotate(var(--spin, 360deg)); opacity: .7; } }

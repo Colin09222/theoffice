@@ -14,15 +14,15 @@ export function fanfare() {
   setTimeout(() => sfx('ding', { volume: 0.75, rate: 1.5 }), 300);
 }
 
-export function confetti({ brand, pieces = 64 } = {}) {
+export function confetti({ brand, pieces = window.innerWidth <= 760 ? 30 : 48 } = {}) {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const colors = brand ? [brand, ...COLORS] : COLORS;
   const layer = h('div.confetti', { 'aria-hidden': 'true', 'data-party': 'confetti' });
   for (let i = 0; i < pieces; i++) {
-    layer.append(h('i', { css: { left: `${Math.random() * 100}%`, background: colors[i % colors.length], '--dx': `${Math.round((Math.random() - 0.5) * 240)}px`, '--spin': `${Math.round(Math.random() * 900 - 450)}deg`, 'animation-delay': `${(Math.random() * 0.7).toFixed(2)}s`, 'animation-duration': `${(2.4 + Math.random() * 1.6).toFixed(2)}s` } }));
+    layer.append(h('i', { css: { left: `${Math.random() * 100}%`, background: colors[i % colors.length], '--dx': `${Math.round((Math.random() - 0.5) * 240)}px`, '--spin': `${Math.round(Math.random() * 900 - 450)}deg`, 'animation-delay': `${(Math.random() * 0.3).toFixed(2)}s`, 'animation-duration': `${(1.3 + Math.random() * 0.8).toFixed(2)}s` } }));
   }
   document.body.append(layer);
-  setTimeout(() => layer.remove(), 5200);
+  setTimeout(() => layer.remove(), 2600);
 }
 
 /** One party a minute in any tab, and the same launch is never celebrated twice. */

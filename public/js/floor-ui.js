@@ -277,6 +277,8 @@ class FloorPage {
     if (this.stepBtn) { const up = !phone || this.sheet !== 'full'; this.stepBtn.replaceChildren(icon(up ? 'caret-up' : 'caret-down')); this.stepBtn.setAttribute('aria-label', up ? 'Make this panel bigger' : 'Make this panel smaller'); }
     this.pillEl.hidden = phone || this.panelOpen;
     if (!this.pillEl.hidden) this.pillEl.replaceChildren(icon(this.owner ? 'phone-call' : 'chats-teardrop'), this.canSeeChat ? (this.owner ? `Call ${this.manager?.name || 'your manager'}` : 'Read the chat') : 'See what they\'re saying');
+    // A toast at the foot of the room goes above whatever banner is there, so it needs that banner's height.
+    document.documentElement.style.setProperty('--controls-h', `${phone ? this.controlsEl.offsetHeight : 0}px`);
     const w = window.innerWidth, h = window.innerHeight;
     if (!this.view) return;
     if (phone) {

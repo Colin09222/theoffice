@@ -4,7 +4,8 @@
 // 0 faces the back wall, PI faces the camera, PI/2 faces the left wall, -PI/2 faces the right.
 export const ROOM_W = 32, ROOM_D = 20, CELL = 0.5, WALL_H = 4.6;
 const Q = Math.PI / 2, HALF = Math.PI;
-const DOOR_W = 1.6;
+// Wide enough for a person to walk through with their arms at their sides and a little to spare: they are chunky.
+const DOOR_W = 2.2;
 const SIDES = { n: { n: [0, 1], t: [1, 0] }, s: { n: [0, -1], t: [1, 0] }, w: { n: [1, 0], t: [0, 1] }, e: { n: [-1, 0], t: [0, 1] } };
 const OPPOSITE = { n: 's', s: 'n', e: 'w', w: 'e' };
 const RY = { n: 0, s: HALF, w: Q, e: -Q };
@@ -24,6 +25,8 @@ function edge([x0, z0, x1, z1], side) {
   if (side === 'w') return { line: `v${x0}`, c: x0, a: z0, b: z1 };
   return { line: `v${x1}`, c: x1, a: z0, b: z1 };
 }
+/** The walls that leave a sitter facing away from the camera, and the wall to use instead. */
+const FACING = { n: 'e', w: 's' };
 const OUTER = new Set([`h${-ROOM_D / 2}`, `h${ROOM_D / 2}`, `v${-ROOM_W / 2}`, `v${ROOM_W / 2}`]);
 
 function deskIn(rect, wall, big) {
@@ -40,7 +43,7 @@ function meetingFor(rect, opts) {
   if (opts.crates) return { table: [tx, tz], kind: 'crates', size: [1.5, 1.5], block: [2.6, 1.5], chairs: [], stand: [tx, tz - 1.45], spots: [[tx - 1.7, tz + 1.5], [tx - 0.5, tz + 1.5], [tx + 0.7, tz + 1.5], [tx + 1.9, tz + 1.5], [tx - 2.1, tz], [tx + 2.1, tz], [tx - 2.0, tz - 1.4], [tx + 2.0, tz - 1.4]] };
   if (w >= 9) return { table: [tx, tz], size: [2.2, 1.5, 2.0], block: [6.4, 3.2],
     chairs: [[tx - 2.85, tz, Q], [tx + 2.85, tz, -Q], [tx - 1.3, tz - 1.15, 0], [tx, tz - 1.15, 0], [tx + 1.3, tz - 1.15, 0], [tx - 1.3, tz + 1.15, HALF], [tx, tz + 1.15, HALF], [tx + 1.3, tz + 1.15, HALF]], stand: [tx, tz - 2.25],
-    spots: [[tx - 2.7, tz + 2.15], [tx - 1.3, tz + 2.15], [tx + 1.3, tz + 2.15], [tx + 2.7, tz + 2.15], [tx - 3.95, tz], [tx + 3.95, tz], [tx - 2.4, tz - 2.15], [tx + 2.4, tz - 2.15]] };
+    spots: [[tx - 3.3, tz + 2.15], [tx - 1.6, tz + 2.15], [tx + 1.6, tz + 2.15], [tx + 3.3, tz + 2.15], [tx - 3.95, tz], [tx + 3.95, tz], [tx - 2.4, tz - 2.15], [tx + 2.4, tz - 2.15]] };
   return { table: [tx, tz], size: [1.5, 1.5], block: [3.4, 1.3],
     chairs: [[tx - 2.05, tz, Q], [tx + 2.05, tz, -Q], [tx - 0.9, tz + 0.8, HALF], [tx + 0.9, tz + 0.8, HALF]], stand: [tx - 0.3, tz - 1.2],
     spots: [[tx - 2.2, tz + 1.55], [tx - 0.8, tz + 1.55], [tx + 0.5, tz + 1.55], [tx + 2.1, tz + 1.55], [tx - 2.75, tz], [tx + 2.75, tz], [tx - 2.75, tz - 1.2], [tx + 2.75, tz - 1.2]] };
@@ -73,7 +76,8 @@ function make(def) {
       room.door = room.door || { side, at: c, x: e.line[0] === 'h' ? c : e.c, z: e.line[0] === 'h' ? e.c : c };
     }
     if (kind === 'staff' || kind === 'office') {
-      room.wall = spec.wall || OPPOSITE[spec.door];
+      // A desk against the door's far wall would leave some people with their backs to the viewer, who would then never see a tie. Those desks go on the wall to the side.
+      room.wall = spec.wall || FACING[OPPOSITE[spec.door]] || OPPOSITE[spec.door];
       const d = deskIn(rect, room.wall, kind === 'office');
       room.desk = d;
       if (kind === 'staff') { plan.desks.push(d); plan.shared ||= []; const half = (SIDES[room.wall].n[0] ? z1 - z0 : x1 - x0) / 2; if (half >= 2) plan.shared.push(sharedDesk(room)); } else plan[id] = d;
@@ -97,7 +101,8 @@ function make(def) {
     const c = Number(line.slice(1)); const along = line[0] === 'h';
     const merged = []; for (const [a, b] of [...list].sort((p, q) => p[0] - q[0])) { const last = merged.at(-1); if (last && a <= last[1] + 1e-6) last[1] = Math.max(last[1], b); else merged.push([a, b]); }
     for (const [a, b] of merged) {
-      const gaps = (doors.get(line) || []).filter(([p, q]) => p >= a - 1e-6 && q <= b + 1e-6).filter((g, i, all) => all.findIndex((o) => Math.abs(o[0] - g[0]) < 1e-6) === i);
+      // A door near the end of a wall is trimmed to the wall it stands in; it still has to be wide enough to walk through.
+      const gaps = (doors.get(line) || []).filter(([p, q]) => q > a + 1e-6 && p < b - 1e-6).map(([p, q]) => [Math.max(p, a), Math.min(q, b)]).filter(([p, q]) => q - p >= 1.2).filter((g, i, all) => all.findIndex((o) => Math.abs(o[0] - g[0]) < 1e-6) === i);
       plan.walls.push(along ? [a, c, b, c, gaps] : [c, a, c, b, gaps]);
     }
   }

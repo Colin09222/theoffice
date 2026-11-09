@@ -8,6 +8,7 @@ import { boot } from './helpers.js';
 import { buildStatics, pickEncoding, wantBrotli } from '../server/statics.js';
 import { ROOT } from '../server/config.js';
 import { layoutLabels } from '../public/js/labels.js';
+import { frameCrew, onScreen, aimAt } from '../public/js/framing.js';
 import { slugFrom } from '../public/js/looks.js';
 import { slugify } from '../server/workspace.js';
 
@@ -44,6 +45,10 @@ describe('stamping', () => {
   test('the page, the stylesheets and the models folder are stamped; the files on disk are not touched', () => {
     const page = statics.get('/index.html').body.toString('utf8');
     for (const m of page.matchAll(/(?:src|href)="(\/theoffice\/[^"]+)"/g)) assert.match(m[1], /\?v=[0-9a-f]{12}$/, m[1]);
+    const html = statics.get('/index.html').body.toString('utf8');
+    assert.equal((html.match(/rel="stylesheet"/g) || []).length, 1, 'one stylesheet on the wire');
+    assert.match(html, /\/theoffice\/css\/all\.css\?v=[0-9a-f]{12}/);
+    assert.match(statics.get('/css/all.css').body.toString('utf8'), /url\(\/theoffice\/assets\/fonts\/lilita-one-400\.woff2\?v=[0-9a-f]{12}\)/);
     const css = statics.get('/css/app.css').body.toString('utf8');
     assert.match(css, /url\(\/theoffice\/assets\/fonts\/lilita-one-400\.woff2\?v=[0-9a-f]{12}\)/);
     const models = statics.get('/js/models.js').body.toString('utf8');
@@ -144,10 +149,45 @@ describe('labels in a huddle', () => {
     const items = [{ ...person('a', 370, 300, 1, 110), side: 'right' }];
     assert.equal(layoutLabels(items, { width: 390 }).get('a').side, 'left');
   });
+  test('a phone shows only as many bubbles as it is told to, whoever is talking first', () => {
+    const items = [person('a', 60, 300, 1, 90, 1), person('b', 200, 300, 2, 90, 9), person('c', 320, 300, 3, 90, 9), person('d', 200, 500, 4, 90, 2)];
+    const solved = layoutLabels(items, { width: 390, calm: true, maxBubbles: 2 });
+    assert.deepEqual([...solved].filter(([, o]) => o.bubble).map(([id]) => id).sort(), ['b', 'c']);
+  });
+  test('nothing touches the header or the lift, and on a phone a name with no room of its own steps aside', () => {
+    const header = { x0: 0, y0: 0, x1: 300, y1: 80 }, lift = { x0: 320, y0: 0, x1: 390, y1: 130 };
+    const items = [{ ...person('a', 150, 150, 2, 120, 9), full: true }, person('b', 350, 100, 1), person('c', 150, 148, 1)];
+    const solved = layoutLabels(items, { width: 390, calm: true, top: 4, blocks: [header, lift] });
+    const o = solved.get('a'), left = 150 - 20, y1 = 150 - o.lift - 14 - 5 - o.by;
+    const bubble = o.side === 'right' ? { x0: left + 40 * 0.58 + o.bx, x1: left + 40 * 0.58 + o.bx + 120, y0: y1 - 20, y1 } : { x0: left + 40 * 0.42 + o.bx - 120, x1: left + 40 * 0.42 + o.bx, y0: y1 - 20, y1 };
+    assert.equal(o.bubble, true);
+    for (const b of [header, lift]) assert.ok(bubble.x1 <= b.x0 || bubble.x0 >= b.x1 || bubble.y1 <= b.y0 || bubble.y0 >= b.y1, JSON.stringify({ bubble, b }));
+    assert.equal(solved.get('b').name, false, 'its name would be under the lift');
+    assert.equal(solved.get('c').name, false, 'its name would be on top of the person talking');
+  });
   test('a bubble with no room anywhere waits rather than covering someone', () => {
     const items = [person('a', 50, 96, 1, 400)];
     const solved = layoutLabels(items, { width: 100 });
     assert.equal(solved.get('a').bubble, false);
+  });
+});
+
+describe('where the camera starts', () => {
+  const opts = { yaw: 1.02, pitch: 0.68, visW: 390, visH: 563, tall: 2.5, top: 96, pad: 52, ppuMax: 34, ppuMin: 28 };
+  test('a small team fills the frame as close as it can', () => {
+    const f = frameCrew([[0, 0], [2.5, 1]], opts);
+    assert.equal(f.ppu, 34); assert.equal(f.framed, 2);
+  });
+  test('a floor too spread out for one picture frames the biggest group, close up, not everyone tiny', () => {
+    const f = frameCrew([[-13, -7], [-9, -7], [-4, -7], [0, -7], [4, -7], [12, -7]], opts);
+    assert.ok(f.framed >= 3 && f.framed < 6, `framed ${f.framed}`);
+    assert.ok(f.ppu >= 28, `ppu ${f.ppu}`);
+  });
+  test('what it aims at lands the group where it says', () => {
+    const f = frameCrew([[3, 2], [5, 3]], opts);
+    const aim = aimAt(f.u, f.s, opts.yaw, opts.pitch);
+    const back = onScreen(aim, opts.yaw, opts.pitch);
+    assert.ok(Math.abs(back.u - f.u) < 1e-6);
   });
 });
 

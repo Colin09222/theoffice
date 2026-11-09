@@ -214,7 +214,7 @@ function matcap() {
     const x = ((i + 0.5) / S) * 2 - 1, y = ((j + 0.5) / S) * 2 - 1, r2 = x * x + y * y, z = Math.sqrt(Math.max(0, 1 - r2));
     const ndl = Math.max(0, x * L.x + y * L.y + z * L.z);
     const rim = sstep(0.55, 1, r2);
-    const lit = Math.min(1, 0.6 + 0.48 * Math.pow(ndl, 0.8)) * (1 - 0.14 * rim);
+    const lit = Math.min(1, 0.6 + 0.48 * Math.pow(ndl, 0.8)) * (1 - 0.18 * rim) * (1 - 0.42 * sstep(0.9, 1, r2));  // the edge falls away dark, so a person stands out from whatever is behind them
     // A big soft window highlight up and to the left, a long quiet sheen down the right flank, and a little light round the edge.
     const big = 0.9 * Math.exp(-(((x + 0.3) ** 2) / 0.03 + ((y - 0.56) ** 2) / 0.016));
     const soft = 0.18 * Math.exp(-(((x + 0.28) ** 2) / 0.15 + ((y - 0.5) ** 2) / 0.1));

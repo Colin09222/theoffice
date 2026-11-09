@@ -41,18 +41,18 @@ const TiltShader = {
 
 /** The final grade, after tone mapping: a soft vignette and fine grain, so the image reads as a photograph rather than a render. */
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, uVignette: { value: 0.3 }, uGrain: { value: 0.024 }, uTime: { value: 0 }, uWarm: { value: 0 } },
+  uniforms: { tDiffuse: { value: null }, uVignette: { value: 0.3 }, uGrain: { value: 0.024 }, uTime: { value: 0 }, uWarm: { value: 0 }, uPop: { value: 0 } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-  fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uVignette; uniform float uGrain; uniform float uTime; uniform float uWarm;
+  fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uVignette; uniform float uGrain; uniform float uTime; uniform float uWarm; uniform float uPop;
     float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7)) + uTime) * 43758.5453); }
     void main(){
       vec4 c = texture2D(tDiffuse, vUv);
       // Golden hour: gold into the highlights, a little violet-teal into the shadows, then a gentle contrast curve and a touch of saturation.
       float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
       vec3 graded = c.rgb * mix(vec3(0.97, 0.985, 1.03), vec3(1.035, 1.0, 0.945), smoothstep(0.08, 0.72, l));
-      graded = mix(graded, graded * graded * (3.0 - 2.0 * graded), 0.34);
+      graded = mix(graded, graded * graded * (3.0 - 2.0 * graded), 0.34 + 0.18 * uPop);
       float l2 = dot(graded, vec3(0.2126, 0.7152, 0.0722));
-      graded = clamp(mix(vec3(l2), graded, 1.1), 0.0, 1.0);
+      graded = clamp(mix(vec3(l2), graded, 1.1 + 0.28 * uPop), 0.0, 1.0);
       c.rgb = mix(c.rgb, graded, uWarm);
       vec2 q = vUv - 0.5;
       float v = 1.0 - uVignette * smoothstep(0.25, 1.1, dot(q, q) * 2.2);
@@ -102,6 +102,7 @@ class Post {
     this.grade.uniforms.uVignette.value = view.grade?.vignette ?? 0.3;
     this.grade.uniforms.uGrain.value = view.grade?.grain ?? 0.024;
     this.grade.uniforms.uWarm.value = view.grade?.warm ?? 0;
+    this.grade.uniforms.uPop.value = view.grade?.pop ?? 0;
     this.tilt.uniforms.uAmount.value = view.tilt?.amount ?? 0;
     if (view.tilt) { this.tilt.uniforms.uCenter.value = view.tilt.center; this.tilt.uniforms.uWidth.value = view.tilt.width; }
     this.fxaaWanted = view.fxaa !== false;
