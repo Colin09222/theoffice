@@ -157,6 +157,14 @@ Nothing new to set. The tables are made at boot, Phaser is served from `public/v
   - The site passes the phone layout, links, meta and the form.
 - **Screenshots:** four, in `media/out/office-makers/`.
 
+## Shops
+
+A Website job whose words are about selling ("a shop for my candles": `SELLS` in `server/makers.js`) starts on the `shop` starter instead of `website`, and its Writer also lists the products. In chat, selling is its own lane (`shop` in `server/prompts.js`): Writer, Designer, Builder, Tester, on the same starter. Either way the launch checklist holds the catalogue to a name, a price and a picture for every product, and going live asks the boss to approve them. See [PAYMENTS.md](PAYMENTS.md), "Shops".
+
+## The last look before a first publish
+
+`server/shipcheck.js`: when a site, app or game is published for the first time through `publish_project` (not the maker flow's own Launch), one call to `tools.ship` in `config/models.json` (Claude Fable 5.2) is shown the boss's words, the Builder's brief, the Tester's report and screenshots, and the page, and asked whether it would ship it. A "no" refuses that publish with up to five things to fix. It looks twice at most per project; a version it has already seen is never paid for again; after the second look, or a third try with nothing changed, the publish goes through and the manager is told what is left. No key, no room in the limits, a refusal or an unreadable answer all mean no opinion, and the publish goes on. `SHIP_CHECK=0` switches it off.
+
 ## After Launch
 
 Right after Launch, and after every automatic update of a launched job, the server goes to the live link and checks it the way a player's browser would (`server/live-check.js`): the page, a save written and read back, a score on a hidden board, and that the shipped game really calls saves and the leaderboard. Office Cloud can't run on the Tester's local preview, so this is where it is proved. A failure goes to the team as a major bug and starts a fix pass, at most twice; if the link can't be reached at all, nothing is reported, because the team couldn't fix that.

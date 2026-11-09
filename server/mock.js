@@ -421,6 +421,14 @@ export function createMockClient(cfg) {
         const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
         return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
       }
+      // The last look before a first publish. [noship] in the boss's words holds the first look back; the second lets it through, or [nevership] holds that too.
+      if (meta?.kind === 'shipcheck') {
+        await sleep(Math.min(cfg.mockDelayMs, 20), signal);
+        const no = /\[nevership\]/.test(meta.allBoss || '') || (/\[noship\]/.test(meta.allBoss || '') && meta.look === 1);
+        const content = /\[shipgarbage\]/.test(meta.allBoss || '') ? 'I would rather not say.' : JSON.stringify({ ship: !no, scores: { works: 8, as_asked: no ? 5 : 8, look: 8, phone: 8, showable: no ? 5 : 8 }, fix: no ? ['The hero says nothing about what this is: put the one-line pitch there.'] : [], note: no ? 'Not yet.' : 'Good to go.' });
+        const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
+        return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
+      }
       if (meta?.kind === 'app_ai_locked') {
         await sleep(Math.min(cfg.mockDelayMs, 20), signal);
         const last = String(messages.filter((m) => m.role === 'user').at(-1)?.content ?? '');

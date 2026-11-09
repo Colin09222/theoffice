@@ -424,6 +424,9 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (isDoc && c.task) check.claims.push(...unseenLinks(c, prefix, sources));
       const problem = gateProblem(check, reason);
       if (problem) { saveCheck(db, c.floor.id, slug, check, reason, engine.now()); throw new WorkspaceError(problem); }
+      // A first publish gets one outside look: would you actually ship this? (server/shipcheck.js)
+      const notYet = await engine.shipCheck?.(c.floor, slug, { kind, directory, agent: c.agent, task: c.task, signal: c.signal });
+      if (notYet) throw new WorkspaceError(notYet);
       const n = publishSnapshot(db, c.floor.id, slug, cfg.quotaBytes, directory);
       // Work done under a private task stays private, whatever slug it ends up published as.
       const inherited = !!(c.project && get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', c.floor.id, c.project)?.private);

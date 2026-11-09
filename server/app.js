@@ -24,6 +24,7 @@ import { handleData, DataError, DATA_LIMITS, clearProjectData } from './appdata.
 import { installCloud, CHAT_JS, CHAT_PANEL_JS, SDK_JS, API_PREFIX } from './cloud/index.js';
 import { installPay } from './cloud/pay.js';
 import { installShop } from './shop.js';
+import { installShipCheck } from './shipcheck.js';
 import { installLegal } from './legal.js';
 import { recordVisit, projectStats, formEntries, formsCsv, formCount } from './launch.js';
 import { DomainRefused } from './domains.js';
@@ -732,6 +733,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // Payments: each boss's own Stripe account, on the apps their team makes. See docs/PAYMENTS.md.
   const pay = installPay({ ...ext, RateLimiter: A.RateLimiter, payFetch, paySleep });
   installShop({ db, engine, log });
+  installShipCheck({ db, cfg, engine, log });
   extensions.push(pay);
   const cloud = installCloud({ ...ext, ipOf, secret, llm: client, cloudNet, pay });
   extensions.push(cloud);

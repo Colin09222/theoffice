@@ -846,6 +846,8 @@ export class Computer {
       const refused = gateProblem(check, p.reason);
       saveCheck(e.db, floor.id, p.project, check, p.reason, e.now());
       if (refused) return { ok: false, problem: refused };
+      const held = await e.shipCheck?.(floor, p.project, { kind: p.kind, directory: p.directory, agent, task: { id: taskId } });
+      if (held) return { ok: false, problem: held };
       try {
         const n = publishSnapshot(e.db, floor.id, p.project, e.cfg.quotaBytes, p.directory);
         e.upsertProject(floor, p.project, { title: p.title, description: p.description, kind: p.kind, sources: [], published: true });

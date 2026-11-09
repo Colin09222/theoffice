@@ -102,7 +102,9 @@ export function surprise(type, { seed = Date.now(), cfg = CONFIG, floor = null, 
   const { ownProject, ...card } = pool[Math.floor(rng(seed)() * pool.length)] || cardFor(type, bank[0], cfg);
   return card;
 }
-export const starterFor = (type, text = '') => (type === 'game' ? (/\b(3d|three|first[- ]person|fly|flying|drive|driving|planet|race|racing|island|glide)\b/i.test(text) ? 'game-3d' : 'game-2d') : type === 'app' ? 'app' : type === 'website' ? 'website' : type === 'shop' ? 'shop' : '');
+export const starterFor = (type, text = '') => (type === 'game' ? (/\b(3d|three|first[- ]person|fly|flying|drive|driving|planet|race|racing|island|glide)\b/i.test(text) ? 'game-3d' : 'game-2d') : type === 'app' ? 'app' : type === 'website' ? (SELLS.test(text) ? 'shop' : 'website') : type === 'shop' ? 'shop' : '');
+// A website whose whole point is selling things starts on the shop starter: a basket, card checkout and an order confirmation that already work.
+export const SELLS = /\b(shop|store|sell|sells|selling|for sale|buy|checkout|merch)\b/i;
 /** The boss's own words: a name made from them, the type's goal and plan, and the words themselves as the pitch. */
 export function fromWords(type, text, cfg = CONFIG) {
   const said = clip(text, 400);
@@ -210,7 +212,8 @@ About two pages. It builds on the starter already in the project (read STARTER.m
 Exactly these headings: Who it is for (one line); The core thing they make or track (the ${j.object || 'item'}, with its fields); Screens (landing, sign up, the list, the detail or edit, settings), what each shows when empty, loading and failing; The one moment it has to nail; Passes (what the first version holds, then what each polish pass adds); Words (the landing page headline, three short points, and the call to action, all real: no testimonials, numbers or prices nobody gave). If the idea charges money, say what the paid plan is and what it unlocks; if it doesn't, leave payments out. It builds on the starter already in the project (read STARTER.md). Do not publish.`,
   website: (j) => `Write notes/copy.md and notes/design.md for ${j.title}: ${j.pitch}
 copy.md: who it is for, the one thing a visitor should do, a page title, a one-sentence description, and the real words for every section, ready to use. Only facts from the boss; where one is missing, write the sentence so it doesn't need one, and never invent a review, price, phone number, address or story.
-design.md: a palette with names and hex values, typefaces (system stacks with character, named), the layout, the sections in order, and the one idea only this subject could have. It builds on the starter already in the project (read STARTER.md). Do not publish.`,
+design.md: a palette with names and hex values, typefaces (system stacks with character, named), the layout, the sections in order, and the one idea only this subject could have. It builds on the starter already in the project (read STARTER.md). Do not publish.${j.starter === 'shop' ? `
+This one is a shop, so also write notes/products.md: every product, each with a short lowercase key, its name, a one-line description of what the buyer gets, its price, whether the boss gave that price or you are proposing it, and whether it is posted. Every product has a price: the boss's where they gave one, otherwise a sensible proposal marked as proposed. Never "coming soon". No stock levels, discounts, delivery times or returns promises nobody gave.` : ''}`,
 };
 const DOC_ROLE = { game: 'designer', app: 'writer', website: 'writer' };
 
@@ -219,7 +222,7 @@ export function buildBrief(job, pass, { bugs = [], regressions = [], unmet = [],
   const passJob = cfg.types[job.type]?.passJobs?.[pass - 1] || '';
   const doc = job.type === 'game' ? 'notes/design.md' : job.type === 'app' ? 'notes/spec.md' : 'notes/copy.md and notes/design.md';
   const head = pass === 0
-    ? `Build the first ${job.type === 'game' ? 'playable slice' : 'version'} of ${job.title} from ${doc}, on the starter already in this project. Read STARTER.md first: it already has ${STARTER_HAS[job.type]}. Make it this ${job.type === 'game' ? 'game' : job.type === 'app' ? 'app' : 'site'}: replace the starter's demo content, keep its structure and its test hooks.`
+    ? `Build the first ${job.type === 'game' ? 'playable slice' : 'version'} of ${job.title} from ${doc}, on the starter already in this project. Read STARTER.md first: it already has ${STARTER_HAS[job.starter === 'shop' ? 'shop' : job.type]}. Make it this ${job.type === 'game' ? 'game' : job.type === 'app' ? 'app' : 'site'}: replace the starter's demo content, keep its structure and its test hooks.`
     : `Depth pass ${pass} of ${job.depth} on ${job.title}.${passJob ? ` This pass has its own job: ${passJob}` : ''} Add what ${doc} lists for pass ${pass}, and fix the Tester's list below first. Change what's needed; don't rewrite what works.`;
   const fixHead = `Fix pass on ${job.title}. The Tester found serious bugs (major or blocker), and Launch is held until they are gone. Fix every [major] and [blocker] item below, nothing new until they're fixed, and don't rewrite what works.${job.type === 'game' ? ' Remove any cheat or debug hook from the shipped build (URL parameters like ?wave=, god mode, test keys, debug panels).' : ''}`;
   const fixList = [
@@ -239,6 +242,7 @@ const STARTER_HAS = {
   game: 'boot, menu, play, pause and game over; keyboard, touch and gamepad; a responsive canvas; audio with mute; settings; saves and a leaderboard through Office Cloud; and juice helpers (shake, particles, tweens, hit-stop)',
   app: 'a landing page and a signed-in app shell on Office Cloud accounts and the database, with create, edit and delete, empty, loading and error states, settings and a paid-plan section on office.pay that is honest about whether payments are open yet',
   website: 'fast accessible sections, full search and social meta, and a contact form that posts to Office Cloud',
+  shop: 'a product grid drawn from shop.json, a basket, card checkout on Stripe\'s own page through office.pay, a thank-you with the order number, an order request by email for before payments are on, full search and social meta, and a contact form. Put every product from notes/products.md in shop.json with its picture and price, as STARTER.md says, and take the example products out',
 };
 export function testBrief(job, pass, { computer = false, recheck = [] } = {}, cfg = CONFIG) {
   const doc = job.type === 'game' ? 'notes/design.md' : job.type === 'app' ? 'notes/spec.md' : 'notes/copy.md';

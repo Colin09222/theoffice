@@ -46,6 +46,8 @@ export function modelShape(model) {
   const m = String(model || '');
   if (/^claude-sonnet-5-5\b/.test(m)) return { fallbacks: 'default', thinkingOff: 'between_tools', forcedToolChoice: false };
   if (/^claude-opus-5-5\b/.test(m)) return { fallbacks: 'default', thinkingOff: null, forcedToolChoice: false };
+  // Fable 5.x: thinking is always on (an explicit 'disabled' is a 400, so effort is the only control) and a forced tool_choice is a 400.
+  if (/^claude-(fable|mythos)-5\b/.test(m)) return { fallbacks: 'default', thinkingOff: null, forcedToolChoice: false };
   if (/^claude-haiku/.test(m)) return { fallbacks: null, thinkingOff: 'disabled', forcedToolChoice: true };
   if (/^claude-(opus|sonnet|fable)/.test(m)) return { fallbacks: 'default', thinkingOff: 'disabled', forcedToolChoice: true };
   return { fallbacks: null, thinkingOff: 'disabled', forcedToolChoice: true };
