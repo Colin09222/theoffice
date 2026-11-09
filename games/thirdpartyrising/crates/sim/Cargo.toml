@@ -1,0 +1,16 @@
+[package]
+name = "tpr-sim"
+version = "0.1.0"
+edition = "2021"
+description = "Third Party Rising: deterministic political simulation core. No UI code."
+license = "UNLICENSED"
+
+[features]
+default = ["parallel"]
+# Multi-threaded county and election passes. Results are bit-identical with or without it.
+parallel = ["dep:rayon"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rayon = { version = "1.10", optional = true }

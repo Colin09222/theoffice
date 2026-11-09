@@ -1,0 +1,8 @@
+[package]
+name = "tpr-headless"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tpr-sim = { path = "../sim" }
+serde_json = "1"

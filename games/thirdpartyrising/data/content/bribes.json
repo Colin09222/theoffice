@@ -1,0 +1,8 @@
+{
+  "note": "Shortcuts. They work. Each adds 'heat'; heat is what starts an investigation. No option names or targets a real person or office-holder. 'cost' is dollars plus costPerNeed x the state's petition requirement.",
+  "bribes": [
+    { "id": "petition_fixer", "name": "Hire a petition fixer", "text": "A consultant who never signs anything says he can deliver boxes of signatures that will pass the count. Do not ask where they come from.", "result": "Signatures worth a quarter of the requirement appear on your tally.", "cost": 1500, "costPerNeed": 0.5, "effect": "sigs", "v": 0.25, "heat": 0.9 },
+    { "id": "friendly_coverage", "name": "Buy friendly coverage", "text": "An envelope for a local media broker, and your party is suddenly the fresh face in every bulletin and free paper in the state.", "result": "A strong wave of favourable attention everywhere your party is known.", "cost": 9000, "costPerNeed": 0, "effect": "buzz", "v": 1.6, "heat": 0.7 },
+    { "id": "walking_money", "name": "Spread walking-around money", "text": "Cash to ward bosses and club presidents who promise to bring their people to the polls for your leader.", "result": "A large boost to your leader's current race.", "cost": 4000, "costPerNeed": 0, "effect": "camp", "v": 1.0, "heat": 1.1 }
+  ]
+}
