@@ -189,11 +189,12 @@ describe('a project with its own domain lives at that domain', () => {
     const { at, connect } = await domainOn();
     connect();
     const r = await at('/about?ref=x&y=2');
-    assert.equal(r.status, 308);
+    assert.equal(r.status, 301);
     assert.equal(r.headers.get('location'), 'https://tinyteacups.com/about?ref=x&y=2');
     assert.equal((await at('/', 'HEAD')).headers.get('location'), 'https://tinyteacups.com/');
     assert.equal((await at('//evil.example/x')).headers.get('location'), 'https://tinyteacups.com/', 'nothing strange gets through in the path');
-    for (const path of ['/_data/state', '/_office/cloud/status']) assert.notEqual((await at(path)).status, 308, `${path} still answers for a tab left open on the old address`);
+    for (const path of ['/_data/state', '/_office/cloud/status']) assert.notEqual((await at(path)).status, 301, `${path} still answers for a tab left open on the old address`);
+    assert.equal((await at('/about', 'POST')).status, 405, 'and it was only ever a page, so anything but a read is refused as before');
   });
 
   test('the real domain still serves, and it is what links, cards and the Projects tab point at', async () => {

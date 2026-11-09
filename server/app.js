@@ -909,8 +909,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     const onOwnDomain = liveDomain && ownHost === liveDomain;
     // A public project with its own domain lives there. Its old address on the apps domain passes everyone along, path and query intact; a preview pass was already dealt with above.
     // The project's own data and Cloud calls still answer here, so a tab left open on the old address keeps its saves and its login.
-    if (liveDomain && !onOwnDomain && !pr.private && segs[0] !== '_data' && segs[0] !== '_office' && appHostLabel(cfg, ownHost) !== null) {
-      res.writeHead(308, { ...HEAD, location: `https://${liveDomain}${/^\/[^/\\]/.test(rawUrl) || rawUrl === '/' ? rawUrl : '/'}` });
+    if ((req.method === 'GET' || req.method === 'HEAD') && liveDomain && !onOwnDomain && !pr.private && segs[0] !== '_data' && segs[0] !== '_office' && appHostLabel(cfg, ownHost) !== null) {
+      res.writeHead(301, { ...HEAD, location: `https://${liveDomain}${/^\/[^/\\]/.test(rawUrl) || rawUrl === '/' ? rawUrl : '/'}` });
       return res.end();
     }
     const welcome = !pr.private && (onOwnDomain || !!pr.indexable);
