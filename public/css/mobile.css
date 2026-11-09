@@ -52,6 +52,7 @@
   .rest-now em { flex: none; font-style: normal; color: var(--m-ink-3); }
   .rest-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--m-ok); animation: rest-pulse 2.4s ease-in-out infinite; }
   @keyframes rest-pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .rest-dot { animation: none; } }
   .rest-said { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .rest-only .rest-now { font-size: 14px; color: var(--ink); letter-spacing: 0; }
   .rest-only .rest-now .rest-dot { background: var(--m-ok); }
