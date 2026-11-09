@@ -620,7 +620,7 @@ function towerGlass() {
         float frame = smoothstep(0.012, 0.012 + fw * 1.4, cell) * smoothstep(0.988, 0.988 - fw * 1.4, cell);
         frame = mix(frame, 0.95, smoothstep(0.3, 0.9, fw));
         float yv = vLocal.y / ${(FLOOR_H * 0.86).toFixed(2)} + 0.5;
-        float sill = mix(0.1, 0.24, clamp(vState.x, 0.0, 1.0));
+        float sill = mix(0.1, 0.32, clamp(vState.x, 0.0, 1.0));
         float band = smoothstep(sill, sill + 0.03, yv) * smoothstep(0.995, 0.975, yv);
         float faceId = sideX ? 40.0 + sign(_nn.x) * 7.0 : sign(_nn.z) * 7.0;
         float rnd = hash(vec2(floor(along) + faceId, floor(vY)));
@@ -635,13 +635,13 @@ function towerGlass() {
         vec3 tt = (step(vec3(0.0), rd2) - ro) / rd2;
         float tm = min(tt.x, min(tt.y, tt.z));
         vec3 hit = ro + rd2 * tm;
-        float lamp = on > 0.5 ? (rnd > 0.16 ? 0.9 : 0.3) + busy * 0.25 : (rnd > 0.93 ? 0.5 : 0.07);
-        vec3 wallTint = mix(vec3(0.34, 0.27, 0.21), mix(vec3(0.42, 0.33, 0.25), brand, 0.62), on);
+        float lamp = on > 0.5 ? (rnd > 0.12 ? 0.92 : 0.4) + busy * 0.25 : (rnd > 0.95 ? 0.4 : 0.05);
+        vec3 wallTint = mix(vec3(0.20, 0.19, 0.21), mix(vec3(1.0, 0.60, 0.24), brand * 1.4 + 0.04, 0.38), on);
         vec3 room;
         if (tm == tt.z) room = wallTint * (0.72 + 0.28 * hit.y);
-        else if (tm == tt.y) room = rd2.y > 0.0 ? vec3(0.62, 0.53, 0.42) * (0.55 + 0.45 * hit.z) : wallTint * vec3(0.5) * (0.45 + 0.55 * hit.z);
+        else if (tm == tt.y) room = rd2.y > 0.0 ? vec3(0.62, 0.53, 0.42) * (0.55 + 0.45 * hit.z) : wallTint * vec3(0.68) * (0.5 + 0.5 * hit.z);
         else room = wallTint * 0.62 * (0.5 + 0.5 * hit.z);
-        room *= lamp;
+        room = (room + wallTint * on * 0.5) * lamp;
         // Melt the room into its average once a pane is only a few pixels wide.
         room = mix(room, wallTint * lamp * 0.72, smoothstep(0.12, 0.42, fw));
         // Reflection: the sky and the skyline, with each pane a hair out of true as real curtain wall is. The ray is bent upward so the glass always holds the glow.
@@ -649,8 +649,13 @@ function towerGlass() {
         vec3 R = reflect(V, N2); R.y = abs(R.y) * 0.5 + 0.1;
         float az = atan(R.z, R.x);
         float line = 0.11 + 0.05 * vnoise(vec2(az * 11.0, 2.0)) * vnoise(vec2(az * 31.0, 5.0));
-        vec3 refl = mix(s2l(vec3(0.40, 0.34, 0.33)), skyColor(normalize(R)) * 0.62, smoothstep(line - 0.006, line + 0.03, R.y));
-        float F = (0.34 + 0.6 * pow(clamp(1.0 + dot(V, _nn), 0.0, 1.0), 2.5)) * (1.0 - on * 0.5);
+        // Curtain wall is cool against the warm stone and the evening: deep sea-green low down where it holds the city, clear sky blue toward the crown, and gold on the faces the sun is on.
+        float up = smoothstep(2.0, 30.0, vY);
+        float sunSide = clamp(dot(_nn, ${SUN_GLSL}) * 1.5, 0.0, 1.0);
+        vec3 tint = mix(vec3(0.22, 0.40, 0.52), vec3(0.50, 0.72, 0.92), up);
+        vec3 refl = mix(s2l(vec3(0.30, 0.29, 0.34)) * tint * 2.0, skyColor(normalize(R)) * tint, smoothstep(line - 0.006, line + 0.03, R.y));
+        refl += vec3(1.0, 0.66, 0.36) * sunSide * (0.05 + 0.13 * up) * (0.7 + 0.6 * rnd);
+        float F = (0.5 + 0.45 * pow(clamp(1.0 + dot(V, _nn), 0.0, 1.0), 2.5)) * (1.0 - on * 0.62);
         vec3 glassLight = mix(room, refl, F);
         // The strip under the glass: bronze on an empty floor, the company's own colour on a taken one, so taken floors read as ribbons round the shaft.
         vec3 spandrel = mix(s2l(vec3(0.34, 0.30, 0.27)), brand, on);
@@ -663,13 +668,13 @@ function towerGlass() {
         roughnessFactor = mix(0.65, 0.18, paneOn);
         metalnessFactor = 0.0;
         float hover = vState.z;
-        vec3 _emis = glassLight * paneOn + brand * on * 0.22 * (1.0 - band) * frame + vec3(1.0, 0.86, 0.6) * hover * 0.5 * band + brand * hover * 0.25;`)
+        vec3 _emis = glassLight * paneOn + brand * on * 0.5 * (1.0 - band) * frame + vec3(1.0, 0.86, 0.6) * hover * 0.5 * band + brand * hover * 0.25;`)
       .replace('#include <roughnessmap_fragment>', '')
       .replace('#include <metalnessmap_fragment>', '')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += _emis;');
     mat.userData.shader = shader;
   };
-  mat.customProgramCacheKey = () => 'towerglass2';
+  mat.customProgramCacheKey = () => 'towerglass3';
   return mat;
 }
 
@@ -677,8 +682,11 @@ function signTexture() {
   const c = document.createElement('canvas'); c.width = 1024; c.height = 180;
   const x = c.getContext('2d');
   x.clearRect(0, 0, 1024, 180);
-  x.font = '500 118px Fraunces, Georgia, serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-  x.fillStyle = 'rgba(30,34,52,.95)';
+  x.fillStyle = '#23242e'; x.fillRect(0, 0, 1024, 180);
+  x.strokeStyle = '#c9a86a'; x.lineWidth = 8; x.strokeRect(8, 8, 1008, 164);
+  x.font = '600 124px Fraunces, Georgia, serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.shadowColor = 'rgba(255,190,110,.9)'; x.shadowBlur = 18;
+  x.fillStyle = '#fff0cf';
   x.fillText('The Office', 512, 96);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   return t;
@@ -689,8 +697,8 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   const H = GROUND + floorCount * FLOOR_H;
   // Pale limestone, cut in courses: the same stone shader as the city, so the tower belongs to it.
   const stoneCourses = { color: 'diffuseColor.rgb = stone(diffuseColor.rgb, vec2(vWp.x + vWp.z * 0.7, vWp.y), fwidth(vWp.x + vWp.z * 0.7) + fwidth(vWp.y), 0.45);' };
-  const stone = patch(new THREE.MeshStandardMaterial({ color: '#e6d6be', roughness: 0.9, metalness: 0 }), stoneCourses);
-  const stoneDark = patch(new THREE.MeshStandardMaterial({ color: '#dccfbc', roughness: 0.92, metalness: 0 }), stoneCourses);
+  const stone = patch(new THREE.MeshStandardMaterial({ color: '#e7e1d6', roughness: 0.9, metalness: 0 }), stoneCourses);
+  const stoneDark = patch(new THREE.MeshStandardMaterial({ color: '#d6cfc3', roughness: 0.92, metalness: 0 }), stoneCourses);
   const dark = new THREE.MeshStandardMaterial({ color: '#3c4150', roughness: 0.6, metalness: 0.1 });
   const brass = new THREE.MeshStandardMaterial({ color: '#c9a86a', roughness: 0.35, metalness: 0.8, envMap: env });
   const green = new THREE.MeshStandardMaterial({ color: '#6c9452', roughness: 0.95 });
@@ -767,9 +775,10 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
 
   if (stub) { mergeMeshes(group); return { group, floors, state, glass, height: H }; }
   // A small TO LET board on each face of an empty floor. setFloors shows the ones that are really free.
-  const boards = new THREE.InstancedMesh(new THREE.PlaneGeometry(2.7, 0.62), new THREE.MeshBasicMaterial({ map: toLetTexture() }), Math.max(1, floorCount * 4));
+  const boards = new THREE.InstancedMesh(new THREE.PlaneGeometry(1.26, 0.4), new THREE.MeshBasicMaterial({ map: toLetTexture(), color: '#e9e2d4' }), Math.max(1, floorCount * 4));
   boards.count = 0; boards.frustumCulled = false; group.add(boards);
-  const boardAt = (i, a) => { const ang = (a * Math.PI) / 2, r = half + 0.42; m.makeRotationY(ang); m.setPosition(Math.sin(ang) * r, GROUND + i * FLOOR_H + FLOOR_H * 0.5, Math.cos(ang) * r); return m; };
+  const bay = TOWER_W / 6;
+  const boardAt = (i, a) => { const ang = (a * Math.PI) / 2, r = half + 0.02, off = ([-2.5, 1.5, -0.5, 2.5, -1.5, 0.5][(i * 5 + a * 2) % 6]) * bay; m.makeRotationY(ang); m.setPosition(Math.sin(ang) * r + Math.cos(ang) * off, GROUND + i * FLOOR_H + FLOOR_H * 0.42, Math.cos(ang) * r - Math.sin(ang) * off); return m; };
   // The crown: stepped terraces with greenery, a louvred plant screen, brass trim, the sign and a mast.
   let y = H;
   add(stone, TOWER_W + 0.6, 0.3, TOWER_W + 0.6, 0, y, 0); y += 0.3;
@@ -781,7 +790,7 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
     add(stone, w, hh, w, 0, y, 0);
     if (i === 0) {
       for (let a = 0; a < 4; a++) {
-        const s = new THREE.Mesh(new THREE.PlaneGeometry(5.6, 0.98), signMat);
+        const s = new THREE.Mesh(new THREE.PlaneGeometry(6.6, 1.16), signMat);
         const ang = (a * Math.PI) / 2;
         s.position.set(Math.sin(ang) * (w / 2 + 0.02), y + hh / 2, Math.cos(ang) * (w / 2 + 0.02));
         s.rotation.y = ang; group.add(s);
@@ -802,10 +811,10 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
 
 function toLetTexture() {
   const c = document.createElement('canvas'); c.width = 280; c.height = 64; const x = c.getContext('2d');
-  x.fillStyle = '#b52e1b'; x.fillRect(0, 0, 280, 64);
-  x.strokeStyle = '#fff8e6'; x.lineWidth = 4; x.strokeRect(4, 4, 272, 56);
-  x.fillStyle = '#fff8e6'; x.font = '600 38px Fraunces, Georgia, serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
-  x.fillText('TO LET', 140, 34);
+  x.fillStyle = '#f6efdf'; x.fillRect(0, 0, 280, 64);
+  x.strokeStyle = '#a93322'; x.lineWidth = 5; x.strokeRect(5, 5, 270, 54);
+  x.fillStyle = '#a93322'; x.font = '700 40px Fraunces, Georgia, serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText('TO LET', 140, 35);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   return t;
 }
@@ -889,6 +898,7 @@ export function getWorld() {
   return worldCache;
 }
 
+const PHONE_TOP = 70, PHONE_BOTTOM = 200;  // what the lobby's own sign and its bottom stack (news strip, To Let board, the directory's edge) cover on a phone
 export class LobbyView {
   constructor({ floorCount = 10, onHover, onPick } = {}) {
     Object.assign(this, { floorCount, onHover, onPick });
@@ -967,7 +977,10 @@ export class LobbyView {
   /** The whole building in frame, ground to mast, whatever its height: the same picture as a taller tower, brought closer. */
   frame(phone) {
     this.lookY = this.tower.height * 0.47;
-    return this.tower.height * (phone ? 3.12 : 2.42);
+    if (!phone) return this.tower.height * 2.42;
+    // A phone gives the tower what its sign and its bottom stack leave: nearly all of a tall screen, less of a short one.
+    const free = Math.min(0.72, Math.max(0.5, ((this.h || 800) - PHONE_TOP - PHONE_BOTTOM) / (this.h || 800)));
+    return this.tower.height * (1.66 / free);
   }
   enter() {
     this.active = true; this.flying = null; this.camera.clearViewOffset();
@@ -982,7 +995,7 @@ export class LobbyView {
     const phone = w <= 760;
     // Frame the tower in the clear area: left of the desktop panel, above the phone's sheet.
     this.shiftX = phone ? 0 : -w * 0.055;
-    this.shiftY = phone ? h * 0.055 : 0;
+    this.shiftY = phone ? (PHONE_BOTTOM - PHONE_TOP) / 2 - h * 0.012 : 0;
     this.targetDist = this.frame(phone);
     if (!this.framed) { this.dist = this.targetDist; this.framed = true; }  // the first picture is the right one, with no zoom into place
     this.camera.setViewOffset(w, h, this.shiftX, this.shiftY, w, h);
