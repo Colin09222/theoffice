@@ -91,6 +91,9 @@ export function toolCallsOf(msg) {
   return msg.content.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: msg.stop_reason === 'max_tokens' ? '{' : JSON.stringify(b.input ?? {}) }));
 }
 
+// Thinking isn't streamed unless a summary is asked for, and the SDK drops the server's pings, so a long think looks exactly like a dead connection. At high effort a model can think for many minutes, so this has to be longer than that and only catches a stream that has really died.
+export const STREAM_QUIET_MS = 20 * 60_000;
+
 export function createAnthropicClient(cfg) {
   const client = new Anthropic({ apiKey: cfg.anthropicKey, maxRetries: 0, ...(cfg.anthropicBase ? { baseURL: cfg.anthropicBase } : {}) });
   return {
@@ -100,7 +103,7 @@ export function createAnthropicClient(cfg) {
       const onAbort = () => ctl.abort(signal.reason);
       if (signal) { if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true }); }
       let idle; let timedOut = false;
-      const bump = () => { clearTimeout(idle); idle = setTimeout(() => { timedOut = true; ctl.abort(); }, 240_000); };
+      const bump = () => { clearTimeout(idle); idle = setTimeout(() => { timedOut = true; ctl.abort(); }, STREAM_QUIET_MS); };
       bump();
       let streamed = 0;
       const converted = toAnthropic(messages, tools);

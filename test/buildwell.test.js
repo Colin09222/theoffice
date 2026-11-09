@@ -7,6 +7,7 @@ import { toolsForRole, toolDefs } from '../server/tools.js';
 import { createMedia } from '../server/media.js';
 import { managerPrompt, laneBrief, computerPrompt, computerBriefing, staffPrompt, howYouWork, LANES } from '../server/prompts.js';
 import { createMockSessions } from '../server/mock-sessions.js';
+import { STREAM_QUIET_MS } from '../server/anthropic.js';
 import { boot, claim, until, sleep } from './helpers.js';
 
 const TINY = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEAQH/rcg7WQAAAABJRU5ErkJggg==', 'base64');
@@ -154,6 +155,10 @@ const STAFF = ['builder', 'designer', 'tester', 'researcher', 'writer', 'analyst
 const person = (role) => ({ name: 'S', title: 'T', role });
 // Everything a bot is told before and during a job, on each path.
 const everyPrompt = (cfg) => [managerPrompt(floor, BOSS, ROSTER, cfg), managerPrompt(floor, BOSS, ROSTER, BARE), ...STAFF.flatMap((r) => [staffPrompt(floor, person(r), {}, { lane: '' }, cfg), computerPrompt(cfg, r, {}), computerBriefing(floor, person(r), {}, { id: 1, title: 'x', brief: 'y', project: 'p', lane: '' }, cfg)]), ...LANES.flatMap((lane) => STAFF.flatMap((r) => [laneBrief(lane, r, cfg), computerBriefing(floor, person(r), {}, { id: 1, title: 'x', brief: 'y', project: 'p', lane }, cfg)]))];
+
+test('a model that thinks for a long time is not taken for a dead connection', () => {
+  assert.ok(STREAM_QUIET_MS >= 15 * 60_000, `${STREAM_QUIET_MS}`);
+});
 
 describe('how everyone in the building works', () => {
   const ALL = everyPrompt(FULL);
