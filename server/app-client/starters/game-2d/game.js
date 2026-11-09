@@ -1,6 +1,6 @@
-// {{TITLE}}: the 2D starter's demo game, on Phaser 3 and the Office game kit. An arena with waves, three enemy kinds, upgrades between
-// waves and a win at wave 10. Replace the theme, the art and the rules with the design doc's; keep the shape: boot, start, update, render, state.
-import { run, input, juice, audio, addScore, gameOver, choose, settings } from './kit.js';
+// {{TITLE}}: the 2D starter's demo game, on Phaser 3 and the Office game kit. An arena with waves, three enemy kinds, strikes that land
+// where the player stands, upgrades between waves and a win at wave 10. Replace the theme, the art and the rules with the design doc's; keep the shape: boot, start, update, render, state.
+import { run, input, juice, audio, addScore, gameOver, choose, playerHurt, settings } from './kit.js';
 
 const W = () => innerWidth, H = () => innerHeight;
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -22,6 +22,10 @@ const KINDS = {
   splitter: { r: 20, hp: 3, speed: 50, score: 30 },
   shooter: { r: 14, hp: 2, speed: 70, score: 35 },
 };
+// Strikes keep the pressure on from the start: a ring marks where the player stands, and a strike lands there a moment later. Moving at
+// all dodges it, and it clears enemies it catches. A player who does nothing is hurt at about 12 s and out at about 22 s; the Tester's
+// playtest times exactly that, so re-time it whenever these numbers or the enemies change.
+const STRIKE = { first: 11, warn: 1.1, r: 46, every: (wave) => Math.max(2.4, 5.5 - wave * 0.3), color: 0xff8a5c };
 
 let scene, gfx, emitter, hud, trail, stars = [], world = null;
 
@@ -79,7 +83,7 @@ function startWave() {
 
 function hurtPlayer() {
   const p = world.player; if (p.inv > 0) return;
-  p.hp--; p.inv = 1.2; audio.sfx('hurt'); juice.shake(0.6); juice.hitStop(90); burst(p.x, p.y, PALETTE.player, 22);
+  p.hp--; p.inv = 1.2; playerHurt(); audio.sfx('hurt'); juice.shake(0.6); juice.hitStop(90); burst(p.x, p.y, PALETTE.player, 22);
   scene.cameras.main.flash(120, 255, 80, 120);
   if (p.hp <= 0) end(false);
 }
@@ -100,7 +104,7 @@ async function end(won) {
 const game = {
   title: '{{TITLE}}',
   pitch: 'Survive ten waves in the arena. Grab gems, pick upgrades, keep the combo going.',
-  howTo: 'Move to dodge. You shoot the nearest enemy on your own. A (Space) dashes through danger; B (Shift) fires a pulse that clears the space round you once your gem meter is full. Upgrades come between waves.',
+  howTo: 'Move to dodge. You shoot the nearest enemy on your own. A (Space) dashes through danger; B (Shift) fires a pulse that clears the space round you once your gem meter is full. A ring on the ground means a strike is about to land there: step out of it, or lead it onto enemies. Upgrades come between waves.',
   boot(progress) {
     return new Promise((resolve) => {
       new Phaser.Game({ type: Phaser.AUTO, parent: 'game', backgroundColor: '#120e24', scale: { mode: Phaser.Scale.RESIZE, width: W(), height: H() }, scene: [Arena], audio: { noAudio: true }, banner: false,
@@ -109,7 +113,7 @@ const game = {
   },
   start() {
     if (world) this.quit();
-    world = { wave: 0, queue: [], spawnIn: 0, enemies: [], shots: [], eshots: [], gems: [], gemsGot: 0, meter: 0, combo: 0, comboT: 0, banner: null, picking: false,
+    world = { wave: 0, queue: [], spawnIn: 0, strikeIn: STRIKE.first, marks: [], enemies: [], shots: [], eshots: [], gems: [], gemsGot: 0, meter: 0, combo: 0, comboT: 0, banner: null, picking: false,
       player: { x: W() / 2, y: H() / 2, r: 14, hp: 3, maxHp: 3, speed: 230, fireEvery: 0.32, fireT: 0, shots: 1, pierce: 0, magnet: 90, inv: 0, dashT: 0, dashCd: 0, img: sprite('player', W() / 2, H() / 2) } };
     trail?.destroy(); trail = scene.add.particles(0, 0, 'spark', { follow: world.player.img, frequency: 35, lifespan: 320, speed: 0, scale: { start: 0.9, end: 0 }, alpha: { start: 0.45, end: 0 }, tint: PALETTE.player, blendMode: 'ADD' }).setDepth(-1);
     startWave();
@@ -137,6 +141,15 @@ const game = {
     // Spawning.
     w.spawnIn -= dt;
     if (w.queue.length && w.spawnIn <= 0) { const at = edgePoint(); spawn(w.queue.shift(), at.x, at.y); w.spawnIn = Math.max(0.25, 0.9 - w.wave * 0.06); }
+    // Strikes: mark the spot, then land on it. Enemies caught in one go too, so a quick player can lead a strike onto them.
+    w.strikeIn -= dt;
+    if (w.strikeIn <= 0) { w.marks.push({ x: p.x, y: p.y, t: STRIKE.warn }); w.strikeIn = STRIKE.every(w.wave); audio.sfx('select'); }
+    for (let i = w.marks.length - 1; i >= 0; i--) {
+      const m = w.marks[i]; m.t -= dt; if (m.t > 0) continue;
+      w.marks.splice(i, 1); burst(m.x, m.y, STRIKE.color, 30); audio.sfx('explode'); juice.shake(0.35);
+      for (let j = w.enemies.length - 1; j >= 0; j--) if (dist2(w.enemies[j], m) < (STRIKE.r + w.enemies[j].r) ** 2) kill(w.enemies[j], j);
+      if (dist2(p, m) < (STRIKE.r + p.r * 0.5) ** 2) { hurtPlayer(); if (!world) return; }
+    }
     // Enemies: each kind moves its own way.
     for (const e of w.enemies) {
       const k = KINDS[e.kind], ang = Math.atan2(p.y - e.y, p.x - e.x); e.t += dt;
@@ -203,6 +216,7 @@ const game = {
     for (let y = (t * 8) % 48; y < H(); y += 48) gfx.lineBetween(0, y, W(), y);
     if (!w) return;
     const p = w.player; p.img.setPosition(p.x, p.y).setAlpha(p.inv > 0 && Math.floor(p.inv * 20) % 2 ? 0.35 : 1);
+    for (const m of w.marks) { const k = 1 - Math.max(0, m.t) / STRIKE.warn; gfx.fillStyle(STRIKE.color, 0.12 + 0.3 * k).fillCircle(m.x, m.y, STRIKE.r * k); gfx.lineStyle(3, STRIKE.color, 0.9).strokeCircle(m.x, m.y, STRIKE.r); }
     for (const e of w.enemies) if (e.kind === 'dasher' && e.state === 'aim') { gfx.lineStyle(2, PALETTE.dasher, 0.7); gfx.lineBetween(e.x, e.y, e.x + Math.cos(e.aim) * 240, e.y + Math.sin(e.aim) * 240); }
     gfx.fillStyle(0x000000, 0.35).fillRoundedRect(W() - 170, 52, 150, 12, 6); gfx.fillStyle(PALETTE.gem, 1).fillRoundedRect(W() - 170, 52, 150 * w.meter, 12, 6);
     hud.setText(`${'♥'.repeat(Math.max(0, p.hp))}${'♡'.repeat(Math.max(0, p.maxHp - p.hp))}   Wave ${w.wave}   ${window.officeGame?.state().score ?? 0}${w.combo >= 5 ? `   x${1 + Math.floor(w.combo / 5)}` : ''}${w.banner ? `\n${w.banner.text}` : ''}`);

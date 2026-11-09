@@ -1,7 +1,7 @@
-// {{TITLE}}: the 3D starter's demo game, on three.js and the Office game kit. A floating arena with waves, three enemy kinds, gems,
-// upgrades between waves and a win at wave 8. Replace the theme, the models and the rules with the design doc's; keep the shape.
+// {{TITLE}}: the 3D starter's demo game, on three.js and the Office game kit. A floating arena with waves, three enemy kinds, strikes that
+// land where the player stands, gems, upgrades between waves and a win at wave 8. Replace the theme, the models and the rules with the design doc's; keep the shape.
 import * as THREE from './_office/three.module.min.js';
-import { run, input, juice, audio, addScore, gameOver, choose } from './kit.js';
+import { run, input, juice, audio, addScore, gameOver, choose, playerHurt } from './kit.js';
 
 const ARENA = 14, rand = (a, b) => a + Math.random() * (b - a);
 const COLORS = { player: 0x44e2ff, chaser: 0xff5d8f, dasher: 0xffc94d, splitter: 0x9b7bff, gem: 0xfff07a };
@@ -11,6 +11,10 @@ const UPGRADES = [
   { label: 'Swift', apply: (p) => { p.speed *= 1.2; } }, { label: 'Patch up', apply: (p) => { p.hp = Math.min(p.maxHp, p.hp + 1); } },
   { label: 'Magnet', apply: (p) => { p.magnet *= 1.6; } }, { label: 'Big heart', apply: (p) => { p.maxHp++; p.hp++; } },
 ];
+// Strikes keep the pressure on from the start: a ring marks where the player stands, and a strike lands there a moment later. Moving at
+// all dodges it, and it clears enemies it catches. A player who does nothing is hurt at about 12 s and out at about 22 s; the Tester's
+// playtest times exactly that, so re-time it whenever these numbers or the enemies change.
+const STRIKE = { first: 11, warn: 1.1, r: 1.7, every: (wave) => Math.max(2.4, 5.5 - wave * 0.3), color: 0xff8a5c };
 
 let renderer, scene, camera, world = null, sparks;
 const mats = {}, geo = {};
@@ -32,16 +36,19 @@ function setup() {
   for (const [k, c] of Object.entries(COLORS)) mats[k] = new THREE.MeshStandardMaterial({ color: c, roughness: 0.4, emissive: c, emissiveIntensity: 0.15 });
   mats.shot = new THREE.MeshBasicMaterial({ color: 0xffffff }); mats.flash = new THREE.MeshBasicMaterial({ color: 0xffffff });
   geo.player = new THREE.CapsuleGeometry(0.45, 0.6, 4, 12); geo.ball = new THREE.SphereGeometry(1, 20, 14); geo.cone = new THREE.ConeGeometry(0.7, 1.4, 12); geo.shot = new THREE.SphereGeometry(0.14, 8, 6); geo.gem = new THREE.OctahedronGeometry(0.25);
+  geo.ring = new THREE.RingGeometry(0.9, 1, 48); geo.disc = new THREE.CircleGeometry(1, 40);
+  mats.ring = new THREE.MeshBasicMaterial({ color: STRIKE.color, side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthWrite: false }); mats.disc = new THREE.MeshBasicMaterial({ color: STRIKE.color, side: THREE.DoubleSide, transparent: true, opacity: 0.35, depthWrite: false });
   // Particles: one pooled cloud of points, so a burst costs nothing to make.
   const N = 600, pos = new Float32Array(N * 3).fill(-999), col = new Float32Array(N * 3);
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   sparks = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.22, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-  sparks.userData = { vel: new Float32Array(N * 3), life: new Float32Array(N), next: 0, N }; scene.add(sparks);
+  sparks.frustumCulled = false; sparks.userData = { vel: new Float32Array(N * 3), life: new Float32Array(N), next: 0, N }; scene.add(sparks);
   addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 }
 function burst(p, color, n = 24) {
   const u = sparks.userData, pos = sparks.geometry.attributes.position.array, col = sparks.geometry.attributes.color.array, c = new THREE.Color(color);
-  for (let i = 0; i < n; i++) { const k = u.next = (u.next + 1) % u.N; pos.set([p.x, p.y + 0.5, p.z], k * 3); col.set([c.r, c.g, c.b], k * 3); u.vel.set([rand(-6, 6), rand(1, 7), rand(-6, 6)], k * 3); u.life[k] = rand(0.3, 0.7); }
+  for (let i = 0; i < n; i++) { const k = u.next = (u.next + 1) % u.N; pos.set([p.x, (p.y || 0) + 0.5, p.z], k * 3); col.set([c.r, c.g, c.b], k * 3); u.vel.set([rand(-6, 6), rand(1, 7), rand(-6, 6)], k * 3); u.life[k] = rand(0.3, 0.7); }
+  sparks.geometry.attributes.color.needsUpdate = true;
 }
 function stepSparks(dt) {
   const u = sparks.userData, pos = sparks.geometry.attributes.position.array;
@@ -57,24 +64,29 @@ function spawn(kind, x, z, r) {
   world.enemies.push(e);
 }
 function startWave() { world.wave++; world.queue = []; for (let i = 0; i < 4 + world.wave * 2; i++) world.queue.push(world.wave >= 3 && i % 4 === 3 ? 'splitter' : world.wave >= 2 && i % 3 === 2 ? 'dasher' : 'chaser'); world.spawnIn = 0.5; audio.sfx('power'); }
-function hurt() { const p = world.player; if (p.inv > 0) return; p.hp--; p.inv = 1.2; audio.sfx('hurt'); juice.shake(0.7); juice.hitStop(90); burst(p, COLORS.player, 40); if (p.hp <= 0) end(false); }
+function hurt() { const p = world.player; if (p.inv > 0) return; p.hp--; p.inv = 1.2; playerHurt(); audio.sfx('hurt'); juice.shake(0.7); juice.hitStop(90); burst(p, COLORS.player, 40); if (p.hp <= 0) end(false); }
 function kill(e, i) {
   world.enemies.splice(i, 1); drop(e); addScore(KINDS[e.kind].score); burst(e, COLORS[e.kind], 30); audio.sfx('explode'); juice.shake(0.25); juice.hitStop(35);
   for (let n = 0; n < (e.kind === 'splitter' ? 3 : 1); n++) { const g = { x: e.x + rand(-0.4, 0.4), z: e.z + rand(-0.4, 0.4) }; g.mesh = mesh(geo.gem, mats.gem); world.gems.push(g); }
   if (e.kind === 'splitter' && e.r > 0.6) for (let n = 0; n < 2; n++) spawn('chaser', e.x + rand(-0.5, 0.5), e.z + rand(-0.5, 0.5), 0.4);
 }
-function clear(w) { for (const o of [...w.enemies, ...w.shots, ...w.gems]) drop(o); drop(w.player); }
+function mark(x, z) {
+  const m = { x, z, t: STRIKE.warn, mesh: new THREE.Group() }, ring = new THREE.Mesh(geo.ring, mats.ring); m.fill = new THREE.Mesh(geo.disc, mats.disc);
+  ring.scale.setScalar(STRIKE.r); m.fill.scale.setScalar(0.01); m.mesh.add(ring, m.fill); m.mesh.rotation.x = -Math.PI / 2; m.mesh.position.set(x, 0.04, z); scene.add(m.mesh);
+  world.marks.push(m);
+}
+function clear(w) { for (const o of [...w.enemies, ...w.shots, ...w.gems, ...w.marks]) drop(o); drop(w.player); }
 async function end(won) { const w = world; world = null; clear(w); await gameOver({ won, stats: { Wave: w.wave } }); }
 
 run({
   title: '{{TITLE}}',
   pitch: 'Hold the floating arena for eight waves. Dash through danger, grab gems, pick upgrades.',
-  howTo: 'Move to dodge; you fire at the nearest enemy on your own. A (Space) dashes. Upgrades come between waves.',
+  howTo: 'Move to dodge; you fire at the nearest enemy on your own. A (Space) dashes. A ring on the floor means a strike is about to land there: step out of it, or lead it onto enemies. Upgrades come between waves.',
   boot(progress) { setup(); progress(1); },
   start() {
     if (world) { clear(world); world = null; }
     const p = { x: 0, z: 0, r: 0.5, hp: 3, maxHp: 3, speed: 6, fireEvery: 0.3, fireT: 0, shots: 1, magnet: 2.5, inv: 0, dashT: 0, dashCd: 0 };
-    p.mesh = mesh(geo.player, mats.player); world = { wave: 0, queue: [], spawnIn: 0, enemies: [], shots: [], gems: [], picking: false, player: p };
+    p.mesh = mesh(geo.player, mats.player); world = { wave: 0, queue: [], spawnIn: 0, strikeIn: STRIKE.first, marks: [], enemies: [], shots: [], gems: [], picking: false, player: p };
     startWave();
   },
   quit() { if (world) { clear(world); world = null; } },
@@ -93,6 +105,15 @@ run({
     }
     w.spawnIn -= dt;
     if (w.queue.length && w.spawnIn <= 0) { const ang = rand(0, Math.PI * 2); spawn(w.queue.shift(), Math.cos(ang) * (ARENA - 1), Math.sin(ang) * (ARENA - 1)); w.spawnIn = Math.max(0.3, 1 - w.wave * 0.08); }
+    // Strikes: mark the spot, then land on it. Enemies caught in one go too, so a quick player can lead a strike onto them.
+    w.strikeIn -= dt;
+    if (w.strikeIn <= 0) { mark(p.x, p.z); w.strikeIn = STRIKE.every(w.wave); audio.sfx('select'); }
+    for (let i = w.marks.length - 1; i >= 0; i--) {
+      const m = w.marks[i]; m.t -= dt; if (m.t > 0) continue;
+      w.marks.splice(i, 1); drop(m); burst(m, STRIKE.color, 50); audio.sfx('explode'); juice.shake(0.35);
+      for (let j = w.enemies.length - 1; j >= 0; j--) { const e = w.enemies[j]; if ((e.x - m.x) ** 2 + (e.z - m.z) ** 2 < (STRIKE.r + e.r) ** 2) kill(e, j); }
+      if ((p.x - m.x) ** 2 + (p.z - m.z) ** 2 < (STRIKE.r + p.r * 0.5) ** 2) { hurt(); if (!world) return; }
+    }
     for (const e of w.enemies) {
       const k = KINDS[e.kind], ang = Math.atan2(p.z - e.z, p.x - e.x); e.t += dt;
       if (e.kind === 'dasher') {
@@ -125,6 +146,7 @@ run({
     if (w) {
       const p = w.player; p.mesh.position.set(p.x, 0.75, p.z); p.mesh.visible = !(p.inv > 0 && Math.floor(p.inv * 20) % 2);
       for (const e of w.enemies) { e.mesh.position.set(e.x, e.r, e.z); e.mesh.material = e.flash > 0 ? mats.flash : mats[e.kind]; e.flash -= dt; if (e.kind === 'dasher') { e.mesh.rotation.z = e.state === 'aim' ? Math.sin(t * 40) * 0.2 : 0; } }
+      for (const m of w.marks) m.fill.scale.setScalar(Math.max(0.01, STRIKE.r * (1 - Math.max(0, m.t) / STRIKE.warn)));
       for (const b of w.shots) b.mesh.position.set(b.x, 0.6, b.z);
       for (const g of w.gems) { g.mesh.position.set(g.x, 0.4 + Math.sin(t * 4 + g.x) * 0.1, g.z); g.mesh.rotation.y = t * 3; }
     }
