@@ -5,6 +5,5 @@ target/
 node_modules/
 dist/
 tools/data/cache/
-ui/src/wasm/
 *.log
 .shots-tmp/

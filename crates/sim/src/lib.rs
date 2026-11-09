@@ -77,6 +77,40 @@ pub mod rng {
     }
 }
 
+pub mod fmath {
+    //! exp and ln written in plain IEEE arithmetic. Faster than libm, and — unlike libm — they
+    //! give the same bits on Windows, Linux and WebAssembly, which is what keeps a seed replayable
+    //! across builds. Relative error is below 1e-5, far finer than anything the game models.
+    #[inline]
+    pub fn exp(x: f32) -> f32 {
+        let t = x.clamp(-80.0, 80.0) * 1.442_695;
+        // Floor by truncation: `f32::floor` is a library call on baseline x86-64.
+        let i = t as i32;
+        let fl = (i - (t < i as f32) as i32) as f32;
+        let y = (t - fl - 0.5) * 0.693_147_2;
+        let p = 1.0 + y * (1.0 + y * (0.5 + y * (1.0 / 6.0 + y * (1.0 / 24.0 + y * (1.0 / 120.0)))));
+        p * 1.414_213_5 * f32::from_bits(((fl as i32 + 127) as u32) << 23)
+    }
+    #[inline]
+    pub fn ln(x: f32) -> f32 {
+        let bits = x.max(1e-30).to_bits();
+        let mut e = ((bits >> 23) & 255) as i32 - 127;
+        let mut m = f32::from_bits((bits & 0x007F_FFFF) | 0x3F80_0000);
+        if m > 1.414_213_5 {
+            m *= 0.5;
+            e += 1;
+        }
+        let t = (m - 1.0) / (m + 1.0);
+        let t2 = t * t;
+        e as f32 * 0.693_147_2 + 2.0 * t * (1.0 + t2 * (1.0 / 3.0 + t2 * (0.2 + t2 * (1.0 / 7.0))))
+    }
+    #[inline]
+    pub fn tanh(x: f32) -> f32 {
+        let e = exp(2.0 * x.clamp(-10.0, 10.0));
+        (e - 1.0) / (e + 1.0)
+    }
+}
+
 pub mod cal {
     //! Calendar. Day 0 is 1 January 2025.
     pub const EPOCH_YEAR: i32 = 2025;
@@ -127,6 +161,15 @@ pub mod cal {
 #[cfg(test)]
 mod tests {
     use super::cal::*;
+    #[test]
+    fn fast_math() {
+        for i in -400..400 {
+            let x = i as f32 * 0.05;
+            assert!((super::fmath::exp(x) / x.exp() - 1.0).abs() < 2e-5, "exp {x}");
+            let y = x.exp();
+            assert!((super::fmath::ln(y) - x).abs() < 2e-5 * x.abs().max(1.0), "ln {y}");
+        }
+    }
     #[test]
     fn calendar() {
         assert_eq!(ymd(0), (2025, 1, 1, 0));
