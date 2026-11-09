@@ -1,0 +1,38 @@
+{
+  "note": "Interface text. {braces} are filled in by the interface. Edit freely; the simulation never reads this file.",
+  "title": "Third Party Rising",
+  "tagline": "Found a party in any town in America. Take on the machines. Work your way up.",
+  "disclaimer": "Third Party Rising is a game, a work of fiction built on public statistics. It is not a voting guide, not a forecast and not election information. Real office-holders appear by name, party and office only; everything that happens to anyone in the game is invented and happens only to fictional characters.",
+  "offices": ["City council", "Mayor", "County commission", "State house", "State senate", "Governor"],
+  "ops": [
+    null,
+    { "name": "Canvass county", "verb": "Canvassing", "help": "Volunteers knock on doors across the county. Raises awareness of your party. Works better with more volunteers there." },
+    { "name": "Canvass the town", "verb": "Canvassing in", "help": "Door to door in one town. Builds the local roots that win council and mayoral races." },
+    { "name": "Recruit volunteers", "verb": "Recruiting in", "help": "Sign up volunteers in this county. Volunteers power canvassing and petitions, and cost a little to keep going." },
+    { "name": "Hold a fundraiser", "verb": "Fundraising in", "help": "Raises money from supporters in this county. Bigger where you have more support." },
+    { "name": "Petition drive", "verb": "Petitioning in", "help": "Volunteers collect ballot-access signatures in this county." },
+    { "name": "Hold a rally", "verb": "Rally in", "help": "Your leader speaks. Raises awareness, name recognition and a little reputation." },
+    { "name": "Court a donor", "verb": "Courting a donor", "help": "Two weeks of lunches. If it works, a donor gives every month." },
+    { "name": "Campaign push", "verb": "Campaigning for", "help": "Ten days of concentrated campaigning for one of your candidates." }
+  ],
+  "log": {
+    "1": "{party} is founded.",
+    "2": "{party} has qualified for the ballot.",
+    "3": "{party} fell short of the vote test and lost its ballot line.",
+    "4": "{name} ({party}) is elected: {seat}, with {pct} of the vote.",
+    "5": "{name} ({party}) loses the race for {seat} with {pct}.",
+    "6": "Investigators have opened a file on {party}.",
+    "7": "Charges. The leader of {party} is out, and the party is in disgrace.",
+    "8": "The investigation into {party} is closed without charges.",
+    "9": "Scandal: {scandal}",
+    "10": "{name} leaves office: {seat}.",
+    "11": "{party} has dissolved.",
+    "12": "{op} {target}: done{amount}.",
+    "13": "{year}: {party} holds the most seats in the {chamber} ({n}).",
+    "14": "{party} moves its position on {issue}.",
+    "15": "Donor courtship: {result}",
+    "16": "A quiet arrangement was made: {bribe}.",
+    "17": "{party} cannot make payroll. An organizer has left.",
+    "18": "{name} files as the {party} candidate: {seat}."
+  }
+}

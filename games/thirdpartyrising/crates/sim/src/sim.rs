@@ -15,8 +15,8 @@ pub const AI_FILE_LEAD: i32 = 100;
 pub const FILE_DEADLINE: i32 = 45;
 pub const SIG_PRICE: f32 = 4.5;
 const KQ: [f32; KINDS] = [1.5, 1.3, 0.9, 0.7, 0.6, 0.45];
-const CAMPAIGN_COST: [f32; KINDS] = [400.0, 900.0, 1500.0, 3000.0, 6000.0, 40000.0];
-const RECRUIT_COST: [f32; KINDS] = [300.0, 800.0, 1000.0, 2500.0, 5000.0, 25000.0];
+pub const CAMPAIGN_COST: [f32; KINDS] = [250.0, 900.0, 1500.0, 3000.0, 6000.0, 40000.0];
+pub const RECRUIT_COST: [f32; KINDS] = [300.0, 800.0, 1000.0, 2500.0, 5000.0, 25000.0];
 
 pub fn step(w: &mut World, ct: &Content) {
     w.day += 1;
@@ -66,7 +66,7 @@ fn counties_daily(w: &mut World) {
         bonus[p] = 0.5 * pt.rep + w.mood[p];
     }
     let (seed, day) = (w.seed, w.day as u64);
-    let (appeal, pop) = (&w.appeal, &w.pop);
+    let (appeal, cal, pop) = (&w.appeal, &w.cal, &w.pop);
     let work = |c: usize, sup: &mut [f32], base: &mut [f32], anchor: &mut [f32], aware: &mut [f32], org: &mut [f32], press: &mut [f32]| {
         // Every party slot is processed every day, active or not: the cost of a day is fixed.
         let mut wt = [0f32; P];
@@ -77,7 +77,7 @@ fn counties_daily(w: &mut World) {
             let orgf = insurgent[p] * 0.35 * fmath::ln(1.0 + org[p] * 4000.0 / pop[c]);
             // Support far above a county's long-run character meets resistance, whoever holds it.
             let drag = 1.5 * (sup[p] - anchor[p] - 0.25).max(0.0);
-            wt[p] = live[p] * aware[p] * base[p] * fmath::exp(0.9 * appeal[c * P + p] + orgf + 0.35 * press[p] + bonus[p] - drag);
+            wt[p] = live[p] * aware[p] * base[p] * fmath::exp(0.9 * (appeal[c * P + p] - cal[c * P + p]) + orgf + 0.35 * press[p] + bonus[p] - drag);
             sum += wt[p];
         }
         let sum = sum.max(1e-9);
@@ -159,7 +159,7 @@ fn parties_daily(w: &mut World) {
             vols += w.org[c * P + p];
         }
         let pt = &mut w.parties[p];
-        let income = supporters * 0.006 * (0.7 + 0.5 * pt.rep).max(0.2) + pt.donors * 66.0;
+        let income = supporters * 0.004 * (0.7 + 0.5 * pt.rep).max(0.2) + pt.donors * 66.0;
         let upkeep = vols * 0.15 + pt.organizers as f32 * 100.0;
         pt.net = income - upkeep;
         pt.money += pt.net as f64;
@@ -380,7 +380,7 @@ fn complete_op(w: &mut World, p: usize, op: Op) {
         }
         OP_TOWN => {
             let a = &mut w.arenas[op.target as usize];
-            let e = (w.org[i] * 300.0 / a.pop).clamp(0.2, 1.5);
+            let e = (w.org[i] * 1500.0 / a.pop).clamp(0.3, 1.5);
             a.roots[p] = (a.roots[p] + 0.5 * e).min(2.5);
             w.aware[i] += 0.05 * e * (a.pop / pop).min(1.0) * (1.0 - w.aware[i]);
             amount = e;
@@ -392,7 +392,7 @@ fn complete_op(w: &mut World, p: usize, op: Op) {
         }
         OP_FUNDRAISE => {
             let supporters = w.support[i] * pop * w.wealth[c];
-            amount = (400.0 + supporters * 0.4 + w.parties[p].donors.sqrt() * 500.0) * (1.0 + rep).max(0.3);
+            amount = (800.0 + supporters * 0.4 + w.parties[p].donors.sqrt() * 500.0) * (1.0 + rep).max(0.3);
             w.parties[p].money += amount as f64;
         }
         OP_PETITION => {
@@ -620,15 +620,35 @@ pub fn withdraw(w: &mut World, p: usize, s: usize) -> Result<(), &'static str> {
 
 /// Expected (or, with `noisy`, actual) vote shares for a seat among the filed candidates.
 pub fn seat_shares(w: &World, s: usize, noisy: bool) -> [f32; P] {
+    shares(w, s, noisy, false)
+}
+
+/// A poll: expected shares, assuming the two established parties will each field an ordinary
+/// candidate (or their incumbent) even if they have not filed yet.
+pub fn seat_poll(w: &World, s: usize) -> [f32; P] {
+    shares(w, s, false, true)
+}
+
+fn shares(w: &World, s: usize, noisy: bool, presume: bool) -> [f32; P] {
     let seat = &w.seats[s];
     let k = seat.kind as usize;
     let local = seat.kind <= MAYOR;
     let mut m = [f32::NEG_INFINITY; P];
     let mut n = 0;
     for p in 0..P {
-        let c = seat.cand[p];
+        let mut c = seat.cand[p];
         if c == NONE {
-            continue;
+            if !(presume && p < 2 && w.parties[p].active) {
+                continue;
+            }
+            if seat.holder != NONE && seat.holder_party == p as u8 {
+                c = seat.holder;
+            } else {
+                // A generic, average candidate.
+                n += 1;
+                m[p] = if p == DEM { seat.tilt } else { -seat.tilt } + if local { 0.8 } else { 0.0 };
+                continue;
+            }
         }
         n += 1;
         let pol = &w.pols[c as usize];
@@ -681,7 +701,11 @@ pub fn seat_shares(w: &World, s: usize, noisy: bool) -> [f32; P] {
             add(c, w.pop[c], &mut out);
         }
     } else {
-        add(w.seat_county(seat), 1.0, &mut out);
+        for m in seat.mix {
+            if m.1 > 0.0 {
+                add(m.0 as usize, m.1, &mut out);
+            }
+        }
     }
     let norm = |o: &mut [f32; P]| {
         let t: f32 = o.iter().sum();
@@ -1132,6 +1156,7 @@ fn eligible(w: &World, p: usize, c: &Cond) -> bool {
         && (!c.needs_office || (pt.leader != NONE && w.pols[pt.leader as usize].seat != NONE))
         && c.qualified.map_or(true, |q| q == pt.qualified)
         && seats as i32 >= c.min_seats
+        && pt.sigs >= c.min_sigs_share * w.need_sigs
 }
 
 fn pick_event(w: &World, ct: &Content, p: usize, salt: u64) -> Option<usize> {
@@ -1420,7 +1445,7 @@ fn ai_filing(w: &mut World, y: i32) {
                     if x.kind != below || x.holder == NONE || x.holder_party != p as u8 || x.next_year as i32 == y {
                         continue;
                     }
-                    if kind == SENATE && x.area as usize != c {
+                    if kind == SENATE && !w.seat_covers(&w.seats[s], w.seat_county(x)) {
                         continue;
                     }
                     let h = &w.pols[x.holder as usize];
@@ -1462,7 +1487,7 @@ fn ai_filing(w: &mut World, y: i32) {
                 let near = match kind {
                     COUNCIL | MAYOR => seat.area == home_arena,
                     GOVERNOR => true,
-                    _ => seat.area as usize == home,
+                    _ => w.seat_covers(seat, home),
                 };
                 if !near || (kind as i32) < cur_kind || (kind as i32 == cur_kind && w.pols[leader as usize].seat != s as i32) {
                     continue;

@@ -29,6 +29,11 @@ pub struct PCounty {
     pub bach: Option<f64>,
     #[serde(default)]
     pub pres: BTreeMap<String, [f64; 3]>,
+    /// District shape containing this county's internal point (see tools/data/link.mjs).
+    #[serde(default)]
+    pub house: Option<usize>,
+    #[serde(default)]
+    pub senate: Option<usize>,
 }
 #[derive(Deserialize)]
 pub struct PPlace {
@@ -152,6 +157,9 @@ pub struct Cond {
     pub qualified: Option<bool>,
     #[serde(rename = "minSeats", default)]
     pub min_seats: i32,
+    /// Share of the petition requirement already collected.
+    #[serde(rename = "minSigsShare", default)]
+    pub min_sigs_share: f32,
 }
 #[derive(Deserialize, Serialize, Clone)]
 pub struct EventDef {

@@ -100,6 +100,9 @@ pub struct Seat {
     pub area: u16,
     /// Index of this seat within its kind's list in the pack (district order) or within its area.
     pub ord: u16,
+    /// Up to four counties the seat's voters are drawn from, with weights summing to 1.
+    /// (Governor: unused, every county votes.)
+    pub mix: [(u16, f32); 4],
     /// Positive leans Democratic, negative Republican, relative to the surrounding county.
     pub tilt: f32,
     pub voters: f32,
@@ -196,6 +199,9 @@ pub struct World {
     pub ideal: Vec<f32>,
     /// Cached platform fit per county x party, refreshed when a platform changes.
     pub appeal: Vec<f32>,
+    /// Calibration: the platform fit already reflected in each county's real results. Only fit
+    /// better or worse than this moves votes, so the map starts at (and returns to) real returns.
+    pub cal: Vec<f32>,
     pub salience: [f32; K],
     // ---- dynamic per county x party
     pub support: Vec<f32>,
@@ -312,6 +318,7 @@ impl World {
             wealth: pack.counties.iter().map(|c| c.income.map(|x| (x / mean_income) as f32).unwrap_or(1.0).clamp(0.4, 2.5)).collect(),
             ideal: vec![0.0; nc * K],
             appeal: vec![0.0; nc * P],
+            cal: vec![0.0; nc * P],
             salience: [1.0; K],
             support: vec![0.0; nc * P],
             base: vec![0.0; nc * P],
@@ -362,7 +369,7 @@ impl World {
             let pop = w.pop[i];
             for p in 0..4 {
                 w.support[i * P + p] = w.base[i * P + p];
-                w.aware[i * P + p] = [1.0, 1.0, 0.6, 0.5][p];
+                w.aware[i * P + p] = 1.0;
                 w.org[i * P + p] = w.base[i * P + p] * pop * if p < 2 { 0.0025 } else { 0.001 };
             }
         }
@@ -417,7 +424,7 @@ impl World {
             }
             let mayor = w.seats.len() as u32;
             let mk = |kind: u8, area: usize, ord: usize, tilt: f32, voters: f32, term: u8, next: u16| Seat {
-                kind, area: area as u16, ord: ord as u16, tilt, voters, term, next_year: next,
+                kind, area: area as u16, ord: ord as u16, mix: [(area as u16, 1.0), (0, 0.0), (0, 0.0), (0, 0.0)], tilt, voters, term, next_year: next,
                 holder: NONE, holder_party: NO_PARTY, elect: NONE, elect_party: NO_PARTY,
                 cand: [NONE; P], camp: [0.0; P], last_share: [0.0; P], last_year: 0,
             };
@@ -426,10 +433,13 @@ impl World {
             for j in 0..n {
                 w.seats.push(mk(COUNCIL, ai, j, tilt, v * TURNOUT[COUNCIL as usize], 4, if j % 2 == 0 { 2025 } else { 2027 }));
             }
+            for x in w.seats[mayor as usize..].iter_mut() {
+                x.mix[0].0 = c as u16;
+            }
             w.arenas.push(Arena { place: pi as u32, county: c as u16, pop, tilt, roots: [0.0; P], mayor, council0: mayor + 1, council_n: n as u8 });
         }
         let mk = |kind: u8, area: usize, ord: usize, tilt: f32, voters: f32, term: u8, next: u16| Seat {
-            kind, area: area as u16, ord: ord as u16, tilt, voters, term, next_year: next,
+            kind, area: area as u16, ord: ord as u16, mix: [(area as u16, 1.0), (0, 0.0), (0, 0.0), (0, 0.0)], tilt, voters, term, next_year: next,
             holder: NONE, holder_party: NO_PARTY, elect: NONE, elect_party: NO_PARTY,
             cand: [NONE; P], camp: [0.0; P], last_share: [0.0; P], last_year: 0,
         };
@@ -464,7 +474,21 @@ impl World {
                     }
                 }
                 let (term, next) = cycle(code, i);
-                w.seats.push(mk(kind, c, i, tilt, state_pop / n * ADULT * TURNOUT[kind as usize], term, next));
+                // Electorate: the counties whose internal point lies in this district, largest
+                // first; a district inside one big county is just that county plus its tilt.
+                let mut members: Vec<usize> = (0..nc).filter(|&k| (if kind == HOUSE { pack.counties[k].house } else { pack.counties[k].senate }) == Some(s.shape)).collect();
+                members.sort_by(|a, b| w.pop[*b].partial_cmp(&w.pop[*a]).unwrap());
+                members.truncate(4);
+                if members.is_empty() {
+                    members.push(c);
+                }
+                let total: f32 = members.iter().map(|k| w.pop[*k]).sum();
+                let mut seat = mk(kind, members[0], i, tilt, state_pop / n * ADULT * TURNOUT[kind as usize], term, next);
+                seat.mix = [(0, 0.0); 4];
+                for (j, k) in members.iter().enumerate() {
+                    seat.mix[j] = (*k as u16, w.pop[*k] / total);
+                }
+                w.seats.push(seat);
             }
         }
         w.gov_seat = w.seats.len() as u32;
@@ -474,8 +498,8 @@ impl World {
         w.pols = vec![Pol { real: NONE, seat: NONE, party: NO_PARTY, ..Pol::default() }; w.seats.len() * 4 + BENCH];
         for s in 0..w.seats.len() {
             let seat = w.seats[s].clone();
-            let (c, tilt) = (seat.area as usize, seat.tilt);
-            let c = if seat.kind <= MAYOR { w.arenas[c].county as usize } else { c };
+            let tilt = seat.tilt;
+            let c = w.seat_county(&seat);
             let mut real: Option<(&str, u8)> = None;
             if cfg.real_names {
                 match seat.kind {
@@ -545,6 +569,13 @@ impl World {
             w.push_log(L_FOUNDED, PLAYER as i32, 0, 0, 0.0);
         }
         w.refresh_appeal();
+        for c in 0..nc {
+            let (d, r) = (w.base[c * P + DEM], w.base[c * P + REP]);
+            let standard = (d * w.appeal[c * P + DEM] + r * w.appeal[c * P + REP]) / (d + r).max(1e-6);
+            for p in 0..P {
+                w.cal[c * P + p] = if p < 4 { w.appeal[c * P + p] } else { standard };
+            }
+        }
         w.recount();
         Ok(w)
     }
@@ -655,14 +686,19 @@ impl World {
 
     /// The county a seat's voters are drawn from (governor: none, uses every county).
     pub fn seat_county(&self, s: &Seat) -> usize {
-        if s.kind <= MAYOR { self.arenas[s.area as usize].county as usize } else { s.area as usize }
+        s.mix[0].0 as usize
+    }
+
+    /// Whether county `c` is part of the seat's electorate.
+    pub fn seat_covers(&self, s: &Seat, c: usize) -> bool {
+        s.kind == GOVERNOR || s.mix.iter().any(|m| m.1 > 0.0 && m.0 as usize == c)
     }
 
     /// Approximate bytes of heap held by the world. Constant for the life of a game.
     pub fn heap_bytes(&self) -> usize {
         use std::mem::size_of;
         (self.pop.len() + self.openness.len() + self.wealth.len() + self.ideal.len()) * 4
-            + (self.support.len() * 7) * 4
+            + (self.support.len() * 8) * 4
             + self.parties.len() * size_of::<Party>()
             + self.seats.len() * size_of::<Seat>()
             + self.pols.len() * size_of::<Pol>()

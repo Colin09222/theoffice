@@ -1,5 +1,5 @@
 {
-  "note": "Events for the player's party; AI parties meet the same list and choose for themselves. Effects: op is money | rep | heat | volunteers | awareness | buzz | donors | sigs | recognition; scope is 'home' (default) or 'state'. Conditions in 'when': minDay (days since founding), minHeat, minMoney, needsOffice, qualified, minSeats. Nothing here refers to a real person, party position or real election.",
+  "note": "Events for the player's party; AI parties meet the same list and choose for themselves. Effects: op is money | rep | heat | volunteers | awareness | buzz | donors | sigs | recognition; scope is 'home' (default) or 'state'. Conditions in 'when': minDay (days since founding), minHeat, minMoney, needsOffice, qualified, minSeats, minSigsShare (share of the petition requirement already collected). Nothing here refers to a real person, party position or real election.",
   "events": [
     { "id": "diner_debate", "title": "The diner debate", "text": "A regular at the busiest diner in town challenges your leader to defend the platform, loudly, in front of the breakfast crowd.", "weight": 1.2, "when": {},
       "choices": [
@@ -27,7 +27,7 @@
         { "label": "Rent the booth", "result": "Hundreds of conversations.", "effects": [{ "op": "money", "v": -600 }, { "op": "awareness", "v": 0.10 }, { "op": "volunteers", "v": 3 }] },
         { "label": "Skip it this year", "result": "Nothing ventured.", "effects": [] }
       ] },
-    { "id": "petition_challenge", "title": "Signatures challenged", "text": "A lawyer files a challenge to a batch of your petition signatures, claiming bad addresses.", "weight": 1.3, "when": { "qualified": false, "minDay": 120 },
+    { "id": "petition_challenge", "title": "Signatures challenged", "text": "A lawyer files a challenge to a batch of your petition signatures, claiming bad addresses.", "weight": 1.3, "when": { "qualified": false, "minDay": 120, "minSigsShare": 0.1 },
       "choices": [
         { "label": "Hire counsel and defend every line", "result": "Most of the batch survives.", "effects": [{ "op": "money", "v": -2500 }, { "op": "sigs", "v": -0.01 }] },
         { "label": "Let the batch go and collect more", "result": "A setback.", "effects": [{ "op": "sigs", "v": -0.06 }] },

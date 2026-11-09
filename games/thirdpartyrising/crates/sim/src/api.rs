@@ -101,12 +101,13 @@ impl Engine {
         let mut v = json!({
             "i": s, "kind": seat.kind, "area": seat.area, "ord": seat.ord, "next": seat.next_year, "term": seat.term,
             "electionDay": sim::seat_election_day(seat), "voters": seat.voters.round(),
+            "counties": seat.mix.iter().filter(|m| m.1 > 0.0).map(|m| m.0).collect::<Vec<u16>>(),
             "holder": self.pol_json(seat.holder), "holderParty": seat.holder_party,
             "elect": self.pol_json(seat.elect), "electParty": seat.elect_party,
             "cands": cands, "lastYear": seat.last_year, "lastShare": seat.last_share.map(r4),
         });
         if poll {
-            v["poll"] = json!(sim::seat_shares(w, s, false).map(r4));
+            v["poll"] = json!(sim::seat_poll(w, s).map(r4));
         }
         v
     }
@@ -191,7 +192,7 @@ impl Engine {
             "county" => {
                 let c = (q["i"].as_u64().unwrap_or(0) as usize).min(w.nc - 1);
                 let r = c * P..c * P + P;
-                let seats: Vec<Value> = (0..w.seats.len()).filter(|&s| w.seats[s].kind >= COUNTY && w.seats[s].kind < GOVERNOR && w.seats[s].area as usize == c).map(|s| self.seat_json(s, false)).collect();
+                let seats: Vec<Value> = (0..w.seats.len()).filter(|&s| w.seats[s].kind >= COUNTY && w.seats[s].kind < GOVERNOR && w.seat_covers(&w.seats[s], c)).map(|s| self.seat_json(s, false)).collect();
                 json!({
                     "i": c, "pop": w.pop[c], "support": w.support[r.clone()].iter().map(|x| r4(*x)).collect::<Vec<_>>(),
                     "aware": r4(w.aware[c * P + PLAYER]), "org": r4(w.org[c * P + PLAYER]), "press": r4(w.press[c * P + PLAYER]),
@@ -202,7 +203,7 @@ impl Engine {
             }
             "costs" => json!({
                 "ops": OP_SPEC.iter().map(|(d, c)| json!({"days": d, "cost": c})).collect::<Vec<_>>(),
-                "adState": sim::ad_cost(w, -1, 1).round(), "sig": sim::SIG_PRICE,
+                "adState": sim::ad_cost(w, -1, 1).round(), "sig": sim::SIG_PRICE, "recruit": sim::RECRUIT_COST, "campaign": sim::CAMPAIGN_COST,
                 "bribes": self.content.bribes.iter().map(|b| (b.cost + b.cost_per_need * w.need_sigs).round()).collect::<Vec<_>>(),
             })
             .to_string(),
