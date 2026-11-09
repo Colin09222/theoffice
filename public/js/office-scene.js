@@ -1426,20 +1426,36 @@ export class OfficeView {
         marker(primary); x.beginPath(); x.arc(560, 230, 42, 0, 7); x.stroke(); x.beginPath(); x.moveTo(560, 188); x.lineTo(560, 230); x.lineTo(595, 250); x.stroke();
         return;
       }
+      // The meeting room's board is the team's real work, read straight from the tasks the page already has (nothing is asked of a model for it):
+      // what is being done right now and by whom on a sticky band, then the rest of the plan ticked off as it goes, and how far along it is.
       const title = (tasks[0].plan || 'The plan').slice(0, 30);
-      x.font = '600 36px Fraunces, Georgia, serif'; x.fillStyle = primary; x.fillText(title, 30, 54);
-      marker(primary); x.lineWidth = 3; x.beginPath(); x.moveTo(30, 66); x.lineTo(34 + x.measureText(title).width, 70); x.stroke();
-      x.font = '600 23px ui-sans-serif, system-ui, sans-serif';
-      tasks.slice(0, 6).forEach((t, i) => {
-        const y = 108 + i * 38;
+      x.font = '600 30px Fraunces, Georgia, serif'; x.fillStyle = primary; x.fillText(title, 30, 44);
+      const done = tasks.filter((t) => t.status === 'done').length;
+      x.font = '700 20px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = '#7d8594'; x.textAlign = 'right'; x.fillText(`${done} of ${tasks.length} done`, 440, 42); x.textAlign = 'left';
+      const now = tasks.find((t) => t.status === 'doing') || tasks.find((t) => t.status === 'review') || tasks.find((t) => t.status === 'blocked') || tasks.find((t) => t.status === 'todo');
+      const who = now && [...this.actors.values()].find((a) => a.taskId === now.id || (now.agent_id != null && String(a.id) === String(now.agent_id)));
+      let y = 60;
+      if (now) {
+        x.fillStyle = mix(accent, '#fff6d8', 0.55); x.fillRect(26, y, 418, 96); x.fillStyle = 'rgba(0,0,0,.08)'; x.fillRect(26, y + 92, 418, 4);
+        const head = now.status === 'doing' ? 'NOW' : now.status === 'review' ? 'IN REVIEW' : now.status === 'blocked' ? 'STUCK' : 'NEXT';
+        x.font = '800 17px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = now.status === 'blocked' ? '#b3303f' : '#2f3340'; x.fillText(who?.name ? `${head} · ${String(who.name).toUpperCase().slice(0, 18)}` : head, 38, y + 24);
+        // The task itself, as big as two lines allow.
+        x.font = '700 25px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = '#1f2330';
+        const words = String(now.title || '').split(/\s+/); const lines = ['']; for (const wd of words) { const tryLine = lines.at(-1) ? `${lines.at(-1)} ${wd}` : wd; if (x.measureText(tryLine).width <= 394 || !lines.at(-1)) lines[lines.length - 1] = tryLine; else if (lines.length < 2) lines.push(wd); else { lines[1] = `${lines[1].replace(/.{1,3}$/, '')}…`; break; } }
+        lines.forEach((ln, i) => x.fillText(ln.length > 34 ? `${ln.slice(0, 33)}…` : ln, 38, y + 54 + i * 29));
+        y += 110;
+      }
+      x.font = '600 21px ui-sans-serif, system-ui, sans-serif';
+      tasks.filter((t) => t !== now).slice(0, now ? 4 : 6).forEach((t, i) => {
+        const ty = y + 22 + i * 34;
         marker(t.status === 'done' ? '#3d8a55' : t.status === 'blocked' ? '#c8455a' : '#2f3340'); x.lineWidth = 3;
-        x.strokeRect(32, y - 18, 22, 22);
-        if (t.status === 'done') { x.lineWidth = 4; x.beginPath(); x.moveTo(36, y - 7); x.lineTo(43, y + 1); x.lineTo(58, y - 20); x.stroke(); }
-        else if (t.status === 'doing' || t.status === 'review') { x.fillStyle = accent; x.fillRect(36, y - 14, 14, 14); }
+        x.strokeRect(32, ty - 17, 20, 20);
+        if (t.status === 'done') { x.lineWidth = 4; x.beginPath(); x.moveTo(35, ty - 7); x.lineTo(42, ty); x.lineTo(56, ty - 19); x.stroke(); }
+        else if (t.status === 'doing' || t.status === 'review') { x.fillStyle = accent; x.fillRect(36, ty - 13, 12, 12); }
         x.fillStyle = t.status === 'done' ? '#8a8e99' : '#2f3340';
-        const label = t.title.slice(0, 32);
-        x.fillText(label, 66, y);
-        if (t.status === 'done') { x.lineWidth = 2; x.strokeStyle = '#8a8e99'; x.beginPath(); x.moveTo(66, y - 8); x.lineTo(66 + x.measureText(label).width, y - 8); x.stroke(); }
+        const label = String(t.title || '').slice(0, 32);
+        x.fillText(label, 64, ty);
+        if (t.status === 'done') { x.lineWidth = 2; x.strokeStyle = '#8a8e99'; x.beginPath(); x.moveTo(64, ty - 7); x.lineTo(64 + x.measureText(label).width, ty - 7); x.stroke(); }
       });
       // A diagram scribble on the right: boxes, arrows and a little chart.
       marker('#2a60c0'); x.lineWidth = 3;
@@ -1466,7 +1482,7 @@ export class OfficeView {
     const shown = tasks.filter((t) => ['todo', 'doing', 'review', 'blocked', 'done'].includes(t.status));
     const open = shown.some((t) => t.status !== 'done');
     const list = open ? shown : [];
-    const key = JSON.stringify(list.map((t) => [t.title, t.status]));
+    const key = JSON.stringify([list.map((t) => [t.title, t.status, t.agent_id ?? null]), [...this.actors.values()].map((a) => a.taskId ?? null)]);
     if (key === this.boardKey) return;
     this.boardKey = key;
     this.boardMat.map?.dispose();
@@ -1716,7 +1732,7 @@ export class OfficeView {
   }
   /** The floor is closed and nobody has been called in: everyone but the boss goes home. */
   setClosed(on) { this.closed = !!on; }
-  agentEvent(ev) { const a = this.actors.get(ev.id); if (a) { a.taskId = ev.taskId ?? null; a.setState(ev.state, ev.activity); } }
+  agentEvent(ev) { const a = this.actors.get(ev.id); if (a) { const was = a.taskId; a.taskId = ev.taskId ?? null; a.setState(ev.state, ev.activity); if (was !== a.taskId && this.tasks && this.boardMat) this.updateBoard(this.tasks); } }  // the board names whoever holds the current task
   taskFor(actor) { return actor.taskId == null ? null : this.tasks.find((t) => t.id === actor.taskId) || null; }
   /** A free place to stand and talk to someone: in the same room as them, on the side the camera can see, and not where someone else is already standing. */
   visitSpot(seat, visitor = null) {

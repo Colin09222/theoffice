@@ -31,6 +31,14 @@ The same commits are also on `claude/office-visual-polish-lft5rr`, the branch th
 - Both ways of reaching a floor (a direct link, and flown in from the lobby) now give the same room. Before, the direct link had the bare
   terrace and the lobby route had the furnished one.
 
+### The meeting room's board
+A last, separate pass, asked for mid-way with the note that it must cost nothing extra. The whiteboard by the meeting table now leads
+with the team's real current task on a sticky band ("NOW · IVY" and the task's own title, or IN REVIEW, STUCK or NEXT), with "2 of 3
+done" beside the plan's name and the rest of the plan ticked off beneath. It is drawn from the tasks and staff the page already holds:
+no model call, no server change, no new request. Planning meetings are untouched and stay on the talk model they already use; the board
+redraws when a task changes hands. I saw it drawn once, on the demo floor at 1280x800. The request itself never reached this session, only
+the note about it, so if more was meant than the board, it has not been done.
+
 ### Floor chrome
 - **Desktop:** the lift's floor buttons are quiet paper discs with only the current floor lit, and a long list fades out at the ends
   instead of slicing a number in half. The whole team is kept in frame (a wide screen gives up a little bean size for it, and the margin
@@ -79,7 +87,25 @@ These are my scores, not the reviewers'. I would not be surprised by a 7 where I
 
 ## Tests
 
-Being run as this draft is pushed; results follow in the next commit.
+Node 22, `AI_MODE=mock`. This machine draws WebGL in software, at roughly a frame every few seconds on the heavier suites, so every
+check that waits on an animation or a frame time is unreliable here. The owner asked for the browser suites not to be run again, so
+they were each run once and stopped.
+
+- `npm test`: 1472 of 1474 pass. The two failures are server tests I did not touch and are down to this container:
+  `domains.test.js` (no IPv6: `listen EAFNOSUPPORT ::1`) and one `launch.test.js` case (a 408 under load).
+- After the last client change: `statics`, `life`, `tower10`, `building`, `beans` tests, 61 of 61.
+- `mobile.mjs` at 390x844 and 844x390, on the final lobby and floor code: 97 pass, 1 fail ("the keyboard (Android-style) … the newest
+  message isn't visible" at 390x844). The same step passed at 360x640 and 375x667 on the same floor code in an earlier run, and I
+  changed nothing in the chat or keyboard code. I read it as a timing flake but did not get to re-run it. An earlier partial run
+  (360x640, 375x667) had one other failure, a 43px Sign in button measured mid-animation at 375x667. Worth one run on a real GPU.
+- `tower.mjs`: 14 pass, 11 fail, all after "tap a floor on the tower … timed out". The lobby worker saw the same failures on untouched
+  `main` on this machine. I checked tapping separately with a patient script: at 1280x800, 390x844 and 844x390 a click on a lit floor
+  arrives on that floor, and a click on an empty floor opens Open an office.
+- `floors.mjs`: 33 pass, 2 fail, both "the room got no more space / folded sheet is 489 tall": a 0.24 s slide that had not moved
+  after 1.4 s. Not compared against `main`.
+- `polish.mjs`: its timing checks cannot pass here (first 3D frame at 18.6 s on localhost). No conclusion drawn from it either way.
+- `e2e.mjs`: stopped part-way (13 passes, no failures when stopped). It rewrites `media/*.jpg`; I reverted those.
+- No test was edited or weakened.
 
 ## What I couldn't check
 - **A real GPU or a real phone.** Colour, sharpness and frame rate on real hardware are the integrator's call. On a real GPU the high tier's
