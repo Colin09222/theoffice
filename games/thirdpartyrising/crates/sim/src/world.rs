@@ -76,6 +76,8 @@ pub struct Party {
     pub invest: i32,
     pub platform: [i8; K],
     pub leader: i32,
+    /// Seat the leader is currently a candidate for, or -1.
+    pub race: i32,
     pub founded: i32,
     pub home: i32,
     pub donors: f32,
@@ -345,7 +347,7 @@ impl World {
             let lean = dshare[i] * 2.0 - 1.0;
             for (k, iss) in content.issues.iter().enumerate() {
                 let x = iss.w[0] * lean * 2.0 + iss.w[1] * zd[i] + iss.w[2] * zi[i] + iss.w[3] * za[i] + iss.w[4] * zb[i];
-                w.ideal[i * K + k] = 2.0 * x.tanh();
+                w.ideal[i * K + k] = 2.0 * fmath::tanh(x);
             }
             let l = (other[i] * 0.45).max(0.004);
             let g = (other[i] * 0.20).max(0.002);
@@ -361,7 +363,7 @@ impl World {
             for p in 0..4 {
                 w.support[i * P + p] = w.base[i * P + p];
                 w.aware[i * P + p] = [1.0, 1.0, 0.6, 0.5][p];
-                w.org[i * P + p] = if p < 2 { w.base[i * P + p] * pop / 4000.0 * 2.5 } else { pop / 4000.0 * 0.15 };
+                w.org[i * P + p] = w.base[i * P + p] * pop * if p < 2 { 0.0025 } else { 0.001 };
             }
         }
 
@@ -380,11 +382,13 @@ impl World {
             pt.qualified = p < 2 || (p == LIB && rules.lp) || (p == GRN && rules.gp);
             pt.platform = plat(PARTY_CODES[p]);
             pt.leader = NONE;
+            pt.race = NONE;
             pt.home = NONE;
             pt.scruples = 1.0;
         }
         for p in 4..P {
             w.parties[p].leader = NONE;
+            w.parties[p].race = NONE;
             w.parties[p].home = NONE;
             w.parties[p].color = if p == PLAYER { 0xC64FD0 } else { RIVAL_COLORS[p - 5] };
         }
@@ -454,9 +458,9 @@ impl World {
                     let (d, r) = (w.base[c * P + DEM], w.base[c * P + REP]);
                     let code = party_code(&inc.party);
                     if code == DEM as u8 {
-                        tilt = tilt.max(0.5 * (1.08 * r / d).ln());
+                        tilt = tilt.max(0.5 * fmath::ln(1.08 * r / d));
                     } else if code == REP as u8 {
-                        tilt = tilt.min(-0.5 * (1.08 * d / r).ln());
+                        tilt = tilt.min(-0.5 * fmath::ln(1.08 * d / r));
                     }
                 }
                 let (term, next) = cycle(code, i);
@@ -467,7 +471,7 @@ impl World {
         w.seats.push(mk(GOVERNOR, 0, 0, 0.0, state_pop * ADULT * TURNOUT[GOVERNOR as usize], rules.gov_term as u8, rules.gov_next as u16));
 
         // ---- politicians
-        w.pols = vec![Pol { real: NONE, seat: NONE, party: NO_PARTY, ..Pol::default() }; w.seats.len() + BENCH];
+        w.pols = vec![Pol { real: NONE, seat: NONE, party: NO_PARTY, ..Pol::default() }; w.seats.len() * 4 + BENCH];
         for s in 0..w.seats.len() {
             let seat = w.seats[s].clone();
             let (c, tilt) = (seat.area as usize, seat.tilt);
@@ -488,9 +492,9 @@ impl World {
                     let d = if seat.kind == GOVERNOR {
                         (0..nc).map(|i| w.base[i * P + DEM] * w.pop[i]).sum::<f32>() / state_pop
                     } else {
-                        w.base[c * P + DEM] * tilt.exp()
+                        w.base[c * P + DEM] * fmath::exp(tilt)
                     };
-                    let r = if seat.kind == GOVERNOR { 1.0 - d } else { w.base[c * P + REP] * (-tilt).exp() };
+                    let r = if seat.kind == GOVERNOR { 1.0 - d } else { w.base[c * P + REP] * fmath::exp(-tilt) };
                     let pd = d.powi(4) / (d.powi(4) + r.powi(4));
                     if seq.unit() < pd { DEM as u8 } else { REP as u8 }
                 }
@@ -528,6 +532,7 @@ impl World {
             }
             pt.platform = cfg.platform.map(|v| v.clamp(-2, 2));
             pt.leader = leader;
+            pt.race = NONE;
             pt.home = w.home_arena as i32;
             pt.money = 5000.0;
             pt.founded = w.day;
@@ -544,30 +549,40 @@ impl World {
         Ok(w)
     }
 
-    /// Takes a free slot from the fixed politician pool, recycling the least notable person
-    /// without an office if the pool is full.
-    pub fn alloc_pol(&mut self, party: u8, seq: &mut Seq, year: i32) -> i32 {
+    /// Takes a free slot from the fixed politician pool. Returns NONE if the pool is full; the pool
+    /// is sized (four per seat plus a bench) so that this should not happen in practice.
+    pub fn try_alloc_pol(&mut self, party: u8, seq: &mut Seq, year: i32) -> i32 {
         let n = self.pols.len();
-        let mut found = None;
         for k in 0..n {
             let i = (self.pol_cursor as usize + k) % n;
             if self.pols[i].status == 0 {
-                found = Some(i);
-                break;
+                return self.init_pol(i, party, seq, year);
             }
         }
-        let i = found.unwrap_or_else(|| {
-            let leaders: Vec<i32> = self.parties.iter().map(|p| p.leader).collect();
-            let mut best = usize::MAX;
-            let mut score = f32::MAX;
-            for (i, p) in self.pols.iter().enumerate() {
-                if p.status == 1 && !leaders.contains(&(i as i32)) && !self.is_candidate(i as i32) && p.recog < score {
-                    score = p.recog;
-                    best = i;
-                }
+        NONE
+    }
+
+    /// As `try_alloc_pol`, but if the pool is full it recycles the least notable person who holds
+    /// no office and is in no race. Used where a person is required (leaders, appointments).
+    pub fn alloc_pol(&mut self, party: u8, seq: &mut Seq, year: i32) -> i32 {
+        let i = self.try_alloc_pol(party, seq, year);
+        if i != NONE {
+            return i;
+        }
+        let leaders: Vec<i32> = self.parties.iter().map(|p| p.leader).collect();
+        let mut best = 0;
+        let mut score = f32::MAX;
+        for (i, p) in self.pols.iter().enumerate() {
+            if p.status == 1 && p.recog < score && !leaders.contains(&(i as i32)) && !self.is_candidate(i as i32) {
+                score = p.recog;
+                best = i;
             }
-            if best == usize::MAX { 0 } else { best }
-        });
+        }
+        self.init_pol(best, party, seq, year)
+    }
+
+    fn init_pol(&mut self, i: usize, party: u8, seq: &mut Seq, year: i32) -> i32 {
+        let n = self.pols.len();
         self.pol_cursor = ((i + 1) % n) as u32;
         self.pols[i] = Pol {
             status: 1,

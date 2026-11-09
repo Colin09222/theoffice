@@ -8,6 +8,8 @@ use crate::*;
 
 /// County evaluations each AI party may make per day.
 pub const AI_EVALS: usize = 12;
+/// Below this many counties the daily pass runs on one thread.
+pub const PAR_MIN_COUNTIES: usize = 1024;
 /// Days before election day that AI parties file, and the last day the player may file.
 pub const AI_FILE_LEAD: i32 = 100;
 pub const FILE_DEADLINE: i32 = 45;
@@ -53,23 +55,29 @@ fn counties_daily(w: &mut World) {
     let mut bonus = [0f32; P];
     let mut active = [false; P];
     let mut established = [false; P];
+    let mut live = [0f32; P];
+    let mut insurgent = [0f32; P];
     for p in 0..P {
         let pt = &w.parties[p];
         active[p] = pt.active;
         established[p] = pt.kind == MAJOR || pt.kind == MINOR;
-        bonus[p] = 0.8 * pt.rep + w.mood[p];
+        live[p] = if pt.active { 1.0 } else { 0.0 };
+        insurgent[p] = if established[p] { 0.0 } else { 1.0 };
+        bonus[p] = 0.5 * pt.rep + w.mood[p];
     }
     let (seed, day) = (w.seed, w.day as u64);
     let (appeal, pop) = (&w.appeal, &w.pop);
     let work = |c: usize, sup: &mut [f32], base: &mut [f32], anchor: &mut [f32], aware: &mut [f32], org: &mut [f32], press: &mut [f32]| {
+        // Every party slot is processed every day, active or not: the cost of a day is fixed.
         let mut wt = [0f32; P];
         let mut sum = 0f32;
         for p in 0..P {
-            if !active[p] || aware[p] <= 0.0 {
-                continue;
-            }
-            let orgf = (1.0 + org[p] * 4000.0 / pop[c]).ln();
-            wt[p] = aware[p] * base[p] * (0.9 * appeal[c * P + p] + 0.6 * orgf + 0.35 * press[p] + bonus[p]).exp();
+            // An established party's organisation is already part of its base; an insurgent's
+            // volunteers are a bonus it has to build.
+            let orgf = insurgent[p] * 0.35 * fmath::ln(1.0 + org[p] * 4000.0 / pop[c]);
+            // Support far above a county's long-run character meets resistance, whoever holds it.
+            let drag = 1.5 * (sup[p] - anchor[p] - 0.25).max(0.0);
+            wt[p] = live[p] * aware[p] * base[p] * fmath::exp(0.9 * appeal[c * P + p] + orgf + 0.35 * press[p] + bonus[p] - drag);
             sum += wt[p];
         }
         let sum = sum.max(1e-9);
@@ -79,25 +87,36 @@ fn counties_daily(w: &mut World) {
             let target = wt[p] / sum;
             h = rng::mix(h);
             let n = (unit(h) - 0.5) * 0.0052;
-            sup[p] = (sup[p] + (target - sup[p]) * 0.03 + n * sup[p]).max(0.0);
+            // Values decaying towards zero are snapped to zero: subnormal floats are very slow and
+            // would make old worlds run slower than new ones.
+            let v = sup[p] + (target - sup[p]) * 0.03 + n * sup[p];
+            sup[p] = if v > 1e-7 { v } else { 0.0 };
             total += sup[p];
         }
         for p in 0..P {
             sup[p] /= total.max(1e-9);
-            base[p] += (sup[p] - base[p]) * 0.0006 + (anchor[p] - base[p]) * 0.0003;
+            base[p] += (sup[p] - base[p]) * 0.0006 + (anchor[p] - base[p]) * 0.0006;
             anchor[p] += (base[p] - anchor[p]) * 0.00004;
-            press[p] *= 0.975;
+            press[p] = if press[p].abs() > 1e-4 { press[p] * 0.975 } else { 0.0 };
             if !established[p] && active[p] {
                 let floor = (base[p] * 8.0).min(1.0);
                 if aware[p] > floor {
                     aware[p] += (floor - aware[p]) * 0.0006;
                 }
-                org[p] = org[p] * 0.9992 + sup[p] * pop[c] * aware[p] * 0.000002;
+                // Volunteers come from supporters: a party cannot field more than its base allows.
+                let cap = sup[p] * pop[c] * 0.004 + 12.0;
+                org[p] = (org[p] * 0.9992 + sup[p] * pop[c] * aware[p] * 0.000002).min(cap);
+            } else if active[p] {
+                // Established parties keep a standing volunteer base in proportion to their support.
+                let rate = if p < 2 { 0.0025 } else { 0.001 };
+                org[p] += (sup[p] * pop[c] * rate - org[p]) * 0.01;
             }
         }
     };
+    // Threads only pay for themselves on big maps (the future national map); a single state is
+    // faster on one core, and the result is identical either way.
     #[cfg(feature = "parallel")]
-    {
+    if w.nc >= PAR_MIN_COUNTIES {
         use rayon::prelude::*;
         w.support
             .par_chunks_mut(P)
@@ -107,10 +126,10 @@ fn counties_daily(w: &mut World) {
             .zip(w.org.par_chunks_mut(P))
             .zip(w.press.par_chunks_mut(P))
             .enumerate()
-            .with_min_len(96)
+            .with_min_len(128)
             .for_each(|(c, (((((s, b), an), a), o), pr))| work(c, s, b, an, a, o, pr));
+        return;
     }
-    #[cfg(not(feature = "parallel"))]
     for c in 0..w.nc {
         let r = c * P..c * P + P;
         let (s, b, an, a, o, pr) = (&mut w.support[r.clone()], &mut w.base[r.clone()], &mut w.anchor[r.clone()], &mut w.aware[r.clone()], &mut w.org[r.clone()], &mut w.press[r]);
@@ -144,8 +163,8 @@ fn parties_daily(w: &mut World) {
         let upkeep = vols * 0.15 + pt.organizers as f32 * 100.0;
         pt.net = income - upkeep;
         pt.money += pt.net as f64;
-        pt.heat *= 0.9992;
-        pt.rep *= 0.9993;
+        pt.heat = if pt.heat > 1e-4 { pt.heat * 0.9992 } else { 0.0 };
+        pt.rep = if pt.rep.abs() > 1e-4 { pt.rep * 0.9993 } else { 0.0 };
         if pt.money < -3000.0 && pt.organizers > 0 {
             pt.organizers -= 1;
             pt.money += 1500.0;
@@ -179,6 +198,7 @@ fn resolve_investigation(w: &mut World, p: usize) {
     }
     // Scandal and ruin: the leader is out, money and trust go with them.
     let old = w.parties[p].leader;
+    w.parties[p].race = NONE;
     for c in 0..w.nc {
         w.support[c * P + p] *= 0.6;
         w.base[c * P + p] *= 0.75;
@@ -368,7 +388,7 @@ fn complete_op(w: &mut World, p: usize, op: Op) {
         OP_RECRUIT => {
             let supporters = w.support[i] * pop;
             amount = (4.0 + supporters * 0.004 + (pop * w.aware[i]).sqrt() * 0.03) * (1.0 + rep).max(0.3);
-            w.org[i] = (w.org[i] + amount).min(pop * 0.01);
+            w.org[i] += amount;
         }
         OP_FUNDRAISE => {
             let supporters = w.support[i] * pop * w.wealth[c];
@@ -418,7 +438,7 @@ fn complete_op(w: &mut World, p: usize, op: Op) {
 
 pub fn ad_cost(w: &World, county: i32, tier: i32) -> f32 {
     let pop = if county < 0 { w.state_pop } else { w.pop[county as usize] };
-    0.03 * pop * tier as f32
+    (if county < 0 { 0.04 } else { 0.03 }) * pop * tier as f32
 }
 
 pub fn buy_ads(w: &mut World, p: usize, county: i32, tier: i32) -> Result<(), &'static str> {
@@ -480,7 +500,11 @@ pub fn bribe(w: &mut World, ct: &Content, p: usize, idx: usize) -> Result<(), &'
         }
         "camp" => {
             let l = w.parties[p].leader;
-            let s = w.seats.iter().position(|s| l != NONE && s.cand[p] == l).ok_or("your leader is not in a race")?;
+            let _ = l;
+            if w.parties[p].race == NONE {
+                return Err("your leader is not in a race");
+            }
+            let s = w.parties[p].race as usize;
             w.seats[s].camp[p] = (w.seats[s].camp[p] + b.v).min(2.4);
         }
         _ => return Err("unknown effect"),
@@ -551,7 +575,10 @@ pub fn file(w: &mut World, p: usize, s: usize, use_leader: bool, deadline: i32) 
         }
         let mut seq = Seq(key(w.seed, w.day as u64, s as u64, 50 + p as u64));
         let y = w.year();
-        let i = w.alloc_pol(p as u8, &mut seq, y);
+        let i = w.try_alloc_pol(p as u8, &mut seq, y);
+        if i == NONE {
+            return Err("no one is available to recruit right now");
+        }
         let lift = (w.parties[p].rep * 15.0).clamp(-10.0, 12.0) as i32;
         let pol = &mut w.pols[i as usize];
         pol.cha = (pol.cha as i32 + lift).clamp(20, 95) as u8;
@@ -559,6 +586,9 @@ pub fn file(w: &mut World, p: usize, s: usize, use_leader: bool, deadline: i32) 
         i
     };
     w.seats[s].cand[p] = pol;
+    if use_leader {
+        w.parties[p].race = s as i32;
+    }
     if p == PLAYER {
         w.push_log(L_FILED, s as i32, pol, p as i32, 0.0);
     }
@@ -572,6 +602,9 @@ pub fn withdraw(w: &mut World, p: usize, s: usize) -> Result<(), &'static str> {
     let pol = w.seats[s].cand[p];
     w.seats[s].cand[p] = NONE;
     w.seats[s].camp[p] = 0.0;
+    if w.parties[p].race == s as i32 {
+        w.parties[p].race = NONE;
+    }
     if pol != w.parties[p].leader && w.pols[pol as usize].status == 1 {
         w.pols[pol as usize].status = 0;
     }
@@ -634,7 +667,7 @@ pub fn seat_shares(w: &World, s: usize, noisy: bool) -> [f32; P] {
                 // Local races are mostly about the person: partisanship counts for less.
                 sup = 0.6 * sup + 0.4 / n as f32;
             }
-            wt[p] = sup * m[p].exp();
+            wt[p] = sup * fmath::exp(m[p]);
             sum += wt[p];
         }
         if sum > 0.0 {
@@ -751,6 +784,7 @@ fn elections(w: &mut World, y: i32) {
         }
     }
     for pt in w.parties.iter_mut() {
+        pt.race = NONE;
         for o in pt.ops.iter_mut() {
             if o.kind == OP_CAMPAIGN {
                 *o = Op::default();
@@ -896,7 +930,7 @@ fn new_year(w: &mut World, ct: &Content, y: i32) {
         if pol.status == 0 {
             continue;
         }
-        pol.taint *= 0.5;
+        pol.taint = if pol.taint > 1e-3 { pol.taint * 0.5 } else { 0.0 };
         let age = y - pol.born as i32;
         let is_leader = leaders.contains(&(i as i32));
         if pol.status == 2 {
@@ -985,7 +1019,7 @@ fn dissolve(w: &mut World, p: usize) {
         }
     }
     let color = w.parties[p].color;
-    w.parties[p] = Party { color, leader: NONE, home: NONE, ..Party::default() };
+    w.parties[p] = Party { color, leader: NONE, race: NONE, home: NONE, ..Party::default() };
     w.push_log(L_DISSOLVED, p as i32, 0, 0, 0.0);
 }
 
@@ -1029,6 +1063,7 @@ fn found_rival(w: &mut World, ct: &Content, p: usize, y: i32) {
         color,
         platform,
         leader,
+        race: NONE,
         founded: w.day,
         home: arena as i32,
         money: 6000.0 + seq.unit() as f64 * 6000.0,
@@ -1196,7 +1231,7 @@ fn ai_major(w: &mut World, p: usize, season: bool) {
         let r = c * P;
         let threat: f32 = (2..P).map(|q| w.support[r + q]).sum();
         let close = (1.0 - (w.support[r + p] - w.support[r + other]).abs() * 4.0).max(0.0);
-        let target = (threat * 7.0 + if season { close * 0.6 } else { 0.0 }).min(2.5);
+        let target = (threat * 9.0 + if season { close * 0.6 } else { 0.0 }).min(3.0);
         if w.press[r + p] < target {
             w.press[r + p] = (w.press[r + p] + 0.3).min(target);
         }
@@ -1275,7 +1310,7 @@ fn ai_rival(w: &mut World, ct: &Content, p: usize, ed: i32) {
         }
         let i = c * P + p;
         let known = w.aware[i] > 0.0 || c == home;
-        let s = appeal(w, p, c) + 0.5 * (w.openness[c] / 0.03).ln() - 0.2 * (w.pop[c] / 50_000.0).ln().max(-2.0)
+        let s = appeal(w, p, c) + 0.5 * fmath::ln(w.openness[c] / 0.03) - 0.2 * fmath::ln(w.pop[c] / 50_000.0).max(-2.0)
             + 3.0 * w.support[i]
             + if c == home { 1.2 } else { 0.0 }
             + if known { 0.4 } else { 0.0 }
@@ -1296,7 +1331,8 @@ fn ai_rival(w: &mut World, ct: &Content, p: usize, ed: i32) {
     let r = unit(key(w.seed, day, p as u64, 33));
     let to_election = ed - w.day;
     let leader = w.parties[p].leader;
-    let leader_seat = w.seats.iter().position(|s| leader != NONE && s.cand[p] == leader);
+    let _ = leader;
+    let leader_seat = if w.parties[p].race != NONE { Some(w.parties[p].race as usize) } else { None };
     let coverage = w.org[i] * 4000.0 / w.pop[c];
     let res = if money < 600.0 {
         if money >= 150.0 { start_op(w, p, OP_FUNDRAISE, rich_c as i32, 0, false) } else { start_op(w, p, OP_CANVASS, home as i32, 0, false) }
@@ -1400,7 +1436,7 @@ fn ai_filing(w: &mut World, y: i32) {
             }
             if cand == NONE {
                 let mut seq = Seq(key(w.seed, y as u64, s as u64, 93 + p as u64));
-                cand = w.alloc_pol(p as u8, &mut seq, y);
+                cand = w.try_alloc_pol(p as u8, &mut seq, y);
             }
             w.seats[s].cand[p] = cand;
         }
@@ -1448,7 +1484,7 @@ fn ai_filing(w: &mut World, y: i32) {
         // Recruits where the party has a base.
         let mut filed = 0;
         for &s in &up {
-            if filed >= (up.len() / 3).max(8) {
+            if filed >= up.len() {
                 break;
             }
             let seat = &w.seats[s];
