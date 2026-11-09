@@ -30,6 +30,8 @@ const cfg = loadConfig();
 const usage = () => {
   console.log(['Usage:',
     '  node scripts/admin.mjs code [--floor N]       issue a one-time office code',
+    '  node scripts/admin.mjs cloud ai lock PROJECT --model ID --day-usd N [--only HOSTS] [--effort E]   give a project a locked AI (its own prompt, one model, a hard daily stop)',
+    '  node scripts/admin.mjs cloud ai unlock PROJECT | locks                                            remove a lock | list locks and today\'s spend',
     '  node scripts/admin.mjs code hold --issued-at MS --floor N   make the one unused code issued at that moment hold floor N. Prints no code',
     '  node scripts/admin.mjs mail status [--json]   email: sending and receiving, today\'s counts, each floor\'s address, pauses and alerts. No message text',
     '  node scripts/admin.mjs mail pause|resume [--floor N]   stop or restart sending for one floor, or for the whole building. Receiving carries on',
@@ -220,6 +222,25 @@ if (cmd === 'code' && rest[0] === 'hold') {
       if (!report.projects.length) console.log('No project has used it today or has a switch set.');
       for (const x of report.projects) console.log(`${nameOf(x)}: ${x.paused ? 'PAUSED' : x.on ? 'on' : 'off (by its boss)'}, ${kind === 'ai' ? `${x.callsToday} requests today, ${x.fastLeft} fast and ${x.smartLeft} smart tokens left` : `${x.fetchedToday} pages today, ${x.left} left`}`);
     }
+  } else if (kind === 'ai' && sub === 'lock') {
+    // A project whose AI uses only its own published prompt, one OpenRouter model and a hard stop per day. Off for every project unless switched on here.
+    if (!given) die('Name a project.');
+    const p = findProject();
+    const flag = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : undefined; };
+    const model = flag('--model'), dayUsd = Number(flag('--day-usd')), only = flag('--only') || '', effort = flag('--effort') || 'low';
+    if (!model || !loadModels().prices?.[model]) die('Give --model with a model that has a price in config/models.json.');
+    if (!(dayUsd > 0 && dayUsd <= 25)) die('Give --day-usd between 0 and 25.');
+    run(db, 'INSERT INTO cloud_ai_locks (floor_id,project,model,day_usd,only_provider,effort,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(floor_id,project) DO UPDATE SET model=excluded.model, day_usd=excluded.day_usd, only_provider=excluded.only_provider, effort=excluded.effort', p.floorId, p.project, model, dayUsd, only, effort, Date.now());
+    console.log(`AI locked for ${nameOf(p)}: ${model}, stop at ${dayUsd} a day${only ? `, hosts: ${only}` : ''}.`);
+  } else if (kind === 'ai' && sub === 'unlock') {
+    if (!given) die('Name a project.');
+    const p = findProject();
+    run(db, 'DELETE FROM cloud_ai_locks WHERE floor_id=? AND project=?', p.floorId, p.project);
+    console.log(`AI lock removed for ${nameOf(p)}.`);
+  } else if (kind === 'ai' && sub === 'locks') {
+    const rows = all(db, 'SELECT * FROM cloud_ai_locks ORDER BY floor_id, project');
+    if (!rows.length) console.log('No project has a locked AI.');
+    for (const x of rows) console.log(`${nameOf({ floorId: x.floor_id, project: x.project })}: ${x.model}, stop ${x.day_usd} a day, spent today ${get(db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND day=? AND kind=?', x.floor_id, powers.today(), `app_ai_locked:${x.project}`).n.toFixed(4)}, calls today ${powers.counts(x.floor_id, x.project).ai_calls}.`);
   } else if (sub === 'pause' || sub === 'resume') {
     const on = sub === 'pause';
     if (rest.includes('--all')) { powers.setBuildingPaused(kind, on); console.log(`${name} ${on ? 'paused' : 'back on'} for the whole building.`); } else {

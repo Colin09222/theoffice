@@ -753,6 +753,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     const lg = legal.page(f, pr, path);  // the approved /terms, /privacy and /refunds (server/legal.js); matched exactly, before the file rules
     if (lg) return lg;
     try { safe = cleanPath(path, { binary: true }); } catch { return null; }
+    // A locked project's prompt and catalog are read by the server only (server/cloud/ai-locked.js); they aren't published to visitors.
+    if (safe.startsWith('ai/') && get(db, 'SELECT 1 x FROM cloud_ai_locks WHERE floor_id=? AND project=?', f.id, pr.slug)) return null;
     const row = get(db, 'SELECT content FROM published_files WHERE floor_id=? AND project=? AND path=?', f.id, pr.slug, safe);
     if (row) return legal.decorate(f, pr, { type: mimeOf(safe), body: row.content });
     if (safe !== 'index.html' && !safe.endsWith('/index.html')) return null;

@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS cloud_power_days (
   ai_calls INTEGER NOT NULL DEFAULT 0, fetches INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (floor_id, project, day)
 );
 CREATE INDEX IF NOT EXISTS cloud_power_days_day ON cloud_power_days(day);
+-- A project's AI, locked by the admin: one model on OpenRouter, the prompt from its own published files, and a hard stop per day (server/cloud/ai-locked.js).
+CREATE TABLE IF NOT EXISTS cloud_ai_locks (
+  floor_id INTEGER NOT NULL, project TEXT NOT NULL, model TEXT NOT NULL, day_usd REAL NOT NULL, only_provider TEXT NOT NULL DEFAULT '', effort TEXT NOT NULL DEFAULT 'low', created_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (floor_id, project)
+);
 CREATE TABLE IF NOT EXISTS chat_settings (
   floor_id INTEGER NOT NULL, project TEXT NOT NULL, enabled INTEGER, paused INTEGER NOT NULL DEFAULT 0, faq TEXT NOT NULL DEFAULT '[]', faq_by TEXT NOT NULL DEFAULT '',
   updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (floor_id, project)
@@ -79,4 +83,4 @@ CREATE INDEX IF NOT EXISTS chat_questions_waiting ON chat_questions(floor_id, st
 // Child rows first, so a wipe never leaves orphans if it stops part way.
 export const CLOUD_TABLES = ['cloud_docs', 'cloud_saves', 'cloud_scores', 'cloud_file_chunks', 'cloud_files', 'cloud_resets', 'cloud_sessions', 'cloud_users', 'cloud_usage', 'chat_messages', 'chat_questions', 'chat_conversations'];
 // Switches and today's AI and web counts. Clearing a project's data leaves these alone, or clearing it would hand back the day's allowance and lift a pause. They only go with the floor.
-export const CLOUD_POWER_TABLES = ['cloud_powers', 'cloud_power_days', 'chat_settings', 'cloud_mail_days'];
+export const CLOUD_POWER_TABLES = ['cloud_powers', 'cloud_power_days', 'cloud_ai_locks', 'chat_settings', 'cloud_mail_days'];

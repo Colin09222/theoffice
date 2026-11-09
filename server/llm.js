@@ -22,7 +22,7 @@ export const plainProviderText = (e) => (e?.message && !/\bsaid\b|provider error
 
 export function createOpenRouterClient(cfg) {
   return {
-    async chat({ model, messages, tools, maxTokens, onToken, onToolCall, signal, pricing }) {
+    async chat({ model, messages, tools, maxTokens, onToken, onToolCall, signal, pricing, extra }) {
       if (!cfg.openrouterKey) throw new ProviderError('No OpenRouter key is configured on the server.', { status: 401 });
       const ctl = new AbortController();
       const onAbort = () => ctl.abort(signal.reason);
@@ -36,7 +36,7 @@ export function createOpenRouterClient(cfg) {
           res = await fetch(`${cfg.openrouterBase}/chat/completions`, {
             method: 'POST', signal: ctl.signal,
             headers: { authorization: `Bearer ${cfg.openrouterKey}`, 'content-type': 'application/json', 'x-title': 'The Office' },
-            body: JSON.stringify({ model, messages, stream: true, max_tokens: maxTokens, usage: { include: true }, ...(tools?.length ? { tools, tool_choice: 'auto' } : {}) }),
+            body: JSON.stringify({ model, messages, stream: true, max_tokens: maxTokens, usage: { include: true }, ...(tools?.length ? { tools, tool_choice: 'auto' } : {}), ...(extra || {}) }),
           });
         } catch (e) {
           if (signal?.aborted) throw e;

@@ -386,6 +386,13 @@ export function createMockClient(cfg) {
         const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
         return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
       }
+      if (meta?.kind === 'app_ai_locked') {
+        await sleep(Math.min(cfg.mockDelayMs, 20), signal);
+        const last = String(messages.filter((m) => m.role === 'user').at(-1)?.content ?? '');
+        const content = last.includes('[broken]') ? 'not json at all' : JSON.stringify({ reply: last.includes('[dose]') ? 'Take 200 mg a week.' : last.includes('[safe]') ? 'Tren is perfectly safe.' : last.includes('[link]') ? 'See https://example.com' : last.includes('[html]') ? 'Hello <img src=x onerror=alert(1)>' : last.includes('[price]') ? 'That is $40 at a lab.' : `Mock reply to: ${last.slice(0, 200)}`, compounds: last.includes('[made-up]') ? ['not_a_compound', 'testosterone_therapy'] : [], concerns: [], markers: [], answers: { started: 'unknown', diabetes: 'unknown', growth_hormone: 'unknown' }, alert: last.includes('[alert]') });
+        const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
+        return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
+      }
       if (meta?.kind === 'talk') {
         await sleep(cfg.mockDelayMs, signal);
         const content = talkStep(meta);

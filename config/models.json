@@ -2,6 +2,10 @@
   "_comment": "Who runs on which model, in one place. provider 'anthropic' uses the Claude API; anything else goes to OpenRouter. A role names its model and effort; what a model costs is under prices, so changing a model changes the price with it. OpenRouter models are checked by scripts/validate-models.mjs.",
   "prices": {
     "_comment": "USD per million tokens. cacheRead is what a prompt-cache hit costs; a cache write is charged at 1.25 times the input price.",
+    "openai/gpt-5-nano": { "prompt": 0.05, "completion": 0.4 },
+    "openai/gpt-6-luna": { "prompt": 0.1, "completion": 0.5 },
+    "anthropic/claude-haiku-5.5": { "prompt": 0.1, "completion": 0.5 },
+    "z-ai/glm-5.3-flash": { "prompt": 0.15, "completion": 0.5 },
     "claude-opus-5-5": {
       "prompt": 4,
       "completion": 20,
