@@ -77,7 +77,8 @@ A floor with no company name (`floor.setup`) gets a full-screen Setup instead of
 These are in `config/makers.json`, per type.
 
 - Each rule has an id, its text, and `check` set to `browser` (machine-checked) or `judge` (judged by the Tester against the design doc).
-- The bars are numbers the Tester and the Builder both see: `softlockSeconds 60`, `frozenSeconds 12`, `minFps 30` (`headlessMinFps 18`), `minMechanics 3`, `minPlayMinutes 10`, `phoneWidth 390`, and a page-weight budget.
+- The bars are numbers the Tester and the Builder both see: `softlockSeconds 60`, `frozenSeconds 12`, `idleHurtSeconds 30`, `idleLoseSeconds 60`, `idleSafeSeconds 10`, `minFps 30` (`headlessMinFps 18`), `minMechanics 3`, `minPlayMinutes 10`, `phoneWidth 390`, and a page-weight budget.
+- **`pressure`** is the games' browser rule for an opening that is too gentle: a player who does nothing is hurt within `idleHurtSeconds` and has lost within `idleLoseSeconds`, and nobody loses in the first `idleSafeSeconds`. It is measured, not judged (see the idle run below). The Tester's verdict carries the two numbers in an `idle` field, and `decide()` goes by them whatever the Tester ticked: past a bar is a failing browser rule, so Launch is held and a fix pass follows with the numbers in the Builder's list.
 - The Builder's and Tester's briefs are built from this file, so a change there reaches both.
 - The review loop reads the Tester's `office-verdict` block from `TEST-REPORT.md`. That file never goes live.
 
@@ -88,24 +89,28 @@ These are in `config/makers.json`, per type.
 - **Games** are played at desktop and phone size:
   - menu, settings and back, then start;
   - keyboard, gamepad and touch must each move the player (a fake gamepad is injected before the page loads). Each check starts from play and gets a second go, because a game can pause itself on a focus change;
+  - **the idle run**, first, on a fresh run: no input at all, timed until the player is first hurt and until game over. It fills the `pressure` rule (`idleVerdict`). Time is counted only in play, so a choice screen costs nothing (its first option is picked), and in the game's own clock (the hook's `t`) when it has one, so a slow machine doesn't make a game look gentler. It stops at game over or at `idleLoseSeconds`. A run cut short is reported as unknown, not as failed;
   - pause and resume;
-  - 60 s of scripted plus random input;
+  - scripted plus random input for the rest of the 60 s, and never less than 30 s, so the idle run adds at most half a minute a size;
   - soft-locks: play frozen for 12 s, game over that won't restart, or stuck on a choice or settings screen;
   - the frame rate;
+  - a hook that has no `lives`, `health`, `hp` or `hurts` can't say when the player was hurt, so then only the time to game over is judged, and the notes say so;
   - game over on purpose, the saved best and a posted score through Office Cloud, then restart;
   - screenshots of the menu, pause, play and game over, for the model to judge.
 - **Apps:** sign up, create, reload, sign out and back in, through the starter's `data-office` hooks; plus the phone layout. On a computer's local preview, Office Cloud isn't live, so those rules are reported as unknown rather than as passed.
 - **Sites:** the phone layout, every link and in-page anchor, the meta tags, and a real form submission that must thank the visitor.
 
-Results go to `playtest.json`, one value per browser rule. The Tester adds the judged rules and writes the verdict.
+Results go to `playtest.json`, one value per browser rule, plus `idle` for a game: the two numbers (the slower size for each) and each size's own. The Tester adds the judged rules and writes the verdict.
+
+A game's Builder gets the same `.office/playtest.mjs` in its box and is told to run it before handing over, so a failing browser rule is found in the build task rather than by a Tester round, a fix pass and a re-test.
 
 ## Starters (`server/app-client/starters/`)
 
 | Starter | What it is |
 |---|---|
-| `game-kit` (shared) | Boot, menu, play, pause, settings, help, leaderboard, game over, and a mid-run choice screen. Keyboard, touch (stick and A/B) and gamepad as one set of actions, with fast taps latched. Synthesised sound with mute and music. Saves and a shared leaderboard on Office Cloud. Juice: shake, hit-stop, tweens, easing. The `window.officeGame` test hook |
-| `game-2d` | Phaser 3.90 (vendored, MIT, served as `_office/phaser.min.js`). An arena with waves, chasers, dashers that telegraph, splitters, shooters, gems, a pulse, upgrades between waves, and a win at wave 10. Particles, shake, hit-stop and flashes |
-| `game-3d` | three.js (vendored). A floating arena with the same loop, pooled particle points, shadows and fog |
+| `game-kit` (shared) | Boot, menu, play, pause, settings, help, leaderboard, game over, and a mid-run choice screen. Keyboard, touch (stick and A/B) and gamepad as one set of actions, with fast taps latched. Synthesised sound with mute and music. Saves and a shared leaderboard on Office Cloud. Juice: shake, hit-stop, tweens, easing. The `window.officeGame` test hook: `state()` carries `lives` from the game, and `hurts` (counted by `playerHurt()`) and `won` from the kit, which is what the idle run reads |
+| `game-2d` | Phaser 3.90 (vendored, MIT, served as `_office/phaser.min.js`). An arena with waves, chasers, dashers that telegraph, splitters, shooters, strikes that land where the player stands (from 11 s, so standing still is never safe), gems, a pulse, upgrades between waves, and a win at wave 10. Particles, shake, hit-stop and flashes |
+| `game-3d` | three.js (vendored). A floating arena with the same loop and the same strikes, pooled particle points, shadows and fog |
 | `app` | A landing page, sign-up and sign-in on Office Cloud accounts, a private list with create, edit, done and delete, empty, loading and error states, settings on the account, and a "coming soon" payments hook |
 | `website` | Sections, a skip link, full SEO and OG meta, and a contact form posting to Office Cloud with a spam trap. `COMPANY_EMAIL.notify` in `site.js` is the one-line hook for company mail |
 
@@ -149,12 +154,13 @@ Things that were looked at and left alone, and why:
   - a failing job that asks the boss and is stopped;
   - "Stop all" mid-job becoming a question, and Try again starting over from the design doc;
   - the manager never being nudged to publish a maker project before Launch.
+- `test/pressure.test.js`, in the node suite: the `pressure` rule and its bars in the config and in `server/playtest.js`; the verdict from an idle run's numbers; the idle run itself against a made-up game on a made-up clock (lives, health, hurts, an older hook, choice screens, a slow machine, a win); `decide()` acting on the rule and on the numbers; the briefs and the game playbook naming the bars.
 - `node test/browser/makers.mjs`, in real Chrome, mock mode:
   - the 3-tap launch on a phone and on a desktop, through Launch and a share link that opens;
-  - each starter published to its own origin and put through the playtest: both games for 60 s at both sizes, saving and posting to Office Cloud;
+  - each starter published to its own origin and put through the playtest: both games for 60 s at both sizes, idle run included, saving and posting to Office Cloud;
   - the app end to end;
   - the site's layout, links, meta and form.
-- `MAKERS_SECONDS` shortens the runs, and `MAKERS_OUT=dir` saves four pictures.
+- `MAKERS_SECONDS` shortens the runs (the idle run is always timed in full), and `MAKERS_OUT=dir` saves four pictures.
 
 ## Deploy
 
@@ -164,18 +170,30 @@ Nothing new to set. The tables are made at boot, Phaser is served from `public/v
 
 - The playtest's model half (judging screenshots) is the Tester's own model call; it was not run against a real model here.
 - On a computer, app accounts can't be checked before publishing, because Office Cloud runs only on the project's origin.
+- The kit's `fps` is worked out from frame times capped at 50 ms, so it never reads under 20 and the `headlessMinFps 18` bar can't fail. It was left alone here: making it honest would start failing games on slow test machines, which needs trying on a real one first.
 
 ## Proof (Node 22, `AI_MODE=mock`, no model calls)
 
-- **Node suite:** 977/977 (`npm test`, with `test/makers.test.js` at 19/19).
-- **`node test/browser/makers.mjs`, full 60 s runs:** 48/48.
+- **Node suite:** 1501/1502 (`npm test`, with `test/pressure.test.js` at 28/28). The one failure is `test/domains.test.js` listening on `::1` on a machine with no IPv6; nothing here touches it.
+- **`node test/browser/makers.mjs`, full 60 s runs:** 56/56.
   - The 3-tap launch passes on a phone and on a desktop, through Launch to a share link that opens.
-  - Both games pass every browser rule at desktop and phone size, with a saved best and a posted score on the server:
-    - `game-2d`: about 54 fps on desktop and 60 on a phone;
-    - `game-3d`: about 54 and 41, in headless Chrome.
+  - Both games pass every browser rule at desktop and phone size, `pressure` included, with a saved best and a posted score on the server.
   - The app passes sign up, create, reload, and sign out and back in, at both sizes.
   - The site passes the phone layout, links, meta and the form.
-- **Screenshots:** four, in `media/out/office-makers/`.
+- **The idle run on the starters,** seconds of play, before and after the strikes went in:
+
+  | Starter | Before: first hurt / game over | After: first hurt / game over |
+  |---|---|---|
+  | `game-2d` desktop | 32 to 39 / 38 to 43 (fails the hurt bar) | 11.5 to 12.4 / 21.7 to 26.7 |
+  | `game-2d` phone | 28.7 to 28.9 / 32 to 36 | 11.6 to 12.2 / 21.1 to 29.2 |
+  | `game-3d` desktop | 33 or never / not in 59 to 67 s watched | 12.1 to 13 / 21.6 to 26.5 |
+  | `game-3d` phone | 31.5 or never / 34 or not in 60 s | 12.2 to 12.7 / 22 to 26.4 |
+
+  Before, an idle player in `game-3d` also won the whole game once in real time (wave 8 cleared by the auto-fire, 135 s in) and was still alive after 150 s in another run.
+- **The copy on a computer** (`playtest.js` plus `playtest-box.mjs` as one file) was run under real Playwright against `game-2d` laid out as a Tester's box: every browser rule true, `idle: { hurt: 11.6, lose: 25.7 }` in `playtest.json`.
+- The test machine was shared and slow (games ran at 30% to 90% of real speed), which is why the idle run uses the game's own clock. Frame rates from this run mean nothing and are left out.
+- Found on the way and fixed: `STATE?.scene === 'play'` in `playtest.js` was always true (the conditional swallowed the test), so "restart works" and "pause is reachable" were never really checked; they are now, and the starters pass. The 3D starter's particles never showed (colours never uploaded, `NaN` heights); they do now.
+- **Screenshots:** four, in `media/out/office-makers/` (from before the strikes).
 
 ## Shops
 

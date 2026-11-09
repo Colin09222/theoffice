@@ -11,6 +11,7 @@ import { writeFile, readFile, slugify, slugPattern, floorBytes, goesLive, projec
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { checkLive } from './live-check.js';
 import { claimShortLabel } from './apps.js';
+import { idleVerdict } from './playtest.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = JSON.parse(readFileSync(join(ROOT, 'config/makers.json'), 'utf8'));
@@ -128,7 +129,10 @@ export function parseReport(text) {
   for (const [k, x] of Object.entries(v.rules && typeof v.rules === 'object' ? v.rules : {})) if (/^[a-z][a-z0-9_-]{0,30}$/i.test(k)) rules[k] = x === true ? true : x === false ? false : null;
   const bugs = (Array.isArray(v.bugs) ? v.bugs : []).slice(0, 30).map((b) => (typeof b === 'string' ? { severity: 'major', text: clip(b, 300) } : { severity: ['blocker', 'major', 'minor'].includes(b?.severity) ? b.severity : 'major', text: clip(b?.text, 300) })).filter((b) => b.text);
   const regressions = (Array.isArray(v.regressions) ? v.regressions : []).slice(0, 20).map((x) => clip(x, 300)).filter(Boolean);
-  return { verdict: v.verdict === 'pass' ? 'pass' : 'fail', rules, bugs, regressions, summary: clip(v.summary, 400) };
+  // A game's idle run: seconds until a player who does nothing is first hurt, and until game over. null when it wasn't measured or didn't happen.
+  const sec = (x) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? Math.round(x * 10) / 10 : null);
+  const idle = v.idle && typeof v.idle === 'object' ? { hurt: sec(v.idle.hurt), lose: sec(v.idle.lose) } : null;
+  return { verdict: v.verdict === 'pass' ? 'pass' : 'fail', rules, bugs, regressions, summary: clip(v.summary, 400), idle };
 }
 
 // ---- the loop ----
@@ -155,7 +159,10 @@ export function decide(job, ev, cfg = CONFIG) {
     return { action: 'build', pass: job.pass, patch: { fails }, bugs: job.bugs || [], regressions: [], fix: !!job.fixing };
   }
   // A test.
-  const r = ev.ok ? ev.report : null;
+  let r = ev.ok ? ev.report : null;
+  // The idle numbers are measured, so they decide the pressure rule whatever the Tester ticked: past a bar is a failing browser rule.
+  const idle = r?.idle && rulesFor.some((x) => x.id === 'pressure') ? idleVerdict({ ...r.idle, watched: 0, tellsHurt: false }, cfg.types[job.type].bars || {}) : null;
+  if (idle?.ok === false) r = { ...r, rules: { ...r.rules, pressure: false } };
   if (!r) {
     const fails = (job.fails || 0) + 1;
     if (fails >= limit) return { action: 'ask', patch: { fails }, why: 'the Tester could not play it twice' };
@@ -163,7 +170,8 @@ export function decide(job, ev, cfg = CONFIG) {
   }
   const best = job.best || {};
   const regressions = [...new Set([...r.regressions, ...Object.keys(best).filter((k) => best[k] === true && r.rules[k] === false).map((k) => `${ruleText(rulesFor, k)} worked before and broke`)])];
-  const browserBroken = rulesFor.filter((x) => x.check === 'browser' && r.rules[x.id] === false).map((x) => x.text);
+  const measured = idle?.ok === false ? ` (measured: ${idle.notes.join(' ')})` : r.idle && (r.idle.hurt !== null || r.idle.lose !== null) ? ` (measured with no input: first hurt ${r.idle.hurt !== null ? `after ${r.idle.hurt} s` : 'not seen'}, game over ${r.idle.lose !== null ? `after ${r.idle.lose} s` : 'not seen'})` : '';
+  const browserBroken = rulesFor.filter((x) => x.check === 'browser' && r.rules[x.id] === false).map((x) => (x.id === 'pressure' ? `${x.text}${measured}` : x.text));
   const blockers = r.bugs.filter((b) => b.severity === 'blocker');
   const passing = r.verdict === 'pass' && !regressions.length && !browserBroken.length && !blockers.length;
   const unmet = rulesFor.filter((x) => r.rules[x.id] === false || (r.rules[x.id] === undefined && x.check === 'judge')).map((x) => x.text);
@@ -194,6 +202,7 @@ const ruleText = (rules, id) => rules.find((x) => x.id === id)?.text || id;
 // ---- briefs ----
 const rulesBlock = (type, cfg = CONFIG) => cfg.types[type].doneRules.map((r) => `- ${r.id}: ${r.text}${r.check === 'browser' ? ' (checked in a real browser)' : ' (judged against the design doc)'}`).join('\n');
 const barsLine = (type, cfg = CONFIG) => Object.entries(cfg.types[type].bars || {}).map(([k, v]) => `${k} ${v}`).join(', ');
+const IDLE = CONFIG.types.game?.bars || {};
 const DOC = {
   game: (j) => `Write notes/design.md for ${j.title}: ${j.pitch}
 It is where the depth gets decided, so make it specific enough that two builders would make the same game. Exactly these headings:
@@ -202,7 +211,7 @@ It is where the depth gets decided, so make it specific enough that two builders
 3. Mechanics and enemies: at least 3 distinct ones${j.mechanics ? ` (start from: ${j.mechanics.join('; ')})` : ''}, each with how it behaves, how the player counters it, and the wave it first appears.
 4. Levels or waves: a table of at least 8, with what is new in each.
 5. Upgrades or unlocks: at least 5, with what each costs in the game's own currency.
-6. Scoring, win and lose.
+6. Scoring, win and lose, and what gets a player who does nothing: first hurt within ${IDLE.idleHurtSeconds ?? 30} s and lost within ${IDLE.idleLoseSeconds ?? 60} s, though nobody loses in the first ${IDLE.idleSafeSeconds ?? 10} s. The Tester times it.
 7. Juice and audio: what shakes, what bursts into particles, where hit-stop goes, what tweens, which sound for what.
 8. Phone controls: exactly what each thumb does on a portrait phone.
 9. Look: a palette with hex values, the shapes, and the one idea only this game has.
@@ -247,14 +256,16 @@ const STARTER_HAS = {
 export function testBrief(job, pass, { computer = false, recheck = [] } = {}, cfg = CONFIG) {
   const doc = job.type === 'game' ? 'notes/design.md' : job.type === 'app' ? 'notes/spec.md' : 'notes/copy.md';
   const how = computer
-    ? `Run the browser half first: node .office/playtest.mjs project --type ${job.type} --out .office/playtest (install playwright with npm i -D playwright && npx playwright install chromium if it asks). It serves the project, ${job.type === 'game' ? 'plays 60 s of scripted and random keyboard, touch and gamepad input at desktop and phone size, watches for console errors, soft-locks and the frame rate, and saves screenshots of the menu, play and game over' : job.type === 'app' ? 'signs up, creates something, reloads, signs out and back in, at desktop and phone size' : 'checks the phone layout, every link, the meta tags and the form'}, and writes playtest.json with a result for each browser rule. Then look at the screenshots and judge them against ${doc}, as a ${job.type === 'game' ? 'player: is it clear, is it alive, would you go again' : 'first real visitor'}.`
+    ? `Run the browser half first: node .office/playtest.mjs project --type ${job.type} --out .office/playtest (install playwright with npm i -D playwright && npx playwright install chromium if it asks). It serves the project, ${job.type === 'game' ? 'at desktop and phone size, sits through one run with no input to time how long until the player is first hurt and until game over, then plays scripted and random keyboard, touch and gamepad input (60 s watched at each size), watches for console errors, soft-locks and the frame rate, and saves screenshots of the menu, play and game over' : job.type === 'app' ? 'signs up, creates something, reloads, signs out and back in, at desktop and phone size' : 'checks the phone layout, every link, the meta tags and the form'}, and writes playtest.json with a result for each browser rule${job.type === 'game' ? ' and the idle run\'s two numbers' : ''}. Then look at the screenshots and judge them against ${doc}, as a ${job.type === 'game' ? 'player: is it clear, is it alive, would you go again' : 'first real visitor'}.`
     : `You have no browser here, so read the code against ${doc} and the rules, and give null for any browser rule you can't be sure of.`;
   const lateGame = job.type === 'game' ? `Every pass, including this one, re-check the late game: reach the final boss (or last level) and the win screen, on a debug copy of the project at .office/debug-copy, where you may start at the last wave with extra health. That copy never ships, so never put it inside the project or save it. Say in your report that you reached them, or that this version doesn't have them yet. Set lategame true only if the boss and the win screen really worked. Any cheat or debug hook left in the shipped build (a ?wave= style link, god mode, test keys, a debug panel) is a major bug even if the game is fun: list it as major and set nocheats false. Then look for such hooks in the shipped files on purpose. ` : '';
+  const pressure = cfg.types[job.type].doneRules.some((r) => r.id === 'pressure');
+  const idleLine = pressure ? `Report the idle run's two numbers in TEST-REPORT.md and in the block's idle field: seconds until a player who does nothing is first hurt, and seconds until game over${computer ? ' (the idle field of playtest.json has both)' : ''}. Give null for one that was not measured, or did not happen while it was watched. pressure is false if either is past its bar, or if that player lost inside the first ${cfg.types[job.type].bars?.idleSafeSeconds ?? 10} s. ` : '';
   return `${MARK} test ${pass} · ${job.title}
 Test ${pass === 0 ? 'the first version' : `depth pass ${pass}`} of ${job.title}. ${how}${recheck.length ? `\nThe Builder just tried to fix these. Check each one yourself, and list any still there with its severity:\n${recheck.map((b) => `- [${b.severity}] ${b.text}`).join('\n')}\n` : ''}
-${lateGame}Fix nothing big yourself: the Builder gets your list. Write TEST-REPORT.md in the project (it never goes live): what you checked, what you saw, then the bugs worst first. End it with this block, filled in, and nothing after it:
+${lateGame}${idleLine}Fix nothing big yourself: the Builder gets your list. Write TEST-REPORT.md in the project (it never goes live): what you checked, what you saw, then the bugs worst first. End it with this block, filled in, and nothing after it:
 \`\`\`office-verdict
-{"verdict": "pass or fail", "rules": {${cfg.types[job.type].doneRules.map((r) => `"${r.id}": true`).join(', ')}}, "bugs": [{"severity": "blocker, major or minor", "text": "what is wrong and how to see it"}], "regressions": ["anything that worked in the last version and doesn't now"], "summary": "one line"}
+{"verdict": "pass or fail", "rules": {${cfg.types[job.type].doneRules.map((r) => `"${r.id}": true`).join(', ')}},${pressure ? ' "idle": {"hurt": "seconds until a player who does nothing is first hurt, as a number, or null", "lose": "seconds until that player has lost, as a number, or null"},' : ''} "bugs": [{"severity": "blocker, major or minor", "text": "what is wrong and how to see it"}], "regressions": ["anything that worked in the last version and doesn't now"], "summary": "one line"}
 \`\`\`
 pass means a first-time ${job.type === 'game' ? 'player' : 'visitor'} would get a working thing: no blocker, no failing browser rule, no regression. A rule is true, false, or null if you couldn't check it.
 The rules:

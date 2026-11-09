@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
 import { join, extname, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
@@ -25,7 +26,11 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const siteUrl = `http://127.0.0.1:${server.address().port}/`;
 let chromium;
-try { ({ chromium } = await import('playwright')); } catch { console.error('Playwright is missing. Run: npm i -D playwright && npx playwright install chromium'); process.exit(2); }
+try { ({ chromium } = await import('playwright')); } catch {
+  // An import only looks in node_modules beside this file and above it. A global or NODE_PATH install, or one in the folder this was run from, is found by require.
+  for (const from of [join(process.cwd(), 'x.js'), import.meta.url]) { if (chromium) break; try { ({ chromium } = createRequire(from)('playwright')); } catch { /* the next place */ } }
+  if (!chromium) { console.error('Playwright is missing. Run: npm i -D playwright && npx playwright install chromium'); process.exit(2); }
+}
 mkdirSync(outDir, { recursive: true });
 const browser = await chromium.launch();
 const runs = [];
@@ -58,6 +63,9 @@ try {
   }
 } finally { await browser.close(); server.close(); }
 const all = combine(runs);
-const report = { type: kind, rules: all.rules, notes: all.notes, errors: all.errors, shots: all.shots, runs: runs.map(({ tag, rules, notes, fps, scenes, input }) => ({ tag, rules, notes, fps, scenes, input })) };
+// A game's idle run in one pair of numbers for the report: the slower size for each, and null if it never happened at one of them.
+const idleRuns = runs.filter((r) => r.idle);
+const slowest = (k) => (idleRuns.some((r) => r.idle[k] === null) ? null : Math.max(...idleRuns.map((r) => r.idle[k])));
+const report = { type: kind, rules: all.rules, notes: all.notes, errors: all.errors, shots: all.shots, ...(idleRuns.length ? { idle: { hurt: slowest('hurt'), lose: slowest('lose'), sizes: idleRuns.map((r) => ({ tag: r.tag, ...r.idle })) } } : {}), runs: runs.map(({ tag, rules, notes, fps, scenes, input, idle }) => ({ tag, rules, notes, fps, scenes, input, idle })) };
 writeFileSync(join(outDir, 'playtest.json'), JSON.stringify(report, null, 2));
-console.log(JSON.stringify({ rules: report.rules, notes: report.notes.slice(0, 10), errors: report.errors.slice(0, 5), shots: report.shots }, null, 1));
+console.log(JSON.stringify({ rules: report.rules, ...(report.idle ? { idle: report.idle } : {}), notes: report.notes.slice(0, 10), errors: report.errors.slice(0, 5), shots: report.shots }, null, 1));
