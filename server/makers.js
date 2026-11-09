@@ -7,10 +7,11 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { get, all, run, tx } from './db.js';
-import { writeFile, readFile, slugify, slugPattern, floorBytes, goesLive, WorkspaceError } from './workspace.js';
+import { writeFile, readFile, slugify, slugPattern, floorBytes, goesLive, projectSum, WorkspaceError } from './workspace.js';
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { checkLive } from './live-check.js';
 import { claimShortLabel } from './apps.js';
+import { idleVerdict } from './playtest.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG = JSON.parse(readFileSync(join(ROOT, 'config/makers.json'), 'utf8'));
@@ -102,7 +103,9 @@ export function surprise(type, { seed = Date.now(), cfg = CONFIG, floor = null, 
   const { ownProject, ...card } = pool[Math.floor(rng(seed)() * pool.length)] || cardFor(type, bank[0], cfg);
   return card;
 }
-export const starterFor = (type, text = '') => (type === 'game' ? (/\b(3d|three|first[- ]person|fly|flying|drive|driving|planet|race|racing|island|glide)\b/i.test(text) ? 'game-3d' : 'game-2d') : type === 'app' ? 'app' : type === 'website' ? 'website' : '');
+export const starterFor = (type, text = '') => (type === 'game' ? (/\b(3d|three|first[- ]person|fly|flying|drive|driving|planet|race|racing|island|glide)\b/i.test(text) ? 'game-3d' : 'game-2d') : type === 'app' ? 'app' : type === 'website' ? (SELLS.test(text) ? 'shop' : 'website') : type === 'shop' ? 'shop' : '');
+// A website whose whole point is selling things starts on the shop starter: a basket, card payment and an order confirmation that already work.
+export const SELLS = /\b(shop|store|sell|sells|selling|for sale|buy|merch)\b/i;
 /** The boss's own words: a name made from them, the type's goal and plan, and the words themselves as the pitch. */
 export function fromWords(type, text, cfg = CONFIG) {
   const said = clip(text, 400);
@@ -126,7 +129,10 @@ export function parseReport(text) {
   for (const [k, x] of Object.entries(v.rules && typeof v.rules === 'object' ? v.rules : {})) if (/^[a-z][a-z0-9_-]{0,30}$/i.test(k)) rules[k] = x === true ? true : x === false ? false : null;
   const bugs = (Array.isArray(v.bugs) ? v.bugs : []).slice(0, 30).map((b) => (typeof b === 'string' ? { severity: 'major', text: clip(b, 300) } : { severity: ['blocker', 'major', 'minor'].includes(b?.severity) ? b.severity : 'major', text: clip(b?.text, 300) })).filter((b) => b.text);
   const regressions = (Array.isArray(v.regressions) ? v.regressions : []).slice(0, 20).map((x) => clip(x, 300)).filter(Boolean);
-  return { verdict: v.verdict === 'pass' ? 'pass' : 'fail', rules, bugs, regressions, summary: clip(v.summary, 400) };
+  // A game's idle run: seconds until a player who does nothing is first hurt, and until game over. null when it wasn't measured or didn't happen.
+  const sec = (x) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? Math.round(x * 10) / 10 : null);
+  const idle = v.idle && typeof v.idle === 'object' ? { hurt: sec(v.idle.hurt), lose: sec(v.idle.lose) } : null;
+  return { verdict: v.verdict === 'pass' ? 'pass' : 'fail', rules, bugs, regressions, summary: clip(v.summary, 400), idle };
 }
 
 // ---- the loop ----
@@ -153,7 +159,10 @@ export function decide(job, ev, cfg = CONFIG) {
     return { action: 'build', pass: job.pass, patch: { fails }, bugs: job.bugs || [], regressions: [], fix: !!job.fixing };
   }
   // A test.
-  const r = ev.ok ? ev.report : null;
+  let r = ev.ok ? ev.report : null;
+  // The idle numbers are measured, so they decide the pressure rule whatever the Tester ticked: past a bar is a failing browser rule.
+  const idle = r?.idle && rulesFor.some((x) => x.id === 'pressure') ? idleVerdict({ ...r.idle, watched: 0, tellsHurt: false }, cfg.types[job.type].bars || {}) : null;
+  if (idle?.ok === false) r = { ...r, rules: { ...r.rules, pressure: false } };
   if (!r) {
     const fails = (job.fails || 0) + 1;
     if (fails >= limit) return { action: 'ask', patch: { fails }, why: 'the Tester could not play it twice' };
@@ -161,7 +170,8 @@ export function decide(job, ev, cfg = CONFIG) {
   }
   const best = job.best || {};
   const regressions = [...new Set([...r.regressions, ...Object.keys(best).filter((k) => best[k] === true && r.rules[k] === false).map((k) => `${ruleText(rulesFor, k)} worked before and broke`)])];
-  const browserBroken = rulesFor.filter((x) => x.check === 'browser' && r.rules[x.id] === false).map((x) => x.text);
+  const measured = idle?.ok === false ? ` (measured: ${idle.notes.join(' ')})` : r.idle && (r.idle.hurt !== null || r.idle.lose !== null) ? ` (measured with no input: first hurt ${r.idle.hurt !== null ? `after ${r.idle.hurt} s` : 'not seen'}, game over ${r.idle.lose !== null ? `after ${r.idle.lose} s` : 'not seen'})` : '';
+  const browserBroken = rulesFor.filter((x) => x.check === 'browser' && r.rules[x.id] === false).map((x) => (x.id === 'pressure' ? `${x.text}${measured}` : x.text));
   const blockers = r.bugs.filter((b) => b.severity === 'blocker');
   const passing = r.verdict === 'pass' && !regressions.length && !browserBroken.length && !blockers.length;
   const unmet = rulesFor.filter((x) => r.rules[x.id] === false || (r.rules[x.id] === undefined && x.check === 'judge')).map((x) => x.text);
@@ -192,6 +202,7 @@ const ruleText = (rules, id) => rules.find((x) => x.id === id)?.text || id;
 // ---- briefs ----
 const rulesBlock = (type, cfg = CONFIG) => cfg.types[type].doneRules.map((r) => `- ${r.id}: ${r.text}${r.check === 'browser' ? ' (checked in a real browser)' : ' (judged against the design doc)'}`).join('\n');
 const barsLine = (type, cfg = CONFIG) => Object.entries(cfg.types[type].bars || {}).map(([k, v]) => `${k} ${v}`).join(', ');
+const IDLE = CONFIG.types.game?.bars || {};
 const DOC = {
   game: (j) => `Write notes/design.md for ${j.title}: ${j.pitch}
 It is where the depth gets decided, so make it specific enough that two builders would make the same game. Exactly these headings:
@@ -200,17 +211,18 @@ It is where the depth gets decided, so make it specific enough that two builders
 3. Mechanics and enemies: at least 3 distinct ones${j.mechanics ? ` (start from: ${j.mechanics.join('; ')})` : ''}, each with how it behaves, how the player counters it, and the wave it first appears.
 4. Levels or waves: a table of at least 8, with what is new in each.
 5. Upgrades or unlocks: at least 5, with what each costs in the game's own currency.
-6. Scoring, win and lose.
+6. Scoring, win and lose, and what gets a player who does nothing: first hurt within ${IDLE.idleHurtSeconds ?? 30} s and lost within ${IDLE.idleLoseSeconds ?? 60} s, though nobody loses in the first ${IDLE.idleSafeSeconds ?? 10} s. The Tester times it.
 7. Juice and audio: what shakes, what bursts into particles, where hit-stop goes, what tweens, which sound for what.
 8. Phone controls: exactly what each thumb does on a portrait phone.
 9. Look: a palette with hex values, the shapes, and the one idea only this game has.
 10. Passes: what the playable slice holds, then what each depth pass adds: pass 1 more mechanics and content; pass 2 progression and meta (unlocks, upgrades, difficulty curve, more levels or waves); pass 3 balance, onboarding, juice and audio.
 About two pages. It builds on the starter already in the project (read STARTER.md), so design for it. Original only: no named game's characters, levels, art or look. Do not publish.`,
   app: (j) => `Write notes/spec.md for ${j.title}: ${j.pitch}
-Exactly these headings: Who it is for (one line); The core thing they make or track (the ${j.object || 'item'}, with its fields); Screens (landing, sign up, the list, the detail or edit, settings), what each shows when empty, loading and failing; The one moment it has to nail; Passes (what the first version holds, then what each polish pass adds); Words (the landing page headline, three short points, and the call to action, all real: no testimonials, numbers or prices nobody gave). Payments are only a "coming soon" hook. It builds on the starter already in the project (read STARTER.md). Do not publish.`,
+Exactly these headings: Who it is for (one line); The core thing they make or track (the ${j.object || 'item'}, with its fields); Screens (landing, sign up, the list, the detail or edit, settings), what each shows when empty, loading and failing; The one moment it has to nail; Passes (what the first version holds, then what each polish pass adds); Words (the landing page headline, three short points, and the call to action, all real: no testimonials, numbers or prices nobody gave). If the idea charges money, say what the paid plan is and what it unlocks; if it doesn't, leave payments out. It builds on the starter already in the project (read STARTER.md). Do not publish.`,
   website: (j) => `Write notes/copy.md and notes/design.md for ${j.title}: ${j.pitch}
 copy.md: who it is for, the one thing a visitor should do, a page title, a one-sentence description, and the real words for every section, ready to use. Only facts from the boss; where one is missing, write the sentence so it doesn't need one, and never invent a review, price, phone number, address or story.
-design.md: a palette with names and hex values, typefaces (system stacks with character, named), the layout, the sections in order, and the one idea only this subject could have. It builds on the starter already in the project (read STARTER.md). Do not publish.`,
+design.md: a palette with names and hex values, typefaces (system stacks with character, named), the layout, the sections in order, and the one idea only this subject could have. It builds on the starter already in the project (read STARTER.md). Do not publish.${j.starter === 'shop' ? `
+This one is a shop, so also write notes/products.md: every product, each with a short lowercase key, its name, a one-line description of what the buyer gets, its price, whether the boss gave that price or you are proposing it, and whether it is posted. Every product has a price: the boss's where they gave one, otherwise a sensible proposal marked as proposed. Never "coming soon". No stock levels, discounts, delivery times or returns promises nobody gave.` : ''}`,
 };
 const DOC_ROLE = { game: 'designer', app: 'writer', website: 'writer' };
 
@@ -219,7 +231,7 @@ export function buildBrief(job, pass, { bugs = [], regressions = [], unmet = [],
   const passJob = cfg.types[job.type]?.passJobs?.[pass - 1] || '';
   const doc = job.type === 'game' ? 'notes/design.md' : job.type === 'app' ? 'notes/spec.md' : 'notes/copy.md and notes/design.md';
   const head = pass === 0
-    ? `Build the first ${job.type === 'game' ? 'playable slice' : 'version'} of ${job.title} from ${doc}, on the starter already in this project. Read STARTER.md first: it already has ${STARTER_HAS[job.type]}. Make it this ${job.type === 'game' ? 'game' : job.type === 'app' ? 'app' : 'site'}: replace the starter's demo content, keep its structure and its test hooks.`
+    ? `Build the first ${job.type === 'game' ? 'playable slice' : 'version'} of ${job.title} from ${doc}, on the starter already in this project. Read STARTER.md first: it already has ${STARTER_HAS[job.starter === 'shop' ? 'shop' : job.type]}. Make it this ${job.type === 'game' ? 'game' : job.type === 'app' ? 'app' : 'site'}: replace the starter's demo content, keep its structure and its test hooks.`
     : `Depth pass ${pass} of ${job.depth} on ${job.title}.${passJob ? ` This pass has its own job: ${passJob}` : ''} Add what ${doc} lists for pass ${pass}, and fix the Tester's list below first. Change what's needed; don't rewrite what works.`;
   const fixHead = `Fix pass on ${job.title}. The Tester found serious bugs (major or blocker), and Launch is held until they are gone. Fix every [major] and [blocker] item below, nothing new until they're fixed, and don't rewrite what works.${job.type === 'game' ? ' Remove any cheat or debug hook from the shipped build (URL parameters like ?wave=, god mode, test keys, debug panels).' : ''}`;
   const fixList = [
@@ -237,20 +249,23 @@ Keep index.html at the project's root and no build step. Do not publish: the ser
 }
 const STARTER_HAS = {
   game: 'boot, menu, play, pause and game over; keyboard, touch and gamepad; a responsive canvas; audio with mute; settings; saves and a leaderboard through Office Cloud; and juice helpers (shake, particles, tweens, hit-stop)',
-  app: 'a landing page and a signed-in app shell on Office Cloud accounts and the database, with create, edit and delete, empty, loading and error states, settings and a coming-soon payments hook',
+  app: 'a landing page and a signed-in app shell on Office Cloud accounts and the database, with create, edit and delete, empty, loading and error states, settings and a paid-plan section on office.pay that is honest about whether payments are open yet',
   website: 'fast accessible sections, full search and social meta, and a contact form that posts to Office Cloud',
+  shop: 'a product grid drawn from shop.json, a basket, card payment on Stripe\'s own page through office.pay, a thank-you with the order number, an order request by email for before payments are on, full search and social meta, and a contact form. Put every product from notes/products.md in shop.json with its picture and price, as STARTER.md says, and take the example products out',
 };
 export function testBrief(job, pass, { computer = false, recheck = [] } = {}, cfg = CONFIG) {
   const doc = job.type === 'game' ? 'notes/design.md' : job.type === 'app' ? 'notes/spec.md' : 'notes/copy.md';
   const how = computer
-    ? `Run the browser half first: node .office/playtest.mjs project --type ${job.type} --out .office/playtest (install playwright with npm i -D playwright && npx playwright install chromium if it asks). It serves the project, ${job.type === 'game' ? 'plays 60 s of scripted and random keyboard, touch and gamepad input at desktop and phone size, watches for console errors, soft-locks and the frame rate, and saves screenshots of the menu, play and game over' : job.type === 'app' ? 'signs up, creates something, reloads, signs out and back in, at desktop and phone size' : 'checks the phone layout, every link, the meta tags and the form'}, and writes playtest.json with a result for each browser rule. Then look at the screenshots and judge them against ${doc}, as a ${job.type === 'game' ? 'player: is it clear, is it alive, would you go again' : 'first real visitor'}.`
+    ? `Run the browser half first: node .office/playtest.mjs project --type ${job.type} --out .office/playtest (install playwright with npm i -D playwright && npx playwright install chromium if it asks). It serves the project, ${job.type === 'game' ? 'at desktop and phone size, sits through one run with no input to time how long until the player is first hurt and until game over, then plays scripted and random keyboard, touch and gamepad input (60 s watched at each size), watches for console errors, soft-locks and the frame rate, and saves screenshots of the menu, play and game over' : job.type === 'app' ? 'signs up, creates something, reloads, signs out and back in, at desktop and phone size' : 'checks the phone layout, every link, the meta tags and the form'}, and writes playtest.json with a result for each browser rule${job.type === 'game' ? ' and the idle run\'s two numbers' : ''}. Then look at the screenshots and judge them against ${doc}, as a ${job.type === 'game' ? 'player: is it clear, is it alive, would you go again' : 'first real visitor'}.`
     : `You have no browser here, so read the code against ${doc} and the rules, and give null for any browser rule you can't be sure of.`;
   const lateGame = job.type === 'game' ? `Every pass, including this one, re-check the late game: reach the final boss (or last level) and the win screen, on a debug copy of the project at .office/debug-copy, where you may start at the last wave with extra health. That copy never ships, so never put it inside the project or save it. Say in your report that you reached them, or that this version doesn't have them yet. Set lategame true only if the boss and the win screen really worked. Any cheat or debug hook left in the shipped build (a ?wave= style link, god mode, test keys, a debug panel) is a major bug even if the game is fun: list it as major and set nocheats false. Then look for such hooks in the shipped files on purpose. ` : '';
+  const pressure = cfg.types[job.type].doneRules.some((r) => r.id === 'pressure');
+  const idleLine = pressure ? `Report the idle run's two numbers in TEST-REPORT.md and in the block's idle field: seconds until a player who does nothing is first hurt, and seconds until game over${computer ? ' (the idle field of playtest.json has both)' : ''}. Give null for one that was not measured, or did not happen while it was watched. pressure is false if either is past its bar, or if that player lost inside the first ${cfg.types[job.type].bars?.idleSafeSeconds ?? 10} s. ` : '';
   return `${MARK} test ${pass} · ${job.title}
 Test ${pass === 0 ? 'the first version' : `depth pass ${pass}`} of ${job.title}. ${how}${recheck.length ? `\nThe Builder just tried to fix these. Check each one yourself, and list any still there with its severity:\n${recheck.map((b) => `- [${b.severity}] ${b.text}`).join('\n')}\n` : ''}
-${lateGame}Fix nothing big yourself: the Builder gets your list. Write TEST-REPORT.md in the project (it never goes live): what you checked, what you saw, then the bugs worst first. End it with this block, filled in, and nothing after it:
+${lateGame}${idleLine}Fix nothing big yourself: the Builder gets your list. Write TEST-REPORT.md in the project (it never goes live): what you checked, what you saw, then the bugs worst first. End it with this block, filled in, and nothing after it:
 \`\`\`office-verdict
-{"verdict": "pass or fail", "rules": {${cfg.types[job.type].doneRules.map((r) => `"${r.id}": true`).join(', ')}}, "bugs": [{"severity": "blocker, major or minor", "text": "what is wrong and how to see it"}], "regressions": ["anything that worked in the last version and doesn't now"], "summary": "one line"}
+{"verdict": "pass or fail", "rules": {${cfg.types[job.type].doneRules.map((r) => `"${r.id}": true`).join(', ')}},${pressure ? ' "idle": {"hurt": "seconds until a player who does nothing is first hurt, as a number, or null", "lose": "seconds until that player has lost, as a number, or null"},' : ''} "bugs": [{"severity": "blocker, major or minor", "text": "what is wrong and how to see it"}], "regressions": ["anything that worked in the last version and doesn't now"], "summary": "one line"}
 \`\`\`
 pass means a first-time ${job.type === 'game' ? 'player' : 'visitor'} would get a working thing: no blocker, no failing browser rule, no regression. A rule is true, false, or null if you couldn't check it.
 The rules:
@@ -371,6 +386,34 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     return view(floor);
   }
 
+  // What the project's live files add up to. Asked every tick while a test waits its turn, so the bytes are only read again when a file has been written since.
+  const sums = new Map();
+  function liveSum(j) {
+    const mark = get(db, 'SELECT COUNT(*) n, COALESCE(SUM(size),0) bytes, COALESCE(MAX(updated_at),0) at FROM files WHERE floor_id=? AND path>=? AND path<?', j.floor_id, `projects/${j.project}/`, `projects/${j.project}0`);
+    const key = `${mark.n}:${mark.bytes}:${mark.at}`;
+    const had = sums.get(j.id);
+    if (had?.key === key) return had.sum;
+    const sum = projectSum(db, j.floor_id, j.project, { liveOnly: true });
+    sums.set(j.id, { key, sum });
+    return sum;
+  }
+  /**
+   * A test of a version the Tester has already been through, byte for byte, can only come back with the same report. That happens when a pass's build changed
+   * nothing that goes live. So the engine asks here before it starts a test, and if what would be tested is exactly what was tested last time, the last report
+   * is handed back as this test's result and no one is put to work. The loop then goes on from that report as it would from a fresh one: a pass is still a pass,
+   * and a bug list is still a bug list for the Builder. Not when the live link check has found something since, because that is new and the last report never saw it.
+   */
+  function sameAsTested(floor, task) {
+    const link = get(db, 'SELECT * FROM maker_tasks WHERE task_id=?', task.id);
+    if (!link || link.step !== 'test') return null;
+    const j = get(db, 'SELECT * FROM maker_jobs WHERE id=?', link.job_id);
+    if (!j || !OPEN.has(j.stage)) return null;
+    const st = stateOf(j);
+    if (!st.tested?.sum || !st.tested.report || (st.liveBugs || []).length) return null;
+    if (liveSum(j) !== st.tested.sum) return null;
+    return `Nothing that goes live in ${j.title} has changed since the last test, byte for byte, so that test's report stands and it was not played again.\n\`\`\`office-verdict\n${JSON.stringify(st.tested.report)}\n\`\`\``;
+  }
+
   function snapshot(j) {
     const prefix = `projects/${j.project}/`;
     const rows = all(db, 'SELECT path,content,size FROM files WHERE floor_id=? AND path LIKE ?', j.floor_id, `${prefix}%`).filter((f) => goesLive(f.path.slice(prefix.length)));
@@ -435,6 +478,8 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     const report = link.step === 'test' && ok ? parseReport(file && file.updated_at >= task.created_at ? file.content : result) : null;
     const d = decide({ ...st, type: j.type, pass: link.pass, depth: j.depth, tokens: tokensSince(floor.id, j.started_at) }, { step: link.step, ok: link.step === 'test' ? ok && !!report : ok, report }, config);
     save(j, { pass: link.pass, stage: link.step === 'doc' ? 'build' : link.step === 'build' && ok ? 'test' : j.stage }, { ...d.patch, lastReport: report ? { verdict: report.verdict, summary: report.summary, bugs: report.bugs.length, pass: link.pass } : st.lastReport || null });
+    // What exactly was tested, and what the Tester said of it, in case the next test turns out to be of the very same files (sameAsTested).
+    if (report) save(j, {}, { tested: { sum: liveSum(j), report } });
     // The launch candidate is the newest clean version. A version that passed with a serious bug only fills in while there's no clean one, so "launch anyway" has something to launch.
     if (report && d.passing && (d.clean || !st.snapshotClean)) { snapshot(j); save(j, {}, { snapshotClean: !!d.clean, snapshotFlaws: d.clean ? [] : d.serious.slice(0, 6) }); }
     const cancelPaired = () => { for (const t of all(db, "SELECT m.task_id id FROM maker_tasks m JOIN tasks t ON t.id=m.task_id WHERE m.job_id=? AND t.status IN ('todo','blocked')", j.id)) engine.cancelTask(floor, t.id); };
@@ -558,7 +603,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
   const holds = (floorId, slug) => !!get(db, "SELECT 1 x FROM maker_jobs WHERE floor_id=? AND project=? AND launched_at IS NULL AND stage!='stopped'", floorId, slug);
   const projectsOf = (floorId) => all(db, 'SELECT slug,title,description,kind,private FROM projects WHERE floor_id=? ORDER BY COALESCE(published_at,0) DESC, created_at DESC LIMIT 5', floorId);
   const stop = () => { stopped = true; for (const t of timers) clearTimeout(t); timers.clear(); };
-  return { holds, start, afterTask, launch, decideAsk, view, stop, checkLiveLink,  ideaCards: (type, floor, seed, rotate = 0) => ideaCards(type, { floor, seed, rotate, cfg: config, projects: projectsOf(floor.id) }), surprise: (type, seed, floor) => surprise(type, { seed, cfg: config, floor, projects: floor ? projectsOf(floor.id) : [] }), fromWords: (type, text) => fromWords(type, text, config), jobOf };
+  return { holds, start, afterTask, sameAsTested, launch, decideAsk, view, stop, checkLiveLink,  ideaCards: (type, floor, seed, rotate = 0) => ideaCards(type, { floor, seed, rotate, cfg: config, projects: projectsOf(floor.id) }), surprise: (type, seed, floor) => surprise(type, { seed, cfg: config, floor, projects: floor ? projectsOf(floor.id) : [] }), fromWords: (type, text) => fromWords(type, text, config), jobOf };
 }
 
 export function installMakers(ext) {

@@ -314,7 +314,7 @@ export class Computer {
       charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Map(), newestEvent: 0, listFrom: 0, steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), warned: false, limit: '', lastText: '', lastFeed: '',
       pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
       publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
-      ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'ask_colleague', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design' || n === 'deploy_server' || n.startsWith('server_'))]), signal },
+      ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'ask_colleague', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design' || n === 'deploy_server' || n.startsWith('server_'))]), signal, autonomous: !!task.auto },
     };
   }
 
@@ -407,7 +407,8 @@ export class Computer {
         { path: '.office/three.module.min.js', data: THREE_JS },
         ...(task.lane === 'game' ? GAME_ASSETS : []),
         ...(task.lane === 'game' ? [{ path: '.office/phaser.min.js', data: PHASER_JS }] : []),
-        ...(agent.role === 'tester' ? [{ path: '.office/playtest.mjs', data: Buffer.from(PLAYTEST) }] : []),
+        // The Tester's browser half. A game's Builder gets it too, to run the same check before handing over, so a failing browser rule is caught without a fix pass.
+        ...(agent.role === 'tester' || (agent.role === 'builder' && task.lane === 'game') ? [{ path: '.office/playtest.mjs', data: Buffer.from(PLAYTEST) }] : []),
         ...files.map((f) => ({ path: `project/${f.path}`, data: f.data })),
         // The boss's files for this task, beside the project rather than in it: only what the agent copies in is saved back.
         ...e.taskFiles(task).map((a) => ({ path: a.path, data: Buffer.from(get(e.db, 'SELECT content FROM files WHERE floor_id=? AND path=?', floor.id, a.path)?.content ?? '') })),
@@ -846,6 +847,8 @@ export class Computer {
       const refused = gateProblem(check, p.reason);
       saveCheck(e.db, floor.id, p.project, check, p.reason, e.now());
       if (refused) return { ok: false, problem: refused };
+      const held = await e.shipCheck?.(floor, p.project, { kind: p.kind, directory: p.directory, agent, task: { id: taskId } });
+      if (held) return { ok: false, problem: held };
       try {
         const n = publishSnapshot(e.db, floor.id, p.project, e.cfg.quotaBytes, p.directory);
         e.upsertProject(floor, p.project, { title: p.title, description: p.description, kind: p.kind, sources: [], published: true });

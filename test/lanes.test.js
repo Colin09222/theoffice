@@ -17,7 +17,7 @@ const BARE = { aiMode: 'live' };
 describe('the manager\'s playbooks', () => {
   const full = managerPrompt(floor, BOSS, ROSTER, FULL);
   test('it knows the three lanes, and that ideas come only when asked for', () => {
-    assert.deepEqual(LANES, ['game', 'website', 'business', 'app']);
+    assert.deepEqual(LANES, ['game', 'website', 'business', 'app', 'shop']);
     for (const h of [/^GAME$/m, /^WEBSITE$/m, /^BUSINESS$/m]) assert.match(full, h);
     assert.match(full, /If they ask for ideas or have nothing yet, give three ideas, one line each/); assert.match(full, /Set lane on every assign_task/);
   });

@@ -1214,7 +1214,7 @@ class FloorPage {
     on('domain', async () => { await this.reload(); const n = (this.state.domains || []).filter((d) => d.status === 'awaiting_boss').length; if (n > lastWaiting) toast('A domain is waiting for your OK under Requests'); lastWaiting = n; });
     on('hired', () => this.reload());
     on('mail', (d) => onMailEvent(this, d));
-    on('pay', () => { this.reload(); });
+    on('pay', (d) => { if (d?.sale && this.owner) toast(`New order ${d.number || ''}: it's on your Payments tab`.replace('  ', ' ')); this.reload(); });
     on('sitechat', (d) => onChatEvent(this, d));
     on('reload', () => this.reload());
     on('floor', (d) => {

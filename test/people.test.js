@@ -6,7 +6,8 @@ import { get, all, run } from '../server/db.js';
 import { createMockClient } from '../server/mock.js';
 import { toolsForRole, wrapUntrusted, COMPUTER_TOOL_DEFS } from '../server/tools.js';
 import { managerPrompt, staffPrompt } from '../server/prompts.js';
-import { personBlock, readMemory } from '../server/people.js';
+import { personBlock, readMemory, answerRoute } from '../server/people.js';
+import { loadModels } from '../server/config.js';
 
 const row = (t, slug) => get(t.db, 'SELECT * FROM floors WHERE slug=?', slug);
 const claimBare = async (t, bossName = 'Sam') => {
@@ -232,13 +233,66 @@ describe('what people say to each other', () => {
       assert.equal(ask.to, writer.id); assert.equal(ans.from, writer.id); assert.equal(ans.to, ask.from);
       assert.match(ans.text, /bakery brief/, 'from their own memory');
       const call_ = seen.find((x) => x.meta?.purpose === 'answer');
-      assert.equal(call_.model, 'claude-haiku-5-5');
+      // A work question is answered on the asked colleague's own model (the Writer's entry in config/models.json), not the one that writes the chatter.
+      const own = loadModels().all.writer;
+      assert.equal(call_.model, own.model); assert.equal(call_.model, 'claude-opus-5-5'); assert.equal(call_.provider, 'anthropic');
+      assert.equal(call_.effort, 'high'); assert.ok(call_.maxTokens > 900 && call_.maxTokens <= 6000, 'room for a short answer, not for a whole job');
+      assert.deepEqual(call_.pricing, own.pricing, 'charged at that model\'s price');
       assert.match(call_.messages[1].content, /<untrusted_data source="question from/);
+      // Who they are and what they know is the cached part: it holds nothing about who is asking or what, so a second question to them reads it back.
+      assert.equal(call_.cache, 'system');
+      assert.match(call_.messages[0].content, /bakery brief/); assert.match(call_.messages[0].content, /your own notes/);
+      assert.ok(!call_.messages[0].content.includes('What should I know from your last job?'), 'the question is not in the cached part');
+      const asker = get(t2.db, "SELECT name FROM agents WHERE floor_id=? AND role='researcher'", f.id).name;
+      assert.ok(!call_.messages[0].content.includes(asker), 'nor is the asker'); assert.ok(call_.messages[1].content.includes(asker));
+      // Everything else people say stays on the cheap model.
+      const chatter = seen.filter((x) => x.meta?.kind === 'talk' && x.meta.purpose !== 'answer');
+      assert.ok(chatter.length > 0, 'there was chatter to check');
+      for (const x of chatter) { assert.equal(x.model, 'claude-haiku-5-5', x.meta.purpose); assert.equal(x.effort, 'low'); assert.equal(x.cache, false); }
+      // It is on the ledger at the role model's price, against the floor and the asker's task.
+      const paid = get(t2.db, "SELECT * FROM ledger WHERE floor_id=? AND kind='talk-answer'", f.id);
+      assert.equal(paid.model, 'claude-opus-5-5'); assert.equal(paid.provider, 'anthropic'); assert.equal(paid.agent_id, writer.id);
+      assert.ok(Math.abs(paid.cost_usd - (paid.prompt_tokens * own.pricing.prompt + paid.completion_tokens * own.pricing.completion) / 1e6) < 1e-9, 'at Opus\'s price');
+      const askerTask = get(t2.db, "SELECT t.id, t.cost_usd c FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='researcher'", f.id);
+      const ownCalls = get(t2.db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND kind='model' AND agent_id=(SELECT agent_id FROM tasks WHERE id=?)", f.id, askerTask.id).n;
+      assert.ok(Math.abs(askerTask.c - (ownCalls + paid.cost_usd)) < 1e-9, 'the question counts towards the task that asked it');
+      assert.equal(get(t2.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0, 'nothing is left held');
       const staffStep = seen.find((x) => x.meta?.role === 'researcher' && JSON.stringify(x.messages).includes('bakery brief'));
       assert.ok(staffStep, 'the answer reached the asker\'s work');
       assert.match(JSON.stringify(staffStep.messages), /untrusted_data source=\\"what /);
       assert.ok(ledgerKinds(t2, f.id).some((l) => l.kind === 'talk-answer' && l.provider === 'anthropic'));
       assert.ok(s.tasks.length);
+    } finally { await t2.close(); }
+  });
+
+  test('which model answers: the colleague\'s own, at high effort at most, and the autonomous one for a job the team picked itself', () => {
+    const m = loadModels();
+    const b = answerRoute(m, 'builder');
+    assert.equal(b.model, m.all.builder.model); assert.equal(b.provider, 'anthropic');
+    assert.equal(m.all.builder.effort, 'xhigh'); assert.equal(b.effort, 'high', 'capped');
+    assert.equal(b.maxTokens, 6000); assert.deepEqual(b.pricing, m.prices[b.model]);
+    assert.equal(answerRoute(m, 'lawyer').effort, 'medium', 'a lower effort is left alone');
+    assert.equal(answerRoute(m, 'lawyer').model, 'claude-sonnet-5-5');
+    const auto = answerRoute(m, 'builder', { autonomous: true });
+    assert.equal(auto.model, m.autonomous.model); assert.equal(auto.effort, 'high'); assert.deepEqual(auto.pricing, m.prices[m.autonomous.model]);
+    // The Tester's own model is another lab's, and stays so on an autonomous job, as its own calls do.
+    const tester = answerRoute(m, 'tester', { autonomous: true });
+    assert.equal(tester.model, m.all.tester.model); assert.equal(tester.provider, 'openrouter');
+    assert.notEqual(b.model, m.tools.talk.model);
+  });
+
+  test('a job the team picked itself asks on the autonomous model', async () => {
+    const seen = [];
+    const t2 = await boot({}, { llm: recording(seen) });
+    try {
+      const c = await claim(t2, 'Auto Askers');
+      const f = row(t2, c.slug);
+      const a = get(t2.db, "SELECT * FROM agents WHERE floor_id=? AND role='researcher'", f.id);
+      const ctx = { ...t2.app.engine.toolCtx(f, a, null, toolsForRole('researcher')), autonomous: true };
+      assert.match(await t2.app.engine.tools.exec(ctx, 'ask_colleague', JSON.stringify({ who: 'writer', question: 'Anything I should know?' })), /untrusted_data/);
+      const q = seen.find((x) => x.meta?.purpose === 'answer');
+      assert.equal(q.model, loadModels().autonomous.model); assert.equal(q.effort, 'high');
+      assert.equal(get(t2.db, "SELECT model FROM ledger WHERE floor_id=? AND kind='talk-answer'", f.id).model, 'claude-sonnet-5-5');
     } finally { await t2.close(); }
   });
 

@@ -46,6 +46,41 @@ const PLACEHOLDER = /lorem ipsum|\bTODO\b|\bFIXME\b|your company name|your tagli
  * files: [{path, data}] of what is about to go live. bossText: what the boss has actually said, the only source a claim can come from.
  * Returns errors (never publishable), claims (need a stated reason), warnings and the list of what passed.
  */
+// A shop's catalogue, shop.json: what is for sale, each thing's picture and price. The page is drawn from it and the boss is asked to approve what is in it,
+// so a product with no price, no picture or a made-up label is caught here, before anyone sees a shop that says "price coming soon".
+const SHOP_KEY = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+const NOT_A_NAME = /coming soon|\btb[ac]\b|to be (confirmed|announced|decided)|placeholder|lorem ipsum|^\s*(product|item)\s*\d*\s*$/i;
+export function checkCatalogue(raw, hasFile = () => true) {
+  let c;
+  try { c = JSON.parse(typeof raw === 'string' ? raw : text(raw)); } catch { return { catalogue: null, problems: ['shop.json is not valid JSON.'] }; }
+  const list = Array.isArray(c?.products) ? c.products : [];
+  const problems = [];
+  if (!list.length) return { catalogue: null, problems: ['shop.json has no products. A shop needs at least one, with its name, price and picture.'] };
+  if (list.length > 20) problems.push('shop.json has more than 20 products. Keep the first shop to 20 or fewer.');
+  const seen = new Set();
+  const products = list.slice(0, 20).map((p, i) => {
+    const key = String(p?.key ?? '').trim(), n = key || `product ${i + 1}`;
+    if (!SHOP_KEY.test(key)) problems.push(`${n}: key must be short and lowercase: letters, digits, - and _.`);
+    else if (seen.has(key)) problems.push(`${n}: the same key is used twice.`);
+    seen.add(key);
+    const name = String(p?.name ?? '').trim();
+    if (!name) problems.push(`${n}: needs a name.`);
+    for (const [label, v] of [['name', name], ['description', String(p?.description ?? '')]]) if (NOT_A_NAME.test(v)) problems.push(`${n}: the ${label} says "${v.trim().slice(0, 40)}". Write the real thing: nothing in a shop is "coming soon" or a placeholder.`);
+    if (/^example\b/i.test(name) || /^example-/.test(key)) problems.push(`${n}: is still the starter's example product. Replace it with a real one.`);
+    const cents = Number.isInteger(p?.priceCents) ? p.priceCents : Math.round(Number(p?.price) * 100);
+    if (p?.price === null || p?.price === undefined || p?.price === '' ? !Number.isInteger(p?.priceCents) : !Number.isFinite(cents)) problems.push(`${n}: has no price. Use the boss's price, or propose a sensible one and set priceFrom to "proposed".`);
+    else if (cents < 50 || cents > 1000000) problems.push(`${n}: the price must be between 0.50 and 10,000.`);
+    if (p?.priceFrom !== 'boss' && p?.priceFrom !== 'proposed') problems.push(`${n}: priceFrom must be "boss" (the boss gave this price) or "proposed" (the team chose it, and the page says so).`);
+    const image = String(p?.image ?? '').replace(/^\.?\//, '');
+    if (!image) problems.push(`${n}: needs a picture (image). Use the boss's photo if they sent one; otherwise make an illustration and set imageKind to "illustration".`);
+    else if (/^(https?:)?\/\//i.test(String(p.image))) problems.push(`${n}: its picture is on another site. Copy it into the project.`);
+    else if (!hasFile(image)) problems.push(`${n}: its picture ${image} isn't in what's being published.`);
+    if (p?.imageKind !== undefined && p.imageKind !== 'photo' && p.imageKind !== 'illustration') problems.push(`${n}: imageKind is "photo" (the boss's own photo of the real thing) or "illustration".`);
+    return { ...p, key, name, priceCents: Number.isFinite(cents) ? cents : 0, image };
+  });
+  return { catalogue: { ...c, products }, problems: [...new Set(problems)].slice(0, 20) };
+}
+
 export function checkSite({ files, bossText = '', paymentLink = false, kind = 'site' }) {
   const errors = [], claims = [], warnings = [], passed = [];
   const map = new Map(files.map((f) => [f.path, f.data]));
@@ -72,6 +107,16 @@ export function checkSite({ files, bossText = '', paymentLink = false, kind = 's
     for (const m of t.matchAll(PAYMENT_HOSTS)) errors.push(`${f.path}: links to a payment page directly (${hostOf(m[0])}). The only way to take money here is a link to _office/pay, which goes to the Stripe link the boss pasted.`);
   }
   if (!isDoc && !map.has('index.html')) errors.push('index.html is missing.');
+  // A shop: its catalogue has to be whole, and the page has to really sell from it.
+  if (!isDoc && map.has('shop.json')) {
+    const shop = checkCatalogue(map.get('shop.json'), (p) => map.has(p));
+    for (const p of shop.problems) errors.push(`shop.json: ${p}`);
+    const code = files.filter((f) => /\.(html?|m?js)$/i.test(f.path) && (f.data?.length ?? 0) <= MAX_PAGE).map((f) => text(f.data)).join('\n');
+    if (!/\bpay\s*\.\s*checkout\s*\(/.test(code)) errors.push('shop.json: this is a shop, but nothing on the site calls office.pay.checkout, so nobody can buy. Keep the starter\'s basket and checkout.');
+    if (!/\bpay\s*\.\s*status\s*\(/.test(code)) warnings.push('The shop never calls office.pay.status, so it can\'t tell a visitor honestly whether it is taking payments yet.');
+    for (const f of pages) { const m = stripTags(text(f.data)).match(/price[^.]{0,20}coming soon|coming soon/i); if (m) errors.push(`${f.path}: says "${m[0]}". A shop shows every product with a price: the boss's, or a proposed one labelled as proposed.`); }
+    if (!shop.problems.length) passed.push(`shop catalogue (${shop.catalogue.products.length} products, each with a price and a picture)`);
+  }
   // Every page counts, whatever the project calls itself: a "doc" with an index.html is still a web page.
   let pageBytes = 0, formPage = '';
   {

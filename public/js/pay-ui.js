@@ -24,6 +24,18 @@ export function onPayLanding(page) {
 
 /** The Requests tab's share: products and prices the team proposed, each one tap from going on sale. */
 export function renderPayRequests(page, list) {
+  const waiting = page.state?.pay?.waiting || [];
+  // Several at once, as a shop's catalogue arrives: one tap of the boss's own approves them all.
+  if (waiting.length > 1 && page.state.pay.connected) {
+    list.append(h('article.card.request.pay-approve', { 'data-pay-approve-all': '' },
+      h('b', {}, `${waiting.length} products are waiting to go on sale`),
+      h('p.fineprint', {}, 'Check each price below. Approve them one by one, or all together.'),
+      h('div.row', {}, h('button.btn.primary', { type: 'button', 'data-pay-approve-all-yes': '', onclick: async (e) => {
+        e.target.disabled = true;
+        try { const r = await api(`/floors/${page.slug}/pay/products/approve-all`, { method: 'POST', body: {} }); toast(`${r.approved} products are on sale`); } catch (err) { toast(err.message, 'bad'); }
+        page.reload();
+      } }, `Approve all ${waiting.length}`))));
+  }
   for (const p of page.state?.pay?.waiting || []) {
     const answer = (action) => async () => {
       try {
@@ -38,6 +50,7 @@ export function renderPayRequests(page, list) {
       h('small', {}, `${p.agentName || 'The team'} proposed this for ${p.project}${p.replaces ? '. It replaces the current price; people already subscribed keep theirs.' : '.'}${page.state.pay.testMode ? ' Test mode.' : ''}`),
       p.why ? h('p.fineprint', {}, p.why) : null,
       !page.state.pay.connected ? h('p.fineprint', {}, 'Connect Stripe on the Payments tab first, then approve this.') : null,
+      p.ships ? h('p.fineprint', {}, 'Posted to the buyer: checkout asks for their address, and you get it with the order.') : null,
       p.unlocks?.length ? h('p.fineprint', {}, `Only buyers can use: ${p.unlocks.join(', ')}`) : null,
       h('div.row', {}, h('button.btn.primary', { type: 'button', 'data-pay-approve-yes': p.key, onclick: answer('approve') }, 'Approve'), h('button.btn.ghost', { type: 'button', onclick: answer('decline') }, 'No thanks'))));
   }
@@ -102,10 +115,15 @@ function salesBox(page, v, reload) {
     h('div.pay-tiles', {}, tile('sold', fmt(s.grossCents, s.currency)), tile('refunded', fmt(s.refundsCents, s.currency)), tile('orders', String(s.orders)), tile('subscribers', String(s.activeSubs))),
     s.byDay.length ? h('div.bars', { role: 'img', 'aria-label': 'Sales by day' }, ...s.byDay.map((d) => h('i', { title: `${d.day}: ${fmt(d.grossCents, s.currency)}`, css: { height: `${Math.max(4, (d.grossCents / max) * 100)}%` } }))) : null,
     v.orders.length ? h('div.pay-orders', {}, h('h4', {}, 'Recent orders'), ...v.orders.map((o) => h('div.pay-order', { 'data-pay-order': o.token },
-      h('div.row.spread', {}, h('b', {}, o.product), h('span', {}, fmt(o.amountCents, o.currency))),
-      h('small', {}, `${o.buyer} · ${PAY_STATUS[o.status] || o.status}${o.kind === 'subscription' ? ' · subscription' : ''}`),
+      h('div.row.spread', {}, h('b', {}, o.items?.length ? o.items.map((i) => `${i.quantity} x ${i.name}`).join(', ') : o.product), h('span', {}, fmt(o.amountCents, o.currency))),
+      h('small', {}, `${o.number ? `Order ${o.number} · ` : ''}${o.buyer}${o.email ? ` · ${o.email}` : ''} · ${PAY_STATUS[o.status] || o.status}${o.kind === 'subscription' ? ' · subscription' : ''}${o.sentAt ? ' · sent' : ''}`),
+      o.shipTo?.length ? h('p.fineprint', { 'data-pay-ship': o.token }, `Send to: ${o.shipTo.join(', ')}`) : null,
+      o.shipTo?.length && o.status === 'active' ? h('button.link', { type: 'button', 'data-pay-sent': o.token, onclick: async () => {
+        try { await api(`/floors/${page.slug}/pay/orders/${o.token}/sent`, { method: 'POST', body: {} }); } catch (err) { toast(err.message, 'bad'); }
+        page.reload();
+      } }, o.sentAt ? 'Not sent yet' : 'Mark as sent') : null,
       o.refundable ? h('button.link', { type: 'button', 'data-pay-refund': o.token, onclick: refund(o) }, 'Refund') : null))) : h('p.empty', {}, 'No orders yet.'),
-    h('p.fineprint', {}, 'Only you can see this. Stripe emails your customers their receipts; check that "Successful payments" is on under Customer emails in your Stripe settings.'));
+    h('p.fineprint', {}, 'Only you can see this. Each buyer gets an order confirmation from your company email, and each order also lands in your Inbox. Stripe sends its own receipt too when "Successful payments" is on under Customer emails in your Stripe settings.'));
 }
 
 export async function renderPay(page) {

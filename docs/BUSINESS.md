@@ -21,7 +21,13 @@ described in [ADS.md](ADS.md).
 - **2. Build.** Four department tracks, each with a lamp, a count and a done state: Website, Product, Payments and Analytics.
   - There is a live preview of the page as it is saved.
   - The domain comes through the existing broker: a .com first, then the boss's Buy click.
-  - Payments says honestly that there is no Stripe here, and uses a notify-me sign-up instead.
+  - **Where the building has payments** (a Stripe key and app origins), the build is a shop on the shop starter ([PAYMENTS.md](PAYMENTS.md), "Shops"): the
+    Researcher checks rival prices, the Writer decides the one to three things a customer can buy on day one with proposed prices, the Designer
+    picks the look and draws a picture for each, the Builder builds it, a Tester goes through it as a customer, and the Builder fixes what was
+    found and puts it live. Publishing asks the boss to approve the products. The Payments track shows "Checkout on the shop", then two items
+    marked **yours to do**: connect your Stripe, approve the products. Those never hold the journey up; the shop takes order requests by email
+    until they are done, and says so.
+  - Without payments in the building, it is the older page: Payments says honestly that it can't take cards, and uses a notify-me sign-up.
 - **3. Customers.** The marketer makes:
   - 2 picture ads;
   - 2 vertical video ads of 6–10 s with captions (`google/gemini-omni-1.2-flash` on OpenRouter's `/videos` jobs, through the image key
@@ -43,6 +49,11 @@ described in [ADS.md](ADS.md).
   "Facebook & Instagram ads: coming soon" taped over beside it. That one is a disabled button, read out in exactly those words. While paid
   ads are off, the Google plate is taped "coming soon" too, and during a building-wide stop it reads "off for now". The manager's notes say the
   same, so a boss who asks about Instagram hears that it isn't here yet.
+
+- **Launching for real.** At Launch, and in the manager's notes from Build on, the journey says where three things stand (`launchKit` in
+  `server/business.js`): a name of its own (the manager checks two or three .com names and offers them with their prices; only the boss's Buy
+  click buys one, and a bought name gets the site and the company's email on it by itself), the company's email address, and whether the shop
+  can take a card yet. Nothing in the journey buys a domain, approves a product or connects Stripe for the boss.
 
 **Money.** No figure is shown on a floor except the boss's own choice of ad money on their own slip. Visitors see the steps, the
 lamps and the launched ads, never an amount.

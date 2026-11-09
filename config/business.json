@@ -9,17 +9,23 @@
   "ideas": { "min": 2, "max": 3, "evidenceMin": 2, "evidenceMax": 4, "rounds": 4 },
   "tracks": [
     { "id": "website", "label": "Website", "items": [
-      { "task": "look", "role": "designer", "title": "Pick the look", "label": "The look" },
-      { "task": "site", "role": "builder", "title": "Build the landing page", "label": "The page", "after": ["look", "offer", "prices"] },
+      { "task": "look", "role": "designer", "title": "Pick the look", "label": "The look", "after": ["offer"] },
+      { "task": "site", "role": "builder", "title": "Build the shop", "label": "The shop", "after": ["look", "offer", "prices"] },
+      { "task": "test", "role": "tester", "title": "Test the shop as a customer", "label": "Tested as a customer", "after": ["site"], "selling": true },
+      { "task": "golive", "role": "builder", "title": "Fix what the test found and put it live", "label": "Fixes, then live", "after": ["test"], "selling": true },
       { "check": "published", "label": "Live on the web" },
-      { "check": "domain", "label": "A .com of its own", "optional": true }
+      { "check": "domain", "label": "A .com of its own", "optional": true },
+      { "check": "email", "label": "A company email address", "optional": true }
     ] },
     { "id": "product", "label": "Product", "items": [
-      { "task": "offer", "role": "writer", "title": "Write the offer", "label": "The offer" },
-      { "task": "prices", "role": "researcher", "title": "Check what rivals charge", "label": "Rival prices" }
+      { "task": "prices", "role": "researcher", "title": "Check what rivals charge", "label": "Rival prices" },
+      { "task": "offer", "role": "writer", "title": "Write the offer and the products", "label": "The offer", "after": ["prices"] }
     ] },
-    { "id": "payments", "label": "Payments", "note": "No card payments yet: there is no Stripe here. A notify-me sign-up collects the people who want it instead.", "items": [
-      { "check": "signup", "label": "Notify-me sign-up" }
+    { "id": "payments", "label": "Payments", "note": "No card payments yet: there is no Stripe here. A notify-me sign-up collects the people who want it instead.", "sellingNote": "Card payments go through your own Stripe account, straight to you. Until you connect it and approve the products, the shop takes order requests by email.", "items": [
+      { "check": "signup", "label": "Notify-me sign-up", "selling": false },
+      { "check": "canbuy", "label": "Checkout on the shop", "selling": true },
+      { "check": "stripe", "label": "Connect your Stripe", "yours": true, "selling": true },
+      { "check": "products", "label": "Approve the products", "yours": true, "selling": true }
     ] },
     { "id": "analytics", "label": "Analytics", "items": [
       { "check": "counter", "label": "Visitor counter on" },
@@ -35,10 +41,10 @@
   "chips": {
     "idea.researching": ["What makes a good idea?", "I already have an idea", "How does this work?"],
     "idea.pick": ["Why this idea?", "Show me other ideas", "Which one would you pick?"],
-    "build": ["Show me the site so far", "Find me a .com", "What's left to do?"],
+    "build": ["Show me the site so far", "How do I take payments?", "Find me a .com", "What's left to do?"],
     "customers.making": ["Who are the ads for?", "What will the videos show?", "Skip ads for now"],
     "customers.money": ["Change the ads", "Skip ads for now", "Why these people?", "Should I pay for ads?"],
-    "launch.free": ["How do I share the ads?", "How do I get my first customer?", "What should we do next?"],
+    "launch.free": ["How do I share the ads?", "Find me a .com", "How do I take payments?", "How do I get my first customer?"],
     "launch.paid": ["What happens next with the ad?", "How do I share the ads?", "What should we do next?"]
   }
 }

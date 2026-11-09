@@ -24,7 +24,8 @@
       "doneRules": [
         { "id": "loads", "text": "Loads with 0 console errors", "check": "browser" },
         { "id": "inputs", "text": "Keyboard, touch and gamepad input change the game state", "check": "browser" },
-        { "id": "nosoftlock", "text": "No soft-lock over 60 s of scripted plus random input, and restart always works", "check": "browser" },
+        { "id": "nosoftlock", "text": "No soft-lock over 60 s of idle, scripted and random input, and restart always works", "check": "browser" },
+        { "id": "pressure", "text": "A player who does nothing is hurt within 30 s and has lost within 60 s, and nobody loses in the first 10 s", "check": "browser" },
         { "id": "fps", "text": "Frame rate stays playable", "check": "browser" },
         { "id": "screens", "text": "Menu, play, pause, game over and settings are all reachable", "check": "browser" },
         { "id": "cloud", "text": "Progress saves and scores post to the leaderboard through Office Cloud", "check": "browser" },
@@ -36,7 +37,7 @@
         { "id": "lategame", "text": "The late game holds up: the final boss or last level and the win screen work, checked every pass on a debug copy", "check": "judge" },
         { "id": "nocheats", "text": "No cheat or debug hook in the shipped build: no ?wave= style links, god mode, test keys or debug panels", "check": "judge", "serious": "major" }
       ],
-      "bars": { "maxConsoleErrors": 0, "softlockSeconds": 60, "frozenSeconds": 12, "minFps": 30, "headlessMinFps": 18, "minMechanics": 3, "minPlayMinutes": 10 }
+      "bars": { "maxConsoleErrors": 0, "softlockSeconds": 60, "frozenSeconds": 12, "idleHurtSeconds": 30, "idleLoseSeconds": 60, "idleSafeSeconds": 10, "minFps": 30, "headlessMinFps": 18, "minMechanics": 3, "minPlayMinutes": 10 }
     },
     "app": {
       "label": "App / SaaS",
@@ -55,7 +56,7 @@
         { "id": "states", "text": "Empty, loading and error states are real, not blank", "check": "judge" },
         { "id": "crud", "text": "Edit and delete work as well as create", "check": "judge" },
         { "id": "settings", "text": "A settings screen that does something", "check": "judge" },
-        { "id": "honest", "text": "Payments only as a clearly marked coming-soon hook, nothing invented", "check": "judge" }
+        { "id": "honest", "text": "If it charges money it does so through office.pay and is honest about whether payments are open yet; nothing invented", "check": "judge" }
       ],
       "bars": { "maxConsoleErrors": 0, "phoneWidth": 390, "maxPageKB": 600 }
     },

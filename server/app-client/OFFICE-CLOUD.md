@@ -124,11 +124,24 @@ await office.pay.manage();                  // takes a subscriber to Stripe to c
 ```
 - **Products and prices are proposed, then approved.** The manager proposes each one with `propose_product`; it goes on sale only when the boss taps approve. Until then `checkout` answers `{ok: false, code: 'no_product'}`. Never hard-code a price on the page: read it from `office.pay.status()`.
 - **Always handle "not ready".** `office.pay.status()` gives `ready: false` and a `message` until the building has a Stripe key and the boss has connected their Stripe account. `checkout` and `manage` never throw: when they can't go ahead they resolve to `{ok: false, code, message}`. Show that message in the page, as text.
-- **It needs an account.** A purchase stays with the signed-in Office Cloud account, so `checkout` answers `signed_out` for a guest; send them to sign up first.
+- **A paid plan needs an account.** A purchase made with `{ product }` stays with the signed-in Office Cloud account, so `checkout` answers `signed_out` for a guest; send them to sign up first. (A shop's basket doesn't: see below.)
 - **Back from Stripe**, the page is at the URL they left with `?office_pay=success` or `?office_pay=cancelled` added (or pass `{ returnPath }` to choose another page on this site). Call `office.pay.has(product)` and unlock; don't trust the URL.
 - **Subscriptions and refunds are automatic.** A subscription that lapses or is cancelled, and a refund, make `has` false again. Refunds are the boss's button; there is no refund from the page.
 - **Paid data is enforced by the server.** List collections in the proposal's `unlocks`: that collection then answers `402 payment_required` to everyone but buyers, whatever the page does. Never put paid content in the site's files or an unlocked collection: anyone can read those.
 - A local preview has no server, so `status()` says not ready: build and check that state there.
+
+### A shop: several things, a basket, an address
+A shop is built on the shop starter (its STARTER.md has the details). Its catalogue is `shop.json` at the project's root, and publishing the shop puts every product in it in front of the boss for approval, so nobody has to call `propose_product` for them.
+```js
+await office.pay.checkout({ items: [{ product: 'lavender', quantity: 2 }, { product: 'cedar', quantity: 1 }] });  // the whole basket, one Stripe page
+office.pay.returned();                      // 'success', 'cancelled' or '' : has this visitor just come back from Stripe?
+const o = await office.pay.order();         // {ok, number, paid, status, items: [{name, quantity, amountCents}], totalCents, currency, emailed, testMode}
+```
+- **No account needed for a basket.** A visitor buys as a guest. Anything that renews or unlocks a collection still needs an account and is bought on its own with `{ product }`.
+- **Things that are posted.** A product with `"ships": true` makes Stripe's page ask for the delivery address. The address goes to the boss with the order and never comes back to the page.
+- **The thank-you is real.** `office.pay.order()` reads the order just placed from the server: show its number, lines and total. The buyer also gets a confirmation email from the company, and the boss gets the order in their inbox and on their Payments tab.
+- **Before payments are on**, `status()` says not ready. The shop still shows every product with its price, and takes an order request with `office.forms.submit('order-enquiry', {name, email, message})`, which lands in the boss's inbox. It says so plainly; it never says "coming soon".
+- **Prices.** Show the catalogue's price until `status().products` has the product, then show that amount: it is the one Stripe will charge. A price the boss didn't give is labelled "proposed price" until they approve it.
 
 ## Web pages: fetch and scrape
 ```js

@@ -1,5 +1,6 @@
 // The complete set of things an agent can do. There is no shell, no code execution and no real filesystem here.
 import { LAWYER_ROLE, LAWYER_TOOLS } from './legal-role.js';  // the Lawyer: no spending, no email out, no publishing
+import { createHash } from 'node:crypto';
 import { writeFile, writeBinaryFile, readFile, listFiles, publishSnapshot, WorkspaceError, slugify, slugPattern, attachmentsOf } from './workspace.js';
 import { safeFetch, FetchBlocked } from './safefetch.js';
 import { get, all, run } from './db.js';
@@ -60,7 +61,7 @@ const DEFS = {
     project: S('Project slug this task works on'), private: { type: 'boolean', description: 'True to keep this project hidden from visitors' },
     depends_on: { type: 'array', items: { type: 'integer' }, description: 'Task ids that must finish first' },
     after_previous: { type: 'boolean', description: 'True to start only after the task you assigned just before this one finishes' },
-    lane: { type: 'string', enum: ['game', 'website', 'business', 'app'], description: 'Which lane this plan is in. The person doing the task gets their part of that playbook.' },
+    lane: { type: 'string', enum: LANES, description: 'Which lane this plan is in. The person doing the task gets their part of that playbook.' },
     files: { type: 'array', items: { type: 'string' }, description: 'Files the boss sent (their uploads/ paths) that this person needs. They see the pictures and PDFs, and on a computer they find them all in /workspace/uploads.' },
   }, ['to', 'title', 'brief']),
   review_task: fn('review_task', 'Approve finished work or send it back with notes.', { task_id: { type: 'integer', description: 'Task id' }, verdict: { type: 'string', enum: ['approve', 'revise'] }, notes: S('Feedback for the staff member') }, ['task_id', 'verdict']),
@@ -424,6 +425,9 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (isDoc && c.task) check.claims.push(...unseenLinks(c, prefix, sources));
       const problem = gateProblem(check, reason);
       if (problem) { saveCheck(db, c.floor.id, slug, check, reason, engine.now()); throw new WorkspaceError(problem); }
+      // A first publish gets one outside look: would you actually ship this? (server/shipcheck.js)
+      const notYet = await engine.shipCheck?.(c.floor, slug, { kind, directory, agent: c.agent, task: c.task, signal: c.signal });
+      if (notYet) throw new WorkspaceError(notYet);
       const n = publishSnapshot(db, c.floor.id, slug, cfg.quotaBytes, directory);
       // Work done under a private task stays private, whatever slug it ends up published as.
       const inherited = !!(c.project && get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', c.floor.id, c.project)?.private);
@@ -554,9 +558,6 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const project = projectFor(c, a);
       const file = str(a, 'file', 300); const about = str(a, 'about', 500, false);
       if (about) outbound(c, about, 'description');
-      if (todayCount(c, 'review') >= cfg.reviewsPerFloorDay) throw new WorkspaceError('this floor has had all its design reviews for today');
-      const estimate = engine.media.review.estimateUsd || 0.1;
-      roomFor(c, estimate, 'openrouter');
       const shot = async (name) => {
         let bytes;
         if (c.readOutput) bytes = await c.readOutput(name);
@@ -575,6 +576,18 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const desktop = await shot(file);
       const phoneName = str(a, 'phone_file', 300, false);
       const phone = phoneName ? await shot(phoneName) : null;
+      // A review of pictures that have not changed can only say the same thing again. So the same screenshots, byte for byte, get the review they already had,
+      // and nothing is sent out. It does not count as another look either: a change only counts once new pictures of it have been looked at.
+      const shots = createHash('sha256').update(desktop.bytes).update(`\0${phone ? 'phone' : 'none'}\0`).update(phone ? phone.bytes : '').digest('hex').slice(0, 32);
+      const before = get(db, 'SELECT design_review d FROM projects WHERE floor_id=? AND slug=?', c.floor.id, project)?.d;
+      let last = null; try { last = JSON.parse(before || 'null'); } catch { /* an old row */ }
+      if (last?.shots === shots && last.full) {
+        c.say('reading', 'Reading the last design review again', null, { project });
+        return wrapUntrusted('design review from another lab', `[Office note: these screenshots are byte for byte the ones reviewed last time, so nothing has changed since the last review and this is that review again, not a new look. If you have changed the page since, take new screenshots of it as it is now and send those.]\n\n${last.full}`);
+      }
+      if (todayCount(c, 'review') >= cfg.reviewsPerFloorDay) throw new WorkspaceError('this floor has had all its design reviews for today');
+      const estimate = engine.media.review.estimateUsd || 0.1;
+      roomFor(c, estimate, 'openrouter');
       c.say('reading', 'Getting a second opinion on the design', 'sent the design to another lab for a blunt review', { project });
       let r;
       try { r = await engine.brokerCall(c, { provider: 'openrouter', usd: estimate, model: engine.media.review.model, kind: 'review' }, () => engine.media.reviewDesign({ bytes: desktop.bytes, mime: desktop.mime, phone, context: about, signal: c.signal })); } catch (e) { throw brokerError(e); }
@@ -582,9 +595,8 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const verdict = stated ? stated.toLowerCase() : /FIX FIRST/i.test(r.text) ? 'fix first' : /\bSHIP\b/i.test(r.text) ? 'ship' : 'see notes';
       const score = Number(r.text.match(/\b(\d{1,2})(?:\.\d)?\s*(?:\/|out of)\s*10\b/)?.[1]);
       // How many times the project has been looked at: a change a review asked for only counts once it has been looked at again.
-      const before = get(db, 'SELECT design_review d FROM projects WHERE floor_id=? AND slug=?', c.floor.id, project)?.d;
-      let rounds = 1; try { rounds = (JSON.parse(before || 'null')?.rounds || (before ? 1 : 0)) + 1; } catch { /* an old row */ }
-      run(db, 'UPDATE projects SET design_review=? WHERE floor_id=? AND slug=?', JSON.stringify({ at: engine.now(), model: engine.media.review.model, verdict, score: score >= 1 && score <= 10 ? score : null, rounds, text: r.text.slice(0, 2000) }), c.floor.id, project);
+      const rounds = (last?.rounds || (before ? 1 : 0)) + 1;
+      run(db, 'UPDATE projects SET design_review=? WHERE floor_id=? AND slug=?', JSON.stringify({ at: engine.now(), model: engine.media.review.model, verdict, score: score >= 1 && score <= 10 ? score : null, rounds, text: r.text.slice(0, 2000), shots, full: r.text.slice(0, 12000) }), c.floor.id, project);
       return wrapUntrusted('design review from another lab', r.text);
     },
     async launch_check(c, a) {

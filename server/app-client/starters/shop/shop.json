@@ -1,0 +1,8 @@
+{
+  "currency": "usd",
+  "delivery": "",
+  "products": [
+    { "key": "example-one", "name": "Example product one", "description": "Example: one honest line on what the buyer gets.", "price": 12, "priceFrom": "proposed", "image": "images/example-one.svg", "imageKind": "illustration", "ships": true },
+    { "key": "example-two", "name": "Example product two", "description": "Example: replace every product here with a real one.", "price": 18, "priceFrom": "proposed", "image": "images/example-two.svg", "imageKind": "illustration", "ships": true }
+  ]
+}

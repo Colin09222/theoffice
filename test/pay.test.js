@@ -207,7 +207,7 @@ describe('with Stripe connected (mock)', () => {
       const r = await boss.post(`/api/floors/${boss.slug}/pay/products/${row.id}/approve`, {});
       assert.equal(r.status, 200, JSON.stringify(r.data));
       const live = (await pay(t, shop, 'status')).json;
-      assert.deepEqual(live.products, [{ key: 'pro', name: 'Pro', description: 'All of it', amountCents: 900, currency: 'usd', interval: null }]);
+      assert.deepEqual(live.products, [{ key: 'pro', name: 'Pro', description: 'All of it', amountCents: 900, currency: 'usd', interval: null, ships: false }]);
       const created = mock.state.requests.filter((x) => x.path === '/v1/products');
       assert.equal(created.length, 1); assert.equal(created[0].account, acct); assert.equal(created[0].idem, `office-product-${row.id}`);
       assert.equal(mock.state.requests.filter((x) => x.path === '/v1/prices').at(-1).account, acct);

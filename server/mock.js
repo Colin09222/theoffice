@@ -134,6 +134,39 @@ function businessManager(meta, boss) {
   }
   return null;
 }
+// The shop lane's staff: the Writer lists the products, the Designer draws a picture for each, the Builder fills the starter's shop.json, the Tester
+// reports, and the Builder's last task puts it live. What they write is a real, whole catalogue, so the checklist and the boss's approvals see a real shop.
+const SHOP_PRODUCTS = [
+  { key: 'first-visit', name: 'First visit', description: 'One full visit at your door, booked for a time that suits you.', price: 45, priceFrom: 'proposed', image: 'images/first-visit.svg', imageKind: 'illustration', ships: false },
+  { key: 'care-kit', name: 'Care kit', description: 'Brush, comb and a tin of balm, posted to you.', price: 18.5, priceFrom: 'proposed', image: 'images/care-kit.svg', imageKind: 'illustration', ships: true },
+];
+const SHOP_PICTURE = (fill) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><rect width="400" height="400" fill="${fill}"/><circle cx="200" cy="200" r="120" fill="#fff8"/></svg>`;
+function shopStaff(meta) {
+  const { role, task } = meta;
+  if (task.lane !== 'shop') return null;
+  const b = task.brief || '', dir = `projects/${task.project}`;
+  if (role === 'researcher') return null;
+  if (role === 'writer') return [
+    call('write_file', { path: `${dir}/notes/brief.md`, content: '# Brief\n\nA small shop. A visitor should buy the first visit.\n' }),
+    call('write_file', { path: `${dir}/notes/copy.md`, content: '# Copy\n\nTitle: Doorstep Dog Groom\n\nGrooming that comes to you.\n' }),
+    call('write_file', { path: `${dir}/notes/products.md`, content: `# Products\n\n${SHOP_PRODUCTS.map((p) => `- ${p.key}: ${p.name}. ${p.description} Proposed price ${p.price}. ${p.ships ? 'Posted.' : 'Not posted.'} Needs a picture.`).join('\n')}\n` }),
+    ...(/notes\/offer\.md/.test(b) ? [call('write_file', { path: `${dir}/notes/offer.md`, content: OFFER })] : []),
+  ];
+  if (role === 'designer') return [
+    call('write_file', { path: `${dir}/notes/design.md`, content: '# The look\n\nWarm paper and one bold colour. Pictures: images/first-visit.svg, images/care-kit.svg.\n' }),
+    call('write_file', { path: `${dir}/images/first-visit.svg`, content: SHOP_PICTURE('#d2552b') }),
+    call('write_file', { path: `${dir}/images/care-kit.svg`, content: SHOP_PICTURE('#1b2a22') }),
+  ];
+  if (role === 'tester') return [call('write_file', { path: `${dir}/TEST-REPORT.md`, content: '# Test report\n\nPASS. Added two things to the basket, changed a quantity, sent an order request. Nobody has opened it in a browser.\n' })];
+  if (role === 'builder') {
+    const publish = call('publish_project', { project: task.project, title: 'Doorstep Dog Groom', description: 'Dog grooming that comes to your door, and a care kit by post.', kind: 'site' });
+    if (/read TEST-REPORT\.md/.test(b)) return [call('read_file', { path: `${dir}/TEST-REPORT.md` }), publish];
+    const fill = [call('read_file', { path: `${dir}/STARTER.md` }), call('write_file', { path: `${dir}/shop.json`, content: JSON.stringify({ currency: 'usd', delivery: '', products: SHOP_PRODUCTS }, null, 2) })];
+    return /don't publish|do not publish/i.test(b) ? fill : [...fill, publish];
+  }
+  return null;
+}
+
 function businessStaff(meta) {
   const { role, task } = meta;
   const b = task.brief || '';
@@ -292,14 +325,18 @@ function managerStep(meta, messages = []) {
 
 // The maker loop (server/makers.js). Flags in the boss's pitch pick what the Tester finds: [full] passes every rule at once, [broken]
 // always fails, [regress] breaks a rule in pass 1 that pass 0 had, [cheat] keeps a major bug in every version, [major-once] has a major bug
-// until the first fix pass re-tests it. With none, the first version passes the browser rules and pass 1 the rest.
+// until the first fix pass re-tests it, [idle] has a Builder whose depth passes change nothing that goes live. With none, the first version passes the browser rules and pass 1 the rest.
 function makerStep(meta) {
   const m = /^\[Maker\] (doc|build|test) (\d+)?/.exec(meta.task.brief || '');
   if (!m) return null;
   const dir = `projects/${meta.task.project}`, pass = Number(m[2] || 0), boss = meta.allBoss || '';
   const list = [];
   if (m[1] === 'doc') list.push(call('write_file', { path: `${dir}/notes/design.md`, content: '# Design doc\n\n1. Core loop and controls: move and dodge.\n3. Mechanics: chasers, dashers, splitters.\n' }));
-  else if (m[1] === 'build') list.push(call('write_file', { path: `${dir}/notes/pass-${pass}.md`, content: `Pass ${pass}: built.\n` }));
+  else if (m[1] === 'build') {
+    list.push(call('write_file', { path: `${dir}/notes/pass-${pass}.md`, content: `Pass ${pass}: built.\n` }));
+    // A real build changes what goes live, and a test of files that haven't changed is never run (makers.js, sameAsTested).
+    if (!(/\[idle\]/.test(boss) && pass > 0)) list.push(call('write_file', { path: `${dir}/build.js`, content: `// Pass ${pass}, built in task ${meta.task.id}.\n` }, 1));
+  }
   else {
     const ids = (meta.task.brief.match(/"rules": \{([^}]*)\}/)?.[1] || '').match(/"([a-z][a-z0-9_-]*)"/g)?.map((x) => x.slice(1, -1)) || [];
     const judged = new Set((meta.task.brief.match(/^- ([a-z0-9_-]+): .*\(judged/gm) || []).map((x) => x.slice(2).split(':')[0]));
@@ -336,6 +373,8 @@ function staffStep(meta) {
   if (daily) return daily;
   const maker = makerStep(meta);
   if (maker) return maker;
+  const shop = shopStaff(meta);
+  if (shop) return step < shop.length ? { toolCalls: [shop[step]] } : { content: `Finished "${task.title}".` };
   const biz = businessStaff(meta);
   if (biz) return step < biz.length ? { toolCalls: [biz[step]] } : { content: `Finished "${task.title}".` };
   const p = task.project || 'project';
@@ -383,6 +422,14 @@ export function createMockClient(cfg) {
       if (meta?.kind === 'app_ai') {
         await sleep(Math.min(cfg.mockDelayMs, 20), signal);
         const content = `Mock AI reply to: ${String(messages.filter((m) => m.role === 'user').at(-1)?.content ?? '').slice(0, 300)}`;
+        const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
+        return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
+      }
+      // The last look before a first publish. [noship] in the boss's words holds the first look back; the second lets it through, or [nevership] holds that too.
+      if (meta?.kind === 'shipcheck') {
+        await sleep(Math.min(cfg.mockDelayMs, 20), signal);
+        const no = /\[nevership\]/.test(meta.allBoss || '') || (/\[noship\]/.test(meta.allBoss || '') && meta.look === 1);
+        const content = /\[shipgarbage\]/.test(meta.allBoss || '') ? 'I would rather not say.' : JSON.stringify({ ship: !no, scores: { works: 8, as_asked: no ? 5 : 8, look: 8, phone: 8, showable: no ? 5 : 8 }, fix: no ? ['The hero says nothing about what this is: put the one-line pitch there.'] : [], note: no ? 'Not yet.' : 'Good to go.' });
         const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
         return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
       }

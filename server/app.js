@@ -23,6 +23,8 @@ import { appLabel, appOrigin, appHostLabel, lookupLabel, appHeaders, previewCook
 import { handleData, DataError, DATA_LIMITS, clearProjectData } from './appdata.js';
 import { installCloud, CHAT_JS, CHAT_PANEL_JS, SDK_JS, API_PREFIX } from './cloud/index.js';
 import { installPay } from './cloud/pay.js';
+import { installShop } from './shop.js';
+import { installShipCheck } from './shipcheck.js';
 import { installLegal } from './legal.js';
 import { recordVisit, projectStats, formEntries, formsCsv, formCount } from './launch.js';
 import { DomainRefused } from './domains.js';
@@ -185,7 +187,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     return { slug: p.slug, title: p.title, description: p.description, kind: p.kind, private: !!p.private, publishedAt: p.published_at, sources: JSON.parse(p.sources), url: publicUrl(f.slug, p.slug), appUrl: cfg.appsBaseDomain ? `${appOrigin(cfg, appLabel(db, f, p.slug))}/` : null, domain };
   };
   // What only the boss sees on a project card.
-  const projectOwnerView = (f, p) => ({ ...projectView(f, p), hasPayment: !!p.payment_link, indexable: !!p.indexable, signups: formCount(db, f.id, p.slug), launchCheck: p.launch_check ? JSON.parse(p.launch_check) : null, designReview: p.design_review ? JSON.parse(p.design_review) : null, launchReport: p.launch_report });
+  const projectOwnerView = (f, p) => ({ ...projectView(f, p), hasPayment: !!p.payment_link, indexable: !!p.indexable, signups: formCount(db, f.id, p.slug), launchCheck: p.launch_check ? JSON.parse(p.launch_check) : null, designReview: p.design_review ? (({ full: _full, shots: _shots, ...r }) => r)(JSON.parse(p.design_review)) : null, launchReport: p.launch_report });
   const privateSet = (f) => new Set(all(db, 'SELECT slug FROM projects WHERE floor_id=? AND private=1', f.id).map((p) => p.slug));
   function snapshot(f, viewer) {
     const hidden = viewer.owner ? new Set() : privateSet(f);
@@ -730,6 +732,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // Office Cloud: the backend each published project gets on its own origin. See docs/OFFICE-CLOUD.md.
   // Payments: each boss's own Stripe account, on the apps their team makes. See docs/PAYMENTS.md.
   const pay = installPay({ ...ext, RateLimiter: A.RateLimiter, payFetch, paySleep });
+  installShop({ db, engine, log });
+  installShipCheck({ db, cfg, engine, log });
   extensions.push(pay);
   const cloud = installCloud({ ...ext, ipOf, secret, llm: client, cloudNet, pay });
   extensions.push(cloud);

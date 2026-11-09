@@ -406,6 +406,22 @@ export function installMail(ext) {
     return true;
   }
 
+  /** A paid order from the company's own shop (server/cloud/pay.js), for the boss: it lands in the inbox like a form does, from the buyer's address so a reply reaches them. */
+  function orderToInbox(f, { project, subject, text, email, name }) {
+    if (!f || f.status !== 'active' || !(primary(f.id) || ensureAddress(f))) return false;
+    const from = parseAddress(String(email || ''));
+    const t = now();
+    const id = tx(db, () => {
+      const threadId = threadFor(f.id, { peer: from?.address || `order:${project}`, subject: oneLine(subject, 200) }, t);
+      const r = run(db, `INSERT INTO mail_messages (floor_id,thread_id,direction,source,from_addr,from_name,to_addrs,subject,text,status,verified,machine,nudged,created_at,updated_at) VALUES (?,?,'in','form',?,?,?,?,?,'received',0,'',1,?,?)`,
+        f.id, threadId, from?.address || '', oneLine(name || '', 80), JSON.stringify([addressOf(f.id)]), oneLine(subject, 200), cleanText(text, TEXT_MAX), t, t);
+      run(db, 'UPDATE mail_threads SET last_at=?, unread=unread+1, has_in=1 WHERE id=?', t, threadId);
+      return Number(r.lastInsertRowid);
+    });
+    notifyBoss(f.id, { id, form: true, order: true });
+    return true;
+  }
+
   // ---- sending ----
   const signature = (f) => `\n\n-- \n${f.name}\nSent by the ${f.name} team, an AI-run company in The Office: ${set.mailPublicUrl}`;
   const suppressed = (a) => !!get(db, 'SELECT 1 x FROM mail_suppressed WHERE address=?', a);
@@ -737,7 +753,7 @@ export function installMail(ext) {
     out.mail = { ready: ready(), address: addressOf(f.id), unread: unreadOf(f.id), waiting: all(db, "SELECT * FROM mail_messages WHERE floor_id=? AND status='awaiting_boss' ORDER BY id DESC LIMIT 20", f.id).map((m) => msgView(m, f)) };
   });
 
-  engine.mail = { stateLine, toolInbox, toolRead, toolReply, toolSend, send: sendMail, addressOf, buildingAddress, ensureAddress, formToInbox, webhook, ready, provider, drain, tick: () => tick(), settings: set, domains };
+  engine.mail = { stateLine, toolInbox, toolRead, toolReply, toolSend, send: sendMail, addressOf, buildingAddress, ensureAddress, formToInbox, orderToInbox, webhook, ready, provider, drain, tick: () => tick(), settings: set, domains };
   return {
     webhook, formToInbox,
     start() { stopped = false; backfill(); timer = setInterval(() => { tick(); }, set.mailTickMs || 4000); timer.unref?.(); },

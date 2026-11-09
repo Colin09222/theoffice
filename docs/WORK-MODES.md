@@ -10,8 +10,9 @@ Everything lives in `config/models.json`. A role names its model and effort; wha
 | Asked for by the boss | Manager, Researcher, Writer, Analyst, Marketer, the Tester's computer | `claude-sonnet-5-5` | high |
 | Picked by the team in a work mode | every Claude role, computer sessions included | `claude-sonnet-5-5` | high |
 | Unchanged | talk and banter `claude-haiku-5-5` low; search `claude-sonnet-5-5` low; the Tester's review on Gemini through OpenRouter (`autonomous.keepOwnModel`) | | |
+| A work question to a colleague (`ask_colleague`) | whoever is asked | their own role model, routed like their own calls (so the autonomous model on a job the team picked) | their own, at most high |
 
-Prices (USD per million tokens): Opus 5.5 4 / 20, cache reads 0.20; Sonnet 5.5 2 / 10, cache reads 0.20; Haiku 5.5 0.10 / 0.50.
+Prices (USD per million tokens): Opus 5.5 4 / 20, cache reads 0.20; Sonnet 5.5 2 / 10, cache reads 0.10; Haiku 5.5 0.10 / 0.50, cache reads 0.01. A five-minute cache write is 1.25 times the input price.
 
 `routeFor(models, role, { autonomous, computer })` in `server/config.js` picks the route. A task carries `auto=1` when the manager assigned it during a job the team picked for itself, and its staff calls and its computer session follow. A computer's autonomous variant is its own Managed Agents agent (`theoffice-<role>-auto`), so switching never rewrites the other and each keeps a stable prompt; when both settle on the same model they share one.
 

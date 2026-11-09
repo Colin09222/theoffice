@@ -131,7 +131,7 @@ const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); 
 function tracksEl(b) {
   return h('section.tracks', { 'aria-label': 'Build tracks' }, ...b.tracks.map((t) => h(`div.track.${t.lamp}`, { 'data-track': t.id },
     h('div.track-head', {}, h('span.lamp', { role: 'img', 'aria-label': t.lamp === 'done' ? 'Done' : t.lamp === 'working' ? 'Working' : t.lamp === 'attention' ? 'Needs a look' : 'Not started' }), h('b', {}, t.label), h('span.count', {}, `${t.done}/${t.total}`)),
-    t.items.length ? h('ul.track-items', {}, ...t.items.map((i) => h(`li.${i.state}`, { title: SAYS[i.state] || i.state }, h('i'), i.label, i.optional ? h('small', {}, ' optional') : null))) : null,
+    t.items.length ? h('ul.track-items', {}, ...t.items.map((i) => h(`li.${i.state}`, { title: SAYS[i.state] || i.state }, h('i'), i.label, i.yours && i.state !== 'done' ? h('small', {}, ' yours to do') : i.optional ? h('small', {}, ' optional') : null))) : null,
     t.note ? h('p.track-note', {}, t.note) : null)));
 }
 

@@ -11,10 +11,15 @@
       "completion": 20,
       "cacheRead": 0.2
     },
+    "claude-fable-5-2": {
+      "prompt": 8,
+      "completion": 40,
+      "cacheRead": 0.2
+    },
     "claude-sonnet-5-5": {
       "prompt": 2,
       "completion": 10,
-      "cacheRead": 0.2
+      "cacheRead": 0.1
     },
     "claude-haiku-5-5": {
       "prompt": 0.1,
@@ -131,6 +136,14 @@
     }
   },
   "tools": {
+    "ship": {
+      "_comment": "The last look before a first publish: would you actually ship this? One call, two looks at most per project (server/shipcheck.js). The one place the building uses its dearest model.",
+      "provider": "anthropic",
+      "model": "claude-fable-5-2",
+      "effort": "high",
+      "maxTokens": 6000,
+      "rounds": 2
+    },
     "talk": {
       "provider": "anthropic",
       "model": "claude-haiku-5-5",
