@@ -31,7 +31,7 @@ const ZOOM_MIN = 0.8, ZOOM_MAX = 5.5, TILT_END = 3.6;
 const HOME_YAW = 0.5, TALL_YAW = 1.42;  // a tall phone looks along the room's long side, so a row of desks runs down the tall screen with everyone in it
 const ROLE_TITLE = { manager: 'Office Manager', researcher: 'Researcher', writer: 'Writer', builder: 'Builder', designer: 'Designer', analyst: 'Analyst', marketer: 'Marketer', tester: 'Tester', illustrator: 'Illustrator' };
 /** Business Development: a bean at a desk with a title, and nothing else yet. Only the room draws him, so the server has no such person: no model, no tools, no tasks, no chats, no meetings, nowhere on the staff list, and he can't be tapped. */
-const BIZ_DEV = { id: 'bizdev', role: 'bizdev', name: 'Biz\u00a0Dev', title: 'Business Development', look: { wear: 'bizdev' }, state: 'idle', activity: null };
+const BIZ_DEV = { id: 'bizdev', role: 'bizdev', name: 'Biz\u00a0Dev', title: 'Business Development', look: { wear: 'bizdev' }, state: 'idle', activity: null, extra: true };
 /** A person's job as their name tag and the staff list put it: the title they were hired with, else their role's. */
 export const jobTitle = (info, isBoss = false) => (isBoss ? 'Boss' : info.title || ROLE_TITLE[info.role] || (info.role ? info.role[0].toUpperCase() + info.role.slice(1) : 'Staff'));
 // Sky under a floor page's room: the floor is high up a tower, so what lies beyond the terrace is a cool bank of cloud, and the warm room stands out
@@ -439,7 +439,7 @@ function buildPet(kind) {
 
 export class Actor {
   constructor(view, info, seat, { isBoss = false } = {}) {
-    this.view = view; this.id = info.id; this.info = info; this.seat = seat; this.isBoss = isBoss;
+    this.view = view; this.id = info.id; this.info = info; this.seat = seat; this.isBoss = isBoss; this.extra = !!info.extra;
     rememberJob(info.look, isBoss ? 'boss' : info.role);
     this.char = new Character(info.look, { accent: view.colors.accent, scale: CHAR_SCALE, role: isBoss ? 'boss' : info.role });
     this.manner = manner(String(info.id)); this.char.setManner(this.manner);
@@ -453,7 +453,7 @@ export class Actor {
     this.sitDown();
     this.group.position.y = this.seatY; this.char.blend.sit = 1;  // already sitting when the floor opens
     this.tag = document.createElement('div'); this.tag.className = 'char-tag';
-    this.tag.dataset.side = view.actors.size % 2 ? 'left' : 'right';  // bubbles alternate sides, so a huddle stays readable
+    this.tag.dataset.side = [...view.actors.values()].filter((a) => !a.extra).length % 2 ? 'left' : 'right';  // bubbles alternate sides, so a huddle stays readable
     this.nameEl = document.createElement('span'); this.nameEl.className = 'char-name'; this.setName(info.name);
     // What they do, small on the line above their name, so a glance says who is who.
     this.roleEl = document.createElement('span'); this.roleEl.className = 'char-role'; this.roleEl.textContent = jobTitle(info, isBoss);
@@ -1526,7 +1526,7 @@ export class OfficeView {
       this.nav.block(...deskRect(spot));
       const actor = new Actor(this, a, { at: desk.at, face: desk.face, screenMat: desk.screenMat, glow: desk.glow, bar: desk.bar });
       actor.deskPos = [x, z, ry]; actor.office = host?.id || null;
-      if (a === BIZ_DEV) { actor.extra = true; actor.idleTimer = Infinity; }  // he stays at his desk, and nobody drops in on him
+      if (a.extra) actor.idleTimer = Infinity;  // he stays at his desk
       this.actors.set(a.id, actor);
       actor.setState(a.state, a.activity);
       if (room) this.addOffice(room, a, { own: true, actor });
