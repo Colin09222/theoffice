@@ -42,8 +42,8 @@ function cloudBank() {
     x.fillStyle = g; x.fillRect(0, 0, w, h);
     const r = seeded(91);
     const puff = (cx, cy, rad, a) => { const c = x.createRadialGradient(cx, cy, 0, cx, cy, rad); c.addColorStop(0, `rgba(255,255,255,${a})`); c.addColorStop(0.55, `rgba(255,252,246,${a * 0.75})`); c.addColorStop(1, 'rgba(255,250,240,0)'); x.fillStyle = c; x.beginPath(); x.arc(cx, cy, rad, 0, 7); x.fill(); };
-    for (let i = 0; i < 26; i++) {
-      const ang = r() * Math.PI * 2, dist = 96 + r() * 120, cx = 256 + Math.cos(ang) * dist, cy = 256 + Math.sin(ang) * dist, n = 3 + Math.floor(r() * 3), size = 10 + r() * 12;
+    for (let i = 0; i < 34; i++) {
+      const ang = r() * Math.PI * 2, dist = 62 + r() * 150, cx = 256 + Math.cos(ang) * dist, cy = 256 + Math.sin(ang) * dist, n = 3 + Math.floor(r() * 3), size = 10 + r() * 12;
       for (let k = 0; k < n; k++) puff(cx + (k - n / 2) * size * 0.9, cy + (r() - 0.5) * size * 0.5, size * (0.8 + r() * 0.5), 0.6);
     }
   });
@@ -1244,6 +1244,13 @@ export class OfficeView {
     if (!m.kind) {
       const t = put('tableCross', { x: tx, z: tz, scale: FS * m.size[1] });
       t.scale.x = FS * m.size[0]; t.scale.z = FS * (m.size[2] ?? m.size[1]);
+      // A meeting somebody has just stepped out of: laptops left open, papers, mugs and a plant in the middle. All of it bakes in with the table.
+      const top = T.tableCross.userData.size.y * FS * m.size[1], lx = T.tableCross.userData.size.x * FS * m.size[0] / 2 - 0.55, lz = T.tableCross.userData.size.z * FS * (m.size[2] ?? m.size[1]) / 2 - 0.38;
+      put('laptop', { x: tx - lx * 0.55, y: top, z: tz + lz * 0.55, ry: Math.PI + 0.2, scale: FS * 0.9 }); put('laptop', { x: tx + lx * 0.5, y: top, z: tz - lz * 0.55, ry: -0.15, scale: FS * 0.9 });
+      if (T.plantSmall2) put('plantSmall2', { x: tx, y: top, z: tz, scale: FS * 1.5 });
+      const on = (c, w, hh, dd, x, z, o = {}) => piece(models, c, w, hh, dd, tx + x, top, tz + z, { cast: false, ...o });
+      on('#fbf7ea', 0.36, 0.014, 0.48, lx * 0.15, lz * 0.5, { ry: 0.25 }); on('#fbf7ea', 0.36, 0.014, 0.48, -lx * 0.2, -lz * 0.55, { ry: -0.3 }); on(mix(accent, '#ffffff', 0.5), 0.34, 0.02, 0.46, lx * 0.85, lz * 0.3, { ry: 0.5 }); on('#fbf7ea', 0.36, 0.014, 0.48, -lx * 0.9, -lz * 0.1, { ry: 0.1 });
+      on(accent, 0.15, 0.16, 0.15, -lx * 0.3, lz * 0.2, { geo: cyl }); on(primary, 0.15, 0.16, 0.15, lx * 0.25, -lz * 0.15, { geo: cyl }); on('#fbf7ea', 0.15, 0.16, 0.15, lx * 0.75, -lz * 0.5, { geo: cyl }); on('#d9443a', 0.05, 0.03, 0.34, -lx * 0.62, -lz * 0.45, { ry: 0.8 });
     }
     for (const [cx, cz, ry] of m.chairs) put('chairModernCushion', { x: cx, z: cz, ry, tint: chairTint(primary) });
     // Bookcases against the left wall, with stacks of books on the shelves.
@@ -1338,8 +1345,8 @@ export class OfficeView {
         const empty = r.kind === 'staff' && this.offices.get(r.id)?.info.role === 'vacant';
         // A company's colour on the way through: a long pale runner down the middle of each corridor. A plain wash of the colour over the boards turned to mud.
         if (r.kind === 'corridor') { const mw = (x1 - x0) > (z1 - z0), inset = 0.42; x.globalAlpha = 0.8; x.fillStyle = mix(this.colors.primary, '#efe6d6', 0.58); x.fillRect(px(x0 + (mw ? 0 : inset)), pz(z0 + (mw ? inset : 0)), px(x1) - px(x0) - (mw ? 0 : inset * 2) * ppu, pz(z1) - pz(z0) - (mw ? inset * 2 : 0) * ppu); x.globalAlpha = 1; }
-        // Nobody works there yet: the light is off, so the eye goes to the rooms with people in them.
-        if (empty) { x.fillStyle = 'rgba(70,58,62,.36)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); continue; }
+        // Nobody works there yet: the light is a little lower, so the eye goes to the rooms with people in them.
+        if (empty) { x.fillStyle = 'rgba(70,58,62,.12)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); continue; }
         if (r.desk) { const s = seatOf(r.desk).at; const g = x.createRadialGradient(px(s[0]), pz(s[1]), 0, px(s[0]), pz(s[1]), 3.1 * ppu); g.addColorStop(0, 'rgba(255,212,150,.44)'); g.addColorStop(0.55, 'rgba(255,212,150,.16)'); g.addColorStop(1, 'rgba(255,212,150,0)'); x.fillStyle = g; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); }
       }
       // Pools of warm light around the meeting table and the manager's and boss's desks.
@@ -1635,8 +1642,8 @@ export class OfficeView {
         if (ON_TABLE.has(t.m) && T.sideTableDrawers) { const tb = place(T.sideTableDrawers, { x: at.x, z: at.z, ry: at.ry, scale: FS }); g.add(tb); y = T.sideTableDrawers.userData.size.y * FS; }
         g.add(place(T[t.m], { x: at.x, y, z: at.z, ry: at.ry, scale: FS * (t.s ?? 1), tint: t.rug ? tints(mix(o.theme.wall, '#f4efe6', 0.45)) : t.m.startsWith('chair') || t.m.startsWith('lounge') ? tints(o.theme.wall) : null }));
       }
-      // The room's lights are off too: its furniture bakes in dimmer than the rooms people are in.
-      if (empty) for (let i = first; i < g.children.length; i++) g.children[i].traverse((m) => { if (m.isMesh) m.userData.shade = [0, 3, 0.48, 0.48]; });
+      // The room's light is lower too: its furniture bakes in a shade dimmer than the rooms people are in.
+      if (empty) for (let i = first; i < g.children.length; i++) g.children[i].traverse((m) => { if (m.isMesh) m.userData.shade = [0, 3, 0.86, 0.86]; });
     }
     if (this.host || this.pace) { await this.turn(); if (this.dead || token < this.furnishedToken) return; }
     mergeColored(g, ROOM_MAT);
@@ -1969,7 +1976,7 @@ export class OfficeView {
     let zoom = 2.2, frame = null;
     for (let i = 0; i < 3; i++) {
       const pitch = this.tiltAt(zoom), upright = Math.cos(pitch);
-      frame = frameCrew(spots, { yaw, pitch, visW, visH, tall, top: tallPhone ? 96 : 84, pad: tallPhone ? 52 : 50, ppuMax: bean / (tall * upright), ppuMin: bean * (tallPhone ? 0.82 : 0.7) / (tall * upright) });  // a wide screen gives up a little size to keep the whole team in the picture
+      frame = frameCrew(spots, { yaw, pitch, visW, visH, tall, top: tallPhone ? 96 : 84, pad: tallPhone ? 52 : w > 760 ? 74 : 50, ppuMax: bean / (tall * upright), ppuMin: bean * (tallPhone ? 0.82 : 0.7) / (tall * upright) });  // a wide screen gives up a little size to keep the whole team in the picture
       zoom = Math.min(ZOOM_MAX, Math.max(1, (fit * frame.ppu * 2 * tan) / h));
     }
     // A tall phone looks down the row with the desks on the right, so the picture is the room (the corridor, the meeting table), not the terrace behind the wall.

@@ -41,7 +41,7 @@ for (const [w, h] of SIZES) {
       console.log(w, h, JSON.stringify(await p.ev('({ tier: window.__stage?.tier, ok: !!window.__stage?.ok, dpr: window.__stage?.dpr, sheet: document.body.dataset.sheet })')));
     }
     if (p.errors.length) console.log('errors', w, h, p.errors.slice(0, 5));
-  } catch (e) { console.log('FAILED', w, h, e.message); }
+  } catch (e) { console.log('FAILED', w, h, e.message, p.errors.slice(0, 4)); }
   p.close();
 }
 b.close(); await t.close(); process.exit(0);
