@@ -185,7 +185,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     return { slug: p.slug, title: p.title, description: p.description, kind: p.kind, private: !!p.private, publishedAt: p.published_at, sources: JSON.parse(p.sources), url: publicUrl(f.slug, p.slug), appUrl: cfg.appsBaseDomain ? `${appOrigin(cfg, appLabel(db, f, p.slug))}/` : null, domain };
   };
   // What only the boss sees on a project card.
-  const projectOwnerView = (f, p) => ({ ...projectView(f, p), hasPayment: !!p.payment_link, indexable: !!p.indexable, signups: formCount(db, f.id, p.slug), launchCheck: p.launch_check ? JSON.parse(p.launch_check) : null, designReview: p.design_review ? JSON.parse(p.design_review) : null, launchReport: p.launch_report });
+  const projectOwnerView = (f, p) => ({ ...projectView(f, p), hasPayment: !!p.payment_link, indexable: !!p.indexable, signups: formCount(db, f.id, p.slug), launchCheck: p.launch_check ? JSON.parse(p.launch_check) : null, designReview: p.design_review ? (({ full: _full, shots: _shots, ...r }) => r)(JSON.parse(p.design_review)) : null, launchReport: p.launch_report });
   const privateSet = (f) => new Set(all(db, 'SELECT slug FROM projects WHERE floor_id=? AND private=1', f.id).map((p) => p.slug));
   function snapshot(f, viewer) {
     const hidden = viewer.owner ? new Set() : privateSet(f);

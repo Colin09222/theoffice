@@ -292,14 +292,18 @@ function managerStep(meta, messages = []) {
 
 // The maker loop (server/makers.js). Flags in the boss's pitch pick what the Tester finds: [full] passes every rule at once, [broken]
 // always fails, [regress] breaks a rule in pass 1 that pass 0 had, [cheat] keeps a major bug in every version, [major-once] has a major bug
-// until the first fix pass re-tests it. With none, the first version passes the browser rules and pass 1 the rest.
+// until the first fix pass re-tests it, [idle] has a Builder whose depth passes change nothing that goes live. With none, the first version passes the browser rules and pass 1 the rest.
 function makerStep(meta) {
   const m = /^\[Maker\] (doc|build|test) (\d+)?/.exec(meta.task.brief || '');
   if (!m) return null;
   const dir = `projects/${meta.task.project}`, pass = Number(m[2] || 0), boss = meta.allBoss || '';
   const list = [];
   if (m[1] === 'doc') list.push(call('write_file', { path: `${dir}/notes/design.md`, content: '# Design doc\n\n1. Core loop and controls: move and dodge.\n3. Mechanics: chasers, dashers, splitters.\n' }));
-  else if (m[1] === 'build') list.push(call('write_file', { path: `${dir}/notes/pass-${pass}.md`, content: `Pass ${pass}: built.\n` }));
+  else if (m[1] === 'build') {
+    list.push(call('write_file', { path: `${dir}/notes/pass-${pass}.md`, content: `Pass ${pass}: built.\n` }));
+    // A real build changes what goes live, and a test of files that haven't changed is never run (makers.js, sameAsTested).
+    if (!(/\[idle\]/.test(boss) && pass > 0)) list.push(call('write_file', { path: `${dir}/build.js`, content: `// Pass ${pass}, built in task ${meta.task.id}.\n` }, 1));
+  }
   else {
     const ids = (meta.task.brief.match(/"rules": \{([^}]*)\}/)?.[1] || '').match(/"([a-z][a-z0-9_-]*)"/g)?.map((x) => x.slice(1, -1)) || [];
     const judged = new Set((meta.task.brief.match(/^- ([a-z0-9_-]+): .*\(judged/gm) || []).map((x) => x.slice(2).split(':')[0]));

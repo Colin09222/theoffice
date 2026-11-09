@@ -7,7 +7,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { get, all, run, tx } from './db.js';
-import { writeFile, readFile, slugify, slugPattern, floorBytes, goesLive, WorkspaceError } from './workspace.js';
+import { writeFile, readFile, slugify, slugPattern, floorBytes, goesLive, projectSum, WorkspaceError } from './workspace.js';
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { checkLive } from './live-check.js';
 import { claimShortLabel } from './apps.js';
@@ -371,6 +371,34 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     return view(floor);
   }
 
+  // What the project's live files add up to. Asked every tick while a test waits its turn, so the bytes are only read again when a file has been written since.
+  const sums = new Map();
+  function liveSum(j) {
+    const mark = get(db, 'SELECT COUNT(*) n, COALESCE(SUM(size),0) bytes, COALESCE(MAX(updated_at),0) at FROM files WHERE floor_id=? AND path>=? AND path<?', j.floor_id, `projects/${j.project}/`, `projects/${j.project}0`);
+    const key = `${mark.n}:${mark.bytes}:${mark.at}`;
+    const had = sums.get(j.id);
+    if (had?.key === key) return had.sum;
+    const sum = projectSum(db, j.floor_id, j.project, { liveOnly: true });
+    sums.set(j.id, { key, sum });
+    return sum;
+  }
+  /**
+   * A test of a version the Tester has already been through, byte for byte, can only come back with the same report. That happens when a pass's build changed
+   * nothing that goes live. So the engine asks here before it starts a test, and if what would be tested is exactly what was tested last time, the last report
+   * is handed back as this test's result and no one is put to work. The loop then goes on from that report as it would from a fresh one: a pass is still a pass,
+   * and a bug list is still a bug list for the Builder. Not when the live link check has found something since, because that is new and the last report never saw it.
+   */
+  function sameAsTested(floor, task) {
+    const link = get(db, 'SELECT * FROM maker_tasks WHERE task_id=?', task.id);
+    if (!link || link.step !== 'test') return null;
+    const j = get(db, 'SELECT * FROM maker_jobs WHERE id=?', link.job_id);
+    if (!j || !OPEN.has(j.stage)) return null;
+    const st = stateOf(j);
+    if (!st.tested?.sum || !st.tested.report || (st.liveBugs || []).length) return null;
+    if (liveSum(j) !== st.tested.sum) return null;
+    return `Nothing that goes live in ${j.title} has changed since the last test, byte for byte, so that test's report stands and it was not played again.\n\`\`\`office-verdict\n${JSON.stringify(st.tested.report)}\n\`\`\``;
+  }
+
   function snapshot(j) {
     const prefix = `projects/${j.project}/`;
     const rows = all(db, 'SELECT path,content,size FROM files WHERE floor_id=? AND path LIKE ?', j.floor_id, `${prefix}%`).filter((f) => goesLive(f.path.slice(prefix.length)));
@@ -435,6 +463,8 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     const report = link.step === 'test' && ok ? parseReport(file && file.updated_at >= task.created_at ? file.content : result) : null;
     const d = decide({ ...st, type: j.type, pass: link.pass, depth: j.depth, tokens: tokensSince(floor.id, j.started_at) }, { step: link.step, ok: link.step === 'test' ? ok && !!report : ok, report }, config);
     save(j, { pass: link.pass, stage: link.step === 'doc' ? 'build' : link.step === 'build' && ok ? 'test' : j.stage }, { ...d.patch, lastReport: report ? { verdict: report.verdict, summary: report.summary, bugs: report.bugs.length, pass: link.pass } : st.lastReport || null });
+    // What exactly was tested, and what the Tester said of it, in case the next test turns out to be of the very same files (sameAsTested).
+    if (report) save(j, {}, { tested: { sum: liveSum(j), report } });
     // The launch candidate is the newest clean version. A version that passed with a serious bug only fills in while there's no clean one, so "launch anyway" has something to launch.
     if (report && d.passing && (d.clean || !st.snapshotClean)) { snapshot(j); save(j, {}, { snapshotClean: !!d.clean, snapshotFlaws: d.clean ? [] : d.serious.slice(0, 6) }); }
     const cancelPaired = () => { for (const t of all(db, "SELECT m.task_id id FROM maker_tasks m JOIN tasks t ON t.id=m.task_id WHERE m.job_id=? AND t.status IN ('todo','blocked')", j.id)) engine.cancelTask(floor, t.id); };
@@ -558,7 +588,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
   const holds = (floorId, slug) => !!get(db, "SELECT 1 x FROM maker_jobs WHERE floor_id=? AND project=? AND launched_at IS NULL AND stage!='stopped'", floorId, slug);
   const projectsOf = (floorId) => all(db, 'SELECT slug,title,description,kind,private FROM projects WHERE floor_id=? ORDER BY COALESCE(published_at,0) DESC, created_at DESC LIMIT 5', floorId);
   const stop = () => { stopped = true; for (const t of timers) clearTimeout(t); timers.clear(); };
-  return { holds, start, afterTask, launch, decideAsk, view, stop, checkLiveLink,  ideaCards: (type, floor, seed, rotate = 0) => ideaCards(type, { floor, seed, rotate, cfg: config, projects: projectsOf(floor.id) }), surprise: (type, seed, floor) => surprise(type, { seed, cfg: config, floor, projects: floor ? projectsOf(floor.id) : [] }), fromWords: (type, text) => fromWords(type, text, config), jobOf };
+  return { holds, start, afterTask, sameAsTested, launch, decideAsk, view, stop, checkLiveLink,  ideaCards: (type, floor, seed, rotate = 0) => ideaCards(type, { floor, seed, rotate, cfg: config, projects: projectsOf(floor.id) }), surprise: (type, seed, floor) => surprise(type, { seed, cfg: config, floor, projects: floor ? projectsOf(floor.id) : [] }), fromWords: (type, text) => fromWords(type, text, config), jobOf };
 }
 
 export function installMakers(ext) {
