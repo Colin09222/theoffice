@@ -95,7 +95,41 @@ the manager actually offers domain names at Launch rather than only mentioning t
 
 ## 3. Games
 
-_To be filled in from the games work: see the end of this file._
+The gentle opening is now measured, not hoped for.
+
+### What changed
+
+- **A browser rule, `pressure`** (`config/makers.json`, `server/playtest.js`): the playtest starts with a run that sends no input and
+  times two things, the first hurt and game over. The bars: hurt within 30 s, lost within 60 s, and never lost in the first 10 s. Time
+  counts only while in play and uses the game's own clock where the hook has one, so a slow test machine doesn't make a game look gentler.
+  It shares the existing 60 s window, so a size takes about half a minute longer at most.
+- **The loop goes by the numbers** (`server/makers.js`): the Tester's verdict carries `idle: {hurt, lose}`, `decide()` judges on those
+  whatever box was ticked, and the Builder's fix list names them. The design doc now has to say what happens to a player who does nothing.
+- **Both starters pass it.** Idle seconds before and after:
+
+  | Starter | Before: first hurt / game over | After |
+  |---|---|---|
+  | game-2d | 29 to 39 / 32 to 43 | 11.5 to 12.4 / 21 to 29 |
+  | game-3d | 31 to 33, or never / still alive at 60 s (one run at 150 s) | 12 to 13 / 22 to 27 |
+
+  From 11 s a ring marks where the player stands and a strike lands 1.1 s later. Any movement dodges it.
+- **Prompts** (`server/prompts.js`): the bar is named, the Builder times an idle run with its own script, the Tester reports the two numbers.
+- **Cost:** a game's Builder now gets the playtest script on its own computer and runs it before handing over, so a failing browser rule
+  is caught inside the build task instead of costing a Tester round, a fix pass and a re-test.
+- **Bugs found on the way:** the playtest's "restart works" and "pause is reachable" waits were always true (a precedence slip), so those
+  two rules were never really checked. They are now. The 3D starter's particles never showed. Both fixed.
+
+### What the tests prove
+
+`test/pressure.test.js` (28 tests) and `node test/browser/makers.mjs` at full length (56 of 56): the rule is measured on both starters at
+both sizes, flows into the briefs, and `decide()` holds a game to it.
+
+### What they can't prove
+
+No real model has built a game against the rule or filled in the idle numbers. The Builder self-check saving rounds is an argument, not a
+measurement. An idle player who keeps drawing heal upgrades lasts longer: the worst seen was 29 s, well inside the 60 s bar, but the
+tail isn't bounded. And the frame-rate bar can't currently fail (the kit caps frame times at 50 ms, so fps never reads under 20 against
+a bar of 18): left alone, because an honest reading needs a trial on a real Tester computer first.
 
 ## 4. `ask_colleague`
 
