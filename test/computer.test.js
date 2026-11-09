@@ -145,7 +145,9 @@ describe('isolation between floors and projects', () => {
     assert.equal(box.find((f) => f.path === '.office/assets/sounds/ding.mp3').data.subarray(0, 3).toString('latin1'), 'ID3', 'a real mp3');
     const site = await go(h, 'Write', { to: 'builder', project: 'site' });
     await h.settle(site.id);
+    assert.ok(box.some((f) => f.path === '.office/playtest.mjs' && /export async function playGame/.test(f.data.toString()) && /idleRun/.test(f.data.toString())), 'a game\'s Builder can run the Tester\'s browser check, idle run included, before handing over');
     assert.ok(!unpackTgz(h.sessions.calls.uploads[1].buffer).files.some((f) => f.path.startsWith('.office/assets/')), 'a site box stays small');
+    assert.ok(!unpackTgz(h.sessions.calls.uploads[1].buffer).files.some((f) => f.path === '.office/playtest.mjs'), 'and only a game\'s Builder gets it');
   });
   test('each task gets its own session and container, and floors share none', async () => {
     const h = await start();

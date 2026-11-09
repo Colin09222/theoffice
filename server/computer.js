@@ -407,7 +407,8 @@ export class Computer {
         { path: '.office/three.module.min.js', data: THREE_JS },
         ...(task.lane === 'game' ? GAME_ASSETS : []),
         ...(task.lane === 'game' ? [{ path: '.office/phaser.min.js', data: PHASER_JS }] : []),
-        ...(agent.role === 'tester' ? [{ path: '.office/playtest.mjs', data: Buffer.from(PLAYTEST) }] : []),
+        // The Tester's browser half. A game's Builder gets it too, to run the same check before handing over, so a failing browser rule is caught without a fix pass.
+        ...(agent.role === 'tester' || (agent.role === 'builder' && task.lane === 'game') ? [{ path: '.office/playtest.mjs', data: Buffer.from(PLAYTEST) }] : []),
         ...files.map((f) => ({ path: `project/${f.path}`, data: f.data })),
         // The boss's files for this task, beside the project rather than in it: only what the agent copies in is saved back.
         ...e.taskFiles(task).map((a) => ({ path: a.path, data: Buffer.from(get(e.db, 'SELECT content FROM files WHERE floor_id=? AND path=?', floor.id, a.path)?.content ?? '') })),

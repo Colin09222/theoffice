@@ -132,6 +132,9 @@ try {
       }
       const all = combine(runs);
       for (const [rule, v] of Object.entries(all.rules)) check(`${name}: ${rule}`, v === true, JSON.stringify(runs.map((r) => r.rules[rule])));
+      // The idle run is timed in full whatever MAKERS_SECONDS is: hurt inside the bar, lost inside the bar, and not in the first ten seconds.
+      for (const r of runs) console.log(`  ${name} idle: first hurt ${r.idle?.hurt} s, game over ${r.idle?.lose} s (${r.idle?.clock} clock, speed ${r.idle?.speed})`);
+      check(`${name}: an idle player is hurt, then loses, at both sizes, and it is the hook that says when`, runs.every((r) => r.idle && r.idle.tellsHurt && r.idle.hurt !== null && r.idle.lose !== null && !r.idle.won && r.idle.hurt <= r.idle.lose), JSON.stringify(runs.map((r) => r.idle)));
       kept[name] = runs[0].shots.find((s) => /-play\.jpg$/.test(s)) || runs[0].shots[0];
       const saves = get(t.db, "SELECT COUNT(*) n FROM cloud_saves WHERE floor_id=? AND project=?", floor.id, slug).n;
       const scores = get(t.db, "SELECT COUNT(*) n FROM cloud_scores WHERE floor_id=? AND project=?", floor.id, slug)?.n ?? 0;
