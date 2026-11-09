@@ -99,6 +99,16 @@ Code: `server/cloud/auth-mail.js`, with small hooks in `server/cloud/index.js` (
 - **A call that dies** is released, and anything already written is charged at an estimate. One cut off by its 60-second limit is charged what it held, and a crash is settled at the hold on the next start, as for the staff.
 - `OFFICE_AI_ENABLED=0` turns it off for the building; see the admin commands below for the per-project pause.
 
+## Locked AI (one project, switched on by the admin)
+`server/cloud/ai-locked.js`. With a row in `cloud_ai_locks`, every `POST /_office/cloud/ai/chat` on that project goes down a different path and nothing the page sends can change it:
+- **The prompt and catalog** come from the project's published `ai/guide.json` (the file isn't served to visitors while the lock is on). A page's `system`, `model`, `maxTokens` or anything else is ignored; only the conversation is read.
+- **One model on OpenRouter**, routed with `data_collection: deny`, `zdr: true` and `require_parameters: true` (and the hosts the lock names), with a JSON reply shape whose ids are an enum where the host can enforce one.
+- **A hard stop per day** (`day_usd`), from the real cost OpenRouter returns, counted in the ledger as `kind='app_ai_locked:<project>'`. Each call is refused up front if real spend today, plus what running calls were promised, plus this call at its dearest, would go over. It also stops if the building's OpenRouter budget runs out, like anything else.
+- **Limits:** 500 characters a message, 24 messages a conversation, 10 messages a minute and 80 a day per address, one at a time per address (`LOCKED_RATES`, `LOCKED_LIMITS`). An assistant turn the server didn't sign is left out, so a page can't put words in the model's mouth.
+- **Every reply is checked on the server** before it leaves: real ids only (`shapeReply`), plain text, no links or HTML, a length cap, and a pattern check that replaces anything with a dose, sourcing, a safety claim, a reading of results, a price or a site name with a standard line (`screenReply`). A host's own filter stopping a reply with nothing written gets the emergency line.
+- **The server keeps no conversation:** nothing typed goes in the database or the logs (`log` lines are status codes only), and the ledger holds counts and cost. The browser holds the conversation.
+- `node scripts/admin.mjs cloud ai lock PROJECT --model ID --day-usd 5 [--only HOSTS] [--effort E]`, `unlock PROJECT`, `locks`. Only models with a price in `config/models.json` can be locked, up to $25 a day. A project with no lock row behaves exactly as before. Tests: `test/cloud-locked-ai.test.js`.
+
 ## Web pages (`office.fetch`, `office.scrape`)
 `POST /_office/cloud/fetch` and `/scrape`, handled by `server/cloud/web.js` on top of `server/safefetch.js`, the same SSRF-safe fetch the staff use.
 - **Blocked addresses:** private, loopback, link-local, CGNAT and metadata addresses, every IPv6 form that smuggles one, names that resolve to any of them, credentials in URLs, ports other than 80 and 443, and the building's own hosts and bought domains. Checked on every redirect, inside the socket's DNS lookup so a rebinding name gets no second answer, and again against the address actually connected to. All of them get the same answer, so a page can't use it to map what is behind the building.
