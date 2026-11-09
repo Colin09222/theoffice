@@ -161,3 +161,105 @@ describe('a shop\'s catalogue file', () => {
     assert.equal(checkCatalogue(JSON.stringify({ products: [] }), () => true).problems.length, 1);
   });
 });
+
+// ---- the shop as a kind of job: the starter, the lane, and the Business journey ending in a checkout ----
+import { starterFiles } from '../server/makers.js';
+import { checkSite } from '../server/launch-check.js';
+import { managerPrompt, laneBrief, LANES } from '../server/prompts.js';
+import { floorState } from './helpers.js';
+
+describe('the shop starter and the shop lane', () => {
+  const files = () => starterFiles('shop').map((f) => ({ path: f.path, data: f.data.replaceAll('{{TITLE}}', 'Wick & Co').replaceAll('{{PITCH}}', 'Soy candles poured in a garden shed, posted anywhere in the country.') }));
+  test('the starter, as it arrives, will not publish: its example products have to go', () => {
+    const r = checkSite({ files: files(), kind: 'site' });
+    assert.equal(r.errors.length, 2); assert.ok(r.errors.every((e) => /still the starter's example product/.test(e)), r.errors.join('; '));
+    assert.deepEqual(r.claims, []);
+  });
+  test('with a real catalogue it passes, and a missing price, a missing picture or "coming soon" each stop it', () => {
+    const real = (products) => files().map((f) => (f.path === 'shop.json' ? { ...f, data: JSON.stringify({ currency: 'usd', products }) } : f));
+    const ok = [{ key: 'lavender', name: 'Lavender candle', description: 'Soy wax.', price: 12, priceFrom: 'boss', image: 'images/example-one.svg', imageKind: 'illustration', ships: true }];
+    const good = checkSite({ files: real(ok), kind: 'site' });
+    assert.deepEqual(good.errors, [], good.errors.join('; ')); assert.ok(good.passed.some((p) => /shop catalogue \(1 products/.test(p)));
+    assert.ok(checkSite({ files: real([{ ...ok[0], price: undefined }]), kind: 'site' }).errors.some((e) => /has no price/.test(e)));
+    assert.ok(checkSite({ files: real([{ ...ok[0], image: 'images/nope.jpg' }]), kind: 'site' }).errors.some((e) => /isn't in what's being published/.test(e)));
+    assert.ok(checkSite({ files: real([{ ...ok[0], name: 'Price coming soon' }]), kind: 'site' }).errors.some((e) => /coming soon/i.test(e)));
+    const soon = real(ok).map((f) => (f.path === 'index.html' ? { ...f, data: f.data.replace('<h2>Shop</h2>', '<h2>Shop</h2><p>Price coming soon</p>') } : f));
+    assert.ok(checkSite({ files: soon, kind: 'site' }).errors.some((e) => /index\.html: says "Price coming soon"/.test(e)));
+    const noBuy = real(ok).map((f) => (f.path === 'shop.js' ? { ...f, data: 'console.log("no checkout here")' } : f));
+    assert.ok(checkSite({ files: noBuy, kind: 'site' }).errors.some((e) => /nobody can buy/.test(e)));
+  });
+  test('the manager has a SHOP playbook that ends with the boss connecting Stripe and approving, and each person has their part', () => {
+    const cfg = { appsBaseDomain: 'apps.example', computerEnabled: true, openrouterKey: 'k', anthropicKey: 'k', stripeSecretKey: 'sk_test_x', stripeWebhookSecret: 'whsec_x' };
+    const p = managerPrompt({ name: 'A', number: 1, tagline: '' }, { name: 'B' }, { manager: 'M' }, cfg);
+    assert.ok(LANES.includes('shop'));
+    const shop = p.slice(p.indexOf('\nSHOP\n'), p.indexOf('\nAPP\n'));
+    assert.match(shop, /sell my candles/); assert.match(shop, /never "coming soon"/); assert.match(shop, /connect Stripe on the Payments tab/); assert.match(shop, /approve the products waiting under Requests/);
+    assert.match(shop, /Publishing a shop asks the boss to approve every product/); assert.match(shop, /nobody here ever pays with a real card/);
+    assert.match(p, /never a page that says "coming soon" or a price nobody can pay/);
+    for (const role of ['writer', 'designer', 'builder', 'tester']) assert.match(laneBrief('shop', role, cfg), /^Your part of the shop playbook: /, role);
+    assert.match(laneBrief('shop', 'writer', cfg), /Every product has a price/); assert.match(laneBrief('shop', 'builder', cfg), /shop\.json/);
+    assert.match(laneBrief('shop', 'designer', cfg), /never something that could pass for a photo/); assert.match(laneBrief('shop', 'tester', cfg), /Never enter a card number/);
+    for (const role of ['writer', 'designer', 'builder', 'tester']) assert.doesNotMatch(laneBrief('shop', role, cfg), /hurry|quick|budget|tokens|\bcosts? (money|us)\b|steps left/i);
+  });
+});
+
+describe('Business mode ends in a shop a customer can buy from', () => {
+  let t, mock, boss, floor;
+  const biz = async () => (await floorState(boss)).business;
+  const untilBiz = (pred, what) => until(async () => { const b = await biz(); return pred(b) ? b : null; }, { what, timeout: 30000 });
+  const item = (b, track, label) => b.tracks.find((x) => x.id === track).items.find((i) => i.label === label);
+  before(async () => {
+    mock = await startMockStripe();
+    t = await boot({ appsBaseDomain: BASE, appsScheme: 'https', stripeSecretKey: mock.apiKey, stripeWebhookSecret: mock.secret, stripeApiBase: mock.base, cloudRateScale: 1000, mediaMock: true, searchMock: true, businessTickMs: 40, modesTickMs: 60000 }, { paySleep: async () => {} });
+    mock.connect(`${t.base}/api/pay/webhook`);
+    boss = await claim(t, 'Doorstep Co');
+    floor = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+  });
+  after(async () => { await t.close(); await mock.close(); });
+
+  test('the build makes a real shop, tested before it goes live, and publishing it asks the boss to approve the products', async () => {
+    assert.equal((await boss.post(`/api/floors/${boss.slug}/business/start`, {})).status, 200);
+    await untilBiz((b) => b.phase === 'pick', 'idea cards');
+    const pick = await boss.post(`/api/floors/${boss.slug}/business/pick`, { idea: 0 });
+    assert.equal(pick.status, 200, JSON.stringify(pick.data));
+    const start = pick.data.business;
+    assert.match(start.tracks.find((x) => x.id === 'payments').note, /your own Stripe account, straight to you/);
+    assert.deepEqual(start.tracks.find((x) => x.id === 'website').items.map((i) => i.label).slice(0, 5), ['The look', 'The shop', 'Tested as a customer', 'Fixes, then live', 'Live on the web']);
+    assert.ok(get(t.db, "SELECT 1 x FROM agents WHERE floor_id=? AND role='tester'", floor.id), 'a Tester is hired for it');
+    const tasks = all(t.db, "SELECT title, lane FROM tasks WHERE floor_id=? AND plan LIKE 'Business mode: build%' ORDER BY id", floor.id);
+    assert.deepEqual(tasks.map((x) => x.title), ['Check what rivals charge', 'Write the offer and the products', 'Pick the look', 'Build the shop', 'Test the shop as a customer', 'Fix what the test found and put it live']);
+    assert.ok(tasks.every((x) => x.lane === 'shop'));
+    const b = await untilBiz((x) => x.step !== 'build', 'the build to finish');
+    const slug = b.project;
+    assert.ok(get(t.db, "SELECT 1 x FROM published_files WHERE floor_id=? AND project=? AND path='shop.json'", floor.id, slug), 'the catalogue is live');
+    assert.equal(item(b, 'payments', 'Checkout on the shop').state, 'done');
+    assert.equal(item(b, 'payments', 'Connect your Stripe').state, 'yours'); assert.equal(item(b, 'payments', 'Connect your Stripe').yours, true);
+    assert.equal(item(b, 'payments', 'Approve the products').state, 'yours');
+    assert.equal(b.tracks.find((x) => x.id === 'payments').lamp, 'attention', 'the boss can see something is theirs to do');
+    const waiting = (await floorState(boss)).pay.waiting;
+    assert.deepEqual(waiting.map((w) => [w.key, w.amountCents, w.ships]), [['first-visit', 4500, false], ['care-kit', 1850, true]]);
+    const notes = all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='note'", floor.id).map((m) => m.text).join('\n');
+    assert.match(notes, /is a shop, and publishing it asked the boss to put 2 products on sale/);
+    assert.match(notes, /connect it on the Payments tab/);
+  });
+  test('the boss connects Stripe and approves, the lamps turn, and a stranger buys from the live shop', async () => {
+    const before = await biz();
+    await boss.post(`/api/floors/${boss.slug}/pay/connect`, {});
+    await mock.finishOnboarding(get(t.db, 'SELECT account FROM pay_accounts WHERE floor_id=?', floor.id).account);
+    assert.equal((await boss.post(`/api/floors/${boss.slug}/pay/products/approve-all`, {})).data.approved, 2);
+    const b = await untilBiz((x) => item(x, 'payments', 'Approve the products').state === 'done', 'the payments lamps');
+    assert.equal(item(b, 'payments', 'Connect your Stripe').state, 'done'); assert.equal(b.tracks.find((x) => x.id === 'payments').lamp, 'done');
+    const host = new URL(`https://${t.app.engine.liveUrl(floor, before.project).replace(/^https?:\/\//, '')}`).host;
+    const r = await cloud(t, host, 'POST', 'pay/checkout', { player: P2, body: { items: [{ product: 'care-kit', quantity: 2 }] } });
+    assert.equal(r.json.ok, true, r.text);
+    const u = new URL(r.json.url);
+    await mock.payCheckout(u.searchParams.get('a'), u.pathname.split('/').pop(), { email: 'kit@example.com' });
+    assert.equal((await boss.get(`/api/floors/${boss.slug}/pay`)).data.orders[0].email, 'kit@example.com');
+  });
+  test('launching says what is still the boss\'s to do, and nothing in the journey buys a domain or approves a product for them', async () => {
+    const line = t.app.engine.business.stateLine(floor.id);
+    assert.match(line, /The shop is taking card payments/);
+    assert.equal(get(t.db, "SELECT COUNT(*) n FROM pay_products WHERE floor_id=? AND status='live'", floor.id).n, 2);
+    assert.equal(get(t.db, 'SELECT COUNT(*) n FROM domain_orders WHERE floor_id=?', floor.id).n, 0);
+  });
+});

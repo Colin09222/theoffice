@@ -207,7 +207,7 @@ It is where the depth gets decided, so make it specific enough that two builders
 10. Passes: what the playable slice holds, then what each depth pass adds: pass 1 more mechanics and content; pass 2 progression and meta (unlocks, upgrades, difficulty curve, more levels or waves); pass 3 balance, onboarding, juice and audio.
 About two pages. It builds on the starter already in the project (read STARTER.md), so design for it. Original only: no named game's characters, levels, art or look. Do not publish.`,
   app: (j) => `Write notes/spec.md for ${j.title}: ${j.pitch}
-Exactly these headings: Who it is for (one line); The core thing they make or track (the ${j.object || 'item'}, with its fields); Screens (landing, sign up, the list, the detail or edit, settings), what each shows when empty, loading and failing; The one moment it has to nail; Passes (what the first version holds, then what each polish pass adds); Words (the landing page headline, three short points, and the call to action, all real: no testimonials, numbers or prices nobody gave). Payments are only a "coming soon" hook. It builds on the starter already in the project (read STARTER.md). Do not publish.`,
+Exactly these headings: Who it is for (one line); The core thing they make or track (the ${j.object || 'item'}, with its fields); Screens (landing, sign up, the list, the detail or edit, settings), what each shows when empty, loading and failing; The one moment it has to nail; Passes (what the first version holds, then what each polish pass adds); Words (the landing page headline, three short points, and the call to action, all real: no testimonials, numbers or prices nobody gave). If the idea charges money, say what the paid plan is and what it unlocks; if it doesn't, leave payments out. It builds on the starter already in the project (read STARTER.md). Do not publish.`,
   website: (j) => `Write notes/copy.md and notes/design.md for ${j.title}: ${j.pitch}
 copy.md: who it is for, the one thing a visitor should do, a page title, a one-sentence description, and the real words for every section, ready to use. Only facts from the boss; where one is missing, write the sentence so it doesn't need one, and never invent a review, price, phone number, address or story.
 design.md: a palette with names and hex values, typefaces (system stacks with character, named), the layout, the sections in order, and the one idea only this subject could have. It builds on the starter already in the project (read STARTER.md). Do not publish.`,
@@ -237,7 +237,7 @@ Keep index.html at the project's root and no build step. Do not publish: the ser
 }
 const STARTER_HAS = {
   game: 'boot, menu, play, pause and game over; keyboard, touch and gamepad; a responsive canvas; audio with mute; settings; saves and a leaderboard through Office Cloud; and juice helpers (shake, particles, tweens, hit-stop)',
-  app: 'a landing page and a signed-in app shell on Office Cloud accounts and the database, with create, edit and delete, empty, loading and error states, settings and a coming-soon payments hook',
+  app: 'a landing page and a signed-in app shell on Office Cloud accounts and the database, with create, edit and delete, empty, loading and error states, settings and a paid-plan section on office.pay that is honest about whether payments are open yet',
   website: 'fast accessible sections, full search and social meta, and a contact form that posts to Office Cloud',
 };
 export function testBrief(job, pass, { computer = false, recheck = [] } = {}, cfg = CONFIG) {

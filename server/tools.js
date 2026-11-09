@@ -60,7 +60,7 @@ const DEFS = {
     project: S('Project slug this task works on'), private: { type: 'boolean', description: 'True to keep this project hidden from visitors' },
     depends_on: { type: 'array', items: { type: 'integer' }, description: 'Task ids that must finish first' },
     after_previous: { type: 'boolean', description: 'True to start only after the task you assigned just before this one finishes' },
-    lane: { type: 'string', enum: ['game', 'website', 'business', 'app'], description: 'Which lane this plan is in. The person doing the task gets their part of that playbook.' },
+    lane: { type: 'string', enum: LANES, description: 'Which lane this plan is in. The person doing the task gets their part of that playbook.' },
     files: { type: 'array', items: { type: 'string' }, description: 'Files the boss sent (their uploads/ paths) that this person needs. They see the pictures and PDFs, and on a computer they find them all in /workspace/uploads.' },
   }, ['to', 'title', 'brief']),
   review_task: fn('review_task', 'Approve finished work or send it back with notes.', { task_id: { type: 'integer', description: 'Task id' }, verdict: { type: 'string', enum: ['approve', 'revise'] }, notes: S('Feedback for the staff member') }, ['task_id', 'verdict']),

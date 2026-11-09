@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { get, all, run, tx } from './db.js';
 import { slugify, readFile, floorBytes, mimeOf } from './workspace.js';
+import { seedStarter } from './makers.js';
 import { googleAdsFromConfig, planCampaign, createCampaign, campaignId, campaignStats, checkSearchAd, monthStartMs, accountInfo, AdsError, HARD_MAX_USD, LIMITS, usd, pauseTrouble } from './googleads.js';
 import { createMockGoogleAds } from './googleads-mock.js';
 
@@ -144,6 +145,8 @@ export const moneyOk = (amount, cfg = CONFIG) => Number.isInteger(amount) && cfg
 // ---- the journey's shape ----
 const stepIndex = (id) => CONFIG.steps.findIndex((s) => s.id === id);
 const TASK_ITEMS = CONFIG.tracks.flatMap((t) => t.items.filter((i) => i.task));
+// An item marked selling belongs to the journey that ends in a working checkout (true), or to the older notify-me page (false). Unmarked items are in both.
+const inJourney = (it, selling) => it.selling === undefined || it.selling === selling;
 
 export function installBusiness(ext) {
   const { db, cfg, engine, log, now, hooks, GET, POST, json, send, readJson, limit, requireOwner, floorBySlug, viewerFor, HttpError, BASE } = ext;
@@ -201,6 +204,9 @@ export function installBusiness(ext) {
   const finished = (t) => !t || ['done', 'review', 'failed', 'cancelled'].includes(t.status);
   const project = (floorId, slug) => (slug ? get(db, 'SELECT * FROM projects WHERE floor_id=? AND slug=?', floorId, slug) : null);
   const formsOn = () => !!cfg.appsBaseDomain;
+  // A business ends with something a customer can buy: a shop on the boss's own Stripe. Where the building has no payments yet, it is the older notify-me page.
+  const sellingOn = () => formsOn() && !!engine.pay?.ready;
+  const sells = (row) => 'test' in tasksOf(row) || 'golive' in tasksOf(row);
 
   // ---- step 1: ideas ----
   function ideasBrief(row, wish, again) {
@@ -261,13 +267,22 @@ export function installBusiness(ext) {
     for (let i = 2; get(db, 'SELECT 1 x FROM projects WHERE floor_id=? AND slug=?', floorId, slug); i++) slug = `${slugify(base, 'business').slice(0, 26).replace(/-+$/, '')}-${i}`;
     return slug;
   }
-  function buildBriefs(floor, idea, slug) {
+  function buildBriefs(floor, idea, slug, selling) {
     const about = `"${idea.name}": ${idea.sell}, for ${idea.whoPays}. Their problem: ${idea.problem}. Why now: ${idea.whyNow}. Evidence: ${idea.evidence.map((e) => e.url).join(' ')}`;
-    return {
+    const prices = `Business mode, Build, Product track. The boss picked ${about}. Find what three named rivals charge for something like it, with a link to each price on their own page, and write projects/${slug}/notes/prices.md. Mark anything you couldn't confirm. Don't publish.`;
+    if (!selling) return {
       look: `Business mode, Build, Website track. The boss picked ${about}. Pick the look for its landing page: write projects/${slug}/style.css and projects/${slug}/notes/look.md (palette, type, and one idea only this business could have). Don't publish.`,
       offer: `Business mode, Build, Product track. The boss picked ${about}. Write projects/${slug}/notes/offer.md: what we sell in the first version, who it is for, the one promise, three short points, a price clearly marked as planned (use notes/prices.md if it is there), a short FAQ, and the notify-me line. No testimonials, customer counts, launch dates or discounts nobody agreed. Don't publish.`,
-      prices: `Business mode, Build, Product track. The boss picked ${about}. Find what three named rivals charge for something like it, with a link to each price on their own page, and write projects/${slug}/notes/prices.md. Mark anything you couldn't confirm. Don't publish.`,
-      site: `Business mode, Build, Website track. Build the landing page for ${about}. Use projects/${slug}/notes/offer.md, notes/prices.md, notes/look.md and style.css from your teammates. There is no Stripe here, so there is no Buy button: ${formsOn() ? 'add a notify-me sign-up with Office.submitForm(\'waitlist\', ...) instead, saying plainly it isn\'t open yet' : 'sign-up forms are off in this building, so say plainly on the page that it isn\'t open yet and how people can find out more'}. The boss watches a live preview while you save. Run the checklist, fix what it finds, then publish project ${slug}.`,
+      prices,
+      site: `Business mode, Build, Website track. Build the landing page for ${about}. Use projects/${slug}/notes/offer.md, notes/prices.md, notes/look.md and style.css from your teammates. Payments are not switched on in this building, so there is no Buy button: ${formsOn() ? 'add a notify-me sign-up with Office.submitForm(\'waitlist\', ...) instead, saying plainly it isn\'t open yet' : 'sign-up forms are off in this building, so say plainly on the page that it isn\'t open yet and how people can find out more'}. The boss watches a live preview while you save. Run the checklist, fix what it finds, then publish project ${slug}.`,
+    };
+    return {
+      prices,
+      offer: `Business mode, Build, Product track. The boss picked ${about}. This business launches as a shop a customer can really buy from, so decide what they can buy on day one: one to three things, each a real product, or for a service a fixed-price first booking or starter package. Write your part of the shop playbook (notes/brief.md, notes/copy.md and notes/products.md), with every price proposed by you from what rivals charge in notes/prices.md and marked as proposed. Also write projects/${slug}/notes/offer.md: what we sell in the first version, who it is for, the one promise, three short points, the same products and proposed prices, and a short FAQ. No testimonials, customer counts, launch dates or discounts nobody agreed. Don't publish.`,
+      look: `Business mode, Build, Website track. The boss picked ${about}. Do your part of the shop playbook for it: the look in notes/design.md and a picture for every product in notes/products.md. Don't publish.`,
+      site: `Business mode, Build, Website track. Build the shop for ${about}, as your part of the shop playbook says, from your teammates' notes in projects/${slug}/notes/ (brief.md, copy.md, products.md, design.md, offer.md, prices.md). Every product in notes/products.md is in shop.json with its picture and its proposed price. The boss watches a live preview while you save. Don't publish yet: the Tester goes through it next.`,
+      test: `Business mode, Build, Website track. Test the shop for "${idea.name}" as its first customer, as your part of the shop playbook says, against notes/products.md and notes/offer.md. Write what you found to TEST-REPORT.md in the project. It is not live yet, so check the local version.`,
+      golive: `Business mode, Build, Website track. The Tester has been through the shop for "${idea.name}": read TEST-REPORT.md and the handoff, fix everything still open, and look at it again in a browser at phone and desktop size. Then run the checklist, fix what it finds, and publish project ${slug} (kind site). Publishing asks the boss to approve the products, so shop.json must be right.`,
     };
   }
   function pick(floor, index, { by = 'boss' } = {}) {
@@ -279,19 +294,27 @@ export function installBusiness(ext) {
     if (!Number.isInteger(i) || i < 0 || i >= ideas.length) throw new BusinessError(400, 'bad_idea', 'Pick one of the idea cards.');
     const idea = ideas[i];
     const slug = uniqueSlug(floor.id, idea.name);
-    const briefs = buildBriefs(floor, idea, slug);
+    const selling = sellingOn();
+    if (selling && !has(floor.id, 'tester')) { try { engine.hireStaff(floor, 'tester'); } catch { /* the Builder's own check stands */ } }
+    // The shop starter goes in first, outside the transaction below: a working basket and checkout are there before anyone starts.
+    if (selling) { engine.upsertProject(floor, slug, { title: idea.name, description: idea.sell.slice(0, 200) }); seedStarter(db, floor, slug, 'shop', '', cfg); }
+    const briefs = buildBriefs(floor, idea, slug, selling);
     const plan = `Business mode: build ${idea.name}`;
     const ids = { ...tasksOf(row) };
+    // Each task waits for the ones it builds on. An item's "after" only ever names tasks that come earlier in this order.
+    const order = ['prices', 'offer', 'look', 'site', 'test', 'golive'];
+    const items = TASK_ITEMS.filter((x) => inJourney(x, selling) && briefs[x.task] && (has(floor.id, x.role) || x.role !== 'tester')).sort((a, b) => order.indexOf(a.task) - order.indexOf(b.task));
     try {
       tx(db, () => {
-        for (const it of TASK_ITEMS.filter((x) => x.task !== 'site')) ids[it.task] = give(floor, it.task, { to: it.role, title: it.title, brief: briefs[it.task], project: slug }, plan);
-        const site = TASK_ITEMS.find((x) => x.task === 'site');
-        ids.site = give(floor, 'site', { to: site.role, title: site.title, brief: briefs.site, project: slug, after: (site.after || []).map((k) => ids[k]).filter(Boolean), lane: 'business' }, plan);
+        for (const it of items) {
+          const after = (selling || it.task === 'site' ? it.after || [] : []).map((k) => ids[k]).filter(Boolean);
+          ids[it.task] = give(floor, it.task, { to: it.role, title: selling || it.task !== 'site' ? it.title : 'Build the landing page', brief: briefs[it.task], project: slug, after, lane: selling ? 'shop' : it.task === 'site' ? 'business' : '' }, plan);
+        }
         patch(floor.id, { step: 'build', picked: i, project: slug, tasks: JSON.stringify(ids) });
       });
     } catch (e) { throw new BusinessError(409, 'busy', `The team can't start the build right now: ${String(e.message).slice(0, 160)}`); }
     engine.upsertProject(floor, slug, { title: idea.name, description: idea.sell.slice(0, 200) });
-    const guide = `the boss picked "${idea.name}". The build has started in four tracks: Website (look, then the page, then live), Product (the offer and rival prices), Payments (no Stripe here, so a notify-me sign-up instead, and say so honestly), Analytics (the visitor counter and the launch checklist). Project slug: ${slug}. ${floor.name ? '' : 'The company has no name yet: call set_company with a name, tagline and what it does that fit this idea. '}${engine.domains?.enabled ? 'Once the page is live, offer the boss 2 or 3 short .com names you checked with check_domain; only their Buy click buys one. ' : ''}In two or three lines, tell the boss what the team is doing now. The tasks are already assigned, so assign nothing more unless the boss asks.`;
+    const guide = `the boss picked "${idea.name}". The build has started in four tracks: ${selling ? 'Website (the look, then a real shop, tested as a customer, then live), Product (rival prices, then the offer and what is for sale), Payments (the shop takes cards through the boss\'s own Stripe account, straight to them: they connect it on the Payments tab of their floor, then approve the products under Requests once the shop is live; until then it takes order requests by email, and says so honestly)' : 'Website (look, then the page, then live), Product (the offer and rival prices), Payments (payments aren\'t switched on in this building, so a notify-me sign-up instead, and say so honestly)'}, Analytics (the visitor counter and the launch checklist). Project slug: ${slug}. ${floor.name ? '' : 'The company has no name yet: call set_company with a name, tagline and what it does that fit this idea. '}${engine.domains?.enabled ? 'Once the page is live, offer the boss 2 or 3 short .com names you checked with check_domain; only their Buy click buys one. ' : ''}In two or three lines, tell the boss what the team is doing now${selling ? ', and that connecting Stripe is the one thing they can do meanwhile, with where to tap' : ''}. The tasks are already assigned, so assign nothing more unless the boss asks.`;
     if (by === 'boss') { tellManager(floor, 'build', guide); engine.bossMessage(floor, `Let's go with ${idea.name}.`); }
     changed(floor.id);
     return { project: slug, guide };
@@ -316,6 +339,18 @@ export function installBusiness(ext) {
         const files = all(db, "SELECT content FROM published_files WHERE floor_id=? AND project=? AND (path LIKE '%.html' OR path LIKE '%.js')", floor.id, slug);
         return files.some((f) => typeof f.content === 'string' ? f.content.includes('Office.submitForm') : Buffer.from(f.content).includes('Office.submitForm')) ? 'done' : 'attention';
       }
+      if (name === 'email') return engine.mail?.ready?.() && engine.mail.addressOf?.(floor.id) ? 'done' : 'off';
+      if (name === 'checkout') {
+        if (!live) return 'waiting';
+        return get(db, "SELECT 1 x FROM published_files WHERE floor_id=? AND project=? AND path='shop.json'", floor.id, slug) ? 'done' : 'attention';
+      }
+      if (name === 'stripe' || name === 'products') {
+        const a = get(db, 'SELECT charges_enabled, disconnected_at FROM pay_accounts WHERE floor_id=? ORDER BY livemode DESC LIMIT 1', floor.id);
+        const taking = !!a && !a.disconnected_at && !!a.charges_enabled;
+        if (name === 'stripe') return taking ? 'done' : 'yours';
+        const n = (status) => get(db, 'SELECT COUNT(*) n FROM pay_products WHERE floor_id=? AND project=? AND status=?', floor.id, slug, status).n;
+        return n('live') && !n('proposed') ? 'done' : n('proposed') ? 'yours' : 'waiting';
+      }
       if (name === 'counter') return live && !pr.private ? 'done' : 'waiting';
       if (name === 'checklist') {
         const c = parse(pr?.launch_check || 'null', null);
@@ -326,16 +361,18 @@ export function installBusiness(ext) {
       return 'waiting';
     };
     const taskState = (t) => (!t ? 'waiting' : t.status === 'done' ? 'done' : t.status === 'review' ? 'checking' : t.status === 'doing' ? 'working' : t.status === 'blocked' ? 'yours' : t.status === 'failed' ? 'attention' : t.status === 'cancelled' ? 'skipped' : 'waiting');
+    const selling = sells(row);
     return CONFIG.tracks.map((tr) => {
-      const items = tr.items.map((it) => {
+      const items = tr.items.filter((it) => inJourney(it, selling) && (!it.task || !it.selling || it.task in ids)).map((it) => {
         const t = it.task ? taskRow(ids[it.task]) : null;
         const state = it.task ? taskState(t) : checkOf(it.check);
-        return { label: it.label, state, optional: !!it.optional, ...(t ? { taskId: t.id } : {}) };
+        return { label: selling || it.task !== 'site' ? it.label : 'The page', state, optional: !!it.optional, yours: !!it.yours, ...(t ? { taskId: t.id } : {}) };
       }).filter((x) => x.state !== 'off');
-      const needed = items.filter((x) => !x.optional);
+      // What only the boss can do never holds the team's journey up: it shows as theirs, and the build moves on without it.
+      const needed = items.filter((x) => !x.optional && !x.yours);
       const done = needed.filter((x) => x.state === 'done' || x.state === 'checking' || x.state === 'skipped').length;
-      const lamp = done === needed.length ? 'done' : items.some((x) => x.state === 'attention' || x.state === 'yours') ? 'attention' : items.some((x) => x.state === 'working' || x.state === 'checking') ? 'working' : 'off';
-      return { id: tr.id, label: tr.label, note: tr.id === 'payments' && !formsOn() ? 'No card payments yet: there is no Stripe here, and sign-up forms are off in this building, so the page says plainly that it isn\'t open yet.' : tr.note || '', lamp, done, total: needed.length, items };
+      const lamp = items.some((x) => x.yours && x.state === 'yours') && done === needed.length && needed.length ? 'attention' : done === needed.length ? 'done' : items.some((x) => x.state === 'attention' || x.state === 'yours') ? 'attention' : items.some((x) => x.state === 'working' || x.state === 'checking') ? 'working' : 'off';
+      return { id: tr.id, label: tr.label, note: tr.id === 'payments' && selling ? tr.sellingNote : tr.id === 'payments' && !formsOn() ? 'No card payments yet: there is no Stripe here, and sign-up forms are off in this building, so the page says plainly that it isn\'t open yet.' : tr.note || '', lamp, done, total: needed.length, items };
     });
   }
 
@@ -457,6 +494,27 @@ export function installBusiness(ext) {
     });
     return n;
   }
+  /** What launching for real still needs, for the manager to say and the boss to tap: a name of its own, the company's email, and payments. Nothing in here buys or approves anything. */
+  function launchKit(floor, row) {
+    const slug = row.project;
+    const out = [];
+    if (engine.domains?.enabled) {
+      const d = engine.domains.forFloor(floor.id).filter((x) => x.project === slug);
+      const own = d.find((x) => ['bought', 'live'].includes(x.status));
+      out.push(own ? `It has its own name, ${own.domain}.` : d.some((x) => x.status === 'awaiting_boss') ? 'A .com is waiting for the boss\'s Buy click under Requests: remind them, since only their click buys it.'
+        : d.some((x) => ['buying', 'sent', 'uncertain'].includes(x.status)) ? 'Its .com is being registered.'
+          : 'It has no name of its own yet, and a real business launches on one: check two or three short .com names with check_domain now and offer them, each with the price the check gave. Only the boss\'s own Buy click buys one; a bought name gets the site, and the company\'s email, on it by itself.');
+    }
+    const address = engine.mail?.ready?.() ? engine.mail.addressOf?.(floor.id) : '';
+    if (address) out.push(`The company's email address is ${address}: tell the boss, and that replies, contact forms and orders land in their Inbox.`);
+    if (sells(row)) {
+      const st = (name) => trackView(floor, row).find((t) => t.id === 'payments')?.items.find((i) => i.label === CONFIG.tracks.find((t) => t.id === 'payments').items.find((x) => x.check === name).label)?.state;
+      const stripe = st('stripe'), products = st('products');
+      out.push(stripe === 'done' && products === 'done' ? 'The shop is taking card payments.'
+        : `The shop can't take a card yet, and it says so: ${[stripe !== 'done' ? 'the boss still has to connect Stripe on the Payments tab of their floor (Stripe\'s own form, a few minutes)' : '', products !== 'done' ? 'approve the products waiting under Requests (one tap approves them all)' : ''].filter(Boolean).join(', then ')}. Say exactly that, as the first of their next steps; until then customers can send an order request by email.`);
+    }
+    return out.join(' ');
+  }
   function launch(floor, amount, { skip = false, by = 'boss' } = {}) {
     const row = activeRow(floor.id);
     if (!row) throw new BusinessError(409, 'not_started', 'Business mode is not on for this floor.');
@@ -471,7 +529,7 @@ export function installBusiness(ext) {
     patch(floor.id, { step: 'launch', ad_money: a, money_set: 1, ads_skipped: skip ? 1 : 0 });
     const n = publishAds(floor, activeRow(floor.id));
     const url = engine.liveUrl(floor, row.project);
-    const report = `give the boss the launch report for ${row.project} with launch_report.`;
+    const report = `${launchKit(floor, row)} Give the boss the launch report for ${row.project} with launch_report, with what is still theirs to do as next_steps.`;
     const guide = skip ? `the boss skipped ads for now, so it launches without them. Step 4 of 4, Launch: ${report} Then, in a line, say they can make ads any time by asking you.`
       : a === 0 ? `the boss chose no ad money: "just for fun". Step 4 of 4, Launch: the ads are up on the floor${n ? ' and on the live site' : ''} for anyone to share. ${report} Then tell the boss, in a line or two, how to share them and who to send them to first.`
         : `the boss chose ad money for this campaign and it is waiting on their approval. Step 4 of 4, Launch: call request_ad_spend with amount ${a} (exactly that), the audience from the plan, and the ads (the file names in ads/). Then ${report} Tell the boss the request needs their one click on the floor; then it runs as a Google search ad for up to a week, never spends more than they approved, and stops on its own. Don't repeat the amount in chat.`;
@@ -718,7 +776,7 @@ export function installBusiness(ext) {
   function view(f, viewer) {
     const row = rowOf(f.id);
     if (!row || row.status !== 'active') return { on, active: false };
-    const tracks = row.step === 'idea' ? CONFIG.tracks.map((t) => ({ id: t.id, label: t.label, note: '', lamp: 'off', done: 0, total: t.items.filter((i) => !i.optional).length, items: [] })) : trackView(f, row);
+    const tracks = row.step === 'idea' ? CONFIG.tracks.map((t) => ({ id: t.id, label: t.label, note: '', lamp: 'off', done: 0, total: t.items.filter((i) => !i.optional && !i.yours && inJourney(i, sellingOn())).length, items: [] })) : trackView(f, row);
     const phase = phaseOf(f, row, tracks);
     const at = stepIndex(row.step);
     const steps = CONFIG.steps.map((s, i) => ({ id: s.id, label: s.label, state: i < at || (i === at && phase === 'launched') ? 'done' : i === at ? 'now' : 'next' }));
@@ -731,7 +789,7 @@ export function installBusiness(ext) {
     const ads = { pictures: files.pictures.map((x) => ({ name: x.name, src: fileUrl(x.name) })), videos: files.videos.map((x) => ({ name: x.name, src: fileUrl(x.name), captions: x.captions ? fileUrl(x.captions) : '' })), plan: adsOf(row).plan || null, videoFailed: adsOf(row).videoFailed || '', skipped: !!row.ads_skipped };
     const base = {
       on, active: true, step: row.step, phase, steps, progress: progressOf(row, phase, tracks), project: row.project, title: pr?.title || (row.picked >= 0 ? ideas[row.picked]?.name : '') || '',
-      tracks: tracks.map((t) => ({ id: t.id, label: t.label, note: t.note, lamp: t.lamp, done: t.done, total: t.total, items: t.items.map((i) => ({ label: i.label, state: i.state, optional: i.optional })) })),
+      tracks: tracks.map((t) => ({ id: t.id, label: t.label, note: t.note, lamp: t.lamp, done: t.done, total: t.total, items: t.items.map((i) => ({ label: i.label, state: i.state, optional: i.optional, ...(i.yours ? { yours: true } : {}) })) })),
       liveUrl: live && !pr.private ? engine.liveUrl(f, row.project) : '', launched: phase === 'launched',
       ads: showAds && live && !pr.private ? { pictures: ads.pictures, videos: ads.videos, plan: ads.plan ? { headline: ads.plan.headline, primaryText: ads.plan.primaryText } : null } : null,
     };
@@ -766,6 +824,7 @@ export function installBusiness(ext) {
       v.step === 'customers' || v.step === 'launch' ? `Ads: ${v.ads.pictures.length} pictures, ${v.ads.videos.length} videos${v.ads.plan ? `, words and plan saved (headline "${v.ads.plan.headline}")` : ''}${v.ads.videoFailed ? `; the AI video failed (${v.ads.videoFailed})` : ''}.` : '',
       v.step === 'launch' ? `Ad money: ${v.ads.skipped ? 'skipped for now' : v.adMoney.chosen ? `${v.adMoney.chosen}, the boss's own choice` : 'none, just for fun'}.${s ? ` Ad request #${s.id}: ${s.label.toLowerCase()}.` : ''}` : '',
       v.step === 'customers' || v.step === 'launch' ? adsWhere() : '',
+      v.picked >= 0 && v.step !== 'idea' ? launchKit(floor, row) : '',
       'The boss picks ideas, chooses ad money and approves requests with buttons on the floor; you explain, answer anything, and keep the team on it. Their suggestions appear as chips, so never list options for them to choose from.'].filter(Boolean).join(' ');
   }
   function brief(floorId) {

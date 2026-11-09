@@ -55,7 +55,7 @@
         { "id": "states", "text": "Empty, loading and error states are real, not blank", "check": "judge" },
         { "id": "crud", "text": "Edit and delete work as well as create", "check": "judge" },
         { "id": "settings", "text": "A settings screen that does something", "check": "judge" },
-        { "id": "honest", "text": "Payments only as a clearly marked coming-soon hook, nothing invented", "check": "judge" }
+        { "id": "honest", "text": "If it charges money it does so through office.pay and is honest about whether payments are open yet; nothing invented", "check": "judge" }
       ],
       "bars": { "maxConsoleErrors": 0, "phoneWidth": 390, "maxPageKB": 600 }
     },

@@ -727,7 +727,7 @@ export class Engine {
     const project = wanted || (priv || floor.default_private ? 'private-work' : '');
     if (project) this.upsertProject(floor, project, { title: project, makePrivate: priv });
     // A game, app or shop asked for in chat starts on the same tested starter as one from the maker cards.
-    if (project && (lane === 'game' || lane === 'app' || lane === 'shop') && this.cfg.computerEnabled) seedStarter(this.db, floor, project, lane, `${title} ${brief}`, this.cfg);
+    if (project && (lane === 'shop' || ((lane === 'game' || lane === 'app') && this.cfg.computerEnabled))) seedStarter(this.db, floor, project, lane, `${title} ${brief}`, this.cfg);
     const deps = dependsOn.map(Number).filter((n) => Number.isInteger(n)).slice(0, 10);
     if (afterPrevious) {
       const prev = get(this.db, "SELECT id FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked') ORDER BY id DESC LIMIT 1", floor.id);

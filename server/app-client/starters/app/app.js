@@ -119,8 +119,8 @@ async function loadPricing() {
   const box = $('[data-office="payments"]'), status = $('[data-office="pricing-status"]'), list = $('[data-office="plans"]');
   pricing = await office.pay.status();
   box.hidden = false; list.replaceChildren();
-  if (!pricing.ready) return say(status, pricing.message || 'Paid plans are coming soon.');
-  say(status, pricing.products.length ? (pricing.testMode ? 'Test mode: no real money moves.' : '') : 'Paid plans are coming soon.');
+  if (!pricing.ready) return say(status, pricing.message || 'Paid plans aren\'t open yet.');
+  say(status, pricing.products.length ? (pricing.testMode ? 'Test mode: no real money moves.' : '') : 'Paid plans aren\'t open yet.');
   for (const p of pricing.products) {
     const li = document.createElement('li'); li.className = 'plan';
     const name = document.createElement('b'); name.textContent = p.name;
@@ -137,7 +137,7 @@ async function loadPlan() {
   const st = $('[data-office="plan-status"]'), up = $('[data-office="upgrade"]'), man = $('[data-office="manage"]'), note = $('[data-office="plan-note"]');
   const [s, paid] = await Promise.all([pricing ? pricing : office.pay.status(), office.pay.has(PRODUCT)]);
   const p = s.products.find((x) => x.key === PRODUCT);
-  st.textContent = paid ? `You have ${p?.name || 'the paid plan'}.` : s.ready && p ? `You are on the free plan. ${p.name}: ${priceText(p)}.` : 'Free. Paid plans are coming soon.';
+  st.textContent = paid ? `You have ${p?.name || 'the paid plan'}.` : s.ready && p ? `You are on the free plan. ${p.name}: ${priceText(p)}.` : 'Free. Paid plans aren\'t open yet.';
   up.hidden = paid || !s.ready || !p; man.hidden = !paid;
   if (!s.ready && s.message) say(note, s.message);
   if (paid && returned === 'success') say(note, 'Thanks. It is yours now.');

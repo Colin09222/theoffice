@@ -134,6 +134,39 @@ function businessManager(meta, boss) {
   }
   return null;
 }
+// The shop lane's staff: the Writer lists the products, the Designer draws a picture for each, the Builder fills the starter's shop.json, the Tester
+// reports, and the Builder's last task puts it live. What they write is a real, whole catalogue, so the checklist and the boss's approvals see a real shop.
+const SHOP_PRODUCTS = [
+  { key: 'first-visit', name: 'First visit', description: 'One full visit at your door, booked for a time that suits you.', price: 45, priceFrom: 'proposed', image: 'images/first-visit.svg', imageKind: 'illustration', ships: false },
+  { key: 'care-kit', name: 'Care kit', description: 'Brush, comb and a tin of balm, posted to you.', price: 18.5, priceFrom: 'proposed', image: 'images/care-kit.svg', imageKind: 'illustration', ships: true },
+];
+const SHOP_PICTURE = (fill) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><rect width="400" height="400" fill="${fill}"/><circle cx="200" cy="200" r="120" fill="#fff8"/></svg>`;
+function shopStaff(meta) {
+  const { role, task } = meta;
+  if (task.lane !== 'shop') return null;
+  const b = task.brief || '', dir = `projects/${task.project}`;
+  if (role === 'researcher') return null;
+  if (role === 'writer') return [
+    call('write_file', { path: `${dir}/notes/brief.md`, content: '# Brief\n\nA small shop. A visitor should buy the first visit.\n' }),
+    call('write_file', { path: `${dir}/notes/copy.md`, content: '# Copy\n\nTitle: Doorstep Dog Groom\n\nGrooming that comes to you.\n' }),
+    call('write_file', { path: `${dir}/notes/products.md`, content: `# Products\n\n${SHOP_PRODUCTS.map((p) => `- ${p.key}: ${p.name}. ${p.description} Proposed price ${p.price}. ${p.ships ? 'Posted.' : 'Not posted.'} Needs a picture.`).join('\n')}\n` }),
+    ...(/notes\/offer\.md/.test(b) ? [call('write_file', { path: `${dir}/notes/offer.md`, content: OFFER })] : []),
+  ];
+  if (role === 'designer') return [
+    call('write_file', { path: `${dir}/notes/design.md`, content: '# The look\n\nWarm paper and one bold colour. Pictures: images/first-visit.svg, images/care-kit.svg.\n' }),
+    call('write_file', { path: `${dir}/images/first-visit.svg`, content: SHOP_PICTURE('#d2552b') }),
+    call('write_file', { path: `${dir}/images/care-kit.svg`, content: SHOP_PICTURE('#1b2a22') }),
+  ];
+  if (role === 'tester') return [call('write_file', { path: `${dir}/TEST-REPORT.md`, content: '# Test report\n\nPASS. Added two things to the basket, changed a quantity, sent an order request. Nobody has opened it in a browser.\n' })];
+  if (role === 'builder') {
+    const publish = call('publish_project', { project: task.project, title: 'Doorstep Dog Groom', description: 'Dog grooming that comes to your door, and a care kit by post.', kind: 'site' });
+    if (/read TEST-REPORT\.md/.test(b)) return [call('read_file', { path: `${dir}/TEST-REPORT.md` }), publish];
+    const fill = [call('read_file', { path: `${dir}/STARTER.md` }), call('write_file', { path: `${dir}/shop.json`, content: JSON.stringify({ currency: 'usd', delivery: '', products: SHOP_PRODUCTS }, null, 2) })];
+    return /don't publish|do not publish/i.test(b) ? fill : [...fill, publish];
+  }
+  return null;
+}
+
 function businessStaff(meta) {
   const { role, task } = meta;
   const b = task.brief || '';
@@ -336,6 +369,8 @@ function staffStep(meta) {
   if (daily) return daily;
   const maker = makerStep(meta);
   if (maker) return maker;
+  const shop = shopStaff(meta);
+  if (shop) return step < shop.length ? { toolCalls: [shop[step]] } : { content: `Finished "${task.title}".` };
   const biz = businessStaff(meta);
   if (biz) return step < biz.length ? { toolCalls: [biz[step]] } : { content: `Finished "${task.title}".` };
   const p = task.project || 'project';
