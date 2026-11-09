@@ -13,7 +13,7 @@ const APPS = 'apps.localhost';
 const open = [];
 after(async () => { for (const t of open) await t.close(); });
 const NO_OTHER_LIMITS = { floorDailyUsd: Infinity, globalDailyUsd: Infinity, taskMaxUsd: Infinity, budgetAnthropicUsd: 100000, budgetOpenrouterUsd: 100000 };
-const start = async (over = {}, deps = {}) => { const t = await boot({ peopleTalk: false, ...NO_OTHER_LIMITS, ...over }, deps); open.push(t); return t; };
+const start = async (over = {}, deps = {}) => { const t = await boot({ peopleTalk: false, ...NO_OTHER_LIMITS, ...over }, { models: loadModels(), ...deps }); open.push(t); return t; };
 const floorOf = (t, c) => get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
 const spend = (t, floorId, provider, usd, when = Date.now()) => run(t.db, "INSERT INTO ledger (floor_id,day,agent_id,model,prompt_tokens,completion_tokens,cost_usd,created_at,kind,provider) VALUES (?,?,NULL,?,0,0,?,?,'model',?)", floorId, new Date().toISOString().slice(0, 10), provider === 'anthropic' ? 'claude-opus-5-5' : 'google/gemini-3.1-pro-preview', usd, when, provider);
 const wipe = (t, floorId) => run(t.db, 'DELETE FROM ledger WHERE floor_id=?', floorId);
@@ -193,6 +193,7 @@ describe('a project with its own domain lives at that domain', () => {
     assert.equal(r.headers.get('location'), 'https://tinyteacups.com/about?ref=x&y=2');
     assert.equal((await at('/', 'HEAD')).headers.get('location'), 'https://tinyteacups.com/');
     assert.equal((await at('//evil.example/x')).headers.get('location'), 'https://tinyteacups.com/', 'nothing strange gets through in the path');
+    for (const path of ['/_data/state', '/_office/cloud/status']) assert.notEqual((await at(path)).status, 308, `${path} still answers for a tab left open on the old address`);
   });
 
   test('the real domain still serves, and it is what links, cards and the Projects tab point at', async () => {

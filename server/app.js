@@ -184,7 +184,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   };
   const projectView = (f, p) => {
     const domain = engine.domains.liveFor(f.id, p.slug);
-    return { slug: p.slug, title: p.title, description: p.description, kind: p.kind, private: !!p.private, publishedAt: p.published_at, sources: JSON.parse(p.sources), url: publicUrl(f.slug, p.slug), appUrl: cfg.appsBaseDomain ? (domain && !p.private ? `https://${domain}/` : `${appOrigin(cfg, appLabel(db, f, p.slug))}/`) : null, domain };
+    const labelUrl = cfg.appsBaseDomain ? `${appOrigin(cfg, appLabel(db, f, p.slug))}/` : null;
+    return { slug: p.slug, title: p.title, description: p.description, kind: p.kind, private: !!p.private, publishedAt: p.published_at, sources: JSON.parse(p.sources), url: publicUrl(f.slug, p.slug), appUrl: labelUrl && domain && !p.private ? `https://${domain}/` : labelUrl, domain };
   };
   // What only the boss sees on a project card.
   const projectOwnerView = (f, p) => ({ ...projectView(f, p), hasPayment: !!p.payment_link, indexable: !!p.indexable, signups: formCount(db, f.id, p.slug), launchCheck: p.launch_check ? JSON.parse(p.launch_check) : null, designReview: p.design_review ? (({ full: _full, shots: _shots, ...r }) => r)(JSON.parse(p.design_review)) : null, launchReport: p.launch_report });
@@ -907,7 +908,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     const liveDomain = engine.domains.liveFor(f.id, pr.slug);
     const onOwnDomain = liveDomain && ownHost === liveDomain;
     // A public project with its own domain lives there. Its old address on the apps domain passes everyone along, path and query intact; a preview pass was already dealt with above.
-    if (liveDomain && !onOwnDomain && !pr.private && appHostLabel(cfg, ownHost) !== null) {
+    // The project's own data and Cloud calls still answer here, so a tab left open on the old address keeps its saves and its login.
+    if (liveDomain && !onOwnDomain && !pr.private && segs[0] !== '_data' && segs[0] !== '_office' && appHostLabel(cfg, ownHost) !== null) {
       res.writeHead(308, { ...HEAD, location: `https://${liveDomain}${/^\/[^/\\]/.test(rawUrl) || rawUrl === '/' ? rawUrl : '/'}` });
       return res.end();
     }
