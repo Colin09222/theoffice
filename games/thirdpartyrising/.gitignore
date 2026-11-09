@@ -1,0 +1,10 @@
+# The repo root ignores every data/ directory; this game's data is source, so re-include it.
+!data/
+!data/**
+target/
+node_modules/
+dist/
+tools/data/cache/
+ui/src/wasm/
+*.log
+.shots-tmp/
