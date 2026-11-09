@@ -250,3 +250,16 @@ section.stack[hidden] { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .stack-strip.live .stack-dot, .stack-strip.live .portrait.busy { animation: none; } }
 
+
+/* A phone on its side: the directory folds to its search row, top right, so the tower has the screen. A tap on its handle or its search opens the list. */
+@media (max-height: 520px) and (min-width: 761px) {
+  .directory { bottom: auto; max-height: calc(100% - 16px); }
+  .directory .sheet-grip { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 30px; margin: 0 0 6px; padding: 0 6px; background: none; border: 0; flex: none; order: -2; color: #ffe9c2; font: 700 15px var(--cond); letter-spacing: .06em; text-transform: uppercase; }
+  .directory .sheet-grip i { order: 2; width: 9px; height: 9px; margin: 0 4px 3px 0; border: solid var(--brass-l); border-width: 0 2.5px 2.5px 0; border-radius: 0; background: none; box-shadow: none; transform: rotate(45deg); transition: transform .15s; }
+  .directory.open .sheet-grip i { transform: rotate(-135deg); margin-bottom: -4px; }
+  .directory .grip-label { display: block; }
+  .directory:not(.open) > :not(.sheet-grip):not(.dir-search) { display: none !important; }
+  .directory:not(.open) .dir-search { margin-bottom: 0; }
+  .directory.open { bottom: 8px; }
+  .directory.open .dir-head { display: none; }
+}

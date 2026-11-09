@@ -67,6 +67,8 @@ function wallCard(pr, onFloor) {
         h('button.btn.small', { type: 'button', onclick: () => onFloor(floor) }, 'Visit floor'))));
 }
 
+/** Where the directory folds away to its search row until it is wanted: a phone, or a phone on its side, where it would otherwise cover the tower. */
+const folds = () => isPhone() || window.innerHeight <= 520;
 function directoryRow(card, onEnter, onHover) {
   const party = partying?.floor === card.number;
   return h(`button.dir-row${party ? '.party' : ''}`, { type: 'button', 'data-floor': card.number, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => onHover(card.number) },
@@ -167,7 +169,7 @@ export async function showLobby(root) {
     panel.classList.toggle('showing-wall', on);
     list.hidden = on; head.hidden = on; wall.hidden = !on; wallHead.hidden = !on;
     search.placeholder = on ? 'Search what launched' : 'Search the building';
-    if (on) { if (isPhone()) panel.classList.add('open'); renderWall(); loadWall(); } else renderList();
+    if (on) { if (folds()) panel.classList.add('open'); renderWall(); loadWall(); } else renderList();
   };
   toggle.addEventListener('click', () => setWall(!wallOn));
 
@@ -202,11 +204,11 @@ export async function showLobby(root) {
     boardOn = on;
     topBtn.setAttribute('aria-pressed', String(on));
     list.hidden = on || wallOn; head.hidden = on || wallOn; board.hidden = !on; boardHead.hidden = !on;
-    if (on) { if (isPhone()) panel.classList.add('open'); renderBoard(); loadBoard(); } else if (!wallOn) renderList();
+    if (on) { if (folds()) panel.classList.add('open'); renderBoard(); loadBoard(); } else if (!wallOn) renderList();
   };
   topBtn.addEventListener('click', () => setBoard(!boardOn));
   // On a phone the sheet is mostly tucked away. Tapping search brings it up, so the results and the field aren't left behind the keyboard.
-  search.addEventListener('focus', () => { if (isPhone()) panel.classList.add('open'); });
+  search.addEventListener('focus', () => { if (folds()) panel.classList.add('open'); });
   search.addEventListener('input', () => { if (wallOn) renderWall(); });
 
   const head = h('div.dir-head', {}, h('span', {}, 'Directory'), count);

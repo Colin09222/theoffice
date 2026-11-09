@@ -977,7 +977,7 @@ export class LobbyView {
   /** The whole building in frame, ground to mast, whatever its height: the same picture as a taller tower, brought closer. */
   frame(phone) {
     this.lookY = this.tower.height * 0.47;
-    if (!phone) return this.tower.height * 2.42;
+    if (!phone) return this.tower.height * ((this.h || 800) <= 520 ? 2.12 : 2.26);
     // A phone gives the tower what its sign and its bottom stack leave: nearly all of a tall screen, less of a short one.
     const free = Math.min(0.72, Math.max(0.5, ((this.h || 800) - PHONE_TOP - PHONE_BOTTOM) / (this.h || 800)));
     return this.tower.height * (1.66 / free);
@@ -994,7 +994,10 @@ export class LobbyView {
     this.camera.aspect = w / h;
     const phone = w <= 760;
     // Frame the tower in the clear area: left of the desktop panel, above the phone's sheet.
-    this.shiftX = phone ? 0 : -w * 0.055;
+    // On a wide screen the tower stands in the gap between the sign on the left and the directory on the right. A phone on its side has the directory folded to its
+    // search row, and stands the same way, clear of the buttons beside it.
+    const short = h <= 520, heroRight = short ? Math.min(w * 0.3, 250) + 12 : Math.min(w * 0.3, 372) + 24, panelLeft = short ? w - 314 : w - 404;
+    this.shiftX = phone ? 0 : Math.round(w / 2 - (heroRight + panelLeft) / 2);
     this.shiftY = phone ? (PHONE_BOTTOM - PHONE_TOP) / 2 - h * 0.012 : 0;
     this.targetDist = this.frame(phone);
     if (!this.framed) { this.dist = this.targetDist; this.framed = true; }  // the first picture is the right one, with no zoom into place

@@ -1064,7 +1064,7 @@ export class OfficeView {
   }
   buildWalls(room) {
     const { primary, accent } = this.colors; const L = this.plan;
-    const body = L.frame ? '#a57a4e' : mix(deepen(this.decor.wall), '#f4e7d4', 0.12), cap = L.frame ? '#6e4e32' : mix(accent, '#f1f5ff', 0.9), foot = shadeHex(body, 0.72);
+    const body = L.frame ? '#a57a4e' : mix(deepen(this.decor.wall), '#f4e7d4', 0.12), cap = L.frame ? '#6e4e32' : mix(accent, '#d9e3fa', 0.9), foot = shadeHex(body, 0.72);
     const T = 0.28, H = 1.14;
     for (const w of wallLines(L)) {
       const along = w.x0 !== w.x1, len = Math.abs(along ? w.x1 - w.x0 : w.z1 - w.z0), cx = (w.x0 + w.x1) / 2, cz = (w.z0 + w.z1) / 2;
