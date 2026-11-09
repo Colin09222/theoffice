@@ -36,7 +36,7 @@
 #labels .char-tag.no-name .char-name, #labels .char-tag.no-name .char-role { visibility: hidden; }
 @media (max-width: 760px) {
   /* On a phone: a quiet first name over each person, and the job and full name only for whoever is talking or tapped. */
-  #labels .char-name { font-size: 11.5px; line-height: 1.3; padding: 0 5px; background: rgba(255, 255, 255, .84); }
+  #labels .char-name { font-size: 12.5px; line-height: 1.3; padding: 0 5px; background: rgba(255, 255, 255, .88); }
   #labels .char-rest { display: none; }
   #labels .char-tag.full .char-rest { display: inline; }
   #labels .char-tag.full .char-role { font-size: 10.5px; padding: 1px 5px 0; max-width: 140px; }
