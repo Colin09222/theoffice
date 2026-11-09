@@ -28,10 +28,28 @@ const WORLD_SCALE = ROOM_W / TOWER_W;  // the room is one tower floor, blown up 
 const SUN_DIR = new THREE.Vector3(0.74, 0.47, -0.32).normalize();
 const SUN_FAR = 64;  // the sun's distance, and its shadow box, scale with the floor
 const ZOOM_MIN = 0.8, ZOOM_MAX = 5.5, TILT_END = 3.6;
-const HOME_YAW = 0.5, TALL_YAW = 1.02;  // a tall phone looks along the room's long side, so the long side fills the tall screen
+const HOME_YAW = 0.5, TALL_YAW = 1.42;  // a tall phone looks along the room's long side, so a row of desks runs down the tall screen with everyone in it
 const ROLE_TITLE = { manager: 'Office Manager', researcher: 'Researcher', writer: 'Writer', builder: 'Builder', designer: 'Designer', analyst: 'Analyst', marketer: 'Marketer', tester: 'Tester', illustrator: 'Illustrator' };
 /** A person's job as their name tag and the staff list put it: the title they were hired with, else their role's. */
 export const jobTitle = (info, isBoss = false) => (isBoss ? 'Boss' : info.title || ROLE_TITLE[info.role] || (info.role ? info.role[0].toUpperCase() + info.role.slice(1) : 'Staff'));
+// Sky under a floor page's room: the floor is high up a tower, so what lies beyond the terrace is a cool bank of cloud, and the warm room stands out
+// against it. It also hides whatever is outside the slab (the podium under floor 1, the roofs below), fading out at its rim so the city still shows from far back.
+let cloudTex = null;
+function cloudBank() {
+  if (cloudTex) return cloudTex;
+  cloudTex = canvasTex(512, 512, (x, w, h) => {
+    const g = x.createRadialGradient(256, 256, 0, 256, 256, 256); g.addColorStop(0, 'rgba(178,217,241,1)'); g.addColorStop(0.45, 'rgba(152,202,237,1)'); g.addColorStop(0.78, 'rgba(134,188,231,1)'); g.addColorStop(1, 'rgba(134,188,231,0)');
+    x.fillStyle = g; x.fillRect(0, 0, w, h);
+    const r = seeded(91);
+    const puff = (cx, cy, rad, a) => { const c = x.createRadialGradient(cx, cy, 0, cx, cy, rad); c.addColorStop(0, `rgba(255,255,255,${a})`); c.addColorStop(0.55, `rgba(255,252,246,${a * 0.75})`); c.addColorStop(1, 'rgba(255,250,240,0)'); x.fillStyle = c; x.beginPath(); x.arc(cx, cy, rad, 0, 7); x.fill(); };
+    for (let i = 0; i < 34; i++) {
+      const ang = r() * Math.PI * 2, dist = 62 + r() * 150, cx = 256 + Math.cos(ang) * dist, cy = 256 + Math.sin(ang) * dist, n = 3 + Math.floor(r() * 3), size = 10 + r() * 12;
+      for (let k = 0; k < n; k++) puff(cx + (k - n / 2) * size * 0.9, cy + (r() - 0.5) * size * 0.5, size * (0.8 + r() * 0.5), 0.6);
+    }
+  });
+  return cloudTex;
+}
+const DESK_TINT = { wood: '#fdf4e3' };  // pale desks: they stand apart from timber floors and the walls' caps, and screens and paper show up on them
 const ON_TABLE = new Set(['radio', 'televisionModern', 'televisionVintage', 'speakerSmall']);
 
 const box = new THREE.BoxGeometry(1, 1, 1);
@@ -746,6 +764,13 @@ export class OfficeView {
     this.stub.group.scale.setScalar(WORLD_SCALE); this.stub.group.position.y = lift;
     this.scene.add(this.stub.group);
   }
+  addBackdrop() {
+    if (this.backdrop) return;
+    const m = new THREE.Mesh(new THREE.CircleGeometry(92, 48), new THREE.MeshBasicMaterial({ map: cloudBank(), transparent: true, depthWrite: false, fog: false }));
+    m.rotation.x = -Math.PI / 2; m.position.y = -0.7; m.renderOrder = -1; m.userData.keep = true;
+    this.backdrop = m; this.root.add(m);
+  }
+  dropBackdrop() { if (!this.backdrop) return; this.backdrop.removeFromParent(); this.backdrop.geometry.dispose(); this.backdrop.material.dispose(); this.backdrop = null; }
   buildRoom() {
     const s = this.scene; const { primary, accent } = this.colors; const d = this.decor; const L = this.plan;
     this.lounge = hasSofa(L);
@@ -776,28 +801,24 @@ export class OfficeView {
     const terrace = new THREE.Group(); R.add(terrace); this.terrace = terrace;
     const out = (c, w, hh, dd, x, y, z, o = {}) => piece(terrace, c, w, hh, dd, x, y, z, { ...o, mat: o.mat || outdoor(c) });
     const plate = TOWER_W * WORLD_SCALE + 1.2;
-    const surround = (c) => (this.host ? c : '#efe3d1');
+    const surround = (c) => mix(c, '#d6dde2', 0.6);  // a pale neutral deck: the sun warms it to stone, and the warm room stands out on it
     out(surround('#e9dfcf'), plate, 0.42, plate, 0, -0.48, 0);
     out(surround('#d4c8b6'), plate + 0.3, 0.12, plate + 0.3, 0, -0.6, 0, { cast: false });
     out(surround('#d9d0c0'), ROOM_W + 1.1, 0.05, ROOM_D + 1.1, 0, -0.08, 0, { recv: true, cast: false });
     out(primary, ROOM_W + 0.9, 0.012, ROOM_D + 0.9, 0, -0.022, 0, { recv: false, cast: false });
     const rail = new THREE.MeshStandardMaterial({ color: '#cfe0ec', roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.4, depthWrite: false, envMap: env });
     for (const [x, z, w, dd] of [[0, plate / 2, plate, 0.06], [0, -plate / 2, plate, 0.06], [plate / 2, 0, 0.06, plate], [-plate / 2, 0, 0.06, plate]]) piece(terrace, null, w, 1.0, dd, x, 0, z, { cast: false, mat: rail });
-    if (this.host) for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { out('#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); out('#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
+    for (const [x, z] of [[-plate / 2 + 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, plate / 2 - 1.2], [plate / 2 - 1.4, -plate / 2 + 1.2], [-plate / 2 + 1.4, -plate / 2 + 1.2]]) { out('#b9b0a2', 1.6, 0.5, 1.0, x, 0, z); out('#6c9452', 1.4, 0.45, 0.8, x, 0.5, z); }
     // The terrace is part of the company too: planters along the rail in its colours and somewhere to sit outside. A timber deck follows in loadLooks.
     // On a floor page the terrace is quieter than the room, so the eye stays on the people. In the tower it is part of the outside and keeps its colours.
-    const hush = (c) => (this.host ? c : mix(c, '#c9baa4', 0.55));
-    // On a floor page a wide pale backdrop, like paper under a model, hides whatever is outside the slab (the podium under floor 1, the roofs below), fading out at its rim so the city still shows from far back.
-    if (!this.host) {
-      const fade = new THREE.Mesh(new THREE.CircleGeometry(78, 48), new THREE.MeshBasicMaterial({ map: canvasTex(256, 256, (x, w, h) => { const g = x.createRadialGradient(128, 128, 0, 128, 128, 128); g.addColorStop(0, 'rgba(239,227,209,1)'); g.addColorStop(0.72, 'rgba(239,227,209,1)'); g.addColorStop(1, 'rgba(239,227,209,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); }), transparent: true, depthWrite: false, fog: false }));
-      fade.rotation.x = -Math.PI / 2; fade.position.y = -0.7; fade.renderOrder = -1; fade.userData.keep = true; terrace.add(fade);
-    }
-    if (this.host) for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
+    const hush = (c) => c;
+    if (!this.host) this.addBackdrop();
+    for (const sz of [-1, 1]) for (let i = -2; i <= 2; i++) {
       const x = i * 6.4 + (sz < 0 ? 1.4 : 0), z = sz * (plate / 2 - 0.85);
       out(hush(mix(primary, '#cfc4b0', 0.62)), 1.9, 0.55, 0.85, x, 0, z);
       out(hush(i % 2 ? '#5c8650' : '#6c9452'), 1.7, 0.36 + ((i * i) % 3) * 0.14, 0.66, x, 0.55, z);
     }
-    if (this.host) for (const [x, z] of [[-10.5, plate / 2 - 2.9], [8.5, plate / 2 - 3.1]]) {
+    for (const [x, z] of [[-10.5, plate / 2 - 2.9], [8.5, plate / 2 - 3.1], [-6.5, -plate / 2 + 3.0], [9.5, -plate / 2 + 2.9]]) {
       out('#a8825c', 1.25, 0.07, 1.25, x, 0.72, z, { geo: cyl }); out('#3d3b44', 0.09, 0.72, 0.09, x, 0, z, { geo: cyl });
       for (const a of [0.4, 2.5, 4.6]) { const sx = x + Math.cos(a) * 1.3, sz = z + Math.sin(a) * 1.3; out(mix(primary, '#ffffff', 0.32), 0.62, 0.1, 0.62, sx, 0.44, sz); out('#3d3b44', 0.07, 0.44, 0.07, sx, 0, sz, { cast: false }); }
     }
@@ -1043,7 +1064,7 @@ export class OfficeView {
   }
   buildWalls(room) {
     const { primary, accent } = this.colors; const L = this.plan;
-    const body = L.frame ? '#a57a4e' : mix(deepen(this.decor.wall), '#f4e7d4', 0.12), cap = L.frame ? '#6e4e32' : mix(accent, '#fff3e0', 0.62), foot = shadeHex(body, 0.72);
+    const body = L.frame ? '#a57a4e' : mix(deepen(this.decor.wall), '#f4e7d4', 0.12), cap = L.frame ? '#6e4e32' : mix(accent, '#d9e3fa', 0.9), foot = shadeHex(body, 0.72);
     const T = 0.28, H = 1.14;
     for (const w of wallLines(L)) {
       const along = w.x0 !== w.x1, len = Math.abs(along ? w.x1 - w.x0 : w.z1 - w.z0), cx = (w.x0 + w.x1) / 2, cz = (w.z0 + w.z1) / 2;
@@ -1207,7 +1228,7 @@ export class OfficeView {
       const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry; target.add(g);
       const outer = target; target = g;
       const front = Math.PI;  // the kit's desk has its drawer at the back; turned, it faces the sitter
-      put('desk', { z: -0.2, ry: front, scale: big ? FS * 1.25 : FS * 1.1 });
+      put('desk', { z: -0.2, ry: front, scale: big ? FS * 1.25 : FS * 1.1, tint: DESK_TINT });
       put('computerScreen', { y: big ? 1.2 : 1.06, z: -0.58, ry: 0 });
       // Keys near the front edge, where a seated person's hands land (see TYPE_A in character.js).
       put('computerKeyboard', { y: big ? 1.2 : 1.06, z: big ? 0.26 : 0.19 });
@@ -1223,6 +1244,13 @@ export class OfficeView {
     if (!m.kind) {
       const t = put('tableCross', { x: tx, z: tz, scale: FS * m.size[1] });
       t.scale.x = FS * m.size[0]; t.scale.z = FS * (m.size[2] ?? m.size[1]);
+      // A meeting somebody has just stepped out of: laptops left open, papers, mugs and a plant in the middle. All of it bakes in with the table.
+      const top = T.tableCross.userData.size.y * FS * m.size[1], lx = T.tableCross.userData.size.x * FS * m.size[0] / 2 - 0.55, lz = T.tableCross.userData.size.z * FS * (m.size[2] ?? m.size[1]) / 2 - 0.38;
+      put('laptop', { x: tx - lx * 0.55, y: top, z: tz + lz * 0.55, ry: Math.PI + 0.2, scale: FS * 0.9 }); put('laptop', { x: tx + lx * 0.5, y: top, z: tz - lz * 0.55, ry: -0.15, scale: FS * 0.9 });
+      if (T.plantSmall2) put('plantSmall2', { x: tx, y: top, z: tz, scale: FS * 1.5 });
+      const on = (c, w, hh, dd, x, z, o = {}) => piece(models, c, w, hh, dd, tx + x, top, tz + z, { cast: false, ...o });
+      on('#fbf7ea', 0.36, 0.014, 0.48, lx * 0.15, lz * 0.5, { ry: 0.25 }); on('#fbf7ea', 0.36, 0.014, 0.48, -lx * 0.2, -lz * 0.55, { ry: -0.3 }); on(mix(accent, '#ffffff', 0.5), 0.34, 0.02, 0.46, lx * 0.85, lz * 0.3, { ry: 0.5 }); on('#fbf7ea', 0.36, 0.014, 0.48, -lx * 0.9, -lz * 0.1, { ry: 0.1 });
+      on(accent, 0.15, 0.16, 0.15, -lx * 0.3, lz * 0.2, { geo: cyl }); on(primary, 0.15, 0.16, 0.15, lx * 0.25, -lz * 0.15, { geo: cyl }); on('#fbf7ea', 0.15, 0.16, 0.15, lx * 0.75, -lz * 0.5, { geo: cyl }); on('#d9443a', 0.05, 0.03, 0.34, -lx * 0.62, -lz * 0.45, { ry: 0.8 });
     }
     for (const [cx, cz, ry] of m.chairs) put('chairModernCushion', { x: cx, z: cz, ry, tint: chairTint(primary) });
     // Bookcases against the left wall, with stacks of books on the shelves.
@@ -1317,8 +1345,8 @@ export class OfficeView {
         const empty = r.kind === 'staff' && this.offices.get(r.id)?.info.role === 'vacant';
         // A company's colour on the way through: a long pale runner down the middle of each corridor. A plain wash of the colour over the boards turned to mud.
         if (r.kind === 'corridor') { const mw = (x1 - x0) > (z1 - z0), inset = 0.42; x.globalAlpha = 0.8; x.fillStyle = mix(this.colors.primary, '#efe6d6', 0.58); x.fillRect(px(x0 + (mw ? 0 : inset)), pz(z0 + (mw ? inset : 0)), px(x1) - px(x0) - (mw ? 0 : inset * 2) * ppu, pz(z1) - pz(z0) - (mw ? inset * 2 : 0) * ppu); x.globalAlpha = 1; }
-        // Nobody works there yet: the light is off, so the eye goes to the rooms with people in them.
-        if (empty) { x.fillStyle = 'rgba(70,58,62,.36)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); continue; }
+        // Nobody works there yet: the light is a little lower, so the eye goes to the rooms with people in them.
+        if (empty) { x.fillStyle = 'rgba(70,58,62,.12)'; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); continue; }
         if (r.desk) { const s = seatOf(r.desk).at; const g = x.createRadialGradient(px(s[0]), pz(s[1]), 0, px(s[0]), pz(s[1]), 3.1 * ppu); g.addColorStop(0, 'rgba(255,212,150,.44)'); g.addColorStop(0.55, 'rgba(255,212,150,.16)'); g.addColorStop(1, 'rgba(255,212,150,0)'); x.fillStyle = g; x.fillRect(px(x0), pz(z0), px(x1) - px(x0), pz(z1) - pz(z0)); }
       }
       // Pools of warm light around the meeting table and the manager's and boss's desks.
@@ -1398,20 +1426,36 @@ export class OfficeView {
         marker(primary); x.beginPath(); x.arc(560, 230, 42, 0, 7); x.stroke(); x.beginPath(); x.moveTo(560, 188); x.lineTo(560, 230); x.lineTo(595, 250); x.stroke();
         return;
       }
+      // The meeting room's board is the team's real work, read straight from the tasks the page already has (nothing is asked of a model for it):
+      // what is being done right now and by whom on a sticky band, then the rest of the plan ticked off as it goes, and how far along it is.
       const title = (tasks[0].plan || 'The plan').slice(0, 30);
-      x.font = '600 36px Fraunces, Georgia, serif'; x.fillStyle = primary; x.fillText(title, 30, 54);
-      marker(primary); x.lineWidth = 3; x.beginPath(); x.moveTo(30, 66); x.lineTo(34 + x.measureText(title).width, 70); x.stroke();
-      x.font = '600 23px ui-sans-serif, system-ui, sans-serif';
-      tasks.slice(0, 6).forEach((t, i) => {
-        const y = 108 + i * 38;
+      x.font = '600 30px Fraunces, Georgia, serif'; x.fillStyle = primary; x.fillText(title, 30, 44);
+      const done = tasks.filter((t) => t.status === 'done').length;
+      x.font = '700 20px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = '#7d8594'; x.textAlign = 'right'; x.fillText(`${done} of ${tasks.length} done`, 440, 42); x.textAlign = 'left';
+      const now = tasks.find((t) => t.status === 'doing') || tasks.find((t) => t.status === 'review') || tasks.find((t) => t.status === 'blocked') || tasks.find((t) => t.status === 'todo');
+      const who = now && [...this.actors.values()].find((a) => a.taskId === now.id || (now.agent_id != null && String(a.id) === String(now.agent_id)));
+      let y = 60;
+      if (now) {
+        x.fillStyle = mix(accent, '#fff6d8', 0.55); x.fillRect(26, y, 418, 96); x.fillStyle = 'rgba(0,0,0,.08)'; x.fillRect(26, y + 92, 418, 4);
+        const head = now.status === 'doing' ? 'NOW' : now.status === 'review' ? 'IN REVIEW' : now.status === 'blocked' ? 'STUCK' : 'NEXT';
+        x.font = '800 17px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = now.status === 'blocked' ? '#b3303f' : '#2f3340'; x.fillText(who?.name ? `${head} · ${String(who.name).toUpperCase().slice(0, 18)}` : head, 38, y + 24);
+        // The task itself, as big as two lines allow.
+        x.font = '700 25px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = '#1f2330';
+        const words = String(now.title || '').split(/\s+/); const lines = ['']; for (const wd of words) { const tryLine = lines.at(-1) ? `${lines.at(-1)} ${wd}` : wd; if (x.measureText(tryLine).width <= 394 || !lines.at(-1)) lines[lines.length - 1] = tryLine; else if (lines.length < 2) lines.push(wd); else { lines[1] = `${lines[1].replace(/.{1,3}$/, '')}…`; break; } }
+        lines.forEach((ln, i) => x.fillText(ln.length > 34 ? `${ln.slice(0, 33)}…` : ln, 38, y + 54 + i * 29));
+        y += 110;
+      }
+      x.font = '600 21px ui-sans-serif, system-ui, sans-serif';
+      tasks.filter((t) => t !== now).slice(0, now ? 4 : 6).forEach((t, i) => {
+        const ty = y + 22 + i * 34;
         marker(t.status === 'done' ? '#3d8a55' : t.status === 'blocked' ? '#c8455a' : '#2f3340'); x.lineWidth = 3;
-        x.strokeRect(32, y - 18, 22, 22);
-        if (t.status === 'done') { x.lineWidth = 4; x.beginPath(); x.moveTo(36, y - 7); x.lineTo(43, y + 1); x.lineTo(58, y - 20); x.stroke(); }
-        else if (t.status === 'doing' || t.status === 'review') { x.fillStyle = accent; x.fillRect(36, y - 14, 14, 14); }
+        x.strokeRect(32, ty - 17, 20, 20);
+        if (t.status === 'done') { x.lineWidth = 4; x.beginPath(); x.moveTo(35, ty - 7); x.lineTo(42, ty); x.lineTo(56, ty - 19); x.stroke(); }
+        else if (t.status === 'doing' || t.status === 'review') { x.fillStyle = accent; x.fillRect(36, ty - 13, 12, 12); }
         x.fillStyle = t.status === 'done' ? '#8a8e99' : '#2f3340';
-        const label = t.title.slice(0, 32);
-        x.fillText(label, 66, y);
-        if (t.status === 'done') { x.lineWidth = 2; x.strokeStyle = '#8a8e99'; x.beginPath(); x.moveTo(66, y - 8); x.lineTo(66 + x.measureText(label).width, y - 8); x.stroke(); }
+        const label = String(t.title || '').slice(0, 32);
+        x.fillText(label, 64, ty);
+        if (t.status === 'done') { x.lineWidth = 2; x.strokeStyle = '#8a8e99'; x.beginPath(); x.moveTo(64, ty - 7); x.lineTo(64 + x.measureText(label).width, ty - 7); x.stroke(); }
       });
       // A diagram scribble on the right: boxes, arrows and a little chart.
       marker('#2a60c0'); x.lineWidth = 3;
@@ -1438,7 +1482,7 @@ export class OfficeView {
     const shown = tasks.filter((t) => ['todo', 'doing', 'review', 'blocked', 'done'].includes(t.status));
     const open = shown.some((t) => t.status !== 'done');
     const list = open ? shown : [];
-    const key = JSON.stringify(list.map((t) => [t.title, t.status]));
+    const key = JSON.stringify([list.map((t) => [t.title, t.status, t.agent_id ?? null]), [...this.actors.values()].map((a) => a.taskId ?? null)]);
     if (key === this.boardKey) return;
     this.boardKey = key;
     this.boardMat.map?.dispose();
@@ -1614,8 +1658,8 @@ export class OfficeView {
         if (ON_TABLE.has(t.m) && T.sideTableDrawers) { const tb = place(T.sideTableDrawers, { x: at.x, z: at.z, ry: at.ry, scale: FS }); g.add(tb); y = T.sideTableDrawers.userData.size.y * FS; }
         g.add(place(T[t.m], { x: at.x, y, z: at.z, ry: at.ry, scale: FS * (t.s ?? 1), tint: t.rug ? tints(mix(o.theme.wall, '#f4efe6', 0.45)) : t.m.startsWith('chair') || t.m.startsWith('lounge') ? tints(o.theme.wall) : null }));
       }
-      // The room's lights are off too: its furniture bakes in dimmer than the rooms people are in.
-      if (empty) for (let i = first; i < g.children.length; i++) g.children[i].traverse((m) => { if (m.isMesh) m.userData.shade = [0, 3, 0.48, 0.48]; });
+      // The room's light is lower too: its furniture bakes in a shade dimmer than the rooms people are in.
+      if (empty) for (let i = first; i < g.children.length; i++) g.children[i].traverse((m) => { if (m.isMesh) m.userData.shade = [0, 3, 0.86, 0.86]; });
     }
     if (this.host || this.pace) { await this.turn(); if (this.dead || token < this.furnishedToken) return; }
     mergeColored(g, ROOM_MAT);
@@ -1688,7 +1732,7 @@ export class OfficeView {
   }
   /** The floor is closed and nobody has been called in: everyone but the boss goes home. */
   setClosed(on) { this.closed = !!on; }
-  agentEvent(ev) { const a = this.actors.get(ev.id); if (a) { a.taskId = ev.taskId ?? null; a.setState(ev.state, ev.activity); } }
+  agentEvent(ev) { const a = this.actors.get(ev.id); if (a) { const was = a.taskId; a.taskId = ev.taskId ?? null; a.setState(ev.state, ev.activity); if (was !== a.taskId && this.tasks && this.boardMat) this.updateBoard(this.tasks); } }  // the board names whoever holds the current task
   taskFor(actor) { return actor.taskId == null ? null : this.tasks.find((t) => t.id === actor.taskId) || null; }
   /** A free place to stand and talk to someone: in the same room as them, on the side the camera can see, and not where someone else is already standing. */
   visitSpot(seat, visitor = null) {
@@ -1842,7 +1886,7 @@ export class OfficeView {
       this.insets = { ...pose.insets }; this.insetNow = { ...pose.insets };
       this.insetsHeldUntil = performance.now() + 600;  // whatever the page then asks for waits until the cross-fade is over
     }
-    this.buildWorld(); this.bind();
+    this.buildWorld(); this.bind(); this.addBackdrop();
     // The same light the tower gave it. Its materials are already the floor page's own, so nothing reloads or bakes again under the camera.
     this.pageLight();
   }
@@ -1854,7 +1898,7 @@ export class OfficeView {
   /** The other way: a floor page's view goes back into the tower without being rebuilt. The tower places the root and owns the camera. */
   demote(host) {
     if (this.host) return;
-    this.unbind?.(); this.unbind = null;
+    this.unbind?.(); this.unbind = null; this.dropBackdrop();
     if (this.world) this.scene.remove(this.world.group);
     if (this.stub) { this.stub.group.removeFromParent(); this.disposeTree(this.stub.group); this.stub = null; }
     this.root.removeFromParent();
@@ -1866,7 +1910,7 @@ export class OfficeView {
     for (const a of this.actors.values()) a.destroy();
     this.actors.clear();
     if (this.world) this.scene.remove(this.world.group);  // shared with the lobby, so never disposed here
-    this.root.removeFromParent();
+    this.root.removeFromParent(); this.dropBackdrop();
     for (const root of [this.terrace, this.room, this.detail, this.legacy, this.models, this.officeStatic, this.officeDetail, this.officeLegacy, this.officeModels, this.stub?.group, this.pet?.group].filter(Boolean)) this.disposeTree(root);
     this.deck?.geometry.dispose(); this.deck?.material.map?.dispose(); this.deck?.material.dispose();
     this.glassGeo?.dispose(); this.glassMat?.dispose();
@@ -1886,7 +1930,7 @@ export class OfficeView {
   }
   defaultInsets() {
     const phone = this.w <= 760;
-    return phone ? { left: 0, right: 0, top: 58, bottom: 234 } : { left: 0, right: Math.min(430, this.w * 0.34), top: 76, bottom: 60 };
+    return phone ? { left: 0, right: 0, top: 58, bottom: 166 } : { left: 0, right: Math.min(430, this.w * 0.34), top: 76, bottom: 60 };
   }
   /** The part of the screen the room may use: the page says what its panels cover, and the room eases over to fit what is left. */
   setInsets(next) {
@@ -1911,7 +1955,7 @@ export class OfficeView {
   /** The closest camera distance at which every corner of the room lands inside the free area. Cached per angle. */
   fitDistance() {
     // On a phone the sheet slides over the room and the room stays the same size: it is framed for the room the sheet leaves at its lowest.
-    const visH = this.w <= 760 ? Math.max(this.visH, this.h - 292) : this.visH;
+    const visH = this.w <= 760 ? Math.max(this.visH, this.h - 224) : this.visH;
     const key = `${this.yaw.toFixed(3)}|${this.visW.toFixed(0)}|${visH.toFixed(0)}`;
     if (key === this.fitKey) return this.fitValue;
     const cam = this.camera; const tan = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
@@ -1948,9 +1992,11 @@ export class OfficeView {
     let zoom = 2.2, frame = null;
     for (let i = 0; i < 3; i++) {
       const pitch = this.tiltAt(zoom), upright = Math.cos(pitch);
-      frame = frameCrew(spots, { yaw, pitch, visW, visH, tall, top: tallPhone ? 96 : 84, pad: tallPhone ? 52 : 50, ppuMax: bean / (tall * upright), ppuMin: bean * 0.82 / (tall * upright) });
+      frame = frameCrew(spots, { yaw, pitch, visW, visH, tall, top: tallPhone ? 96 : 84, pad: tallPhone ? 52 : w > 760 ? 74 : 50, ppuMax: bean / (tall * upright), ppuMin: bean * (tallPhone ? 0.82 : 0.7) / (tall * upright) });  // a wide screen gives up a little size to keep the whole team in the picture
       zoom = Math.min(ZOOM_MAX, Math.max(1, (fit * frame.ppu * 2 * tan) / h));
     }
+    // A tall phone looks down the row with the desks on the right, so the picture is the room (the corridor, the meeting table), not the terrace behind the wall.
+    if (tallPhone) frame.u = Math.min(frame.u, frame.right - (visW / 2 - 100) / frame.ppu);
     return { yaw, zoom, pan: aimAt(frame.u, frame.s, yaw, this.tiltAt(zoom), 0.8).map((v, i) => (i ? v - 0.3 : v)), framed: frame.framed, of: frame.of };
   }
   /** Puts the camera where it starts. Nothing else moves it until someone takes it over with a drag, a pinch or a scroll. */

@@ -43,5 +43,5 @@ export function frameCrew(spots, { yaw, pitch, visW, visH, tall, top = 90, pad =
   const u = Math.max(mid - slack, Math.min(mid + slack, mean));
   // The group sits a little low in the frame, because their words go above them.
   const s = (Math.min(...ss) - head + Math.max(...ss)) / 2 - (top - pad) / 2 / ppu;
-  return { ppu, u, s, framed: chosen.length, of: pts.length };
+  return { ppu, u, s, framed: chosen.length, of: pts.length, right: Math.max(...us) };
 }
