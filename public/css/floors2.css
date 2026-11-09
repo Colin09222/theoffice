@@ -400,3 +400,28 @@
   .talk-pill { background: #fff; color: var(--ink); box-shadow: 0 6px 18px rgba(40, 26, 10, .28); }
   .talk-pill .ico { background: var(--tomato); color: #fff; }
 }
+
+/* ---- the look pass: the chrome sits lightly round the room ---- */
+/* The lift's floor buttons are quiet paper discs; only where you are, and the way up and down, are lit. A list longer than the panel fades out at each end, not cut through a number. */
+@media (min-width: 761px) {
+  .scrub-track { gap: 5px; padding: 12px 0; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%); }
+  .scrub-tick { width: 38px; height: 38px; border: 2px solid #e2d5ba; background: #fff; color: #5a4a30; font-size: 16px; box-shadow: 0 2px 0 #e2d5ba; }
+  .scrub-tick:hover { background: #fff3c4; border-color: #d9a43e; filter: none; }
+  .scrub-tick:active { transform: translateY(2px); box-shadow: 0 0 0 #e2d5ba; }
+  .scrub-tick.on { background: radial-gradient(circle at 50% 40%, #fff3b4, #ffb31f 74%); border-color: #7a4d00; color: #2b1a00; box-shadow: 0 2px 0 #5f4610, 0 0 0 4px rgba(255, 186, 40, .28); }
+  .visitor-note { padding: 6px 11px; border-radius: 999px; background: rgba(255, 252, 244, .9); color: var(--ink-2); font: 600 13px/1.3 var(--sans); box-shadow: 0 2px 8px rgba(40, 26, 10, .14); }
+}
+/* A phone on its side: one row that says where you are, like the phone's own plaque, and the room gets the rest. */
+@media (max-height: 520px) and (min-width: 761px) {
+  .floor-top { width: auto; max-width: 46vw; flex-direction: row; align-items: center; gap: 8px; padding: 5px 10px 5px 5px; overflow: visible; }
+  .floor-top .plaque-top { flex: none; }
+  .floor-top .plaque-top .mute-btn { display: none; }
+  .floor-top .back span { display: none; }
+  .floor-top .back { width: 40px; min-height: 40px; padding: 0; margin: 0; justify-content: center; }
+  .floor-title { display: block; min-width: 0; }
+  .floor-num { font-size: 12px; margin: 0; line-height: 1; }
+  .floor-name { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30vw; }
+  .floor-meta .hours-sign { display: none; }
+  .floor-meta .status-pill { font-size: 12px; padding: 3px 7px; }
+  .visitor-note { max-width: 44vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+}

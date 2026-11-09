@@ -389,7 +389,7 @@ class FloorPage {
         h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'), startButton(this) || '');
     } else {
       put(this.controlsEl,
-        h('span.visitor-note', {}, f.filler ? 'A demo company: scripted and fictional. Watch all you like.' : 'You\'re visiting. Watch all you like.'),
+        h('span.visitor-note', {}, f.filler ? 'Demo company: scripted and fictional' : 'You\'re visiting. Watch all you like.'),
         session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'));
     }
   }

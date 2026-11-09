@@ -1064,7 +1064,7 @@ export class OfficeView {
   }
   buildWalls(room) {
     const { primary, accent } = this.colors; const L = this.plan;
-    const body = L.frame ? '#a57a4e' : mix(deepen(this.decor.wall), '#f4e7d4', 0.12), cap = L.frame ? '#6e4e32' : mix(accent, '#fffaf0', 0.88), foot = shadeHex(body, 0.72);
+    const body = L.frame ? '#a57a4e' : mix(deepen(this.decor.wall), '#f4e7d4', 0.12), cap = L.frame ? '#6e4e32' : mix(accent, '#f1f5ff', 0.9), foot = shadeHex(body, 0.72);
     const T = 0.28, H = 1.14;
     for (const w of wallLines(L)) {
       const along = w.x0 !== w.x1, len = Math.abs(along ? w.x1 - w.x0 : w.z1 - w.z0), cx = (w.x0 + w.x1) / 2, cz = (w.z0 + w.z1) / 2;
@@ -1969,7 +1969,7 @@ export class OfficeView {
     let zoom = 2.2, frame = null;
     for (let i = 0; i < 3; i++) {
       const pitch = this.tiltAt(zoom), upright = Math.cos(pitch);
-      frame = frameCrew(spots, { yaw, pitch, visW, visH, tall, top: tallPhone ? 96 : 84, pad: tallPhone ? 52 : 50, ppuMax: bean / (tall * upright), ppuMin: bean * 0.82 / (tall * upright) });
+      frame = frameCrew(spots, { yaw, pitch, visW, visH, tall, top: tallPhone ? 96 : 84, pad: tallPhone ? 52 : 50, ppuMax: bean / (tall * upright), ppuMin: bean * (tallPhone ? 0.82 : 0.7) / (tall * upright) });  // a wide screen gives up a little size to keep the whole team in the picture
       zoom = Math.min(ZOOM_MAX, Math.max(1, (fit * frame.ppu * 2 * tan) / h));
     }
     // A tall phone looks down the row with the desks on the right, so the picture is the room (the corridor, the meeting table), not the terrace behind the wall.
