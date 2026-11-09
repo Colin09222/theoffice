@@ -244,6 +244,18 @@ describe('failures fall back cleanly', () => {
       assert.equal(get(S.t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0, 'nothing left held');
     } finally { await S.t.close(); }
   });
+  test('a call that hits the clock is cut off, charged what it held, and rests cleanly', async () => {
+    const saved = LOCKED_LIMITS.timeoutMs; LOCKED_LIMITS.timeoutMs = 60;
+    const fake = fakeModel(async (a) => { await new Promise((res, rej) => { a.signal.addEventListener('abort', () => rej(a.signal.reason)); }); });
+    const S = await setup({ llm: fake });
+    try {
+      S.lock(5);
+      const r = await S.ai(S.say('hi'));
+      assert.equal(r.status, 503); assert.equal(r.json.error, 'ai_unavailable');
+      assert.ok(spentToday(S.t, S.floor).n > 0, 'the held amount was charged');
+      assert.equal(get(S.t.db, 'SELECT COUNT(*) n FROM budget_holds').n, 0);
+    } finally { LOCKED_LIMITS.timeoutMs = saved; await S.t.close(); }
+  });
   test('a host filter stop gets the help line', async () => {
     const fake = fakeModel(() => reply('', 0, 0, 0, 'content_filter'));
     const S = await setup({ llm: fake });
