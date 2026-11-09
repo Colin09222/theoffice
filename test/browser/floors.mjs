@@ -84,6 +84,10 @@ for (const [label, opts, q, budget] of ONLY === 'living' || ONLY === 'landscape'
     if (st.detail || st.shadow) throw new Error(JSON.stringify(st));
     if (!(st.calls > 20 && st.calls < 200)) throw new Error(`${st.calls} calls at low`);
   });
+  await step(tag('Business Development has a desk and a title, is on no staff list, and stays put'), async () => {
+    const r = await p.ev(`(() => { const v = window.__office.view, a = v.actors.get('bizdev'); return a ? { title: a.roleEl.textContent, seated: a.seated, idle: a.state === 'idle', extra: !!a.extra, listed: window.__office.state.agents.some((x) => x.id === 'bizdev') } : null; })()`);
+    if (!r || r.title !== 'Business Development' || !r.seated || !r.idle || !r.extra || r.listed) throw new Error(JSON.stringify(r));
+  });
   await step(tag('no console errors'), async () => {
     const errs = p.errors.filter((e) => !/status of 40[0-9]|status of 429/.test(e));
     if (errs.length) throw new Error(errs.slice(0, 5).join(' | ').slice(0, 800));

@@ -22,7 +22,7 @@ const mixHex = (a, b, t) => `#${C(a).lerp(C(b), t).getHexString()}`;
 const gap = (a, b) => { const x = C(a), y = C(b); return Math.hypot(x.r - y.r, x.g - y.g, x.b - y.b); };
 const apart = (list, start, from, min) => { for (let i = 0; i < list.length; i++) { const c = list[(start + i) % list.length]; if (from.every((f) => gap(c, f) >= min)) return c; } return list[start % list.length]; };
 /** Each job's hat and outfit. Today the whole office is in suits and bareheaded: change a line here and that job changes everywhere. outfit: none | tie | suit | waistcoat | hivis | labcoat. */
-export const JOBS = Object.fromEntries(['boss', 'manager', 'builder', 'designer', 'tester', 'lawyer', 'researcher', 'writer', 'analyst', 'marketer', 'illustrator'].map((r) => [r, { hat: 'none', outfit: 'suit' }]));
+export const JOBS = Object.fromEntries(['boss', 'manager', 'builder', 'designer', 'tester', 'lawyer', 'researcher', 'writer', 'analyst', 'marketer', 'illustrator', 'bizdev'].map((r) => [r, { hat: 'none', outfit: 'suit' }]));
 /** The boss picks their own hat and glasses in the character builder. An outfit saved before the suits stays on until they pick a suit or tie colour. */
 const OUTFIT_OF_LOOK = { labcoat: 'labcoat', overalls: 'hivis', shirt: 'tie', tee: 'none', hoodie: 'none' };
 

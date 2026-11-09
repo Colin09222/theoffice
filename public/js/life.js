@@ -192,7 +192,7 @@ export class FloorLife {
   /** Dropping in on a colleague: over to their office for a word, and they answer from their desk. Returns false when nobody is in. */
   visit(a) {
     if (a.isBoss) return false;
-    const free = [...this.people.values()].filter((o) => o !== a && !o.isBoss && o.seated && o.state === 'idle' && !o.action && !o.scene);
+    const free = [...this.people.values()].filter((o) => o !== a && !o.isBoss && !o.extra && o.seated && o.state === 'idle' && !o.action && !o.scene);
     const b = free[Math.floor(Math.random() * free.length)];
     if (!b) return false;
     const spot = this.view.visitSpot(b.seat, a);
@@ -206,7 +206,7 @@ export class FloorLife {
   /** Two free people meet in the kitchen or the lounge for a word. Returns false when nobody is free to talk to. */
   chat(a) {
     if (a.isBoss) return false;
-    const free = [...this.people.values()].filter((o) => o !== a && !o.isBoss && o.state === 'idle' && o.seated && !o.action && !o.scene);
+    const free = [...this.people.values()].filter((o) => o !== a && !o.isBoss && !o.extra && o.state === 'idle' && o.seated && !o.action && !o.scene);
     const b = free[Math.floor(Math.random() * free.length)];
     if (!b) return false;
     const kind = this.view.decor.coffee && Math.random() < 0.6 ? 'kitchen' : 'lounge';

@@ -30,6 +30,8 @@ const SUN_FAR = 64;  // the sun's distance, and its shadow box, scale with the f
 const ZOOM_MIN = 0.8, ZOOM_MAX = 5.5, TILT_END = 3.6;
 const HOME_YAW = 0.5, TALL_YAW = 1.42;  // a tall phone looks along the room's long side, so a row of desks runs down the tall screen with everyone in it
 const ROLE_TITLE = { manager: 'Office Manager', researcher: 'Researcher', writer: 'Writer', builder: 'Builder', designer: 'Designer', analyst: 'Analyst', marketer: 'Marketer', tester: 'Tester', illustrator: 'Illustrator' };
+/** Business Development: a bean at a desk with a title, and nothing else yet. Only the room draws him, so the server has no such person: no model, no tools, no tasks, no chats, no meetings, nowhere on the staff list, and he can't be tapped. */
+const BIZ_DEV = { id: 'bizdev', role: 'bizdev', name: 'Biz\u00a0Dev', title: 'Business Development', look: { wear: 'bizdev' }, state: 'idle', activity: null };
 /** A person's job as their name tag and the staff list put it: the title they were hired with, else their role's. */
 export const jobTitle = (info, isBoss = false) => (isBoss ? 'Boss' : info.title || ROLE_TITLE[info.role] || (info.role ? info.role[0].toUpperCase() + info.role.slice(1) : 'Staff'));
 // Sky under a floor page's room: the floor is high up a tower, so what lies beyond the terrace is a cool bank of cloud, and the warm room stands out
@@ -1506,7 +1508,8 @@ export class OfficeView {
   syncAgents(state) {
     this.synced = true;
     this.setFloorName(state.floor.name);
-    const staff = state.agents.filter((a) => a.role !== 'manager');
+    // Last in the list, so the real staff have first pick of the rooms.
+    const staff = [...state.agents.filter((a) => a.role !== 'manager'), BIZ_DEV];
     const fresh = staff.filter((a) => !this.actors.has(a.id));
     this.owners = assignRooms(this.plan, staff, this.owners);
     for (const a of fresh) {
@@ -1523,6 +1526,7 @@ export class OfficeView {
       this.nav.block(...deskRect(spot));
       const actor = new Actor(this, a, { at: desk.at, face: desk.face, screenMat: desk.screenMat, glow: desk.glow, bar: desk.bar });
       actor.deskPos = [x, z, ry]; actor.office = host?.id || null;
+      if (a === BIZ_DEV) { actor.extra = true; actor.idleTimer = Infinity; }  // he stays at his desk, and nobody drops in on him
       this.actors.set(a.id, actor);
       actor.setState(a.state, a.activity);
       if (room) this.addOffice(room, a, { own: true, actor });
@@ -1770,7 +1774,7 @@ export class OfficeView {
   handoff(fromId, toId) { this.life.handoff(fromId, toId); }
   cheer() {
     for (const a of this.actors.values()) {
-      if (a.action) continue;
+      if (a.action || a.extra) continue;
       a.standUp();
       a.perform([{ anim: 'cheer', hold: 1.8 }]);
     }
