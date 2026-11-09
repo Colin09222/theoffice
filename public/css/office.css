@@ -52,3 +52,5 @@
   #labels .char-bubble.task-pill { background: rgba(255, 255, 255, .92); border: 1px solid rgba(28, 23, 18, .32); box-shadow: none; font-weight: 600; font-size: 12px; }
   #labels .char-bubble.task-pill::after { display: none; }
 }
+/* On a phone a bubble only ever moves to somewhere it has been checked to fit, so it jumps there rather than sliding across the buttons on the way. */
+@media (max-width: 760px) { #labels .char-bubble { transition: none; } }
