@@ -3,9 +3,7 @@ use tpr_sim::Engine;
 fn main() {
     let dir = "data";
     let rd = |f: &str| std::fs::read_to_string(format!("{dir}/{f}")).unwrap();
-    let j = |f: &str| -> serde_json::Value { serde_json::from_str(&rd(f)).unwrap() };
-    let issues = j("content/issues.json");
-    let content = serde_json::json!({"issues": issues["issues"], "platforms": issues["platforms"], "events": j("content/events.json")["events"], "scandals": j("content/scandals.json")["scandals"], "bribes": j("content/bribes.json")["bribes"], "names": j("content/names.json")}).to_string();
+    let content = tpr_sim::data::content_bundle_from_dir(dir).unwrap();
     let cfg = serde_json::json!({"seed": 2, "aiOnly": true, "platform": [0,1,0,1,0,1,0,1]}).to_string();
     let mut e = Engine::new(&rd("states.json"), &rd("packs/OH.json"), &content, &cfg).unwrap();
     e.step(365 * 90);

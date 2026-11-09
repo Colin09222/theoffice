@@ -11,9 +11,7 @@ fn main() {
     let years: i32 = a.get(4).and_then(|x| x.parse().ok()).unwrap_or(60);
     let dir = "data";
     let rd = |f: &str| std::fs::read_to_string(format!("{dir}/{f}")).unwrap();
-    let j = |f: &str| -> serde_json::Value { serde_json::from_str(&rd(f)).unwrap() };
-    let issues = j("content/issues.json");
-    let content = serde_json::json!({"issues": issues["issues"], "platforms": issues["platforms"], "events": j("content/events.json")["events"], "scandals": j("content/scandals.json")["scandals"], "bribes": j("content/bribes.json")["bribes"], "names": j("content/names.json")}).to_string();
+    let content = tpr_sim::data::content_bundle_from_dir(dir).unwrap();
     // Platform: start from the home county's own views (a player can read them on the County tab).
     let probe = Engine::new(&rd("states.json"), &rd(&format!("packs/{st}.json")), &content, &serde_json::json!({"seed": seed, "homePlace": home}).to_string()).unwrap();
     let hc = probe.world.arenas[probe.world.home_arena as usize].county as usize;

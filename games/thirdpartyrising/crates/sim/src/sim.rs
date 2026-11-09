@@ -9,7 +9,7 @@ use crate::*;
 /// County evaluations each AI party may make per day.
 pub const AI_EVALS: usize = 12;
 /// Below this many counties the daily pass runs on one thread.
-pub const PAR_MIN_COUNTIES: usize = 1024;
+pub static PAR_MIN_COUNTIES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1024);
 /// Days before election day that AI parties file, and the last day the player may file.
 pub const AI_FILE_LEAD: i32 = 100;
 pub const FILE_DEADLINE: i32 = 45;
@@ -116,7 +116,7 @@ fn counties_daily(w: &mut World) {
     // Threads only pay for themselves on big maps (the future national map); a single state is
     // faster on one core, and the result is identical either way.
     #[cfg(feature = "parallel")]
-    if w.nc >= PAR_MIN_COUNTIES {
+    if w.nc >= PAR_MIN_COUNTIES.load(std::sync::atomic::Ordering::Relaxed) {
         use rayon::prelude::*;
         w.support
             .par_chunks_mut(P)

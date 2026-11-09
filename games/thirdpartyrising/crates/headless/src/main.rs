@@ -22,20 +22,6 @@ fn rss() -> usize {
         .unwrap_or(0)
 }
 
-pub fn content_bundle(dir: &str) -> Result<String, String> {
-    let rd = |f: &str| -> Result<serde_json::Value, String> {
-        let t = std::fs::read_to_string(format!("{dir}/content/{f}")).map_err(|e| format!("{f}: {e}"))?;
-        serde_json::from_str(&t).map_err(|e| format!("{f}: {e}"))
-    };
-    let issues = rd("issues.json")?;
-    Ok(serde_json::json!({
-        "issues": issues["issues"], "platforms": issues["platforms"],
-        "events": rd("events.json")?["events"], "scandals": rd("scandals.json")?["scandals"],
-        "bribes": rd("bribes.json")?["bribes"], "names": rd("names.json")?,
-    })
-    .to_string())
-}
-
 fn main() {
     let state = arg("--state", "OH");
     let years: i32 = arg("--years", "100").parse().unwrap_or(100);
@@ -45,7 +31,7 @@ fn main() {
     let run = || -> Result<(), String> {
         let states = std::fs::read_to_string(format!("{dir}/states.json")).map_err(|e| e.to_string())?;
         let pack = std::fs::read_to_string(format!("{dir}/packs/{state}.json")).map_err(|e| format!("pack {state}: {e}"))?;
-        let content = content_bundle(&dir)?;
+        let content = tpr_sim::data::content_bundle_from_dir(&dir)?;
         let cfg = serde_json::json!({"seed": seed, "aiOnly": true, "partyName": "Test Party", "platform": [0, 1, 0, 1, 0, 1, 0, 1]}).to_string();
         let mut e = Engine::new(&states, &pack, &content, &cfg)?;
         let (rss0, heap0) = (rss(), e.world.heap_bytes());

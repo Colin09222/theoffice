@@ -238,3 +238,21 @@ pub fn party_code(s: &str) -> u8 {
     }
 }
 pub const PARTY_CODES: [&str; P] = ["D", "R", "L", "G", "P", "X1", "X2", "X3"];
+
+/// Joins the separate content files (data/content/*.json) into the single bundle the engine takes.
+pub fn content_bundle(issues: &str, events: &str, scandals: &str, bribes: &str, names: &str) -> Result<String, String> {
+    let p = |name: &str, t: &str| -> Result<serde_json::Value, String> { serde_json::from_str(t).map_err(|e| format!("{name}: {e}")) };
+    let i = p("issues.json", issues)?;
+    Ok(serde_json::json!({
+        "issues": i["issues"], "platforms": i["platforms"],
+        "events": p("events.json", events)?["events"], "scandals": p("scandals.json", scandals)?["scandals"],
+        "bribes": p("bribes.json", bribes)?["bribes"], "names": p("names.json", names)?,
+    })
+    .to_string())
+}
+
+/// Reads the content bundle from a data directory on disk (native hosts only).
+pub fn content_bundle_from_dir(dir: &str) -> Result<String, String> {
+    let rd = |f: &str| std::fs::read_to_string(format!("{dir}/content/{f}")).map_err(|e| format!("{f}: {e}"));
+    content_bundle(&rd("issues.json")?, &rd("events.json")?, &rd("scandals.json")?, &rd("bribes.json")?, &rd("names.json")?)
+}
