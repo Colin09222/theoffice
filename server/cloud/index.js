@@ -17,6 +17,7 @@ import { createAppAi } from './ai.js';
 import { createWebFetcher } from './web.js';
 import { bearerToken, findByToken, CLOUD_PATH } from '../servers.js';
 import { createChat, CHAT_RATES, CHAT_JS, CHAT_PANEL_JS } from './chat.js';
+import { createLockedAi, LOCKED_RATES } from './ai-locked.js';
 import { createAuthMail, AUTH_MAIL_RATES, RESET_HTML, RESET_JS, RESET_CSS } from './auth-mail.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -59,7 +60,7 @@ const scryptAsync = (pw, salt, o) => new Promise((res, rej) => scrypt(pw, salt, 
 export function installCloud(ext) {
   const { db, cfg, engine, log, now, GET, POST, json, requireOwner, requireAdmin, floorBySlug, HttpError, ipOf, secret, pay } = ext;
   const store = createStore(db, cfg.cloudLimits || {}, now);
-  const RATES = { ...CLOUD_RATES, ...CHAT_RATES, ...AUTH_MAIL_RATES, ...(cfg.cloudRates || {}) };
+  const RATES = { ...CLOUD_RATES, ...CHAT_RATES, ...AUTH_MAIL_RATES, ...LOCKED_RATES, ...(cfg.cloudRates || {}) };
   const rates = new A.RateLimiter(cfg.cloudRateScale ?? cfg.rateScale, now);
   const hashing = gate(2, 64);
   const uploading = gate(4, 8);
@@ -76,6 +77,7 @@ export function installCloud(ext) {
   }
   const powers = createPowers(db, cfg, now);
   const ai = createAppAi({ db, models: ext.models, engine, llm: ext.llm, log, powers, gate: gate(8, 16) });
+  const lockedAi = createLockedAi({ db, models: ext.models, engine, llm: ext.llm, log, powers, gate: gate(8, 16), secret });
   const web = createWebFetcher({ db, cfg, powers, gate: gate(8, 24), net: ext.cloudNet, now, log });
   // Website chat: server/cloud/chat.js.
   const chat = createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, engine });
@@ -313,6 +315,13 @@ export function installCloud(ext) {
         return reply(200, { name: b, players: r ? r.players : 0, max: rooms.L.members });
       }
       if (a === 'chat') return await chat.handle({ req, reply, f, pr, ip, pk, m, b, c });
+      if (a === 'ai' && b === 'chat' && !c && m === 'POST' && lockedAi.lockOf(F, p)) {
+        // This project's AI is locked by the admin: its own published prompt, one model and a hard daily stop. The page only ever sends the conversation.
+        const tooFast = 'You\'re asking very quickly. Give it a minute and try again.';
+        limit('lockedVisitor', `${pk}:${ip}`, tooFast); limit('lockedVisitorDay', `${pk}:${ip}`, 'You\'ve used your chat for today. Come back tomorrow.'); limit('lockedProject', pk, tooFast);
+        const body = await readBody(req, BODY.json);
+        return reply(200, await atOnce(`ai:${ip}`, 1, () => atOnce(`aiP:${pk}`, 6, () => lockedAi.chat({ F, p, pk, body, lock: lockedAi.lockOf(F, p) }), 'The AI is busy on this site right now. Try again in a moment.'), 'One message at a time, please.'));
+      }
       if (a === 'ai' && b === 'chat' && !c && m === 'POST') {
         const tooFast = 'You\'re asking very quickly. Give it a minute and try again.';
         limit('aiVisitor', `${pk}:${ip}`, tooFast); limit('aiVisitorDay', `${pk}:${ip}`, 'You\'ve used your AI requests here for today. Come back tomorrow.'); limit('aiProject', pk, tooFast);
