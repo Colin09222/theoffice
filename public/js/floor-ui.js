@@ -869,13 +869,15 @@ class FloorPage {
       p.sources?.length ? h('small', {}, `${p.sources.length} ${p.sources.length === 1 ? 'source' : 'sources'}`) : null,
       p.domain ? h('small.live-domain', {}, p.domain) : null,
       this.owner ? this.launchBits(p) : null,
-      h('div.row', {}, h('button.btn.primary', { type: 'button', onclick: open }, icon('folder-open'), 'Open'), priv,
+      h('div.row', {}, p.domain && !p.private ? h('a.btn.primary', { href: `https://${p.domain}/`, target: '_blank', rel: 'noopener noreferrer', 'data-open-domain': p.domain, onclick: (e) => { if (p.private) { e.preventDefault(); open(); } } }, icon('folder-open'), 'Open') : h('button.btn.primary', { type: 'button', onclick: open }, icon('folder-open'), 'Open'), priv,
         this.owner && p.appUrl ? h('button.link', { type: 'button', onclick: async () => {
           if (!window.confirm(`Delete every save, account, leaderboard, document, upload, shared value and sign-up for ${p.title}? This can't be undone. Download your sign-ups first if you want them.`)) return;
           try { const r = await api(`/floors/${this.slug}/projects/${p.slug}/clear-data`, { method: 'POST', body: {} }); toast(`Cleared ${r.removed} saved ${r.removed === 1 ? 'item' : 'items'}`); } catch (e) { toast(e.message, 'bad'); }
         } }, 'Clear saved data') : null));
   }
   async openProject(p) {
+    // A public project with its own domain opens there, and the floor's page can't frame that anyway. Also catches a project switched public since this page drew it.
+    if (p.domain && !p.private) { window.open(`https://${p.domain}/`, '_blank', 'noopener'); return; }
     let url = p.appUrl || p.url;
     if (p.private) { try { url = (await api(`/floors/${this.slug}/projects/${p.slug}/preview`)).url; } catch (e) { toast(e.message, 'bad'); return; } }
     this.previewProject(p, url);

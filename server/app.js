@@ -184,7 +184,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   };
   const projectView = (f, p) => {
     const domain = engine.domains.liveFor(f.id, p.slug);
-    return { slug: p.slug, title: p.title, description: p.description, kind: p.kind, private: !!p.private, publishedAt: p.published_at, sources: JSON.parse(p.sources), url: publicUrl(f.slug, p.slug), appUrl: cfg.appsBaseDomain ? `${appOrigin(cfg, appLabel(db, f, p.slug))}/` : null, domain };
+    return { slug: p.slug, title: p.title, description: p.description, kind: p.kind, private: !!p.private, publishedAt: p.published_at, sources: JSON.parse(p.sources), url: publicUrl(f.slug, p.slug), appUrl: cfg.appsBaseDomain ? (domain && !p.private ? `https://${domain}/` : `${appOrigin(cfg, appLabel(db, f, p.slug))}/`) : null, domain };
   };
   // What only the boss sees on a project card.
   const projectOwnerView = (f, p) => ({ ...projectView(f, p), hasPayment: !!p.payment_link, indexable: !!p.indexable, signups: formCount(db, f.id, p.slug), launchCheck: p.launch_check ? JSON.parse(p.launch_check) : null, designReview: p.design_review ? (({ full: _full, shots: _shots, ...r }) => r)(JSON.parse(p.design_review)) : null, launchReport: p.launch_report });
@@ -806,7 +806,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     // With app origins configured, this friendly link just points at the project's own address. Everything above has already decided whether the viewer may have it.
     if (cfg.appsBaseDomain) {
       const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-      const target = `${appOrigin(cfg, appLabel(db, f, pr.slug))}/${signed ? `${rest[0]}/` : tail.map(encodeURIComponent).join('/')}${signed ? '' : q}`;
+      const ownDomain = !signed && !pr.private ? engine.domains.liveFor(f.id, pr.slug) : '';
+      const target = `${ownDomain ? `https://${ownDomain}` : appOrigin(cfg, appLabel(db, f, pr.slug))}/${signed ? `${rest[0]}/` : tail.map(encodeURIComponent).join('/')}${signed ? '' : q}`;
       res.writeHead(302, { ...SITE, location: target });
       return res.end();
     }
@@ -905,6 +906,11 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     // Search engines are only invited to a public project on its own domain, or one the boss switched on.
     const liveDomain = engine.domains.liveFor(f.id, pr.slug);
     const onOwnDomain = liveDomain && ownHost === liveDomain;
+    // A public project with its own domain lives there. Its old address on the apps domain passes everyone along, path and query intact; a preview pass was already dealt with above.
+    if (liveDomain && !onOwnDomain && !pr.private && appHostLabel(cfg, ownHost) !== null) {
+      res.writeHead(308, { ...HEAD, location: `https://${liveDomain}${/^\/[^/\\]/.test(rawUrl) || rawUrl === '/' ? rawUrl : '/'}` });
+      return res.end();
+    }
     const welcome = !pr.private && (onOwnDomain || !!pr.indexable);
     if (welcome) delete HEAD['x-robots-tag'];
     if (segs[0] === '_data') return serveData(req, res, f, pr, label, rawUrl, HEAD);

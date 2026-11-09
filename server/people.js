@@ -22,8 +22,8 @@ const atMostHigh = (effort) => (EFFORTS.indexOf(effort) > EFFORTS.indexOf('high'
  * The model that answers a work question put to this role: the role's own entry in config/models.json (or the autonomous model, for a job the team
  * picked for itself, exactly as the role's own calls are routed), with effort capped at high and a modest reply size.
  */
-export function answerRoute(models, roleKey, { autonomous = false } = {}) {
-  const r = routeFor(models, roleKey, { autonomous });
+export function answerRoute(models, roleKey, { autonomous = false, tier = '' } = {}) {
+  const r = routeFor(models, roleKey, { autonomous, tier });
   return { provider: r.provider, model: r.model, effort: r.effort ? atMostHigh(r.effort) : r.effort, maxTokens: Math.min(r.maxTokens || ANSWER_MAX_TOKENS, ANSWER_MAX_TOKENS), pricing: r.pricing || {} };
 }
 export const CHARACTER_LIMITS = { persona: 240, bio: 240, quirk: 120 };
@@ -130,7 +130,7 @@ export function createPeople(engine) {
     const pricing = s.pricing || {};
     const messages = [{ role: 'system', content: system }, { role: 'user', content: user }];
     const est = ((system.length + user.length) / 4 * (pricing.prompt || 0) + maxTokens * (pricing.completion || 0)) / 1e6;
-    if (engine.budget.out(provider) || engine.budget.room(provider) <= est || engine.overBudget(floorId, est)) return null;
+    if (engine.budget.out(provider, floorId) || engine.budget.room(provider, floorId) <= est || engine.overBudget(floorId, est)) return null;
     let release = null, holdId = 0, reserved = 0;
     try {
       release = await engine.limiter.acquire(floorId, signal);
@@ -334,7 +334,7 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
         .filter((r) => !isPrivateSlug(floorId, r.project) || r.project === here).slice(0, 4).map((r) => `"${r.title}": ${String(r.result).slice(0, ANSWER_WORK_CHARS)}`);
       const notes = notesFor(target, here);
       // A real question about the work, so it is answered on the colleague's own model, not the one that writes the chatter. A job the team picked for itself is routed the way its other calls are.
-      const route = answerRoute(engine.models, target.role, { autonomous: !!c.autonomous });
+      const route = answerRoute(engine.models, target.role, { autonomous: !!c.autonomous, tier: engine.budget.tier(c.floor.id) });
       // Who they are and what they know come first and are the same for every question put to them, so that part is what the prompt cache keeps. The asker and the question come last.
       const answer = await callModel(floorId, target, route, {
         purpose: 'answer', maxTokens: route.maxTokens, signal: c.signal || ctl.signal, taskId: c.task?.id ?? null, cache: 'system', meta: { asker: c.agent.name, answerer: target.name, question, notes },

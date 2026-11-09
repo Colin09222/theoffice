@@ -63,7 +63,7 @@ export function createAppAi({ db, models, engine, llm, log, powers, gate }) {
       if (room < L.minOutput) throw NO_ALLOWANCE();
       const maxTokens = Math.min(q.maxTokens, room);
       const worst = (est * price.prompt * 1.25 + maxTokens * price.completion) / 1e6;
-      if (engine.budget.out(PROVIDER) || engine.budget.room(PROVIDER) <= worst || engine.overBudget(F, worst)) throw RESTING();
+      if (engine.budget.out(PROVIDER, F) || engine.budget.room(PROVIDER, F) <= worst || engine.overBudget(F, worst)) throw RESTING();
       const todayUsd = get(db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE day=? AND kind='app_ai'", powers.today()).n;
       if (todayUsd + runningUsd + worst > L.buildingDayUsd) throw RESTING();
       const holdId = engine.budget.hold(PROVIDER, { floorId: F, agentId: null, usd: worst });

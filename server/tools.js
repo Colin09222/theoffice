@@ -292,7 +292,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
   };
   // It doesn't say why. A bot has no business knowing there is a limit or how near it is, because it could only pass that on.
   const roomFor = (c, usd, provider) => {
-    const short = engine.overBudget(c.floor.id, usd) || engine.budget.out(provider) || engine.budget.room(provider) <= 0 || (c.task && (get(db, 'SELECT cost_usd n FROM tasks WHERE id=?', c.task.id)?.n ?? 0) + usd > cfg.taskMaxUsd);
+    const short = engine.overBudget(c.floor.id, usd) || engine.budget.out(provider, c.floor.id) || engine.budget.room(provider, c.floor.id) <= 0 || (c.task && (get(db, 'SELECT cost_usd n FROM tasks WHERE id=?', c.task.id)?.n ?? 0) + usd > cfg.taskMaxUsd);
     if (short) throw new WorkspaceError('that is not available right now, so carry on without it');
   };
   const brokerError = (e) => { if (e instanceof ProviderError) { engine.log('warn', 'tool provider failed', { status: e.status, err: scrub(e.message, cfg) }); return new WorkspaceError(`that did not work: ${plainProviderText(e)}`); } return e; };

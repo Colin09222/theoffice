@@ -99,7 +99,7 @@ export function installShipCheck({ db, cfg, engine, log = () => {} }) {
       const messages = [{ role: 'system', content: SHIP_SYSTEM }, { role: 'user', content: parts, ...(shots.length ? { office_blocks: shots.map((x) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: Buffer.from(x.f.content).toString('base64') } })) } : {}) }];
       const maxTokens = s.maxTokens || 6000;
       const est = ((SHIP_SYSTEM.length + parts.length) / 4 * (pricing.prompt || 0) + shots.length * 1600 * (pricing.prompt || 0) + maxTokens * (pricing.completion || 0)) / 1e6;
-      if (engine.budget.out(provider) || engine.budget.room(provider) <= est || engine.overBudget(floor.id, est)) return null;
+      if (engine.budget.out(provider, floor.id) || engine.budget.room(provider, floor.id) <= est || engine.overBudget(floor.id, est)) return null;
       let release = null, holdId = 0, res;
       try {
         release = await engine.limiter.acquire(floor.id, signal);

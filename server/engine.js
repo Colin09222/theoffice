@@ -53,7 +53,7 @@ export class Engine {
   constructor({ db, cfg, models, llm, bus, log, now = Date.now, fetcher, httpFetch, sessions, namecheap, media, search }) {
     Object.assign(this, { db, cfg, models, llm, bus, log, now });
     this.Halt = Halt;
-    this.budget = createBudget(db, cfg, now);
+    this.budget = createBudget(db, cfg, now, models?.floorLimits);
     this.computer = sessions ? new Computer(this, sessions) : null;
     this.limiter = new Limiter(cfg.maxCallsFloor, cfg.maxCallsGlobal);
     this.tools = createTools({ db, cfg, engine: this, fetcher, httpFetch });
@@ -139,7 +139,7 @@ export class Engine {
     const mgr = agents.find((a) => a.role === 'manager');
     // Whoever works on a provider that has reached its limit stays in the queue. Everyone else on the floor carries on.
     const stopped = new Set();
-    const usedUp = (a) => { const p = this.agentProvider(a); if (!this.budget.out(p)) return false; stopped.add(p); return true; };
+    const usedUp = (a) => { const p = this.agentProvider(a); if (!this.budget.out(p, floor.id)) return false; stopped.add(p); return true; };
     if (floor.manager_wake && !this.runs.has(mgr.id) && !usedUp(mgr)) {
       run(this.db, 'UPDATE floors SET manager_wake=0 WHERE id=?', floor.id);
       this.launch(floor, mgr, (ctl) => this.runManager(floor.id, mgr.id, ctl));
@@ -215,6 +215,15 @@ export class Engine {
   // ---- the building's lifetime limits, one per provider ----
   /** Who gets paid when this person works. A computer is always Claude, whatever the role's own model is. */
   agentProvider(agent) { return this.computer?.handles(agent.role) ? 'anthropic' : providerForRole(this.models.all[agent.role] || this.models.all.researcher); }
+  /** Which of the floor's models this task runs on. Decided once, when it starts: one task keeps one model, one prompt cache, and the price its computer was really started at. */
+  taskTier(task) {
+    if (task.model_tier) return task.model_tier;
+    // A computer that was already running when the tiers arrived is on the role's own model.
+    const tier = task.session_id ? 'opus' : this.budget.tier(task.floor_id);
+    if (tier) run(this.db, 'UPDATE tasks SET model_tier=? WHERE id=?', tier, task.id);
+    task.model_tier = tier;
+    return tier;
+  }
   /** The boss hears once that the building is out of budget, and never how much. Raising a limit and restarting clears this on the next tick, and the queue simply starts again. */
   judgeBuildingBudget(floor, stopped) {
     const was = floor.budget_out ? floor.budget_out.split(',') : [];
@@ -222,7 +231,7 @@ export class Engine {
     if (was.join() === out.join()) return;
     run(this.db, 'UPDATE floors SET budget_out=? WHERE id=?', out.join(','), floor.id);
     if (!was.length) this.bossNotice(floor.id, 'Boss, work has stopped for now and everything is saved. The building manager knows. We\'ll carry on by ourselves as soon as that is sorted.');
-    else if (!out.length && was.every((p) => !this.budget.out(p))) this.bossNotice(floor.id, 'Good news, boss: we\'re back at work.');
+    else if (!out.length && was.every((p) => !this.budget.out(p, floor.id))) this.bossNotice(floor.id, 'Good news, boss: we\'re back at work.');
     this.emitFloor(floor.id);
   }
   /** A call that was in flight when the process died has no ledger row and never will. It may well have cost what it held, so that is what goes down. */
@@ -257,7 +266,7 @@ export class Engine {
   async callLLM(ctx, { messages, tools, onToken, onToolCall, onReset, meta }) {
     const { floorId, agent, signal } = ctx;
     // A job the team picked for itself in a work mode runs on the autonomous model. Anything the boss asked for runs on the role's own.
-    const role = routeFor(this.models, agent.role, { autonomous: !!ctx.autonomous });
+    const role = routeFor(this.models, agent.role, { autonomous: !!ctx.autonomous, tier: ctx.tier });
     const provider = providerForRole(role);
     const paid = { ...ctx, provider };
     const pricing = { prompt: role.pricing?.prompt || 0, completion: role.pricing?.completion || 0, cacheRead: role.pricing?.cacheRead };
@@ -271,8 +280,8 @@ export class Engine {
       let reservation = 0, holdId = 0;
       try {
         const est = ((JSON.stringify(messages).length / 4 + extra) * pricing.prompt + (role.maxTokens || 2000) * pricing.completion) / 1e6;
-        if (this.budget.out(provider)) throw new Halt('building_budget');
-        if (this.overBudget(floorId, est) || this.budget.room(provider) <= 0) {
+        if (this.budget.out(provider, floorId)) throw new Halt('building_budget');
+        if (this.overBudget(floorId, est) || this.budget.room(provider, floorId) <= 0) {
           if (this.spentOver(floorId, est)) throw new Halt('budget');  // est assumes maxTokens, so the cap holds
           // Blocked only by a session's hold, which comes back when that session ends. Wait without keeping the slot.
           release();
@@ -411,7 +420,7 @@ export class Engine {
     ctx.autonomous = !ctx.bossTurn && !!(this.modes?.running(floorId) || this.daily?.running(floorId));
     meta.autonomous = ctx.autonomous;
     if (ctx.autonomous) { const b = this.modes.brief(floorId); meta.modeList = b.nextUp; meta.modeGoal = b.goal; }
-    const call = { floorId, agent: mgr, signal, project: '', autonomous: ctx.autonomous };
+    const call = { floorId, agent: mgr, signal, project: '', autonomous: ctx.autonomous, tier: this.budget.tier(floorId) };
     const maxSteps = this.cfg.maxManagerSteps;
     const opening = messages.length;
     try {
@@ -505,7 +514,7 @@ export class Engine {
     if (messages[0]?.role !== 'system') messages.unshift({ role: 'system', content: staffPrompt(floor, agent, roleCfg, task, this.cfg, this.people.personBlock(agent, task)) });
     this.setAgent(agent.id, { state: 'thinking', activity: task.title, project: task.project, task_id: task.id });
     this.feed(floorId, agent, `started "${task.title}"`, task.project);
-    const call = { floorId, agent, signal, project: task.project, taskId: task.id, autonomous: !!task.auto };
+    const call = { floorId, agent, signal, project: task.project, taskId: task.id, autonomous: !!task.auto, tier: this.taskTier(task) };
     const allBoss = all(this.db, "SELECT text FROM messages WHERE floor_id=? AND role='boss' ORDER BY id DESC LIMIT 12", floorId).map((m) => m.text).join(' ');
     const answers = () => all(this.db, 'SELECT answer FROM questions WHERE task_id=? AND answer IS NOT NULL', task.id).map((q) => q.answer);
     const maxSteps = this.cfg.maxStaffSteps;
@@ -853,7 +862,7 @@ export class Engine {
     run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
     const state = this.floorState(floor.id);
     if (state.budgetStopped) this.bossNotice(floor.id, 'Noted, boss. Everyone has gone home for today, so I\'ll pick this up first thing tomorrow.');
-    else if (state.outOfBudget && this.budget.out(this.agentProvider({ role: 'manager' }))) this.bossNotice(floor.id, 'Noted, boss. Work is still stopped for now, so I\'ll pick this up once the building manager has sorted that out.');
+    else if (state.outOfBudget && this.budget.out(this.agentProvider({ role: 'manager' }), floor.id)) this.bossNotice(floor.id, 'Noted, boss. Work is still stopped for now, so I\'ll pick this up once the building manager has sorted that out.');
     this.kick();
   }
   pauseFloor(floorId, reason = 'Paused by the boss') {

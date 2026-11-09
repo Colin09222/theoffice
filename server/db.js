@@ -174,6 +174,7 @@ Object.assign(ADDED.tasks, { auto: 'INTEGER NOT NULL DEFAULT 0' });
 
 // What a project's files added up to when the manager sent a task back, so the manager can be told when it comes back with nothing changed.
 Object.assign(ADDED.tasks, { sent_back_sum: "TEXT NOT NULL DEFAULT ''" });
+Object.assign(ADDED.tasks, { model_tier: "TEXT NOT NULL DEFAULT ''" });
 
 export function openDb(dataDir) {
   let path = ':memory:';

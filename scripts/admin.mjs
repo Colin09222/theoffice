@@ -12,7 +12,7 @@ import { lookupLabel } from '../server/apps.js';
 import { slugPattern } from '../server/workspace.js';
 import { writeFileSync } from 'node:fs';
 import { helpListing, helpListingText, answerHelp, declineHelp, HelpError, HELP_LIMITS, newFence } from '../server/help.js';
-import { budgetReport, budgetReportText } from '../server/budget.js';
+import { budgetReport, budgetReportText, createBudget } from '../server/budget.js';
 import { purchaseListing, purchaseListingText, decidePurchase, PurchaseError } from '../server/purchases.js';
 import { readFileSync, statSync } from 'node:fs';
 import { googleAdsFromConfig } from '../server/googleads.js';
@@ -64,6 +64,7 @@ const usage = () => {
     '  node scripts/admin.mjs help list [--json]       what floors have asked buddehbot and not had answered. Everything a floor wrote is fenced as untrusted data',
     '  node scripts/admin.mjs help answer --id N --text-file PATH   answer one, as guidance to that floor\'s manager',
     '  node scripts/admin.mjs help answer --id N --decline          decline one',
+    '  node scripts/admin.mjs floor-limit --floor N [--claude USD] [--openrouter USD] [--fable USD] [--opus USD] [--clear]   top one floor up: raises its stops or moves where its models switch, then shows where it stands (admin only, and it takes effect on the server\'s next tick)',
     '  node scripts/admin.mjs budget [--json]          spent, limit and remaining per provider, what each floor has spent, and a flag at 50%, 80% and 100%',
     '  node scripts/admin.mjs purchases list [--json]  what the staff have asked to buy and nobody has decided. Everything a floor wrote is fenced as untrusted data',
     '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick',
@@ -293,6 +294,17 @@ if (cmd === 'code' && rest[0] === 'hold') {
       }
     } catch (e) { if (e instanceof HelpError) die(e.message); throw e; }
   } else usage();
+} else if (cmd === 'floor-limit') {
+  const usd = (name) => { const i = rest.indexOf(name); if (i < 0) return undefined; const v = Number(rest[i + 1]); if (!Number.isFinite(v) || v < 0) die(`${name} needs a dollar amount.`); return v; };
+  const floor = get(db, 'SELECT id,number,name FROM floors WHERE number=?', floorArg());
+  if (!floor) die('No floor with that number.');
+  const budget = createBudget(db, cfg, Date.now, loadModels().floorLimits);
+  if (rest.includes('--clear')) budget.setFloorOverride(floor.id, null);
+  else {
+    const over = Object.fromEntries(Object.entries({ claudeStopUsd: usd('--claude'), openrouterStopUsd: usd('--openrouter'), fableUntilUsd: usd('--fable'), opusUntilUsd: usd('--opus') }).filter(([, v]) => v !== undefined));
+    if (Object.keys(over).length) budget.setFloorOverride(floor.id, over);
+  }
+  console.log(JSON.stringify({ floor: floor.number, ...budget.floorStatus(floor.id) }));
 } else if (cmd === 'budget') {
   // Read from the database and this process's own BUDGET_ settings, so it needs the same environment as the server. It prints no key.
   const report = budgetReport(db, cfg);

@@ -187,7 +187,7 @@ export function createLockedAi({ db, models, engine, llm, log, powers, gate, sec
       if (powers.blocked('ai', F, p)) throw OFF();
       const est = estimateTokens(guide.system.length + chars);
       const worst = (est * price.prompt * 1.25 + L.maxTokens * price.completion) / 1e6;
-      if (engine.budget.out(PROVIDER) || engine.budget.room(PROVIDER) <= worst || engine.overBudget(F, worst)) throw RESTING();
+      if (engine.budget.out(PROVIDER, F) || engine.budget.room(PROVIDER, F) <= worst || engine.overBudget(F, worst)) throw RESTING();
       // The stop itself: real money so far today, plus what running calls were promised, plus this call at its dearest.
       if (spentToday(F, p) + (running.get(pk) || 0) + worst > lock.day_usd) throw DAY_STOP();
       const holdId = engine.budget.hold(PROVIDER, { floorId: F, agentId: null, usd: worst });

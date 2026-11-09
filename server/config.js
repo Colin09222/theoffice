@@ -189,7 +189,7 @@ export function loadModels(path = resolve(ROOT, 'config/models.json')) {
   const priced = (x) => (x && !x.pricing && prices[x.model] ? { ...x, pricing: prices[x.model] } : x);
   const each = (group) => Object.fromEntries(Object.entries(group || {}).map(([k, r]) => [k, priced(r)]));
   const roles = each(m.roles), hireable = each(m.hireable);
-  return { roles, hireable, all: { ...roles, ...hireable }, tools: each(m.tools), prices, autonomous: m.autonomous || null, appAi: m.appAi || null };
+  return { roles, hireable, all: { ...roles, ...hireable }, tools: each(m.tools), prices, autonomous: m.autonomous || null, appAi: m.appAi || null, floorLimits: m.floorLimits || null };
 }
 
 /**
@@ -197,7 +197,7 @@ export function loadModels(path = resolve(ROOT, 'config/models.json')) {
  * runs on the autonomous model, computer sessions included. Returns { provider, model, effort, maxTokens, pricing }, or null for a role
  * that has no computer when one is asked for.
  */
-export function routeFor(models, roleKey, { autonomous = false, computer = false } = {}) {
+export function routeFor(models, roleKey, { autonomous = false, computer = false, tier = '' } = {}) {
   const role = models.all[roleKey] || models.all.researcher;
   const price = (model, own) => own || models.prices?.[model] || { prompt: 0, completion: 0 };
   let r;
@@ -208,6 +208,10 @@ export function routeFor(models, roleKey, { autonomous = false, computer = false
     // Managed Agents runs Claude only, so a role on another provider names its Claude model under computer.
     r = { provider: 'anthropic', model, effort: over.effort ?? role.effort, maxTokens: role.maxTokens, pricing: price(model, over.pricing || (model === role.model ? role.pricing : null)) };
   } else r = { provider: role.provider === 'anthropic' ? 'anthropic' : (role.provider || 'openrouter'), model: role.model, effort: role.effort, maxTokens: role.maxTokens, pricing: price(role.model, role.pricing) };
+  // The floor's allowance moves the roles that shape the work between models. 'opus' and '' leave a role on its own, and everyone else stays where they are.
+  const fl = models.floorLimits;
+  const moved = fl && (fl.roles || []).includes(roleKey) ? (tier === 'fable' ? { model: fl.fableModel } : tier === 'sonnet' ? { model: fl.sonnetModel, effort: fl.sonnetEffort } : null) : null;
+  if (moved) r = { ...r, provider: 'anthropic', model: moved.model, effort: moved.effort ?? r.effort, pricing: price(moved.model, null) };
   const auto = models.autonomous;
   if (!autonomous || !auto?.model) return r;
   if (!computer && (auto.keepOwnModel || []).includes(roleKey)) return r;

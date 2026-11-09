@@ -7,6 +7,10 @@ import { newFence } from './help.js';
 
 export const PROVIDERS = ['anthropic', 'openrouter'];
 const LIMIT = { anthropic: 'budgetAnthropicUsd', openrouter: 'budgetOpenrouterUsd' };
+// What one floor may spend, on top of what the building may. floorLimits in config/models.json sets the defaults; a settings row can top one floor up.
+const FLOOR_SINCE = 'floor_limits_since';
+const FLOOR_STOP = { anthropic: 'claudeStopUsd', openrouter: 'openrouterStopUsd' };
+const floorKey = (floorId) => `floor_limit_${floorId}`;
 // Less than this left and a provider counts as used up. It is also the least a computer is worth starting for.
 export const MIN_ROOM_USD = 0.1;
 const FLAGS = [[100, '100%'], [80, '80%'], [50, '50%']];
@@ -21,16 +25,37 @@ export function providerOf(model, kind) {
   return model === 'managed-session' || String(model).startsWith('claude-') ? 'anthropic' : 'openrouter';
 }
 
-export function createBudget(db, cfg, now = Date.now) {
+export function createBudget(db, cfg, now = Date.now, floorLimits = null) {
   const limit = (p) => cfg[LIMIT[p]];
   const spent = (p) => get(db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE provider=?', p).n;
   const held = (p) => get(db, 'SELECT COALESCE(SUM(usd),0) n FROM budget_holds WHERE provider=?', p).n;
+  // Counted from the first boot that had these limits, so what a floor spent before then doesn't count against it.
+  const since = floorLimits ? (run(db, 'INSERT OR IGNORE INTO settings (key,value) VALUES (?,?)', FLOOR_SINCE, String(now())), Number(get(db, 'SELECT value FROM settings WHERE key=?', FLOOR_SINCE).value)) : 0;
+  const override = (floorId) => { const r = get(db, 'SELECT value FROM settings WHERE key=?', floorKey(floorId)); if (!r) return {}; try { return JSON.parse(r.value); } catch { return {}; } };
+  const floorLimit = (floorId) => ({ ...floorLimits, ...override(floorId) });
+  const floorSpent = (floorId, p) => get(db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND provider=? AND created_at>=?', floorId, p, since).n;
+  const floorHeld = (floorId, p) => get(db, 'SELECT COALESCE(SUM(usd),0) n FROM budget_holds WHERE floor_id=? AND provider=?', floorId, p).n;
+  const floorStop = (floorId, p) => { const stop = Number(floorLimit(floorId)[FLOOR_STOP[p]]); return Number.isFinite(stop) ? stop : Infinity; };
+  const floorOut = (floorId, p) => !!floorLimits && floorId != null && floorSpent(floorId, p) >= floorStop(floorId, p);
+  const tier = (floorId) => { if (!floorLimits || floorId == null) return ''; const l = floorLimit(floorId), s = floorSpent(floorId, 'anthropic'); return s < l.fableUntilUsd ? 'fable' : s < l.opusUntilUsd ? 'opus' : 'sonnet'; };
   return {
     limit, spent, held,
-    /** Money actually gone, so the provider's roles stop. Raising the limit is the only way back. */
-    out: (p) => limit(p) - spent(p) < MIN_ROOM_USD,
-    /** What is left once running calls and sessions have had what they were promised. */
-    room: (p) => limit(p) - spent(p) - held(p),
+    /** Money actually gone, so the provider's roles stop. Raising the limit is the only way back. Given a floor, that floor's own limit counts too. */
+    out: (p, floorId) => limit(p) - spent(p) < MIN_ROOM_USD || floorOut(floorId, p),
+    /** What is left once running calls and sessions have had what they were promised. Given a floor, whichever is tighter: the building or that floor. */
+    room: (p, floorId) => { const r = limit(p) - spent(p) - held(p); return !floorLimits || floorId == null ? r : Math.min(r, floorStop(floorId, p) - floorSpent(floorId, p) - floorHeld(floorId, p)); },
+    /** Which model the roles that shape the work are on for this floor right now. 'opus' leaves them on their own. See routeFor. */
+    tier,
+    /** Where a floor stands. For the admin's terminal, like everything in this file. */
+    floorStatus(floorId) {
+      const l = floorLimit(floorId);
+      return { claudeUsd: money(floorSpent(floorId, 'anthropic')), openrouterUsd: money(floorSpent(floorId, 'openrouter')), tier: tier(floorId), fableUntilUsd: l.fableUntilUsd, opusUntilUsd: l.opusUntilUsd, claudeStopUsd: floorStop(floorId, 'anthropic'), openrouterStopUsd: floorStop(floorId, 'openrouter'), claudeOut: floorOut(floorId, 'anthropic'), openrouterOut: floorOut(floorId, 'openrouter'), overridden: Object.keys(override(floorId)).length > 0 };
+    },
+    /** Tops one floor up: some of the floorLimits numbers, for this floor alone, on top of any it already has. null goes back to the defaults. */
+    setFloorOverride(floorId, over) {
+      if (over === null) { run(db, 'DELETE FROM settings WHERE key=?', floorKey(floorId)); return; }
+      run(db, 'INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', floorKey(floorId), JSON.stringify({ ...override(floorId), ...over }));
+    },
     hold(provider, { kind = 'call', floorId = null, agentId = null, taskId = null, usd }) {
       return Number(run(db, 'INSERT INTO budget_holds (provider,kind,floor_id,agent_id,task_id,usd,created_at) VALUES (?,?,?,?,?,?,?)', provider, kind, floorId, agentId, taskId ?? null, usd, now()).lastInsertRowid);
     },

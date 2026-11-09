@@ -85,8 +85,8 @@ Copy what you use into the project (such as sounds/ding.mp3) and load it with a 
 })();
 
 /** The model settings a role uses on a computer. Managed Agents runs Claude only, so a role on another provider names its Claude settings here. A job the team picked for itself runs on the autonomous model. */
-export function computerRole(models, roleKey, { autonomous = false } = {}) {
-  return routeFor(models, roleKey, { computer: true, autonomous });
+export function computerRole(models, roleKey, { autonomous = false, tier = '' } = {}) {
+  return routeFor(models, roleKey, { computer: true, autonomous, tier });
 }
 
 function describeTool(ev) {
@@ -166,11 +166,11 @@ export class Computer {
    * One agent per role and model. A role's autonomous variant (Sonnet, say) is a separate agent from the one the boss's jobs use, so switching
    * between them never rewrites either one, and each keeps its own stable prompt for the cache. When both settle on the same model they share one.
    */
-  async agentRef(roleKey, { autonomous = false } = {}) {
+  async agentRef(roleKey, { autonomous = false, tier = '' } = {}) {
     const { cfg, models } = this.engine;
-    const role = models.all[roleKey]; const comp = computerRole(models, roleKey, { autonomous });
+    const role = models.all[roleKey]; const comp = computerRole(models, roleKey, { autonomous, tier });
     const own = computerRole(models, roleKey);
-    const variant = autonomous && (comp.model !== own.model || comp.effort !== own.effort) ? '-auto' : '';
+    const variant = comp.model === own.model && comp.effort === own.effort ? '' : autonomous ? '-auto' : `-${tier}`;
     const tools = COMPUTER_TOOL_DEFS(cfg, roleKey);
     const def = {
       name: `theoffice-${roleKey}${variant}`, model: { id: comp.model, ...(comp.effort ? { effort: comp.effort } : {}) }, system: computerPrompt(cfg, roleKey, role),
@@ -199,7 +199,7 @@ export class Computer {
     const perDay = Math.min(cfg.floorDailyUsd - e.spentToday(floorId) - (e.reserved.get(floorId) || 0), cfg.globalDailyUsd - e.spentGlobal() - e.reservedTotal) + st.hold;
     // Over the session's whole life: going back in line for the next slice can't start its limit again.
     const own = Math.min(cfg.sessionMaxUsd - st.charged, perTask);
-    const perBuilding = e.budget.room('anthropic') + st.hold;
+    const perBuilding = e.budget.room('anthropic', floorId) + st.hold;
     const most = Math.min(own, perDay, perBuilding);
     const slices = own > cfg.sessionSliceUsd;
     return { usd: slices ? Math.min(most, cfg.sessionSliceUsd) : most, daily: perDay < own, building: perBuilding < Math.min(own, perDay), slices, slice: slices && cfg.sessionSliceUsd < most, ceiling: perTask <= most };
@@ -307,7 +307,7 @@ export class Computer {
 
   newState(floor, agent, task, signal) {
     const e = this.engine;
-    const comp = computerRole(e.models, agent.role, { autonomous: !!task.auto });
+    const comp = computerRole(e.models, agent.role, { autonomous: !!task.auto, tier: e.taskTier(task) });
     return {
       id: task.session_id || '', floorId: floor.id, floor, agent, taskId: task.id, project: task.project, signal, room: null,
       // History counts towards the steps, so a restart can't reset them. A round of fixes the manager asked for gets its own, or the fix never fits; the dollar caps still hold.
@@ -335,8 +335,10 @@ export class Computer {
   /** At boot: sessions on floors that won't reattach for now are stopped, so they don't spend off the books. */
   recoverOrphans() {
     const paused = this.engine.globalPaused();
-    const out = this.engine.budget.out('anthropic');
-    for (const t of all(this.engine.db, "SELECT t.id,t.session_id,t.session_charged,t.agent_id,t.floor_id,f.paused,f.status floor_status FROM tasks t JOIN floors f ON f.id=t.floor_id WHERE t.session_id!='' AND t.status='todo' AND (f.paused=1 OR f.status!='active' OR ? OR ?)", paused ? 1 : 0, out ? 1 : 0)) this.settleOrphan(t, { resume: out && !paused && !t.paused && t.floor_status === 'active' });
+    for (const t of all(this.engine.db, "SELECT t.id,t.session_id,t.session_charged,t.agent_id,t.floor_id,f.paused,f.status floor_status FROM tasks t JOIN floors f ON f.id=t.floor_id WHERE t.session_id!='' AND t.status='todo'")) {
+      const out = this.engine.budget.out('anthropic', t.floor_id);
+      if (t.paused || t.floor_status !== 'active' || paused || out) this.settleOrphan(t, { resume: out && !paused && !t.paused && t.floor_status === 'active' });
+    }
   }
 
   /** Reattach to this task's session if it is still alive, otherwise box up the project and start a fresh one. */
@@ -346,7 +348,7 @@ export class Computer {
     e.budget.releaseTask(task.id);
     if (st.id) await this.reconcile(st);
     let room = this.room(floor.id, task, st);
-    const heldUp = (r) => r.usd < MIN_ROOM_USD && ((r.daily && !e.spentOver(floor.id, MIN_ROOM_USD)) || (r.building && !e.budget.out('anthropic')));
+    const heldUp = (r) => r.usd < MIN_ROOM_USD && ((r.daily && !e.spentOver(floor.id, MIN_ROOM_USD)) || (r.building && !e.budget.out('anthropic', floor.id)));
     // Short of room only because other sessions hold it: they give back what they don't spend, so wait for them.
     while (heldUp(room)) {
       e.setAgent(agent.id, { state: 'queued', activity: 'Waiting for a turn' });
@@ -387,7 +389,7 @@ export class Computer {
       this.pushMessage(task.id, 'Your earlier computer was lost. /workspace/project now holds everything that had been saved, so check what is still missing and finish the job.');
       st.id = ''; st.charged = 0;
     }
-    const agentRef = await this.agentRef(agent.role, { autonomous: !!task.auto });
+    const agentRef = await this.agentRef(agent.role, { autonomous: !!task.auto, tier: e.taskTier(task) });
     const vaulted = !!task.vault && !!e.cfg.iosEnabled && !!e.cfg.iosVaultId;
     // The floor's own published hosts, so the Tester and Builder can open the real site, added to the package registries (or the iOS host set). Scoped to this floor alone.
     const ownHosts = this.ownFloorHosts(floor, task);
@@ -759,7 +761,7 @@ export class Computer {
     const soFar = `${st.lastText ? `\n\nLast thing it said: ${st.lastText.slice(0, 800)}` : ''}${result.ok ? e.savedSoFar(floor.id, { project: st.project }) : ' Its last save could not be read, so anything since the task began may be lost.'}`;
     if (outcome === 'budget') {
       // Stopped by what was left of the building's total or of the day. Over if the money is really gone; otherwise it goes back in line for what other sessions give back.
-      if (st.room.building) throw new e.Halt(e.budget.out('anthropic') ? 'building_budget' : 'wait');
+      if (st.room.building) throw new e.Halt(e.budget.out('anthropic', floor.id) ? 'building_budget' : 'wait');
       if (st.room.daily) throw new e.Halt(e.spentOver(floor.id, MIN_ROOM_USD) ? 'budget' : 'wait');
       if (ceiling) return e.stopAtCeiling(floor, agent, taskId, `${links}${soFar}`, result.ok);
       return e.finishTask(floor, agent, taskId, 'failed', `Stopped: this task reached its limit.${links}${soFar}`);
