@@ -37,7 +37,7 @@ proposal, and the old price stays on sale until the boss approves the new one.
   order request there; the real checkout can only be tried on the published shop.
 
 Keep every `data-office` hook (`products`, `product`, `price`, `add`, `cart-open`, `cart`, `cart-count`, `cart-lines`, `cart-total`,
-`checkout`, `order-request`, `order-confirmation`, `shop-status`, `contact-form`, `form-status`): the Tester's script uses them.
+`checkout`, `order-request`, `order-confirmation`, `shop-status`, `pictures-note`, `contact-form`, `form-status`): the Tester's script uses them.
 
 Make it this shop: the real products in shop.json, the words from notes/copy.md, the look from notes/design.md (the variables in shop.css,
 and the layout: this is a skeleton, not a look). Replace og.svg and favicon.svg. Never invent a review, a stock level, a discount, a

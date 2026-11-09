@@ -52,7 +52,7 @@ try {
   await early.goto(shop);
   await early.until('window.officeShop?.ready === true', 'the shop to load');
   check('every product shows with its picture and its price', (await early.ev('[...document.querySelectorAll(\'[data-office="product"]\')].map((c) => c.querySelector(\'[data-office="price"]\').innerText.replace(/\\s+/g, " ") + "|" + (c.querySelector("img").naturalWidth > 0)).join(";")')) === '$12.00|true;$14.50 proposed price|true', await early.ev('document.querySelector(\'[data-office="products"]\').innerText'));
-  check('a generated picture says it is an illustration', /an illustration, not a photo/.test(await text(early, 'products')));
+  check('generated pictures are said to be illustrations', /illustrations, not photos/.test(await text(early, 'pictures-note')));
   check('it says plainly that cards aren\'t on yet, and never "coming soon"', /aren't switched on here yet/.test(await text(early, 'shop-status')) && !/coming soon/i.test(await early.ev('document.body.innerText')));
   await tap(early, '[data-office="product"][data-key="lavender"] [data-office="add"]');
   await early.until('!document.querySelector(\'[data-office="cart"]\').hidden', 'the basket to open');

@@ -18,13 +18,16 @@ const count = () => lines().reduce((n, l) => n + l.quantity, 0);
 
 function renderProducts() {
   const grid = $('products'); grid.textContent = '';
+  const allDrawn = catalogue.products.length > 0 && catalogue.products.every((p) => p.imageKind === 'illustration');
+  const pics = $('pictures-note'); if (pics) { pics.hidden = !allDrawn; pics.textContent = allDrawn ? 'The product pictures are illustrations, not photos.' : ''; }
   for (const p of catalogue.products) {
     const card = el('article', 'card'); card.dataset.office = 'product'; card.dataset.key = p.key;
     const img = el('img'); img.src = p.image; img.alt = p.imageAlt || p.name; img.loading = 'lazy'; img.width = 400; img.height = 400;
     const body = el('div', 'body');
     body.append(el('h3', '', p.name));
     if (p.description) body.append(el('p', 'desc', p.description));
-    if (p.imageKind === 'illustration') body.append(el('p', 'tag', 'Picture: an illustration, not a photo of the product.'));
+    // Honest about pictures: one line under the grid when they are all drawn, a line on the card when only some are.
+    if (p.imageKind === 'illustration' && !allDrawn) body.append(el('p', 'tag', 'Picture: an illustration, not a photo of the product.'));
     const buy = el('div', 'buy');
     const price = el('p', 'price', money(centsOf(p), currencyOf(p))); price.dataset.office = 'price';
     // A price the boss hasn't set or approved yet is a proposal, and says so.
