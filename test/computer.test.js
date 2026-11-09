@@ -322,7 +322,7 @@ describe('limits and caps', () => {
     assert.equal(row.status, 'failed');
     assert.match(row.result, /Ran out of steps/);
     assert.ok(extra <= 9, `ran ${extra} steps`);
-    assert.ok(h.sessions.calls.sends.some((s) => s.ev.type === 'system.message' && /5 steps left/.test(s.ev.content[0].text)));
+    assert.ok(h.sessions.calls.sends.some((s) => s.ev.type === 'system.message' && /Save your work now/.test(s.ev.content[0].text)));
     assert.ok(h.sessions.calls.sends.some((s) => s.ev.type === 'user.interrupt'));
     assert.ok(get(h.t.db, "SELECT 1 x FROM published_files WHERE floor_id=? AND project='game'", h.floor.id), 'what was saved still went up');
   });
@@ -358,7 +358,7 @@ describe('limits and caps', () => {
   test('no session starts when nothing is left of the task cap or the day', async () => {
     const h = await start({}, { taskMaxUsd: 0.05 });
     const row = await h.settle((await go(h)).id);
-    assert.equal(row.status, 'failed'); assert.match(row.result, /reached its limit/); assert.doesNotMatch(row.result, /\$|spen[dt]/i);
+    assert.equal(row.status, 'failed'); assert.match(row.result, /Stopped by the building/); assert.doesNotMatch(row.result, /\$|spen[dt]|\blimit\b/i);
     assert.equal(h.sessions.calls.sessions.length, 0);
     const h2 = await start({}, { floorDailyUsd: 0.05 });
     const task2 = (await go(h2)).id;
@@ -771,7 +771,7 @@ describe('a computer on a job the team picked for itself', () => {
     const { id } = await go(h, 'Build the boss\'s thing', { project: 'boss' });
     await h.settle(id);
     const boss = h.sessions.calls.agents.find((a) => a.name === 'theoffice-builder');
-    assert.equal(boss.model.id, 'claude-opus-5-5'); assert.equal(boss.model.effort, 'high');
+    assert.equal(boss.model.id, 'claude-opus-5-5'); assert.equal(boss.model.effort, 'xhigh');
     const brief = JSON.parse(get(h.t.db, 'SELECT transcript FROM tasks WHERE id=?', auto.id).transcript || '[]')[0]?.content || '';
     assert.match(brief, /picked this job itself/, 'the job says it is the team\'s own, after the brief');
   });

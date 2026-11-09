@@ -67,7 +67,7 @@ const DEFS = {
   cancel_task: fn('cancel_task', 'Cancel a task that is no longer needed.', { task_id: { type: 'integer', description: 'Task id' } }),
   check_domain: fn('check_domain', 'Check whether domain names can be bought and what they cost for a year. Checking costs nothing. Try .com names first: short, brandable, easy to say and spell, no hyphens or numbers, and a fit for the company or project. Other endings only when no good .com is available within the limit, or the boss asks for one.', { names: { type: 'array', items: { type: 'string' }, description: 'Up to 10 names, such as tinyteacups.com' } }),
   request_domain: fn('request_domain', 'Ask the boss to buy a domain for a project, only once the boss has picked or agreed to this name in chat. First ask them for ideas, or offer 2-3 available names from check_domain, each with its price. Prefer a .com; for another ending, say why in the why. This does not buy anything: it puts a Buy button in front of the boss, and only their click spends money. Ordinary names only, within the price limit.', { domain: S('The name, such as tinyteacups.com'), project: S('Project slug it will serve'), why: S('One sentence for the boss') }),
-  generate_image: fn('generate_image', 'Make a real picture with an image model and save it in the project: hero images, logos, favicons, social previews, game art. Costs real money, so make few and make them count. Describe the image fully, including any exact words it must show.', {
+  generate_image: fn('generate_image', 'Make a real picture with an image model and save it in the project: hero images, logos, favicons, social previews, game art. Describe the image fully, including any exact words it must show.', {
     prompt: S('What to draw, up to 1500 characters'), name: S('File name without extension, such as hero'), project: S('Project slug'), directory: S('Folder in the project, default images'),
     aspect: { type: 'string', enum: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'], description: 'Shape of the picture' },
   }, ['prompt', 'name']),
@@ -95,7 +95,7 @@ const DEFS = {
     look: { type: 'object', description: 'Any of: hair, hairColor, skin, outfit, outfitColor, hat, glasses, wear. Values the office doesn\'t have are ignored.' },
   }, ['who']),
   let_go_staff: fn('let_go_staff', 'Let a member of staff go. Use it only because the boss asked. The manager stays, and nobody can go while they have open work.', { who: S('Their name or job') }),
-  make_logo: fn('make_logo', 'Draw the company\'s logo with the image model and hang it on the office wall. Use it only because the boss asked or agreed. Costs real money, so make one and make it count.', { prompt: S('What the logo looks like, in full, including any exact words it must show') }),
+  make_logo: fn('make_logo', 'Draw the company\'s logo with the image model and hang it on the office wall. Use it only because the boss asked or agreed.', { prompt: S('What the logo looks like, in full, including any exact words it must show') }),
   // Standing orders (floors-plus). An order fires as an ordinary boss message on its schedule; it can't spend beyond the floor's normal caps.
   set_standing_order: fn('set_standing_order', 'Set a recurring job for the floor: the instruction is handed to you again on a schedule, every day or every week, when the floor is quiet. Use it when the boss asks for something regular ("every morning", "weekly"). It shows to the boss under Orders, where they can edit, pause or delete it.', {
     instruction: S('What to do each time, written as the boss would say it'), every: { type: 'string', enum: ['day', 'week'] }, at: S('Time of day as HH:MM, 24-hour'),
@@ -156,7 +156,7 @@ const DEFS = {
     path1: S('Optional word shown after the site\'s address in the ad, up to 15 letters'), path2: S('Optional second word after path1, up to 15 letters'),
     test_a: S('Version A of the test'), test_b: S('Version B of the test'), test_measure: S('How the winner is picked'),
   }, ['headline', 'primary_text', 'goal', 'who', 'search_headlines', 'search_descriptions', 'keywords', 'test_a', 'test_b']),
-  make_video_ad: fn('make_video_ad', 'Business mode ads task only: make one short vertical video ad with a video model, saved in the project\'s ads folder with its caption. Costs real money, so make each one count.', {
+  make_video_ad: fn('make_video_ad', 'Business mode ads task only: make one short vertical video ad with a video model, saved in the project\'s ads folder with its caption.', {
     project: S('Project slug'), name: S('File name without extension, such as video-1'), prompt: S('What the video shows, up to 1000 characters. No on-screen text: the caption is added separately'),
     caption: S('The one caption line people read with the sound off'), seconds: { type: 'integer', description: 'Length, 6 to 10 seconds' },
   }, ['name', 'prompt', 'caption']),

@@ -58,7 +58,8 @@ export function loadConfig(env = process.env, overrides = {}) {
     // Off unless set: what stops the money is the building's lifetime limit below. Each of these would stop a job long before that.
     floorDailyUsd: cap(env.FLOOR_DAILY_USD, Infinity),
     globalDailyUsd: cap(env.GLOBAL_DAILY_USD, Infinity),
-    taskMaxUsd: cap(env.TASK_MAX_USD, Infinity),
+    // The exception, a safety net and not a budget: one task can't eat the building if it gets stuck. Normal work never reaches it, no bot is told it exists, and the boss hears plainly if it ever bites. "off" turns it off.
+    taskMaxUsd: cap(env.TASK_MAX_USD, 40),
     // What the whole building may ever spend with each provider. Counted over the whole ledger, for the admin's eyes only. Raising one and restarting starts the work again.
     budgetAnthropicUsd: lifetime(env.BUDGET_ANTHROPIC_USD, 120),
     budgetOpenrouterUsd: lifetime(env.BUDGET_OPENROUTER_USD, 120),
@@ -95,7 +96,6 @@ export function loadConfig(env = process.env, overrides = {}) {
     sessionSliceUsd: num(env.SESSION_SLICE_USD, 2) > 0.1 ? num(env.SESSION_SLICE_USD, 2) : 2,
     sessionMaxSteps: workCap(env.SESSION_MAX_STEPS),    // model requests per session
     sessionMaxMinutes: workCap(env.SESSION_MAX_MINUTES),
-    sessionWrapUp: env.SESSION_WRAP_UP === '1',         // tells a lane job to stop polishing at the step count it ought to take
     maxFixTurns: workCap(env.MAX_FIX_TURNS),            // times a computer is told its save or publish didn't go through before the task fails
     maxSessionsFloor: workCap(env.MAX_SESSIONS_FLOOR),
     maxSessionsGlobal: workCap(env.MAX_SESSIONS_GLOBAL),

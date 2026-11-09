@@ -40,22 +40,22 @@
     "manager": {
       "title": "Office Manager",
       "provider": "anthropic",
-      "model": "claude-sonnet-5-5",
+      "model": "claude-opus-5-5",
       "effort": "high",
       "maxTokens": 16000
     },
     "researcher": {
       "title": "Researcher",
       "provider": "anthropic",
-      "model": "claude-sonnet-5-5",
+      "model": "claude-opus-5-5",
       "effort": "high",
-      "maxTokens": 12000,
+      "maxTokens": 16000,
       "brief": "You dig up facts. Use web_search and fetch_url, keep notes in the workspace and always record your sources with URLs. Say plainly when you could not confirm something."
     },
     "writer": {
       "title": "Writer",
       "provider": "anthropic",
-      "model": "claude-sonnet-5-5",
+      "model": "claude-opus-5-5",
       "effort": "high",
       "maxTokens": 16000,
       "brief": "You write clear, lively documents in markdown: briefs, plans, copy, posts."
@@ -68,7 +68,7 @@
       "maxTokens": 32000,
       "brief": "You build working sites, games, simulations and apps, then publish them. Plain HTML, CSS and JavaScript unless the job calls for more.",
       "computer": {
-        "effort": "high"
+        "effort": "xhigh"
       },
       "computerBrief": "You are the Builder. You build real things: websites, playable games (canvas, WebGL, Three.js), simulations, installable PWAs and front-end apps with real build tooling, then publish them. Prefer the simplest stack that does the job. When a product needs a real picture, make it with generate_image rather than drawing placeholder boxes. Never retype a file you can pull: when you need a file from the shared drive, pull_shared_file brings it onto your computer whole and byte-for-byte, any size, text or binary, so read it with that rather than copying it out of chat. Saving is safe and won't wipe anything: save.sh packs your whole /workspace/project and the office merges it back, keeping other people's untouched files, so save early and often; files you don't save are simply the ones that don't come back."
     },
@@ -76,8 +76,8 @@
       "title": "Designer",
       "provider": "anthropic",
       "model": "claude-opus-5-5",
-      "effort": "medium",
-      "maxTokens": 16000,
+      "effort": "xhigh",
+      "maxTokens": 24000,
       "brief": "You decide how things look: palettes, type, layout and CSS. Use generate_image for real pictures such as hero images, logos, favicons and social previews, and inline SVG for simple shapes. Get a review_design opinion on a screenshot when one exists."
     }
   },
@@ -85,17 +85,17 @@
     "analyst": {
       "title": "Analyst",
       "provider": "anthropic",
-      "model": "claude-sonnet-5-5",
+      "model": "claude-opus-5-5",
       "effort": "high",
-      "maxTokens": 12000,
+      "maxTokens": 16000,
       "brief": "You crunch numbers and write crisp comparisons and estimates."
     },
     "marketer": {
       "title": "Marketer",
       "provider": "anthropic",
-      "model": "claude-sonnet-5-5",
+      "model": "claude-opus-5-5",
       "effort": "high",
-      "maxTokens": 12000,
+      "maxTokens": 16000,
       "brief": "You find the angle, the audience and the words that sell an idea."
     },
     "tester": {

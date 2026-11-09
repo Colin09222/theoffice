@@ -413,7 +413,7 @@ export class Engine {
       for (let step = 0; step < maxSteps; step++) {
         this.checkpoint(floorId, signal);
         trimSteps(messages, opening);
-        if (step === maxSteps - 2) messages.push({ role: 'user', content: '[Office note, not from the boss] You have two steps left this turn. Finish what is essential now, and tell the boss where things stand.' });
+        if (step === maxSteps - 2) messages.push({ role: 'user', content: '[Office note, not from the boss] Tell the boss where things stand now.' });
         this.setAgent(mgr.id, { state: 'thinking', activity: step === 0 ? 'Thinking it over' : 'Sorting out the plan' });
         const buffer = { text: '', pending: '', timer: null };
         const flush = () => { if (buffer.pending) { this.emit(floorId, 'token', { text: buffer.pending }, { persist: false, chat: true }); buffer.pending = ''; } clearTimeout(buffer.timer); buffer.timer = null; };
@@ -508,10 +508,10 @@ export class Engine {
       let step = messages.filter((m) => m.role === 'assistant').length;
       for (let n = 0; ; n++) {
         if (n >= maxSteps) { this.finishTask(floor, agent, task.id, 'failed', `Ran out of steps before finishing.${this.savedSoFar(floor.id, task)}`); return; }
-        if (n === maxSteps - 3) messages.push({ role: 'user', content: 'You have three steps left on this task. Write up what you have now, publish it if publishing is part of your job, and reply with your summary.' });
+        if (n === maxSteps - 3) messages.push({ role: 'user', content: 'Save your work now: write what you have so far into the project.' });
         this.checkpoint(floorId, signal);
         task = get(this.db, 'SELECT * FROM tasks WHERE id=?', taskId);
-        if (task.cost_usd >= this.cfg.taskMaxUsd) { this.finishTask(floor, agent, task.id, 'failed', 'Stopped: this task reached its limit.'); return; }
+        if (task.cost_usd >= this.cfg.taskMaxUsd) { this.stopAtCeiling(floor, agent, task.id, this.savedSoFar(floor.id, task)); return; }
         this.setAgent(agent.id, { state: 'thinking', activity: task.title, project: task.project, task_id: task.id });
         const res = await this.callLLM(call, { messages: compact(messages), tools: defs, meta: { kind: 'staff', role: agent.role, floorId, floorSlug: floor.slug, step, task, allBoss, answers: answers(), files: this.taskFiles(task).map((f) => f.path) } });
         step++;
@@ -629,6 +629,16 @@ export class Engine {
     if (open === 0) this.people.wrapMeeting(floor.id, t);
     this.progressNote(floor.id, agent, t, status);
     this.kick();
+  }
+
+  /**
+   * The safety net on one task's money. A job only gets here by being stuck, and no bot is told it exists, before or after: the manager hears the job was stopped and why that matters, and the boss hears it plainly, without a figure.
+   * Whatever was saved stays on the drive, and the job starts again only if the boss says so.
+   */
+  stopAtCeiling(floor, agent, taskId, soFar = '', saved = true) {
+    const title = get(this.db, 'SELECT title FROM tasks WHERE id=?', taskId)?.title || 'that job';
+    this.finishTask(floor, agent, taskId, 'failed', `Stopped by the building: this job had gone on far longer than any job should, so it was probably stuck.${soFar} Tell the boss plainly what got done and what didn't. Don't start it again unless the boss says to.`);
+    this.bossNotice(floor.id, `Boss, I stopped "${title}": it had gone on far longer than any job should, which usually means someone was stuck. ${saved ? 'Everything it saved is on the drive.' : 'I couldn\'t bring back its last save, so the newest work may be missing.'} Tell me if you want it picked up again.`);
   }
 
   /** A line in the chat as the work moves along, so a long job isn't silence between two manager messages. It costs no model call, and the manager's own report still ends the job. */

@@ -92,17 +92,17 @@ describe('what good work means, per job', () => {
     const r = laneBrief('business', 'researcher', FULL);
     assert.match(r, /that really operate where this business would/); assert.match(r, /publishing checks each link/); assert.match(r, /the gap to aim at, the price to beat, and the biggest risk/);
   });
-  test('computers work in big steps, and only makers read what a page can do', () => {
-    assert.match(computerPrompt(FULL, 'builder', {}), /work in big steps/); assert.match(computerPrompt(FULL, 'builder', {}), /a second review is expected/);
+  test('computers are told to save as they go and nothing about hurrying, and only makers read what a page can do', () => {
+    assert.doesNotMatch(computerPrompt(FULL, 'builder', {}), /big steps/); assert.match(computerPrompt(FULL, 'builder', {}), /a second review is expected/); assert.match(computerPrompt(FULL, 'builder', {}), /save as you go/);
     const writer = staffPrompt(floor, { name: 'S', title: 'Writer', role: 'writer' }, {}, {}, FULL);
     const builder = staffPrompt(floor, { name: 'S', title: 'Builder', role: 'builder' }, {}, {}, FULL);
     assert.doesNotMatch(writer, /office\.leaderboard\.submit/); assert.match(builder, /office\.leaderboard\.submit/);
     assert.match(writer, /choose sensibly and say what you assumed/);
   });
-  test('code, games and pictures stay on Opus; the Builder and Tester computers run Opus at high; planning and words run on Sonnet; search stays on Sonnet at low effort', () => {
+  test('every role that shapes the work is on Opus at high or above, the Builder\'s computer at xhigh and the Tester\'s at high; search stays on Sonnet at low effort', () => {
     const m = loadModels();
-    assert.equal(m.all.manager.model, 'claude-sonnet-5-5'); assert.equal(m.all.manager.effort, 'high');
-    assert.equal(m.all.builder.model, 'claude-opus-5-5'); assert.equal(m.all.builder.computer.effort, 'high');
+    assert.equal(m.all.manager.model, 'claude-opus-5-5'); assert.equal(m.all.manager.effort, 'high');
+    assert.equal(m.all.builder.model, 'claude-opus-5-5'); assert.equal(m.all.builder.computer.effort, 'xhigh');
     assert.equal(m.all.tester.computer.model, 'claude-opus-5-5'); assert.equal(m.all.tester.computer.effort, 'high');
     assert.equal(m.tools.search.model, 'claude-sonnet-5-5'); assert.equal(m.tools.search.effort, 'low');
   });
@@ -336,7 +336,7 @@ describe('never going quiet', () => {
     await until(() => said(h, 'office').length, { what: 'the notice' });
     await idle(h);
     assert.match(said(h, 'office')[0], /ran out of room/);
-    assert.ok(llm.calls.some((c) => c.messages.some((m) => /two steps left this turn/.test(String(m.content)))));
+    assert.ok(llm.calls.some((c) => c.messages.some((m) => /where things stand now/.test(String(m.content)))));
   });
   test('an empty reply to the boss doesn\'t leave them hanging', async () => {
     const h = await start(scripted({ manager: () => ({ content: '' }) }));
@@ -364,7 +364,7 @@ describe('never going quiet', () => {
     h.e.kick();
     await until(() => get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status === 'failed', { what: 'it to stop' });
     assert.match(get(h.t.db, 'SELECT result FROM tasks WHERE id=?', id).result, /Ran out of steps.*1 files are saved.*isn't lost/);
-    assert.ok(llm.calls.some((c) => c.messages.some((m) => /three steps left/.test(String(m.content)))));
+    assert.ok(llm.calls.some((c) => c.messages.some((m) => /Save your work now/.test(String(m.content)))));
   });
   test('a computer nearly up is told to save, and one stopped by its step limit reports where it got to', async () => {
     const seen = [];
@@ -383,19 +383,19 @@ describe('never going quiet', () => {
     const { id } = h.e.assignTask(h.f, h.mgr, { to: 'builder', title: 'B', brief: 'b', plan: '', project: 'g', dependsOn: [], afterPrevious: false });
     h.e.kick();
     await until(() => get(h.t.db, 'SELECT status FROM tasks WHERE id=?', id).status === 'failed' && !h.e.runs.size, { what: 'it to stop', timeout: 20000 });
-    assert.ok(seen.some((ev) => ev.type === 'system.message' && /nearly up/.test(ev.content[0].text)), 'told to save');
+    assert.ok(seen.some((ev) => ev.type === 'system.message' && /Save your work now/.test(ev.content[0].text)), 'told to save');
     const r = get(h.t.db, 'SELECT result FROM tasks WHERE id=?', id).result;
     assert.match(r, /Ran out of steps/); assert.match(r, /Last thing it said: Halfway through the level select/);
   });
 });
 
-describe('small jobs stay small', () => {
+describe('no job is told to stop at a step count', () => {
   async function steps(n, setup) {
     const seen = [];
     const sessions = createMockSessions({}, { onTurn: async (api) => { for (let i = 0; i < n; i++) await api.step(); await api.save([{ path: 'index.html', data: Buffer.from('<h1>x</h1>') }]); await api.message('Done.'); } });
     const send = sessions.send.bind(sessions);
     sessions.send = (id, evs) => { seen.push(...evs); return send(id, evs); };
-    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0, sessionWrapUp: true }, { sessions });
+    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0 }, { sessions });
     h.e.runManager = async () => {};
     const { id } = setup(h);
     h.e.kick();
@@ -403,15 +403,11 @@ describe('small jobs stay small', () => {
     return seen.filter((ev) => ev.type === 'system.message').map((ev) => ev.content[0].text);
   }
   const task = (h, extra = {}) => h.e.assignTask(h.f, h.mgr, { to: 'builder', title: 'B', brief: 'b', plan: '', project: 'g', dependsOn: [], afterPrevious: false, lane: 'game', ...extra });
-  test('a playbook job is told to finish at about the size it should be', async () => {
-    assert.match((await steps(23, (h) => task(h))).join(' '), /That is 22 steps, which is what this job should take/);
-    assert.deepEqual(await steps(20, (h) => task(h)), []);
+  test('a playbook job runs as long as it runs', async () => {
+    assert.deepEqual(await steps(50, (h) => task(h)), []);
   });
-  test('a change to something live is told sooner', async () => {
-    assert.match((await steps(13, (h) => { h.e.upsertProject(h.f, 'g', { title: 'G', kind: 'game', published: true }); return task(h); })).join(' '), /That is 12 steps/);
-  });
-  test('a job outside the playbooks only has the hard limits', async () => {
-    assert.deepEqual(await steps(25, (h) => task(h, { lane: '' })), []);
+  test('so does a change to something live', async () => {
+    assert.deepEqual(await steps(20, (h) => { h.e.upsertProject(h.f, 'g', { title: 'G', kind: 'game', published: true }); return task(h); }), []);
   });
 });
 

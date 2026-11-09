@@ -25,8 +25,10 @@ const STALL_MS = 90_000;
 const STOP_GRACE_MS = 120_000;
 const MAX_LOST = 2, MAX_STREAM_FAILURES = 5;
 const WARN_STEPS_LEFT = 5, SPEND_WARN = 0.8;
-// A small job told to aim for 15 steps will still polish for 40 if nothing says stop. Only with SESSION_WRAP_UP=1.
-const WRAP_UP = { change: 12, tester: 16, default: 22 };
+// All a bot is ever told when it really is about to stop. How much is left, in money or steps, is none of its business.
+const SAVE_NOW = 'Save your work now: run bash /workspace/.office/save.sh.';
+// A job stopped at the ceiling gets this much more, once, so the save it needs can't be what the ceiling cost it. Enough for one command and the end of a turn.
+const LAST_SAVE_USD = 0.75;
 // A session asks for the next slice of money once this share of the last one is left.
 const TOP_UP_AT = 0.5;
 // A computer lost after this many steps had been getting somewhere, so it doesn't count towards giving up. A job that runs for days can lose a few along the way.
@@ -200,7 +202,7 @@ export class Computer {
     const perBuilding = e.budget.room('anthropic') + st.hold;
     const most = Math.min(own, perDay, perBuilding);
     const slices = own > cfg.sessionSliceUsd;
-    return { usd: slices ? Math.min(most, cfg.sessionSliceUsd) : most, daily: perDay < own, building: perBuilding < Math.min(own, perDay), slices, slice: slices && cfg.sessionSliceUsd < most };
+    return { usd: slices ? Math.min(most, cfg.sessionSliceUsd) : most, daily: perDay < own, building: perBuilding < Math.min(own, perDay), slices, slice: slices && cfg.sessionSliceUsd < most, ceiling: perTask <= most };
   }
   /**
    * Near the end of its slice a session gets the next one, for as long as there is money and nothing else says stop. Should it get there first, it pauses at its cap,
@@ -269,7 +271,7 @@ export class Computer {
       }
       st = this.newState(floor, agent, task, signal);
       await this.attach(st, task);
-      await this.finish(st, await this.drive(st));
+      await this.finish(st, st.atCeiling ? 'budget' : await this.drive(st));
     } catch (err) {
       const why = err?.why ?? signal.reason?.why;
       // Only a shutdown leaves a session running, because the next boot picks it up. On any other way out it must not carry on spending unwatched.
@@ -309,7 +311,7 @@ export class Computer {
     return {
       id: task.session_id || '', floorId: floor.id, floor, agent, taskId: task.id, project: task.project, signal, room: null,
       // History counts towards the steps, so a restart can't reset them. A round of fixes the manager asked for gets its own, or the fix never fits; the dollar caps still hold.
-      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Map(), newestEvent: 0, listFrom: 0, steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), wrapUpAt: e.cfg.sessionWrapUp && (task.lane || e.isLive(floor.id, task.project)) ? (e.isLive(floor.id, task.project) && agent.role !== 'tester' ? WRAP_UP.change : WRAP_UP[agent.role] || WRAP_UP.default) * (1 + (task.revisions || 0)) : 0, warned: false, limit: '', lastText: '', lastFeed: '',
+      charged: task.session_id ? task.session_charged : 0, hold: 0, seen: new Map(), newestEvent: 0, listFrom: 0, steps: 0, maxSteps: e.cfg.sessionMaxSteps * (1 + (task.revisions || 0)), warned: false, limit: '', lastText: '', lastFeed: '',
       pendingCustom: new Map(), pendingAsk: new Map(), interruptSent: false, expectRun: false, budgetRaised: false, startedAt: Date.now(),
       publish: JSON.parse(task.session_publish || '[]'), model: comp.model, pricing: comp.pricing,
       ctx: { ...e.toolCtx(floor, agent, task, ['read_file', 'list_files', 'fetch_url', 'web_search', 'ask_boss', 'ask_colleague', 'file_purchase_request', ...toolsForRole(agent.role).filter((n) => n === 'generate_image' || n === 'review_design' || n === 'deploy_server' || n.startsWith('server_'))]), signal },
@@ -356,7 +358,9 @@ export class Computer {
     if (room.usd < MIN_ROOM_USD) {
       if (room.building) throw new e.Halt('building_budget');
       if (room.daily) throw new e.Halt('budget');
-      e.finishTask(floor, agent, task.id, 'failed', 'Stopped: this task reached its limit.');
+      // The ceiling came up while this one waited in line. A computer that still exists gets to save and hand back what it has, the same as one stopped while working.
+      if (st.id && await this.client.retrieve(st.id).then((s) => s.status !== 'terminated', () => false)) { this.equip(st); st.atCeiling = true; return; }
+      e.stopAtCeiling(floor, agent, task.id, e.savedSoFar(floor.id, task));
       throw new e.Halt('stop');
     }
     // Held from this moment, so nothing else in the building can spend the same dollars while this one starts up.
@@ -551,13 +555,9 @@ export class Computer {
           const left = st.maxSteps - st.steps;
           if (left === WARN_STEPS_LEFT && !st.warned) {
             st.warned = true;
-            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: `You have ${WARN_STEPS_LEFT} steps left on this computer. Finish up now: save your work with .office/save.sh, publish if you are going to, and reply with your summary.` }] }]).catch(() => {});
+            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: SAVE_NOW }] }]).catch(() => {});
           }
           if (left <= 0) this.stopFor(st, 'steps');
-          if (st.wrapUpAt && st.steps >= st.wrapUpAt && !st.wrappedUp) {
-            st.wrappedUp = true;
-            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: `That is ${st.wrapUpAt} steps, which is what this job should take. Stop polishing and finish now: leave it working, run .office/save.sh, publish if you are going to, and reply with your summary, including anything still rough.` }] }]).catch(() => {});
-          }
         }
         return null;
       case 'span.model_request_end':
@@ -570,7 +570,7 @@ export class Computer {
           // While more slices are coming there is nothing to warn about, and that is nearly always.
           if (!st.warnedSpend && st.room && !st.room.slice && st.hold <= (st.room.slices ? e.cfg.sessionSliceUsd : st.room.usd) * (1 - SPEND_WARN)) {
             st.warnedSpend = true;
-            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: 'Your time on this computer is nearly up. Save your work now with .office/save.sh, publish if you are going to, and reply with your summary.' }] }] ).catch(() => {});
+            this.client.send(st.id, [{ type: 'system.message', content: [{ type: 'text', text: SAVE_NOW }] }]).catch(() => {});
           }
         }
         return null;
@@ -724,6 +724,9 @@ export class Computer {
     if (outcome === 'retries') throw new ProviderError('The computer failed repeatedly.', { retryable: false });
     if (outcome === 'terminated') { await this.collect(st).catch(() => {}); return this.lost(st); }
     if (outcome === 'refused') { await this.reconcile(st); return e.finishTask(floor, agent, taskId, 'failed', 'The model declined this one.'); }
+    // The ceiling on one task, the one limit nobody is told about. It stops the work, but it must not cost the work: the computer gets one last save first.
+    const ceiling = outcome === 'budget' && !!st.room?.ceiling;
+    if (ceiling) await this.lastSave(st);
     while (outcome === 'done' && st.ctx.suspend) {
       if (get(e.db, 'SELECT 1 x FROM questions WHERE task_id=? AND answer IS NULL', taskId)) {
         await this.reconcile(st);
@@ -753,12 +756,28 @@ export class Computer {
       // Stopped by what was left of the building's total or of the day. Over if the money is really gone; otherwise it goes back in line for what other sessions give back.
       if (st.room.building) throw new e.Halt(e.budget.out('anthropic') ? 'building_budget' : 'wait');
       if (st.room.daily) throw new e.Halt(e.spentOver(floor.id, MIN_ROOM_USD) ? 'budget' : 'wait');
+      if (ceiling) return e.stopAtCeiling(floor, agent, taskId, `${links}${soFar}`, result.ok);
       return e.finishTask(floor, agent, taskId, 'failed', `Stopped: this task reached its limit.${links}${soFar}`);
     }
     if (st.limit === 'steps') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of steps before finishing.${links}${soFar}`);
     if (st.limit === 'time') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of time before finishing.${links}${soFar}`);
     if (!result.ok) return e.finishTask(floor, agent, taskId, 'failed', `The work could not be saved: ${result.problem}`);
     return e.finishTask(floor, agent, taskId, 'review', `${(st.lastText || 'Finished.').slice(0, 1800)}${links}`);
+  }
+  /** One command's worth more, asked for by name, so what a job did before the ceiling is what comes back. If this can't be done, the last save it made anyway is what's collected. */
+  async lastSave(st) {
+    const e = this.engine;
+    try {
+      const cents = await this.reconcile(st);
+      if (cents === null) return;
+      await this.client.updateSession(st.id, { budget: budgetOf(cents + LAST_SAVE_USD * 100) });
+      st.budgetRaised = true;
+      this.pushMessage(st.taskId, `${SAVE_NOW} Then end your turn.`);
+      await this.drive(st);
+    } catch (err) {
+      if (err instanceof e.Halt) throw err;
+      e.log('warn', 'the last save before a stop failed', { err: scrub(err?.message, e.cfg) });
+    }
   }
   lost(st) {
     const e = this.engine;

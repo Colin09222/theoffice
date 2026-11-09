@@ -1,12 +1,12 @@
 {
   "_comment": "The maker flow: what the boss can start in three taps, the passes each kind of job goes through, and the bars its Tester and the review loop hold it to. server/makers.js reads this file. No money anywhere in it.",
   "passes": {
-    "_comment": "depth: depth passes after the playable slice (0 to max). A job runs at least minDepthPasses (per type) even when every done-rule already passes. An open major or blocker bug holds Launch and sends the team straight into a fix pass; after fixesBeforeAsking failed fix attempts the boss chooses: keep trying, or launch anyway with a warning. A pass that fails with no serious bug asks after failsBeforeAsking tries. maxJobTokens counts every model token the floor spends after the job starts, sized for all three depth passes plus fix rounds.",
+    "_comment": "depth: depth passes after the playable slice (0 to max). A job runs at least minDepthPasses (per type) even when every done-rule already passes. An open major or blocker bug holds Launch and sends the team straight into a fix pass; after fixesBeforeAsking failed fix attempts the boss chooses: keep trying, or launch anyway with a warning. A pass that fails with no serious bug asks after failsBeforeAsking tries. maxJobTokens stops a job at a count of model tokens: 0 means no such limit, because a job ends when it is good, and the one money limit is the per-task safety net.",
     "depth": 3,
     "max": 3,
     "failsBeforeAsking": 2,
     "fixesBeforeAsking": 2,
-    "maxJobTokens": 20000000
+    "maxJobTokens": 0
   },
   "types": {
     "game": {

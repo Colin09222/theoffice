@@ -53,8 +53,7 @@ Every one of these is now off unless set. For a count, only a positive number se
 | `MAX_SESSIONS_FLOOR` | 2 | Computers at once on a floor. Only the Builder and the Tester use one, so 2 is also the most a floor can have |
 | `MAX_SESSIONS_GLOBAL` | 4 | Computers at once in the building |
 | `MAX_FIX_TURNS` | 2 | A computer told its save or publish didn't go through, before the task failed. This was the stuck-loop stop |
-| `SESSION_WRAP_UP` | on | Set to `1` to turn it back on. It told a lane job to stop polishing at 12 to 22 steps |
-| `TASK_MAX_USD` | 3 | A task |
+| `TASK_MAX_USD` | 40 (the one exception: on by default) | A task. A safety net, not a budget: normal work never reaches it and no bot is told about it. `off` turns it off |
 | `SESSION_MAX_USD` | 5 | A computer. It counts the session's whole life now, so a restart can't reset it |
 | `FLOOR_DAILY_USD` | 10 | A floor, for the day |
 | `GLOBAL_DAILY_USD` | 25 | The building, for the day |
