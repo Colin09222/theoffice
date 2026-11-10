@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto';
 import { get, all, run } from './db.js';
 import { scrub } from './llm.js';
+import { overFloor } from './config.js';
 
 const KINDS = new Set(['site', 'app', 'game', 'simulation']);
 const MAX_PAGE = 14000, MAX_REPORT = 5000, MAX_SHOT = 700 * 1024;
@@ -52,10 +53,11 @@ export function installShipCheck({ db, cfg, engine, log = () => {} }) {
   const stillDoubts = (floor, slug, v) => engine.addMessage(floor.id, 'note', null, `${slug} went live, but the last look before publishing still had doubts: ${(v.fix.length ? v.fix : [v.note]).join('; ').slice(0, 600)}. Tell the boss plainly what is still not right, and get it fixed.`);
   /** Returns the words that hold this publish back, or null to let it through. */
   engine.shipCheck = async (floor, slug, { kind = 'site', directory = '', agent = null, task = null, signal } = {}) => {
-    const s = spec();
+    // A floor moved onto OpenRouter gets its look on its own model there.
+    const own = spec(), s = own && overFloor({ provider: 'anthropic', ...own }, engine.budget.floorRoute(floor.id), engine.models.prices);
     try {
       if (!s || cfg.shipCheck === false || !KINDS.has(kind)) return null;
-      if (!(cfg.anthropicKey || cfg.aiMode === 'mock')) return null;
+      if (!((s.provider === 'anthropic' ? cfg.anthropicKey : cfg.openrouterKey) || cfg.aiMode === 'mock')) return null;
       const p = get(db, 'SELECT * FROM projects WHERE floor_id=? AND slug=?', floor.id, slug);
       if (!p || p.published_at) return null;  // a first publish only: a change to something live is the boss's own request
       if (engine.makers?.holds?.(floor.id, slug)) return null;  // the maker flow has its own Tester loop and the boss's own Launch
@@ -75,7 +77,7 @@ export function installShipCheck({ db, cfg, engine, log = () => {} }) {
       }
       if (seen || st.looks.length >= rounds) return null;
 
-      const provider = 'anthropic';
+      const provider = s.provider === 'anthropic' ? 'anthropic' : 'openrouter';
       const pricing = s.pricing || {};
       const page = get(db, 'SELECT content FROM files WHERE floor_id=? AND path=?', floor.id, `${prefix}index.html`);
       const shop = get(db, 'SELECT content FROM files WHERE floor_id=? AND path=?', floor.id, `${prefix}shop.json`);
@@ -104,7 +106,7 @@ export function installShipCheck({ db, cfg, engine, log = () => {} }) {
       try {
         release = await engine.limiter.acquire(floor.id, signal);
         holdId = engine.budget.hold(provider, { floorId: floor.id, agentId: agent?.id ?? null, usd: est });
-        res = await engine.llm.chat({ model: s.model, provider: s.provider || provider, effort: s.effort, messages, maxTokens, signal, pricing, meta: { kind: 'shipcheck', floorId: floor.id, project: slug, look: st.looks.length + 1, allBoss: boss } });
+        res = await engine.llm.chat({ model: s.model, provider, effort: s.effort, messages, maxTokens, signal, pricing, meta: { kind: 'shipcheck', floorId: floor.id, project: slug, look: st.looks.length + 1, allBoss: boss } });
         engine.charge(floor.id, agent || { id: null }, typeof res.model === 'string' && res.model ? res.model : s.model, res.usage.prompt, res.usage.completion, res.usage.cost, { taskId: task?.id, kind: 'shipcheck', provider });
       } finally { if (holdId) engine.budget.release(holdId); release?.(); }
       const v = res.finish === 'refusal' ? null : parseVerdict(res.content);

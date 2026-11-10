@@ -46,10 +46,12 @@ export function createBudget(db, cfg, now = Date.now, floorLimits = null) {
     room: (p, floorId) => { const r = limit(p) - spent(p) - held(p); return !floorLimits || floorId == null ? r : Math.min(r, floorStop(floorId, p) - floorSpent(floorId, p) - floorHeld(floorId, p)); },
     /** Which model the roles that shape the work are on for this floor right now. 'opus' leaves them on their own. See routeFor. */
     tier,
+    /** A floor moved wholesale onto OpenRouter: { provider: 'openrouter', model, effort }, or null. Every Claude call it makes goes there instead, and it has no computer. See overFloor in config.js. */
+    floorRoute: (floorId) => (floorId == null ? null : override(floorId).providerOverride || null),
     /** Where a floor stands. For the admin's terminal, like everything in this file. */
     floorStatus(floorId) {
       const l = floorLimit(floorId);
-      return { claudeUsd: money(floorSpent(floorId, 'anthropic')), openrouterUsd: money(floorSpent(floorId, 'openrouter')), tier: tier(floorId), fableUntilUsd: l.fableUntilUsd, opusUntilUsd: l.opusUntilUsd, claudeStopUsd: floorStop(floorId, 'anthropic'), openrouterStopUsd: floorStop(floorId, 'openrouter'), claudeOut: floorOut(floorId, 'anthropic'), openrouterOut: floorOut(floorId, 'openrouter'), overridden: Object.keys(override(floorId)).length > 0 };
+      return { claudeUsd: money(floorSpent(floorId, 'anthropic')), openrouterUsd: money(floorSpent(floorId, 'openrouter')), tier: tier(floorId), fableUntilUsd: l.fableUntilUsd, opusUntilUsd: l.opusUntilUsd, claudeStopUsd: floorStop(floorId, 'anthropic'), openrouterStopUsd: floorStop(floorId, 'openrouter'), claudeOut: floorOut(floorId, 'anthropic'), openrouterOut: floorOut(floorId, 'openrouter'), providerOverride: override(floorId).providerOverride || null, overridden: Object.keys(override(floorId)).length > 0 };
     },
     /** Tops one floor up: some of the floorLimits numbers, for this floor alone, on top of any it already has. null goes back to the defaults. */
     setFloorOverride(floorId, over) {

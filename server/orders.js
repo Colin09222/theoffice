@@ -184,7 +184,7 @@ export function installOrders(ext) {
     if (engine.globalPaused()) return 'the building is paused';
     if (floor.paused) return 'the floor is paused';
     if (engine.floorState(floor.id).budgetStopped) return 'everyone has gone home for today';
-    if (engine.budget.out(engine.agentProvider({ role: 'manager' }), floor.id)) return 'work has stopped for now';
+    if (engine.budget.out(engine.agentProvider({ role: 'manager' }, floor.id), floor.id)) return 'work has stopped for now';
     if (busy(floor.id)) return 'the floor was busy';
     return null;
   }

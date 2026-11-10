@@ -172,7 +172,7 @@ export function installModes(ext) {
     if (engine.globalPaused() || floor.paused) return 'paused';
     const state = engine.floorState(floor.id);
     if (state.budgetStopped) return 'gone home for today';
-    if (engine.budget.out(engine.agentProvider({ role: 'manager' }), floor.id)) return 'work has stopped for now';
+    if (engine.budget.out(engine.agentProvider({ role: 'manager' }, floor.id), floor.id)) return 'work has stopped for now';
     if (engine.daily?.running(floor.id)) return 'busy';  // the day's run has the floor
     if (busy(floor.id)) return 'busy';
     // A standing order that has come due goes first. It needs the same quiet floor.

@@ -459,11 +459,15 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       outbound(c, q, 'search');
       if (serverSearch(cfg) && SEARCH_ROLES.has(c.agent.role) && engine.search) {
         if (todayCount(c, 'search') >= cfg.searchesPerFloorDay) throw new WorkspaceError('this floor has done all its searching for today');
-        roomFor(c, 0.2, 'anthropic');
+        // A floor moved onto OpenRouter searches there, on its own model.
+        const fr = engine.budget.floorRoute(c.floor.id);
+        if (fr && !engine.search.searchOpenRouter) return 'Search is unavailable right now.';
+        const provider = fr ? 'openrouter' : 'anthropic';
+        roomFor(c, 0.2, provider);
         // What was searched for isn't shown on the floor: visitors can read the feed.
         c.say('browsing', 'Searching the web', 'searched the web');
         let r;
-        try { r = await engine.brokerCall(c, { provider: 'anthropic', usd: 0.2, model: engine.search.model, kind: 'search' }, () => engine.search.search(q, c.signal)); } catch (e) { if (e instanceof ProviderError) { engine.log('warn', 'search failed', { status: e.status }); return 'Search is unavailable right now.'; } throw e; }
+        try { r = await engine.brokerCall(c, { provider, usd: 0.2, model: fr ? fr.model : engine.search.model, kind: 'search' }, () => (fr ? engine.search.searchOpenRouter(q, c.signal, fr.model) : engine.search.search(q, c.signal))); } catch (e) { if (e instanceof ProviderError) { engine.log('warn', 'search failed', { status: e.status }); return 'Search is unavailable right now.'; } throw e; }
         const list = r.sources.slice(0, 12).map((s, i) => `${i + 1}. ${s.title}\n${s.url}`).join('\n');
         return wrapUntrusted('web_search', `${r.failed && !r.text ? `The search failed (${r.failed}).` : r.text || 'No results.'}${list ? `\n\nSources:\n${list}` : ''}`);
       }

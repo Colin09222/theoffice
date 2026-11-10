@@ -139,7 +139,7 @@ export class Engine {
     const mgr = agents.find((a) => a.role === 'manager');
     // Whoever works on a provider that has reached its limit stays in the queue. Everyone else on the floor carries on.
     const stopped = new Set();
-    const usedUp = (a) => { const p = this.agentProvider(a); if (!this.budget.out(p, floor.id)) return false; stopped.add(p); return true; };
+    const usedUp = (a) => { const p = this.agentProvider(a, floor.id); if (!this.budget.out(p, floor.id)) return false; stopped.add(p); return true; };
     if (floor.manager_wake && !this.runs.has(mgr.id) && !usedUp(mgr)) {
       run(this.db, 'UPDATE floors SET manager_wake=0 WHERE id=?', floor.id);
       this.launch(floor, mgr, (ctl) => this.runManager(floor.id, mgr.id, ctl));
@@ -159,7 +159,7 @@ export class Engine {
       const agent = agents.find((a) => a.id === t.agent_id);
       if (!agent) continue;
       // A computer works from its own copy of the project. Two at once on one project means testing yesterday's version and fighting over the merge.
-      if (t.project && this.computer?.handles(agent.role) && get(this.db, "SELECT 1 x FROM tasks WHERE floor_id=? AND project=? AND status='doing' AND id!=?", floor.id, t.project, t.id)) continue;
+      if (t.project && this.computer?.handles(agent.role, floor.id) && get(this.db, "SELECT 1 x FROM tasks WHERE floor_id=? AND project=? AND status='doing' AND id!=?", floor.id, t.project, t.id)) continue;
       // A maker job's test of files the Tester has already been through, byte for byte: the last report stands, and nobody is put to work (server/makers.js).
       // The loop it feeds may queue or cancel tasks, so the rest of this floor waits for a fresh look at the board.
       const stands = agent.role === 'tester' ? this.makers?.sameAsTested?.(floor, t) : null;
@@ -168,7 +168,7 @@ export class Engine {
       run(this.db, "UPDATE tasks SET status='doing', updated_at=? WHERE id=?", this.now(), t.id);
       this.emitTask(t.id);
       this.passOn(floor, agent, t, deps);
-      this.launch(floor, agent, (ctl) => (this.computer?.handles(agent.role) ? this.computer.run(floor.id, agent.id, t.id, ctl) : this.runStaff(floor.id, agent.id, t.id, ctl)));
+      this.launch(floor, agent, (ctl) => (this.computer?.handles(agent.role, floor.id) ? this.computer.run(floor.id, agent.id, t.id, ctl) : this.runStaff(floor.id, agent.id, t.id, ctl)));
     }
     this.judgeBuildingBudget(floor, stopped);
   }
@@ -214,7 +214,12 @@ export class Engine {
   }
   // ---- the building's lifetime limits, one per provider ----
   /** Who gets paid when this person works. A computer is always Claude, whatever the role's own model is. */
-  agentProvider(agent) { return this.computer?.handles(agent.role) ? 'anthropic' : providerForRole(this.models.all[agent.role] || this.models.all.researcher); }
+  agentProvider(agent, floorId) {
+    if (this.computer?.handles(agent.role, floorId)) return 'anthropic';
+    return providerForRole(routeFor(this.models, agent.role, { floorRoute: this.budget.floorRoute(floorId) }));
+  }
+  /** The settings a floor's prompts are written for. A floor moved onto OpenRouter has no computer, so its team is told how things work without one. */
+  floorCfg(floorId) { return this.budget.floorRoute(floorId) ? { ...this.cfg, computerEnabled: false } : this.cfg; }
   /** Which of the floor's models this task runs on. Decided once, when it starts: one task keeps one model, one prompt cache, and the price its computer was really started at. */
   taskTier(task) {
     if (task.model_tier) return task.model_tier;
@@ -266,7 +271,7 @@ export class Engine {
   async callLLM(ctx, { messages, tools, onToken, onToolCall, onReset, meta }) {
     const { floorId, agent, signal } = ctx;
     // A job the team picked for itself in a work mode runs on the autonomous model. Anything the boss asked for runs on the role's own.
-    const role = routeFor(this.models, agent.role, { autonomous: !!ctx.autonomous, tier: ctx.tier });
+    const role = routeFor(this.models, agent.role, { autonomous: !!ctx.autonomous, tier: ctx.tier, floorRoute: this.budget.floorRoute(floorId) });
     const provider = providerForRole(role);
     const paid = { ...ctx, provider };
     const pricing = { prompt: role.pricing?.prompt || 0, completion: role.pricing?.completion || 0, cacheRead: role.pricing?.cacheRead };
@@ -372,7 +377,7 @@ export class Engine {
     // So does anything about the budget: a bot that doesn't know can't tell anyone.
     const msgs = all(this.db, "SELECT id,role,text,files FROM messages WHERE floor_id=? AND role NOT IN ('office','report','budget') ORDER BY id DESC LIMIT 30", floor.id).reverse();
     const roster = { manager: mgr.name, person: this.people.personBlock(mgr) };
-    const out = [{ role: 'system', content: managerPrompt(floor, boss, roster, this.cfg) }];
+    const out = [{ role: 'system', content: managerPrompt(floor, boss, roster, this.floorCfg(floor.id)) }];
     for (const m of msgs) {
       if (m.role === 'boss') {
         const files = m.files ? attachmentsOf(this.db, floor.id, JSON.parse(m.files)) : [];
@@ -506,12 +511,12 @@ export class Engine {
     let messages = task.transcript ? JSON.parse(task.transcript) : null;
     if (!messages) {
       messages = [
-        { role: 'system', content: staffPrompt(floor, agent, roleCfg, { ...task, live: this.isLive(floor.id, task.project) }, this.cfg, this.people.personBlock(agent, task)) },
+        { role: 'system', content: staffPrompt(floor, agent, roleCfg, { ...task, live: this.isLive(floor.id, task.project) }, this.floorCfg(floor.id), this.people.personBlock(agent, task)) },
         { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${task.auto ? `\n\n${ON_OUR_OWN}` : ''}${this.handoffFor(floor, task)}${describeFiles(this.taskFiles(task))}`, ...(this.taskFiles(task).length ? { files: this.taskFiles(task).map((f) => f.path) } : {}) },
       ];
     }
     // A task that started on a computer has no system prompt of its own here. It never runs without the safety rules.
-    if (messages[0]?.role !== 'system') messages.unshift({ role: 'system', content: staffPrompt(floor, agent, roleCfg, task, this.cfg, this.people.personBlock(agent, task)) });
+    if (messages[0]?.role !== 'system') messages.unshift({ role: 'system', content: staffPrompt(floor, agent, roleCfg, task, this.floorCfg(floor.id), this.people.personBlock(agent, task)) });
     this.setAgent(agent.id, { state: 'thinking', activity: task.title, project: task.project, task_id: task.id });
     this.feed(floorId, agent, `started "${task.title}"`, task.project);
     const call = { floorId, agent, signal, project: task.project, taskId: task.id, autonomous: !!task.auto, tier: this.taskTier(task) };
@@ -742,7 +747,7 @@ export class Engine {
     const project = wanted || (priv || floor.default_private ? 'private-work' : '');
     if (project) this.upsertProject(floor, project, { title: project, makePrivate: priv });
     // A game, app or shop asked for in chat starts on the same tested starter as one from the maker cards.
-    if (project && (lane === 'shop' || ((lane === 'game' || lane === 'app') && this.cfg.computerEnabled))) seedStarter(this.db, floor, project, lane, `${title} ${brief}`, this.cfg);
+    if (project && (lane === 'shop' || ((lane === 'game' || lane === 'app') && this.floorCfg(floor.id).computerEnabled))) seedStarter(this.db, floor, project, lane, `${title} ${brief}`, this.floorCfg(floor.id));
     const deps = dependsOn.map(Number).filter((n) => Number.isInteger(n)).slice(0, 10);
     if (afterPrevious) {
       const prev = get(this.db, "SELECT id FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked') ORDER BY id DESC LIMIT 1", floor.id);
@@ -862,7 +867,7 @@ export class Engine {
     run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
     const state = this.floorState(floor.id);
     if (state.budgetStopped) this.bossNotice(floor.id, 'Noted, boss. Everyone has gone home for today, so I\'ll pick this up first thing tomorrow.');
-    else if (state.outOfBudget && this.budget.out(this.agentProvider({ role: 'manager' }), floor.id)) this.bossNotice(floor.id, 'Noted, boss. Work is still stopped for now, so I\'ll pick this up once the building manager has sorted that out.');
+    else if (state.outOfBudget && this.budget.out(this.agentProvider({ role: 'manager' }, floor.id), floor.id)) this.bossNotice(floor.id, 'Noted, boss. Work is still stopped for now, so I\'ll pick this up once the building manager has sorted that out.');
     this.kick();
   }
   pauseFloor(floorId, reason = 'Paused by the boss') {

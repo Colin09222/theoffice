@@ -312,7 +312,7 @@ export function installDaily(ext) {
   function watch(r) {
     const floor = get(db, 'SELECT * FROM floors WHERE id=?', r.floor_id);
     if (!floor || floor.status === 'killed') { run(db, "UPDATE daily_runs SET status='stopped', outcome='stopped', why='gone', finished_at=? WHERE id=?", now(), r.id); return; }
-    const budgetOut = engine.floorState(floor.id).budgetStopped || engine.budget.out(engine.agentProvider({ role: 'manager' }), floor.id);
+    const budgetOut = engine.floorState(floor.id).budgetStopped || engine.budget.out(engine.agentProvider({ role: 'manager' }, floor.id), floor.id);
     if (budgetOut) { halt(r, floor, 'budget'); return; }
     if (tokensSince(floor.id, r.started_at) >= tokenCap()) { halt(r, floor, 'tokens'); return; }
     if (now() - r.started_at >= timeoutMs()) { halt(r, floor, 'timeout'); return; }

@@ -117,7 +117,8 @@ export class Computer {
     this.limiter = new Limiter(engine.cfg.maxSessionsFloor, engine.cfg.maxSessionsGlobal);
     this.fileWork = new Limiter(Infinity, FILE_WORK_AT_ONCE);
   }
-  handles(role) { return !!this.engine.models.all[role]?.computer; }
+  /** Whether this role works on a computer, on this floor when one is given. A floor moved onto OpenRouter has none: Managed Agents is the Claude API only. */
+  handles(role, floorId) { return !!this.engine.models.all[role]?.computer && !(floorId != null && this.engine.budget.floorRoute(floorId)); }
 
   // ---- control-plane objects: created once, kept by id, updated only when their definition changes ----
   setting(key) { const v = get(this.engine.db, 'SELECT value FROM settings WHERE key=?', key)?.value; return v ? JSON.parse(v) : null; }

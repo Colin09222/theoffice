@@ -65,7 +65,7 @@ const usage = () => {
     '  node scripts/admin.mjs help list [--json]       what floors have asked buddehbot and not had answered. Everything a floor wrote is fenced as untrusted data',
     '  node scripts/admin.mjs help answer --id N --text-file PATH   answer one, as guidance to that floor\'s manager',
     '  node scripts/admin.mjs help answer --id N --decline          decline one',
-    '  node scripts/admin.mjs floor-limit --floor N [--claude USD] [--openrouter USD] [--fable USD] [--opus USD] [--clear]   top one floor up: raises its stops or moves where its models switch, then shows where it stands (admin only, and it takes effect on the server\'s next tick)',
+    '  node scripts/admin.mjs floor-limit --floor N [--claude USD] [--openrouter USD] [--fable USD] [--opus USD] [--openrouter-only MODEL [--effort low|medium|high|xhigh]] [--no-openrouter-only] [--clear]   top one floor up: raises its stops or moves where its models switch, or puts every Claude call it makes on one OpenRouter model (no computer there), then shows where it stands (admin only, and it takes effect on the server\'s next tick)',
     '  node scripts/admin.mjs budget [--json]          spent, limit and remaining per provider, what each floor has spent, and a flag at 50%, 80% and 100%',
     '  node scripts/admin.mjs purchases list [--json]  what the staff have asked to buy and nobody has decided. Everything a floor wrote is fenced as untrusted data',
     '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick',
@@ -312,6 +312,15 @@ if (cmd === 'code' && rest[0] === 'hold') {
   if (rest.includes('--clear')) budget.setFloorOverride(floor.id, null);
   else {
     const over = Object.fromEntries(Object.entries({ claudeStopUsd: usd('--claude'), openrouterStopUsd: usd('--openrouter'), fableUntilUsd: usd('--fable'), opusUntilUsd: usd('--opus') }).filter(([, v]) => v !== undefined));
+    const only = rest.indexOf('--openrouter-only');
+    if (only >= 0) {
+      const model = rest[only + 1];
+      if (!model || model.startsWith('--') || !model.includes('/')) die('--openrouter-only needs an OpenRouter model id, such as anthropic/claude-sonnet-5.5.');
+      const e = rest.indexOf('--effort'), effort = e >= 0 ? rest[e + 1] : 'high';
+      if (!['low', 'medium', 'high', 'xhigh'].includes(effort)) die('--effort is low, medium, high or xhigh.');
+      over.providerOverride = { provider: 'openrouter', model, effort };
+    }
+    if (rest.includes('--no-openrouter-only')) over.providerOverride = undefined;  // JSON drops it, so the floor goes back to its own providers
     if (Object.keys(over).length) budget.setFloorOverride(floor.id, over);
   }
   console.log(JSON.stringify({ floor: floor.number, ...budget.floorStatus(floor.id) }));

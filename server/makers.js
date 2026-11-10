@@ -325,7 +325,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
   };
   const manager = (floor) => get(db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", floor.id);
   const ensure = (floor, role) => { if (!get(db, 'SELECT 1 x FROM agents WHERE floor_id=? AND role=?', floor.id, role)) engine.hireStaff(floor, role); };
-  const computerOn = (role) => !!engine.computer?.handles?.(role);
+  const computerOn = (role, floorId) => !!engine.computer?.handles?.(role, floorId);
   const tokensSince = (floorId, t) => get(db, 'SELECT COALESCE(SUM(prompt_tokens+completion_tokens),0) n FROM ledger WHERE floor_id=? AND created_at>=?', floorId, t).n;
 
   function queue(floor, j, step, pass, brief, role, deps = [], fix = false) {
@@ -341,7 +341,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     if (live.length) extra = { ...extra, bugs: [...live, ...(extra?.bugs || []).filter((b) => !live.some((x) => x.text === b.text))] };
     const fix = !!extra?.fix;
     const b = queue(floor, j, 'build', pass, buildBrief(j, pass, extra, config), 'builder', [], fix);
-    queue(floor, j, 'test', pass, testBrief(j, pass, { computer: computerOn('tester'), recheck: fix ? (extra.bugs || []).filter((x) => x.severity === 'major' || x.severity === 'blocker') : [] }, config), 'tester', [b], fix);
+    queue(floor, j, 'test', pass, testBrief(j, pass, { computer: computerOn('tester', floor.id), recheck: fix ? (extra.bugs || []).filter((x) => x.severity === 'major' || x.severity === 'blocker') : [] }, config), 'tester', [b], fix);
     save(j, { stage: 'build', pass });
   }
 
@@ -380,7 +380,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     engine.addMessage(floor.id, 'boss', null, `Let's make ${title}: ${pitch}\nGoal: ${goal}`);
     const doc = queue(floor, j, 'doc', 0, docBrief(jobView), role);
     const b = queue(floor, j, 'build', 0, buildBrief(jobView, 0, {}, config), 'builder', [doc]);
-    queue(floor, j, 'test', 0, testBrief(jobView, 0, { computer: computerOn('tester') }, config), 'tester', [b]);
+    queue(floor, j, 'test', 0, testBrief(jobView, 0, { computer: computerOn('tester', floor.id) }, config), 'tester', [b]);
     engine.feed?.(floor.id, null, `The team started making ${title}`, project);
     say(floor, `On it. **${title}**: ${plan.map((p, i) => `${i + 1}. ${p}`).join(' ')}\nThe Tester plays every version in a real browser, and you get a **Launch** button once one passes.`);
     return view(floor);
@@ -485,8 +485,8 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
     const cancelPaired = () => { for (const t of all(db, "SELECT m.task_id id FROM maker_tasks m JOIN tasks t ON t.id=m.task_id WHERE m.job_id=? AND t.status IN ('todo','blocked')", j.id)) engine.cancelTask(floor, t.id); };
     try {
       if (d.action === 'wait') return true;
-      if (d.action === 'redo-doc') { cancelPaired(); const doc = queue(floor, j, 'doc', 0, docBrief({ ...j, ...stateOf(j) }), DOC_ROLE[j.type]); const b = queue(floor, j, 'build', 0, buildBrief({ ...j, ...stateOf(j) }, 0, {}, config), 'builder', [doc]); queue(floor, j, 'test', 0, testBrief(j, 0, { computer: computerOn('tester') }, config), 'tester', [b]); return true; }
-      if (d.action === 'retest') { queue(floor, j, 'test', d.pass, testBrief(j, d.pass, { computer: computerOn('tester') }, config), 'tester'); return true; }
+      if (d.action === 'redo-doc') { cancelPaired(); const doc = queue(floor, j, 'doc', 0, docBrief({ ...j, ...stateOf(j) }), DOC_ROLE[j.type]); const b = queue(floor, j, 'build', 0, buildBrief({ ...j, ...stateOf(j) }, 0, {}, config), 'builder', [doc]); queue(floor, j, 'test', 0, testBrief(j, 0, { computer: computerOn('tester', floor.id) }, config), 'tester', [b]); return true; }
+      if (d.action === 'retest') { queue(floor, j, 'test', d.pass, testBrief(j, d.pass, { computer: computerOn('tester', floor.id) }, config), 'tester'); return true; }
       if (d.action === 'build') { cancelPaired(); queuePass(floor, j, d.pass, { bugs: d.bugs, regressions: d.regressions, unmet: d.unmet || [], fix: !!d.fix }); return true; }
       cancelPaired();
       if (d.action === 'ready') { if (d.outOfTokens) save(j, {}, { skippedWhy: 'the work limit' }); ready(floor, j, d.why, !!d.passing).catch(() => {}); return true; }
@@ -557,7 +557,7 @@ export function createMakers({ db, cfg, engine, now = Date.now, config = CONFIG,
       const st = stateOf(j);
       save(j, {}, { fails: 0, fixTries: 0 });
       const docDone = get(db, "SELECT 1 x FROM maker_tasks m JOIN tasks t ON t.id=m.task_id WHERE m.job_id=? AND m.step='doc' AND t.status='done'", j.id);
-      if (!docDone) { const doc = queue(floor, j, 'doc', 0, docBrief({ ...j, ...st }), DOC_ROLE[j.type]); const b = queue(floor, j, 'build', 0, buildBrief({ ...j, ...st }, 0, {}, config), 'builder', [doc]); queue(floor, j, 'test', 0, testBrief(j, 0, { computer: computerOn('tester') }, config), 'tester', [b]); save(j, { stage: 'doc', pass: 0 }); }
+      if (!docDone) { const doc = queue(floor, j, 'doc', 0, docBrief({ ...j, ...st }), DOC_ROLE[j.type]); const b = queue(floor, j, 'build', 0, buildBrief({ ...j, ...st }, 0, {}, config), 'builder', [doc]); queue(floor, j, 'test', 0, testBrief(j, 0, { computer: computerOn('tester', floor.id) }, config), 'tester', [b]); save(j, { stage: 'doc', pass: 0 }); }
       else if (st.held) { save(j, {}, { fixing: true }); queuePass(floor, j, j.pass, { bugs: st.bugs || [], unmet: st.unmet || [], fix: true }); }
       else queuePass(floor, j, Math.min(j.pass + (st.lastPassing === j.pass ? 1 : 0), j.depth), { bugs: st.bugs || [], unmet: st.unmet || [] });
       say(floor, st.held ? `Going again on ${j.title}: one more try at that serious bug.` : `Going again on ${j.title}, with the Tester's list.`);

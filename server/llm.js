@@ -20,9 +20,17 @@ export const scrub = (s, cfg) => {
 /** A provider's own words can hold account details ("can only afford", "credit balance"), so they stay in the log. This is what a floor hears. */
 export const plainProviderText = (e) => (e?.message && !/\bsaid\b|provider error/i.test(e.message) ? e.message : `The model provider returned an error${e?.status ? ` (${e.status})` : ''}.`);
 
+// Claude's effort as OpenRouter's reasoning effort, which stops at xhigh.
+const REASONING = { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'xhigh' };
+/** What a Claude model on OpenRouter adds to the body: its thinking effort, and prompt caching, which OpenRouter only does for Claude when asked. */
+export function claudeExtras(model, { effort, cache } = {}) {
+  if (!String(model).startsWith('anthropic/')) return {};
+  return { ...(REASONING[effort] ? { reasoning: { effort: REASONING[effort] } } : {}), ...(cache === false ? {} : { cache_control: { type: 'ephemeral' } }) };
+}
+
 export function createOpenRouterClient(cfg) {
   return {
-    async chat({ model, messages, tools, maxTokens, onToken, onToolCall, signal, pricing, extra }) {
+    async chat({ model, messages, tools, maxTokens, onToken, onToolCall, signal, pricing, extra, effort, cache }) {
       if (!cfg.openrouterKey) throw new ProviderError('No OpenRouter key is configured on the server.', { status: 401 });
       const ctl = new AbortController();
       const onAbort = () => ctl.abort(signal.reason);
@@ -36,7 +44,7 @@ export function createOpenRouterClient(cfg) {
           res = await fetch(`${cfg.openrouterBase}/chat/completions`, {
             method: 'POST', signal: ctl.signal,
             headers: { authorization: `Bearer ${cfg.openrouterKey}`, 'content-type': 'application/json', 'x-title': 'The Office' },
-            body: JSON.stringify({ model, messages, stream: true, max_tokens: maxTokens, usage: { include: true }, ...(tools?.length ? { tools, tool_choice: 'auto' } : {}), ...(extra || {}) }),
+            body: JSON.stringify({ model, messages, stream: true, max_tokens: maxTokens, usage: { include: true }, ...claudeExtras(model, { effort, cache }), ...(tools?.length ? { tools, tool_choice: 'auto' } : {}), ...(extra || {}) }),
           });
         } catch (e) {
           if (signal?.aborted) throw e;

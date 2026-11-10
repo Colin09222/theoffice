@@ -4,7 +4,9 @@
     "_comment": "USD per million tokens. cacheRead is what a prompt-cache hit costs; a cache write is charged at 1.25 times the input price.",
     "openai/gpt-5-nano": { "prompt": 0.05, "completion": 0.4 },
     "openai/gpt-6-luna": { "prompt": 0.1, "completion": 0.5 },
-    "anthropic/claude-haiku-5.5": { "prompt": 0.1, "completion": 0.5 },
+    "anthropic/claude-haiku-5.5": { "prompt": 0.1, "completion": 0.5, "cacheRead": 0.01 },
+    "anthropic/claude-sonnet-5.5": { "prompt": 2, "completion": 10, "cacheRead": 0.1 },
+    "anthropic/claude-opus-5.5": { "prompt": 4, "completion": 20, "cacheRead": 0.2 },
     "z-ai/glm-5.3-flash": { "prompt": 0.15, "completion": 0.5 },
     "claude-opus-5-5": {
       "prompt": 4,
@@ -46,7 +48,7 @@
     ]
   },
   "floorLimits": {
-    "_comment": "What each floor may spend, counted from the first boot that had these limits. A floor's Claude spend under fableUntilUsd puts the roles listed on fableModel; from opusUntilUsd they go on sonnetModel; in between they keep their own model. At claudeStopUsd or openrouterStopUsd that provider's work pauses on that floor. One floor can be topped up with: scripts/admin.mjs floor-limit. For the admin's eyes only: none of it reaches a floor, a boss, a visitor or a prompt.",
+    "_comment": "What each floor may spend, counted from the first boot that had these limits. A floor's Claude spend under fableUntilUsd puts the roles listed on fableModel; from opusUntilUsd they go on sonnetModel; in between they keep their own model. At claudeStopUsd or openrouterStopUsd that provider's work pauses on that floor. One floor can be topped up with: scripts/admin.mjs floor-limit, which can also move a whole floor onto one OpenRouter model (--openrouter-only): every Claude call it makes goes there instead, and it works without a computer. For the admin's eyes only: none of it reaches a floor, a boss, a visitor or a prompt.",
     "roles": ["builder", "designer", "manager"],
     "fableModel": "claude-fable-5-2",
     "sonnetModel": "claude-sonnet-5-5",

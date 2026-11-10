@@ -197,7 +197,9 @@ export function loadModels(path = resolve(ROOT, 'config/models.json')) {
  * runs on the autonomous model, computer sessions included. Returns { provider, model, effort, maxTokens, pricing }, or null for a role
  * that has no computer when one is asked for.
  */
-export function routeFor(models, roleKey, { autonomous = false, computer = false, tier = '' } = {}) {
+export function routeFor(models, roleKey, { autonomous = false, computer = false, tier = '', floorRoute = null } = {}) {
+  // A floor moved onto OpenRouter has no computer: Managed Agents is the Claude API only.
+  if (computer && floorRoute) return null;
   const role = models.all[roleKey] || models.all.researcher;
   const price = (model, own) => own || models.prices?.[model] || { prompt: 0, completion: 0 };
   let r;
@@ -213,7 +215,18 @@ export function routeFor(models, roleKey, { autonomous = false, computer = false
   const moved = fl && (fl.roles || []).includes(roleKey) ? (tier === 'fable' ? { model: fl.fableModel } : tier === 'sonnet' ? { model: fl.sonnetModel, effort: fl.sonnetEffort } : null) : null;
   if (moved) r = { ...r, provider: 'anthropic', model: moved.model, effort: moved.effort ?? r.effort, pricing: price(moved.model, null) };
   const auto = models.autonomous;
-  if (!autonomous || !auto?.model) return r;
-  if (!computer && (auto.keepOwnModel || []).includes(roleKey)) return r;
-  return { ...r, provider: auto.provider || 'anthropic', model: auto.model, effort: auto.effort ?? r.effort, pricing: price(auto.model, null) };
+  if (!autonomous || !auto?.model || (!computer && (auto.keepOwnModel || []).includes(roleKey))) return overFloor(r, floorRoute, models.prices);
+  return overFloor({ ...r, provider: auto.provider || 'anthropic', model: auto.model, effort: auto.effort ?? r.effort, pricing: price(auto.model, null) }, floorRoute, models.prices);
+}
+
+/** OpenRouter's name for a Claude model: claude-sonnet-5-5 is anthropic/claude-sonnet-5.5. */
+export const openrouterName = (model) => (String(model).startsWith('claude-') ? `anthropic/${String(model).replace(/-(\d+)-(\d+)$/, '-$1.$2')}` : model);
+/**
+ * One call's route on a floor that was moved onto OpenRouter (budget.floorRoute). A Claude call goes to OpenRouter on the floor's model and effort instead;
+ * anything already on OpenRouter stays as it is. `sameModel` keeps the call's own model under its OpenRouter name (app AI, small talk); `keepEffort` keeps the call's own effort.
+ */
+export function overFloor(r, floorRoute, prices = {}, { sameModel = false, keepEffort = false } = {}) {
+  if (!r || !floorRoute || r.provider !== 'anthropic') return r;
+  const model = sameModel ? openrouterName(r.model) : floorRoute.model;
+  return { ...r, provider: 'openrouter', model, effort: sameModel || keepEffort ? r.effort : floorRoute.effort ?? r.effort, pricing: prices?.[model] || r.pricing };
 }

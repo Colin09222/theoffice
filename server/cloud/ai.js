@@ -3,6 +3,7 @@
 // while it runs and goes on the ledger against its floor afterwards, the same as anything the staff spend.
 import { get, tx } from '../db.js';
 import { CloudError } from './store.js';
+import { overFloor } from '../config.js';
 
 const PROVIDER = 'anthropic';
 const OFF = () => new CloudError(403, 'ai_off', 'AI isn\'t switched on for this site right now.');
@@ -51,7 +52,9 @@ export function createAppAi({ db, models, engine, llm, log, powers, gate }) {
   async function chat({ F, p, pk, body }) {
     if (powers.blocked('ai', F, p)) throw OFF();
     const q = clean(body);
-    const model = models?.appAi?.[q.tier];
+    // On a floor moved onto OpenRouter, the same model there.
+    const own = models?.appAi?.[q.tier];
+    const { model, provider } = own ? overFloor({ provider: PROVIDER, model: own }, engine.budget.floorRoute(F), models?.prices, { sameModel: true }) : { provider: PROVIDER };
     const price = model && models.prices?.[model];
     if (!price?.prompt || !price?.completion) { log('error', 'office.ai has no model or price', { tier: q.tier }); throw RESTING(); }
     return gate(async () => {
@@ -63,14 +66,14 @@ export function createAppAi({ db, models, engine, llm, log, powers, gate }) {
       if (room < L.minOutput) throw NO_ALLOWANCE();
       const maxTokens = Math.min(q.maxTokens, room);
       const worst = (est * price.prompt * 1.25 + maxTokens * price.completion) / 1e6;
-      if (engine.budget.out(PROVIDER, F) || engine.budget.room(PROVIDER, F) <= worst || engine.overBudget(F, worst)) throw RESTING();
+      if (engine.budget.out(provider, F) || engine.budget.room(provider, F) <= worst || engine.overBudget(F, worst)) throw RESTING();
       const todayUsd = get(db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE day=? AND kind='app_ai'", powers.today()).n;
       if (todayUsd + runningUsd + worst > L.buildingDayUsd) throw RESTING();
-      const holdId = engine.budget.hold(PROVIDER, { floorId: F, agentId: null, usd: worst });
+      const holdId = engine.budget.hold(provider, { floorId: F, agentId: null, usd: worst });
       const promised = est + maxTokens;
       bump(key, promised); runningUsd += worst;
       const charge = (prompt, completion, cost) => tx(db, () => {
-        engine.charge(F, { id: null }, model, prompt, completion, cost, { kind: 'app_ai', provider: PROVIDER });
+        engine.charge(F, { id: null }, model, prompt, completion, cost, { kind: 'app_ai', provider });
         powers.add(F, p, { [column]: prompt + completion, ai_calls: 1 });
       });
       try {
@@ -78,7 +81,7 @@ export function createAppAi({ db, models, engine, llm, log, powers, gate }) {
         const signal = AbortSignal.timeout(L.timeoutMs);
         try {
           r = await llm.chat({
-            provider: PROVIDER, model, effort: 'low', maxTokens, tools: [], thinking: 'off', fallbacks: false, pricing: price,
+            provider, model, effort: 'low', maxTokens, tools: [], thinking: 'off', fallbacks: false, pricing: price,
             messages: [...(q.system ? [{ role: 'system', content: q.system }] : []), ...q.turns],
             signal, meta: { kind: 'app_ai' },
           });

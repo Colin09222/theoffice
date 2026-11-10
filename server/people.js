@@ -11,7 +11,7 @@ import { WorkspaceError } from './workspace.js';
 import { talkLine } from './talk.js';
 import { settingText } from './brief.js';
 import { scrub } from './llm.js';
-import { routeFor } from './config.js';
+import { routeFor, overFloor } from './config.js';
 
 const MEMORY_KEEP = 24, MEMORY_SHOWN = 8, NOTE_CHARS = 170;
 // An answer to a colleague is a few sentences, so the role's own model gets room to think and write that, not the room it has for a whole job, and no more than high effort.
@@ -124,7 +124,8 @@ export function createPeople(engine) {
    * the building's limit while it runs and goes on the ledger at that model's own price, a stopped call included.
    */
   async function callModel(floorId, agent, route, { purpose, system, user, maxTokens = 500, meta = {}, signal = ctl.signal, taskId = null, cache = false }) {
-    const s = route;
+    // A floor moved onto OpenRouter talks there too: small talk on the same small model, a work answer on the floor's model at the answer's own effort.
+    const s = overFloor(route, engine.budget.floorRoute(floorId), engine.models.prices, purpose === 'answer' ? { keepEffort: true } : { sameModel: true });
     if (!s || cfg.peopleTalk === false || !speakable(floorRow(floorId))) return null;
     const provider = s.provider === 'anthropic' ? 'anthropic' : 'openrouter';
     const pricing = s.pricing || {};

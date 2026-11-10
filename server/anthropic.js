@@ -186,7 +186,11 @@ export function createRouter({ anthropic, openrouter }) {
   return {
     chat(args) {
       if (args.provider === 'anthropic') return anthropic.chat(args);
-      return openrouter.chat({ ...args, messages: args.messages.map(({ anthropic_content, office_blocks, files, ...m }) => m) });
+      return openrouter.chat({ ...args, messages: args.messages.map(({ anthropic_content, office_blocks, files, ...m }) => {
+        // A picture someone sent goes along as an image part. Everything else stays words.
+        const pics = m.role === 'user' ? (office_blocks || []).filter((b) => b.type === 'image' && b.source?.type === 'base64') : [];
+        return pics.length ? { ...m, content: [{ type: 'text', text: String(m.content ?? '') }, ...pics.map((b) => ({ type: 'image_url', image_url: { url: `data:${b.source.media_type};base64,${b.source.data}` } }))] } : m;
+      }) });
     },
   };
 }
