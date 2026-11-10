@@ -51,9 +51,9 @@
     "fableModel": "claude-fable-5-2",
     "sonnetModel": "claude-sonnet-5-5",
     "sonnetEffort": "high",
-    "fableUntilUsd": 20,
-    "opusUntilUsd": 50,
-    "claudeStopUsd": 85,
+    "fableUntilUsd": 35,
+    "opusUntilUsd": 125,
+    "claudeStopUsd": 125,
     "openrouterStopUsd": 25
   },
   "roles": {

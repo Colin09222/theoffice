@@ -10,14 +10,17 @@ import { createMockClient } from '../server/mock.js';
 import { createMockSessions } from '../server/mock-sessions.js';
 
 const APPS = 'apps.localhost';
+// The boundary tests pin their own numbers, so what floors get in config/models.json can change without rewriting them.
+const pinnedModels = () => { const m = loadModels(); return { ...m, floorLimits: { ...m.floorLimits, fableUntilUsd: 20, opusUntilUsd: 50, claudeStopUsd: 85 } }; };
+test("what floors get today: Fable to \$35, Opus to \$125, then stop", () => { const l = loadModels().floorLimits; assert.deepEqual([l.fableUntilUsd, l.opusUntilUsd, l.claudeStopUsd], [35, 125, 125]); });
 const open = [];
 after(async () => { for (const t of open) await t.close(); });
 const NO_OTHER_LIMITS = { floorDailyUsd: Infinity, globalDailyUsd: Infinity, taskMaxUsd: Infinity, budgetAnthropicUsd: 100000, budgetOpenrouterUsd: 100000 };
-const start = async (over = {}, deps = {}) => { const t = await boot({ peopleTalk: false, ...NO_OTHER_LIMITS, ...over }, { models: loadModels(), ...deps }); open.push(t); return t; };
+const start = async (over = {}, deps = {}) => { const t = await boot({ peopleTalk: false, ...NO_OTHER_LIMITS, ...over }, { models: pinnedModels(), ...deps }); open.push(t); return t; };
 const floorOf = (t, c) => get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
 const spend = (t, floorId, provider, usd, when = Date.now()) => run(t.db, "INSERT INTO ledger (floor_id,day,agent_id,model,prompt_tokens,completion_tokens,cost_usd,created_at,kind,provider) VALUES (?,?,NULL,?,0,0,?,?,'model',?)", floorId, new Date().toISOString().slice(0, 10), provider === 'anthropic' ? 'claude-opus-5-5' : 'google/gemini-3.1-pro-preview', usd, when, provider);
 const wipe = (t, floorId) => run(t.db, 'DELETE FROM ledger WHERE floor_id=?', floorId);
-const models = loadModels();
+const models = pinnedModels();
 const recording = (seen) => { const inner = createMockClient({ mockDelayMs: 2 }); return { ...inner, chat(x) { seen.push({ model: x.model, effort: x.effort, role: x.meta?.role, kind: x.meta?.kind }); return inner.chat(x); } }; };
 const assign = (t, floor, to) => { const mgr = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", floor.id); const r = t.app.engine.assignTask(floor, mgr, { to, title: 'A small job', brief: 'Write a note.', plan: '', project: 'things', private: false, dependsOn: [] }); t.app.engine.kick(); return r; };
 const taskOf = (t, id) => get(t.db, 'SELECT * FROM tasks WHERE id=?', id);
