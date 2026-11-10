@@ -118,15 +118,18 @@ describe('the contractor hold', () => {
     assert.equal(jobs(h)[0].status, 'released');
   });
 
-  test('other floors, and other roles on a held floor, work as before', async () => {
+  test('research is held too; other floors, and writers on a held floor, work as before', async () => {
     const llm = scripted();
     const h = await floor(llm);
     const g = await floor(llm);
     setContractor(h.db, h.f.id, true);
     const w = assign(h, 'writer');
+    const r = assign(h, 'researcher', { project: 'prices' });
+    await until(() => task(h, r.id).contractor === 1, { what: 'the research to be held' });
+    assert.equal(callsBy(llm, 'researcher').length, 0, 'scraping and data gathering go to the contractor too');
     const b = assign(g, 'builder');
     await until(() => ['review', 'done'].includes(task(h, w.id).status) && ['review', 'done'].includes(task(g, b.id).status), { what: 'both to finish' });
-    assert.equal(jobs(h).length, 0); assert.equal(jobs(g).length, 0);
+    assert.equal(jobs(h).length, 1, 'only the research'); assert.equal(jobs(g).length, 0);
   });
 
   test('the admin CLI turns it on and off, lists held jobs fenced, and hands one back', () => {

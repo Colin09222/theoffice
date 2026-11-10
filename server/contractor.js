@@ -1,4 +1,4 @@
-// The contractor hold. On a floor the building manager picks, a Builder's or Designer's job never reaches a model: it waits, held for the building's outside contractor,
+// The contractor hold. On a floor the building manager picks, a Builder's, Designer's or Researcher's job (scraping and data gathering included) never reaches a model: it waits, held for the building's outside contractor,
 // and a row in contractor_jobs says what is wanted. Nothing here calls a model, Claude Code or any subscription. It only queues and records. A person (or their own
 // agent) picks a job up by hand, puts files on the floor's drive the usual way, and hands it back with `admin.mjs contractor done`, which the server turns into an
 // ordinary finished job on its next tick, so whoever comes next (the Tester, say) carries on.
@@ -6,7 +6,7 @@ import { get, all, run } from './db.js';
 import { newFence } from './help.js';
 import { listFiles } from './workspace.js';
 
-export const CONTRACTOR_ROLES = new Set(['builder', 'designer']);
+export const CONTRACTOR_ROLES = new Set(['builder', 'designer', 'researcher']);
 export const SUMMARY_MAX = 6000;
 const FILES_LISTED = 200;
 
