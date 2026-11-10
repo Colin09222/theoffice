@@ -101,6 +101,7 @@ export function openLogin(slugHint = '') {
         session.csrf = r.csrf;
         await refreshMe();
         back = r.slug;
+        if (!r.recoveryCode) { close(); return; }  // a floor that keeps its code: same code as before, so straight up to the floor
         body.replaceChildren(h('div.stack', {},
           h('p.lede', {}, 'You\'re back in. Recovery codes work once, so here is your new one. Save it now: the old one has stopped working, and other devices have been signed out.'),
           recoveryBox(r.recoveryCode),

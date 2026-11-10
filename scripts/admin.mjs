@@ -3,7 +3,7 @@
 import { loadConfig, loadModels } from '../server/config.js';
 import { openDb, all, get, run } from '../server/db.js';
 import { payMode } from '../server/cloud/pay.js';
-import { issueCode, createSession, sha256 } from '../server/auth.js';
+import { issueCode, createSession, sha256, hashSecret, normalizeCode } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
 import { parkHiddenFloors, moveFloor, holdFloorForCode, RenumberError } from '../server/renumber.js';
 import { createStore } from '../server/cloud/store.js';
@@ -38,6 +38,7 @@ const usage = () => {
     '  node scripts/admin.mjs mail suppress <address>   never send to this address again, from any floor',
     '  node scripts/admin.mjs login --floor N [--minutes M]   a short boss login to check floor N by hand (default 60 minutes, at most 240): the office_s cookie value, to this terminal only',
     '  node scripts/admin.mjs login revoke           end such a login now: give its cookie value on stdin',
+    '  node scripts/admin.mjs floor-code --floor N   give floor N a sign-in code of your choosing, read from stdin. It stays the same at every sign-in, and is never printed',
     '  node scripts/admin.mjs floors                 list floors',
     '  node scripts/admin.mjs floors hide|show --floor N   hide floor N from the lobby, directory and lift, or show it again. It still opens by its own link',
     '  node scripts/admin.mjs floors park --from A --to B --at N   move the hidden floors numbered A to B up out of the building, to N upward, in order. Safe to run again',
@@ -294,6 +295,15 @@ if (cmd === 'code' && rest[0] === 'hold') {
       }
     } catch (e) { if (e instanceof HelpError) die(e.message); throw e; }
   } else usage();
+} else if (cmd === 'floor-code') {
+  // The code comes in on stdin so it stays out of the shell history and the process list. Only its hash is kept, and nothing prints it.
+  const n = floorArg();
+  const f = get(db, 'SELECT id FROM floors WHERE number=?', n);
+  if (!f) die(`There is no floor ${n}.`);
+  const code = normalizeCode(readFileSync(0, 'utf8'));
+  if (!code) die('Give the code on stdin.');
+  run(db, 'UPDATE floors SET recovery_hash=?, keep_code=1 WHERE id=?', hashSecret(code), f.id);
+  console.log(`Floor ${n} keeps that code now.`);
 } else if (cmd === 'floor-limit') {
   const usd = (name) => { const i = rest.indexOf(name); if (i < 0) return undefined; const v = Number(rest[i + 1]); if (!Number.isFinite(v) || v < 0) die(`${name} needs a dollar amount.`); return v; };
   const floor = get(db, 'SELECT id,number,name FROM floors WHERE number=?', floorArg());

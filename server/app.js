@@ -289,7 +289,9 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     if (name && !bossName) throw new HttpError(400, 'bad_boss', 'What should the staff call you?');
     const colors = validColors(b.colors); const look = validLook(b.look); const decor = validDecor({});
     const given = slugify(name, 'floor');
-    const recovery = A.newRecoveryCode(); const recoveryHash = A.hashSecret(recovery);
+    // A code the building manager named for someone, rather than an OFFICE- one, stays theirs: it opens the floor once and signs them back in from then on.
+    const keep = !code.startsWith('OFFICE-');
+    const recovery = keep ? code : A.newRecoveryCode(); const recoveryHash = A.hashSecret(recovery);
     const floorId = tx(db, () => {
       const row = get(db, 'SELECT * FROM codes WHERE hash=?', hash);
       if (!row) throw new HttpError(404, 'bad_code', 'We don\'t recognise that code. Check it and try again.');
@@ -299,7 +301,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       const base = name ? given : `floor-${number}`;
       let slug = RESERVED.has(base) || !slugPattern.test(base) ? `${base}-co`.replace(/^-+/, '') : base;
       for (let i = 2; slugTaken(slug); i++) slug = `${base.slice(0, 34)}-${i}`;
-      const r = run(db, 'INSERT INTO floors (slug,number,name,tagline,colors,boss,decor,recovery_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?)', slug, number, name, tagline, JSON.stringify(colors), JSON.stringify({ name: bossName, look }), JSON.stringify(decor), recoveryHash, now());
+      const r = run(db, 'INSERT INTO floors (slug,number,name,tagline,colors,boss,decor,recovery_hash,keep_code,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)', slug, number, name, tagline, JSON.stringify(colors), JSON.stringify({ name: bossName, look }), JSON.stringify(decor), recoveryHash, keep ? 1 : 0, now());
       const id = Number(r.lastInsertRowid);
       run(db, 'UPDATE codes SET claimed_at=?, floor_id=? WHERE hash=? AND claimed_at IS NULL', now(), id, hash);
       engine.seedStaff(id);
@@ -324,9 +326,12 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     // scrypt runs whether or not the floor exists, so timing doesn't reveal which slugs are real.
     const ok = A.verifySecret(code, f ? f.recovery_hash : DUMMY_HASH) && !!f;
     if (!ok) throw new HttpError(401, 'bad_login', 'That floor and recovery code don\'t match.');
-    const fresh = A.newRecoveryCode();
-    run(db, 'UPDATE floors SET recovery_hash=? WHERE id=?', A.hashSecret(fresh), f.id);
-    run(db, "DELETE FROM sessions WHERE floor_id=? AND kind='owner'", f.id);
+    // A floor that keeps its code has nothing new to hand over, and the boss's other devices stay signed in.
+    const fresh = f.keep_code ? undefined : A.newRecoveryCode();
+    if (fresh) {
+      run(db, 'UPDATE floors SET recovery_hash=? WHERE id=?', A.hashSecret(fresh), f.id);
+      run(db, "DELETE FROM sessions WHERE floor_id=? AND kind='owner'", f.id);
+    }
     const s = A.createSession(db, 'owner', f.id, A.OWNER_MAX_AGE, now());
     json(res, 200, { slug: f.slug, csrf: s.csrf, recoveryCode: fresh }, { 'set-cookie': A.cookieHeader(A.COOKIE, s.token, A.OWNER_MAX_AGE) });
   });

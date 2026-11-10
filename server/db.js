@@ -175,6 +175,8 @@ Object.assign(ADDED.tasks, { auto: 'INTEGER NOT NULL DEFAULT 0' });
 // What a project's files added up to when the manager sent a task back, so the manager can be told when it comes back with nothing changed.
 Object.assign(ADDED.tasks, { sent_back_sum: "TEXT NOT NULL DEFAULT ''" });
 Object.assign(ADDED.tasks, { model_tier: "TEXT NOT NULL DEFAULT ''" });
+// A floor with a sign-in code of its own: the same code at every sign-in, instead of a recovery code that rotates.
+Object.assign(ADDED.floors, { keep_code: 'INTEGER NOT NULL DEFAULT 0' });
 
 export function openDb(dataDir) {
   let path = ':memory:';
