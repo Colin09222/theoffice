@@ -75,8 +75,7 @@ describe('the contractor hold', () => {
     setContractor(h.db, h.f.id, true);
     const b = assign(h, 'designer');
     await until(() => task(h, b.id).contractor === 1, { what: 'the job to be held' });
-    assert.throws(() => assign(h, 'builder'), /already with the building's outside contractor \(task #\d+\)/);
-    assert.throws(() => assign(h, 'designer'), /already with the building's outside contractor/);
+    assert.throws(() => assign(h, 'designer'), /already with the building's outside contractor \(task #\d+\)/);
     assign(h, 'builder', { project: 'other' });  // other work goes ahead (and is held in its turn)
     const ctx = h.e.toolCtx(h.f, h.mgr, null, toolsForRole('manager'));
     assert.match(await h.e.tools.exec(ctx, 'cancel_task', JSON.stringify({ task_id: b.id })), /with the building's outside contractor/);

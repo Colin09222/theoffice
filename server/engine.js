@@ -793,7 +793,7 @@ export class Engine {
     // Work already with the outside contractor is never handed out a second time: that would only queue it for them again.
     const project0 = wanted || (priv || floor.default_private ? 'private-work' : '');
     if (CONTRACTOR_ROLES.has(target.role) && contractorOn(this.db, floor.id)) {
-      const held = get(this.db, "SELECT t.id FROM contractor_jobs j JOIN tasks t ON t.id=j.task_id WHERE j.floor_id=? AND j.project=? AND j.status='held' AND t.status='blocked' AND t.contractor=1 ORDER BY t.id LIMIT 1", floor.id, project0);
+      const held = get(this.db, "SELECT t.id FROM contractor_jobs j JOIN tasks t ON t.id=j.task_id WHERE j.floor_id=? AND j.project=? AND j.role=? AND j.status='held' AND t.status='blocked' AND t.contractor=1 ORDER BY t.id LIMIT 1", floor.id, project0, target.role);
       if (held) throw new ToolError(`that work is already with the building's outside contractor (task #${held.id}). Don't assign it again, redo it or plan around it: it comes back as a finished report. Tell the boss plainly the build is with the contractor.`);
     }
     const open = get(this.db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked')", floor.id).n;
