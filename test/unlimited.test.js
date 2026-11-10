@@ -295,7 +295,7 @@ describe('a long run stays a size a model and this server can hold', () => {
       staff: (a) => (a.meta.step === 0 ? { toolCalls: [['write_file', { path: 'projects/p/big.md', content: body }]] } : a.meta.step < 150 ? { toolCalls: [['read_file', { path: 'projects/p/big.md' }]] } : { content: 'All done.' }),
       manager: () => ({ content: 'ok' }),
     });
-    const h = await floor(llm);
+    const h = await floor(llm, { maxStaffSteps: Infinity });  // the step cap is off for this one: it is about what a run that long holds
     const { id } = assign(h); h.e.kick();
     let biggest = 0;
     await until(() => { biggest = Math.max(biggest, get(h.t.db, 'SELECT LENGTH(transcript) n FROM tasks WHERE id=?', id).n); return ['review', 'done', 'failed'].includes(statusOf(h, id)); }, { what: 'the long task', timeout: 60000 });
