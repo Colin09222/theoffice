@@ -138,6 +138,15 @@ CREATE TABLE IF NOT EXISTS budget_holds (
 );
 CREATE INDEX IF NOT EXISTS budget_holds_provider ON budget_holds(provider);
 CREATE INDEX IF NOT EXISTS budget_holds_task ON budget_holds(task_id);
+CREATE TABLE IF NOT EXISTS contractor_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, task_id INTEGER NOT NULL, project TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '',
+  brief TEXT NOT NULL DEFAULT '', files TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'held', summary TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, done_at INTEGER, closed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS contractor_jobs_status ON contractor_jobs(status);
+CREATE TABLE IF NOT EXISTS work_rounds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, triggers TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS work_rounds_project ON work_rounds(floor_id, project, created_at);
 `;
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS.
 const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: 'INTEGER NOT NULL DEFAULT 0', session_charged: 'REAL NOT NULL DEFAULT 0', session_baseline: "TEXT NOT NULL DEFAULT ''", session_publish: "TEXT NOT NULL DEFAULT '[]'", session_tries: 'INTEGER NOT NULL DEFAULT 0' }, app_scores: { lower: 'INTEGER NOT NULL DEFAULT 0' },
@@ -177,6 +186,9 @@ Object.assign(ADDED.tasks, { sent_back_sum: "TEXT NOT NULL DEFAULT ''" });
 Object.assign(ADDED.tasks, { model_tier: "TEXT NOT NULL DEFAULT ''" });
 // A floor with a sign-in code of its own: the same code at every sign-in, instead of a recovery code that rotates.
 Object.assign(ADDED.floors, { keep_code: 'INTEGER NOT NULL DEFAULT 0' });
+// The contractor hold (server/contractor.js): a floor whose Builder and Designer jobs go to the building's outside contractor, and the task that is with them now.
+Object.assign(ADDED.floors, { contractor: 'INTEGER NOT NULL DEFAULT 0' });
+Object.assign(ADDED.tasks, { contractor: 'INTEGER NOT NULL DEFAULT 0' });
 
 export function openDb(dataDir) {
   let path = ':memory:';

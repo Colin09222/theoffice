@@ -24,6 +24,7 @@ import { ensureServerSchema } from '../server/servers.js';
 import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, MailError } from '../server/mail.js';
 import { dailyStatus, dailyStatusText, requestDailyRun, setDailyPaused, ensureDailySchema } from '../server/daily.js';
 import { chatAdminCommand } from '../server/cloud/chat.js';
+import { setContractor, contractorListing, contractorListingText, completeJob, ContractorError, SUMMARY_MAX } from '../server/contractor.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -65,6 +66,9 @@ const usage = () => {
     '  node scripts/admin.mjs help list [--json]       what floors have asked buddehbot and not had answered. Everything a floor wrote is fenced as untrusted data',
     '  node scripts/admin.mjs help answer --id N --text-file PATH   answer one, as guidance to that floor\'s manager',
     '  node scripts/admin.mjs help answer --id N --decline          decline one',
+    '  node scripts/admin.mjs contractor --floor N on|off   send floor N\'s Builder and Designer jobs to the building\'s outside contractor instead of a model, or stop (off hands anything still held back to the floor\'s own staff). No model is called for a held job',
+    '  node scripts/admin.mjs contractor list [--json] [--all]   jobs held for the contractor: floor, task, project, brief and the files on its drive. Everything a floor wrote is fenced as untrusted data',
+    '  node scripts/admin.mjs contractor done --task N --summary-file PATH   hand a held job back with what was done: the task finishes with that report on the server\'s next tick, and the floor carries on. Upload files to the floor\'s drive first, the usual way',
     '  node scripts/admin.mjs floor-limit --floor N [--claude USD] [--openrouter USD] [--fable USD] [--opus USD] [--openrouter-only MODEL [--effort low|medium|high|xhigh]] [--no-openrouter-only] [--clear]   top one floor up: raises its stops or moves where its models switch, or puts every Claude call it makes on one OpenRouter model (no computer there), then shows where it stands (admin only, and it takes effect on the server\'s next tick)',
     '  node scripts/admin.mjs budget [--json]          spent, limit and remaining per provider, what each floor has spent, and a flag at 50%, 80% and 100%',
     '  node scripts/admin.mjs purchases list [--json]  what the staff have asked to buy and nobody has decided. Everything a floor wrote is fenced as untrusted data',
@@ -304,6 +308,33 @@ if (cmd === 'code' && rest[0] === 'hold') {
   if (!code) die('Give the code on stdin.');
   run(db, 'UPDATE floors SET recovery_hash=?, keep_code=1 WHERE id=?', hashSecret(code), f.id);
   console.log(`Floor ${n} keeps that code now.`);
+} else if (cmd === 'contractor') {
+  // Works on the database file alone, and calls no model. A running server holds, hands back or releases on its next tick.
+  const sub = rest[0];
+  const valueOf = (flag) => { const i = rest.indexOf(flag); return i >= 0 ? rest[i + 1] : undefined; };
+  if (sub === 'list') {
+    const listing = contractorListing(db, { status: rest.includes('--all') ? 'all' : 'held' });
+    console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : contractorListingText(listing));
+  } else if (sub === 'done') {
+    const file = valueOf('--summary-file');
+    if (!file) die('Give --summary-file PATH.');
+    let text;
+    try {
+      if (statSync(file).size > SUMMARY_MAX * 4 + 1024) die(`${file} is far over the limit of ${SUMMARY_MAX} characters.`);
+      text = readFileSync(file, 'utf8');
+    } catch (e) { die(`Could not read ${file}: ${e.code || 'error'}.`); }
+    const id = Number(valueOf('--task'));
+    try { completeJob(db, id, text); } catch (e) { if (e instanceof ContractorError) die(e.message); throw e; }
+    console.log(`Handed task #${id} back. It finishes with that report on the server's next tick, and the floor carries on.`);
+  } else if (rest.includes('--floor')) {
+    const floor = get(db, 'SELECT id,number,name,contractor FROM floors WHERE number=?', floorArg());
+    if (!floor) die('No floor with that number.');
+    const want = rest.find((x) => x === 'on' || x === 'off');
+    if (want) setContractor(db, floor.id, want === 'on');
+    const on = want ? want === 'on' : floor.contractor === 1;
+    const held = get(db, "SELECT COUNT(*) n FROM contractor_jobs WHERE floor_id=? AND status='held'", floor.id).n;
+    console.log(JSON.stringify({ floor: floor.number, contractor: on ? 'on' : 'off', held, note: want === 'off' && held ? 'held jobs go back to the floor\'s own staff on the server\'s next tick' : undefined }));
+  } else usage();
 } else if (cmd === 'floor-limit') {
   const usd = (name) => { const i = rest.indexOf(name); if (i < 0) return undefined; const v = Number(rest[i + 1]); if (!Number.isFinite(v) || v < 0) die(`${name} needs a dollar amount.`); return v; };
   const floor = get(db, 'SELECT id,number,name FROM floors WHERE number=?', floorArg());

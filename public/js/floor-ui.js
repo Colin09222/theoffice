@@ -826,7 +826,7 @@ class FloorPage {
       const shown = key === 'done' ? col.slice(-12).reverse() : col;
       board.append(h('section.col', {}, h('h3', {}, title, h('span', {}, String(col.length))),
         ...shown.map((x) => h(`article.card.${x.status}`, {}, h('b', {}, x.title),
-          h('small', {}, x.agentId ? this.face(agents.find((a) => a.id === x.agentId)) : null, h('span', {}, agents.find((a) => a.id === x.agentId)?.name || '', x.status === 'blocked' ? ' · waiting on the boss' : '')),
+          h('small', {}, x.agentId ? this.face(agents.find((a) => a.id === x.agentId)) : null, h('span', {}, agents.find((a) => a.id === x.agentId)?.name || '', x.status === 'blocked' ? (x.contractor ? ' · with the outside contractor' : ' · waiting on the boss') : '')),
           this.owner && x.result ? h('p', {}, x.result.slice(0, 180)) : null))));
     }
     const failed = t.filter((x) => x.status === 'failed' || x.status === 'cancelled');

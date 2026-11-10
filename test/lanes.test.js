@@ -96,7 +96,7 @@ describe('each person\'s part', () => {
     assert.match(full, /ends with a line starting "Done means:"/); assert.match(full, /Everything the boss named is in it/);
     const site = full.split(/^WEBSITE$/m)[1].split(/^BUSINESS$/m)[0];
     assert.match(site, /Say in the brief not to publish yet/); assert.match(site, /role tester/); assert.match(site, /phone and desktop size/);
-    assert.match(site, /really submits every form/); assert.match(site, /send the Builder's task back with review_task/); assert.match(site, /as many times as it takes/); assert.doesNotMatch(site, /One round of fixes/);
+    assert.match(site, /really submits every form/); assert.match(site, /send the Builder's task back with review_task/); assert.match(site, /never for extras nobody asked for/); assert.doesNotMatch(site, /One round of fixes/);
     assert.ok(site.indexOf('Tester') < site.indexOf('launch_report'), 'the Tester comes before the report');
     const bareSite = managerPrompt(floor, BOSS, ROSTER, BARE).split(/^WEBSITE$/m)[1].split(/^BUSINESS$/m)[0];
     assert.match(bareSite, /runs the checklist and publishes/); assert.doesNotMatch(bareSite, /role tester/);

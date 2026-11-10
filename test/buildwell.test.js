@@ -220,7 +220,7 @@ describe('how everyone in the building works', () => {
   });
   test('nothing else in a prompt argues with it', () => {
     const f = managerPrompt(floor, BOSS, ROSTER, FULL);
-    assert.match(f, /as many times as it takes/); assert.match(f, /Never promise a time/); assert.doesNotMatch(f, /Once\.$/m);
+    assert.match(f, /never for extras nobody asked for/); assert.match(f, /ship the best honest version/); assert.match(f, /Never promise a time/); assert.doesNotMatch(f, /Once\.$/m);
     assert.doesNotMatch(computerPrompt(FULL, 'builder', {}), /A third only if|whatever else is quick/);
     assert.match(computerPrompt(FULL, 'builder', {}), /Write whatever checks and notes you need to be sure/);
     assert.doesNotMatch(laneBrief('game', 'builder', FULL), /one quick playthrough|bot runs/);

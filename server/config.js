@@ -16,6 +16,8 @@ const lifetime = (v, d) => Math.max(0, cap(v, d));
 // A cap on how much work gets done is off unless someone sets one, and only a positive number sets one. It stays Infinity in here, which every comparison copes with.
 // Anything that leaves this process has to go through capOrNull first. See "Work caps" in docs/DEPLOY-NEXT.md.
 const workCap = (v) => { const n = Number(v); return v !== undefined && v !== '' && Number.isFinite(n) && n > 0 ? n : Infinity; };
+/** A cap that is on unless set to "off". A typo keeps the default rather than switching it off. */
+const onCap = (v, dflt) => { if (/^\s*off\s*$/i.test(String(v ?? ''))) return Infinity; const n = Number(v); return v !== undefined && String(v).trim() !== '' && Number.isFinite(n) && n > 0 ? Math.floor(n) : dflt; };
 /** How a work cap looks in JSON, where Infinity would silently turn into null anyway. Code that reads this has to treat null as "no cap", and `n >= null` is true, so check first. */
 export const capOrNull = (n) => (Number.isFinite(n) ? n : null);
 
@@ -66,11 +68,15 @@ export function loadConfig(env = process.env, overrides = {}) {
     maxCallsFloor: num(env.MAX_CALLS_FLOOR, 3),
     maxCallsGlobal: num(env.MAX_CALLS_GLOBAL, 6),
     maxStaff: workCap(env.MAX_STAFF),
-    maxStaffSteps: workCap(env.MAX_STAFF_STEPS),
+    // On by default since 11-10: a job that needs more than this is stuck, and it is told to save and report a few steps before. "off" turns it off.
+    maxStaffSteps: onCap(env.MAX_STAFF_STEPS, 40),
     maxManagerSteps: workCap(env.MAX_MANAGER_STEPS),
     maxOpenTasks: workCap(env.MAX_OPEN_TASKS),
     maxTasksPerDay: workCap(env.MAX_TASKS_PER_DAY),
     maxRevisions: workCap(env.MAX_REVISIONS),
+    // Loop caps (server/rounds.js), on by default: how many times one project may fail its test and go back, and be planned again, before the manager stops and asks the boss. "off" turns one off.
+    loopMaxRetests: onCap(env.LOOP_MAX_RETESTS, 2),
+    loopMaxReplans: onCap(env.LOOP_MAX_REPLANS, 3),
     towerFloors: num(env.TOWER_FLOORS, 10),
     quotaBytes: num(env.FLOOR_QUOTA_MB, 100) * 1024 * 1024,
     mockDelayMs: num(env.MOCK_DELAY_MS, 400),

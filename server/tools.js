@@ -21,6 +21,8 @@ import { BusinessError } from './business.js';
 import { MAIL_DEFS, mailHandlers, mailToolsFor } from './mail-tools.js';
 import { CHAT_TOOLS, CHAT_DEFS, chatHandlers } from './cloud/chat-tools.js';
 import { LAYOUTS, TONES, VIBES } from '../public/js/looks.js';
+import { checkRound } from './rounds.js';
+import { heldNow } from './contractor.js';
 
 const LINK_SCAN_CHARS = 24 * 1000 * 1000, MAX_LINKS_CHECKED = 100;
 
@@ -639,12 +641,25 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     ios_request(c, a) { return engine.ios.request(c, projectFor(c, a), a.kind === 'submit' ? 'submit' : 'build', str(a, 'build_id', 80, false)); },
     assign_task(c, a) {
       if (c.goalAsk) throw new WorkspaceError('nothing starts on its own until the boss has given or picked a goal. Ask them in the chat for one, or offer 2-3 to pick from, and assign nothing yet.');
+      const stop = checkRound(db, cfg, c.floor.id, slugify(str(a, 'project', 60, false), ''), { plan: str(a, 'plan', 120, false), now: engine.now() });
+      if (stop) throw new WorkspaceError(stop);
       const t = engine.assignTask(c.floor, c.agent, { to: str(a, 'to', 60), title: str(a, 'title', 160), brief: str(a, 'brief', 6000), plan: str(a, 'plan', 120, false), project: slugify(str(a, 'project', 60, false), ''), private: a.private === true, dependsOn: Array.isArray(a.depends_on) ? a.depends_on : [], afterPrevious: a.after_previous === true, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files) , auto: !!c.autonomous });
       c.assigned.push(t.agentId);
       return `Task #${t.id} assigned to ${t.assignee}.`;
     },
-    review_task(c, a) { return engine.reviewTask(c.floor, c.agent, Number(a.task_id), a.verdict === 'revise' ? 'revise' : 'approve', str(a, 'notes', 2000, false)); },
-    cancel_task(c, a) { return engine.cancelTask(c.floor, Number(a.task_id)); },
+    review_task(c, a) {
+      if (a.verdict === 'revise') {
+        const t = get(db, "SELECT project FROM tasks WHERE id=? AND floor_id=? AND status='review'", Number(a.task_id), c.floor.id);
+        const stop = t && checkRound(db, cfg, c.floor.id, t.project, { now: engine.now() });
+        if (stop) throw new WorkspaceError(stop);
+      }
+      return engine.reviewTask(c.floor, c.agent, Number(a.task_id), a.verdict === 'revise' ? 'revise' : 'approve', str(a, 'notes', 2000, false));
+    },
+    cancel_task(c, a) {
+      // Only the boss can call back a job that is with the outside contractor. Cancelling it to hand it out again would just queue it for them again.
+      if (!c.bossTurn && heldNow(get(db, 'SELECT status,contractor FROM tasks WHERE id=? AND floor_id=?', Number(a.task_id), c.floor.id))) throw new WorkspaceError('that job is with the building\'s outside contractor and comes back as a finished report. Leave it be, and tell the boss plainly it is with the contractor.');
+      return engine.cancelTask(c.floor, Number(a.task_id));
+    },
     hire_staff(c, a) { return engine.hireStaff(c.floor, str(a, 'role', 40).toLowerCase(), str(a, 'name', 24, false)); },
     async ask_colleague(c, a) {
       const who = str(a, 'who', 60); const question = str(a, 'question', 400);

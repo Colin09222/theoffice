@@ -51,9 +51,11 @@ function assertWellFormed(messages) {
 describe('the settings', () => {
   test('every work cap is off by default', () => {
     const c = loadConfig({});
-    for (const k of ['floorDailyUsd', 'globalDailyUsd', 'sessionMaxUsd', 'maxStaff', 'maxStaffSteps', 'maxManagerSteps', 'maxOpenTasks', 'maxTasksPerDay', 'maxRevisions', 'sessionMaxSteps', 'sessionMaxMinutes', 'maxSessionsFloor', 'maxSessionsGlobal', 'maxFixTurns', 'imagesPerFloorDay', 'imagesPerTask', 'reviewsPerFloorDay', 'searchesPerFloorDay', 'ordersPerFloor', 'ordersMaxFails']) assert.equal(c[k], Infinity, k);
+    for (const k of ['floorDailyUsd', 'globalDailyUsd', 'sessionMaxUsd', 'maxStaff', 'maxManagerSteps', 'maxOpenTasks', 'maxTasksPerDay', 'maxRevisions', 'sessionMaxSteps', 'sessionMaxMinutes', 'maxSessionsFloor', 'maxSessionsGlobal', 'maxFixTurns', 'imagesPerFloorDay', 'imagesPerTask', 'reviewsPerFloorDay', 'searchesPerFloorDay', 'ordersPerFloor', 'ordersMaxFails']) assert.equal(c[k], Infinity, k);
     assert.equal(c.sessionWrapUp, undefined, 'nothing can tell a job to stop polishing any more');
     assert.equal(c.taskMaxUsd, 40, 'the safety net is the one money limit left on by default');
+    // Since 11-10, a staff job's steps and a project's rounds are capped unless set to off (test/rounds.test.js).
+    assert.deepEqual([c.maxStaffSteps, c.loopMaxRetests, c.loopMaxReplans], [40, 2, 3]);
   });
   test('what was kept on purpose is still on', () => {
     const c = loadConfig({});
@@ -68,7 +70,10 @@ describe('the settings', () => {
     assert.deepEqual([on.sessionMaxSteps, on.sessionMaxMinutes, on.maxSessionsFloor, on.maxSessionsGlobal, on.maxFixTurns], [40, 30, 2, 4, 2]);
     assert.deepEqual([on.taskMaxUsd, on.sessionMaxUsd, on.floorDailyUsd, on.globalDailyUsd], [3, 5, 10, 25]);
     // A zero would otherwise stop a floor dead or hang its queue for ever, and a typo shouldn't do either.
-    for (const v of ['off', '', 'lots', '0', '-3', 'Infinity', 'NaN']) assert.equal(loadConfig({ MAX_STAFF_STEPS: v, MAX_SESSIONS_GLOBAL: v }).maxStaffSteps, Infinity, v);
+    for (const v of ['off', '', 'lots', '0', '-3', 'Infinity', 'NaN']) assert.equal(loadConfig({ MAX_MANAGER_STEPS: v, MAX_SESSIONS_GLOBAL: v }).maxManagerSteps, Infinity, v);
+    // The caps that are on by default: only "off" switches one off, and a typo keeps the default.
+    for (const [v, want] of [['off', Infinity], [' OFF ', Infinity], ['', 40], ['lots', 40], ['0', 40], ['-3', 40], ['Infinity', 40], ['25', 25]]) assert.equal(loadConfig({ MAX_STAFF_STEPS: v }).maxStaffSteps, want, v);
+    for (const [v, want] of [['off', Infinity], ['5', 5], ['x', 2]]) assert.equal(loadConfig({ LOOP_MAX_RETESTS: v }).loopMaxRetests, want, v);
     for (const v of ['off', '', 'lots', 'Infinity']) assert.equal(loadConfig({ SESSION_MAX_USD: v, TASK_MAX_USD: v }).sessionMaxUsd, Infinity, v);
   });
   test('a typo can still never switch off the building\'s own limits', () => {
@@ -121,9 +126,9 @@ describe('prompts and pages with no caps', () => {
 });
 
 describe('staff and managers with no step limit', () => {
-  test('a staff member goes well past the old 14 steps, and is never told to wrap up', async () => {
+  test('with the step cap off, a staff member goes well past the old 14 steps, and is never told to wrap up', async () => {
     const llm = scripted({ staff: (a) => (a.meta.step < 40 ? { toolCalls: [['list_files', {}]] } : { content: 'All done.' }), manager: () => ({ content: 'ok' }) });
-    const h = await floor(llm);
+    const h = await floor(llm, { maxStaffSteps: Infinity });
     const { id } = assign(h); h.e.kick();
     await until(() => ['review', 'done', 'failed'].includes(statusOf(h, id)), { what: 'the task to finish' });
     assert.notEqual(statusOf(h, id), 'failed');

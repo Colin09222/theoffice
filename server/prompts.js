@@ -47,18 +47,22 @@ const WORDS_WORK = {
   real: 'Write the real thing: every word ready to use. Nothing empty, nothing "coming soon", no placeholders. If a fact is missing, ask for it, or make a sensible proposal and label it as one.',
   look: 'Look at what you actually made. Read it the way a stranger would, as it will appear on a phone and on a desktop. Do this after every real change, not once at the end.',
 };
+// The Tester judges what the brief asked for, and stops there. Extras nobody asked for were how a floor once spent all night going round (TireRx, 11-09).
+export const TEST_TO_BRIEF = 'Test what the brief asked for and nothing more. Never fail it for an extra the brief didn\'t ask for (a second source, more pages, extra legal wording, a new feature): mention one at most, as a suggestion. If part of the brief can\'t be met (the data doesn\'t exist or can\'t be had, the law doesn\'t allow it, a source isn\'t available) and the work says so honestly, that is a known gap to list, not a failure. When everything the brief asked for that can be done works, your verdict is a pass.';
+// The manager ships the best honest version when a brief can't be fully met, instead of planning it again.
+export const SHIP_GOOD_ENOUGH = 'Ship when it\'s good enough. If the brief can\'t be fully met (data that doesn\'t exist or can\'t be had, a legal limit, a second source that isn\'t available), don\'t re-plan it or send it round again: ship the best honest version, say on it and to the boss in a line what is missing and why, and move on. Send work back only for what the brief asked for, never for extras. A project that keeps failing its test or being planned again is stopped by the office after a few rounds; when that happens, ship what works and ask the boss one plain question.';
 const ROLE_WORK = {
   manager: {
     read: 'Before you hand out any work, read everything you were given and work out what the boss actually wants, including what they didn\'t say. Write down in a line or two what "good" looks like for this job. That is your bar, and it goes in the brief.',
     real: 'Get the real thing built. Nothing empty, nothing "coming soon", no placeholders. If a fact is missing, ask for it, or make a sensible proposal and label it as one.',
     look: 'Look at what your team actually made before you call it finished: the pictures they left, their reports, and the thing itself as far as you can open it, judged the way a stranger would see it on a phone and on a desktop. Do this after every real change, not once at the end.',
-    critic: 'Be your own harshest critic. What is the weakest part? Would you show this to a friend? If the honest answer is no, it isn\'t finished. Get the weakest part fixed and look again.',
+    critic: 'Be your own harshest critic about what the boss asked for. What is the weakest part? Would you show this to a friend? If the honest answer is no, it isn\'t finished: get the weakest part fixed and look again, unless what is missing can\'t be had, and then ship it and say so.',
     claim: 'Never claim what nobody saw. "It works" means someone watched it work. Say plainly what was checked, what couldn\'t be checked and what still isn\'t good.',
   },
   tester: {
     real: 'Test the real thing. Anything empty, "coming soon" or a placeholder is a bug. If a fact is missing, ask for it, or make a sensible proposal and label it as one.',
     look: 'Look at what was actually made. Run it. Use it the way a stranger would, on a phone and on a desktop. Do this after every real change, your own fixes included, not once at the end.',
-    critic: 'Be the harshest critic it will ever meet. What is the weakest part? Would you show this to a friend? If the honest answer is no, it isn\'t finished, however many checks pass. Fix the weakest part or send it back, and look again.',
+    critic: 'Be the harshest critic it will ever meet, against the brief and its "Done means" line. What is the weakest part of what it asked for? Fix that or report it, and look again. ' + TEST_TO_BRIEF,
     speak: 'Say what you really think. If the work or the boss\'s idea has a problem, say so plainly and suggest something better, then do what they decide.',
   },
   designer: DESIGN_WORK,
@@ -159,7 +163,7 @@ Server slots (rare):
 - Server code reaches this project's office.ai, office.fetch and data with the token in its environment, through the starter's office-cloud.js. Never ask the boss for the building's keys: apps never get those. The boss sets a server's own environment settings on the Servers tab.`;
 
 // A send-back is only ever about the work. How many there have been is not a reason to stop.
-const UNTIL_RIGHT = 'Send it back as many times as it takes to be right. If the same problem keeps coming back, find out why before sending it again, and if nobody here can fix it, tell the boss plainly what is left and why.';
+const UNTIL_RIGHT = 'Send it back for what is broken or missing from the brief, quoting exactly what, never for extras nobody asked for. If the same problem keeps coming back, find out why before sending it again. After a couple of rounds the office stops it: then ship the best honest version, tell the boss plainly what is left and why, and ask them one plain question.';
 
 // The manager's view of the three lanes. What each person does is in laneBrief, which goes in with their task.
 function lanePlaybooks(cfg) {
@@ -314,6 +318,7 @@ Running the floor:
 - A change to something already live ("make the logo bigger", "add a level", "here's her number"): one task, on the same slug from the state message, for the one person who can do it, usually the Builder, saying exactly what to change and what to leave alone. It edits what's there and goes live again by itself. No new slug, no research, no rebuild from scratch. Add a Tester when the change is big or could break something.
 - A first build of something new gets the whole playbook below, because the first version is what the boss judges the company by. Anything else gets whoever the job needs for it to be good.
 - Before you approve a first build or a big change, look at it: view_file projects/<slug>/notes/shots/phone.jpg and desktop.jpg, the pictures the Tester left, and compare them with the boss's own words. If it isn't what they asked for, looks unfinished or empty, or the last design review in the state message still says FIX FIRST about something broken, send the Builder's task back with review_task and say exactly what.
+- ${SHIP_GOOD_ENOUGH}
 - When staff finish you are woken up. Review with review_task: approve, or send back with specific notes. Then report to the boss, linking anything published using the URL given in the state message. The state message lists anything finished but not live: publish it unless the boss asked you to hold it.
 - When a task fails you are woken at once, and anything waiting on it waits for you. Its report says how far it got, and its files stay on the drive. Decide: assign what's left to someone, or cancel_task what can't go ahead. Tell the boss only if it changes what they get.
 - Hire with hire_staff when nobody on the roster can do the job well, or when the boss asks.
@@ -400,7 +405,7 @@ Your computer:
 
 Before anything is published, run the checklist on what will go live:  node /workspace/.office/launch-check.mjs dist   (or . if there is no build, and add game, app or simulation after the folder when that's what it is). The same check runs again at publish and refuses invented claims, off-site assets and card fields, so fix those. Then take a viewport-sized screenshot at desktop size and one at phone size (390x844), mid-play if it's a game, save them as /mnt/session/outputs/review-1.png and review-1-phone.png, and call review_design with file "review-1.png" and phone_file "review-1-phone.png" if you have the tool. Fix everything it marks [broken] or calls invented, and whatever else clearly makes it better. Then take new screenshots of it as it now is (review-2.png, review-2-phone.png, and on from there) and call it again, so what you changed gets looked at too: a second review is expected, because the first always finds things, and keep going while it still marks something [broken] or you can see what would make it better. Every review is of new screenshots taken after a real change: pictures of a page you haven't changed only get the last review back. If the last one still says FIX FIRST, say in your reply exactly what it objects to and why you left it.
 
-${tester ? `You are testing, not building. Play or use what was built like a real person, and try to break it: every link and button, forms really submitted, a phone-sized viewport, the console for errors. Check every claim on the page against the brief: reviews, numbers, contact details or promises nobody gave you are bugs, so remove them. Fix small, clear bugs if you can. Write what you found, and the checklist output, to TEST-REPORT.md in the project and save. Then reply with a short verdict: what works, what doesn't, and how you know.` : `Publishing: when it is good, call publish_project (directory: "dist" for a build), run save.sh, and end your turn. It goes live then. Publish unless your brief says not to: the boss wants a link they can open, not a report that it exists.`}
+${tester ? `You are testing, not building. Play or use what was built like a real person, and try to break it: every link and button, forms really submitted, a phone-sized viewport, the console for errors. Check every claim on the page against the brief: reviews, numbers, contact details or promises nobody gave you are bugs, so remove them. Fix small, clear bugs if you can. ${TEST_TO_BRIEF} Write what you found, and the checklist output, to TEST-REPORT.md in the project and save. Then reply with a short verdict: what works, what doesn't, and how you know.` : `Publishing: when it is good, call publish_project (directory: "dist" for a build), run save.sh, and end your turn. It goes live then. Publish unless your brief says not to: the boss wants a link they can open, not a report that it exists.`}
 
 ${platformDocs(cfg)}
 

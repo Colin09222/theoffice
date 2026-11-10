@@ -1439,8 +1439,8 @@ export class OfficeView {
       let y = 60;
       if (now) {
         x.fillStyle = mix(accent, '#fff6d8', 0.55); x.fillRect(26, y, 418, 96); x.fillStyle = 'rgba(0,0,0,.08)'; x.fillRect(26, y + 92, 418, 4);
-        const head = now.status === 'doing' ? 'NOW' : now.status === 'review' ? 'IN REVIEW' : now.status === 'blocked' ? 'STUCK' : 'NEXT';
-        x.font = '800 17px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = now.status === 'blocked' ? '#b3303f' : '#2f3340'; x.fillText(who?.name ? `${head} · ${String(who.name).toUpperCase().slice(0, 18)}` : head, 38, y + 24);
+        const head = now.status === 'doing' ? 'NOW' : now.status === 'review' ? 'IN REVIEW' : now.status === 'blocked' ? (now.contractor ? 'WITH CONTRACTOR' : 'STUCK') : 'NEXT';
+        x.font = '800 17px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = now.status === 'blocked' && !now.contractor ? '#b3303f' : '#2f3340'; x.fillText(who?.name ? `${head} · ${String(who.name).toUpperCase().slice(0, 18)}` : head, 38, y + 24);
         // The task itself, as big as two lines allow.
         x.font = '700 25px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = '#1f2330';
         const words = String(now.title || '').split(/\s+/); const lines = ['']; for (const wd of words) { const tryLine = lines.at(-1) ? `${lines.at(-1)} ${wd}` : wd; if (x.measureText(tryLine).width <= 394 || !lines.at(-1)) lines[lines.length - 1] = tryLine; else if (lines.length < 2) lines.push(wd); else { lines[1] = `${lines[1].replace(/.{1,3}$/, '')}…`; break; } }
@@ -1450,7 +1450,7 @@ export class OfficeView {
       x.font = '600 21px ui-sans-serif, system-ui, sans-serif';
       tasks.filter((t) => t !== now).slice(0, now ? 4 : 6).forEach((t, i) => {
         const ty = y + 22 + i * 34;
-        marker(t.status === 'done' ? '#3d8a55' : t.status === 'blocked' ? '#c8455a' : '#2f3340'); x.lineWidth = 3;
+        marker(t.status === 'done' ? '#3d8a55' : t.status === 'blocked' && !t.contractor ? '#c8455a' : '#2f3340'); x.lineWidth = 3;
         x.strokeRect(32, ty - 17, 20, 20);
         if (t.status === 'done') { x.lineWidth = 4; x.beginPath(); x.moveTo(35, ty - 7); x.lineTo(42, ty); x.lineTo(56, ty - 19); x.stroke(); }
         else if (t.status === 'doing' || t.status === 'review') { x.fillStyle = accent; x.fillRect(36, ty - 13, 12, 12); }

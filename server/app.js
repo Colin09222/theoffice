@@ -201,7 +201,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     });
     // Named columns: a view has no business loading transcripts, however large a task's have grown.
     // The latest, and whatever is running now: the queue runs oldest first, so with a long queue that can be far behind the latest.
-    const tasks = all(db, "SELECT id,plan,title,brief,agent_id,project,status,result,updated_at,depends_on FROM tasks WHERE floor_id=? AND (status IN ('doing','blocked') OR id>=(SELECT COALESCE(MIN(id),0) FROM (SELECT id FROM tasks WHERE floor_id=? ORDER BY id DESC LIMIT 80))) ORDER BY id", f.id, f.id).map((t) => {
+    const tasks = all(db, "SELECT id,plan,title,brief,agent_id,project,status,contractor,result,updated_at,depends_on FROM tasks WHERE floor_id=? AND (status IN ('doing','blocked') OR id>=(SELECT COALESCE(MIN(id),0) FROM (SELECT id FROM tasks WHERE floor_id=? ORDER BY id DESC LIMIT 80))) ORDER BY id", f.id, f.id).map((t) => {
       const v = taskView(t);
       if (viewer.owner) return v;
       const { brief: _b, result: _r, ...pub } = v;
