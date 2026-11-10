@@ -4,6 +4,9 @@ services:
     container_name: theoffice
     restart: unless-stopped
     env_file: .env
+    # The contractor ping reaches buddehbot's gateway over the tailnet. hz runs tailscale with --accept-dns=false, so the name is pinned here and TLS still checks it.
+    extra_hosts:
+      - "buddehbot-mac.tail2f5032.ts.net:100.123.213.72"
     environment:
       HOST: 0.0.0.0
       PORT: "8083"

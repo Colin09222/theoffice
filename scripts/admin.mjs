@@ -25,6 +25,7 @@ import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildin
 import { dailyStatus, dailyStatusText, requestDailyRun, setDailyPaused, ensureDailySchema } from '../server/daily.js';
 import { chatAdminCommand } from '../server/cloud/chat.js';
 import { setContractor, contractorListing, contractorListingText, completeJob, ContractorError, SUMMARY_MAX } from '../server/contractor.js';
+import { pingContractor } from '../server/contractorping.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -68,6 +69,7 @@ const usage = () => {
     '  node scripts/admin.mjs help answer --id N --decline          decline one',
     '  node scripts/admin.mjs contractor --floor N on|off   send floor N\'s Builder, Designer and Researcher jobs to the building\'s outside contractor instead of a model, or stop (off hands anything still held back to the floor\'s own staff). No model is called for a held job',
     '  node scripts/admin.mjs contractor list [--json] [--all]   jobs held for the contractor: floor, task, project, brief and the files on its drive. Everything a floor wrote is fenced as untrusted data',
+    '  node scripts/admin.mjs contractor ping --task N   send buddehbot the "Run on PC?" ping again for a job still held (OPENCLAW_HOOK_URL and OPENCLAW_HOOK_TOKEN)',
     '  node scripts/admin.mjs contractor done --task N --summary-file PATH   hand a held job back with what was done: the task finishes with that report on the server\'s next tick, and the floor carries on. Upload files to the floor\'s drive first, the usual way',
     '  node scripts/admin.mjs floor-limit --floor N [--claude USD] [--openrouter USD] [--fable USD] [--opus USD] [--openrouter-only MODEL [--effort low|medium|high|xhigh]] [--no-openrouter-only] [--clear]   top one floor up: raises its stops or moves where its models switch, or puts every Claude call it makes on one OpenRouter model (no computer there), then shows where it stands (admin only, and it takes effect on the server\'s next tick)',
     '  node scripts/admin.mjs budget [--json]          spent, limit and remaining per provider, what each floor has spent, and a flag at 50%, 80% and 100%',
@@ -315,6 +317,14 @@ if (cmd === 'code' && rest[0] === 'hold') {
   if (sub === 'list') {
     const listing = contractorListing(db, { status: rest.includes('--all') ? 'all' : 'held' });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : contractorListingText(listing));
+  } else if (sub === 'ping') {
+    // Sends buddehbot the ping again for a job that is still held, such as one held before the ping existed. Same job, same idempotency key.
+    const id = Number(valueOf('--task'));
+    const j = get(db, "SELECT j.id, j.task_id, j.role, j.title, f.number, f.name FROM contractor_jobs j JOIN floors f ON f.id=j.floor_id WHERE j.task_id=? AND j.status='held' ORDER BY j.id DESC LIMIT 1", id);
+    if (!j) die(`Task #${id} is not held for the contractor.`);
+    const r = await pingContractor(cfg, { id: j.id, floorNumber: j.number, floorName: j.name, taskId: j.task_id, role: j.role, title: j.title }, { log: (level, msg, extra) => console.error(level, msg, JSON.stringify(extra)) });
+    console.log(JSON.stringify({ task: j.task_id, job: j.id, ...r }));
+    if (!r.ok) process.exitCode = 1;
   } else if (sub === 'done') {
     const file = valueOf('--summary-file');
     if (!file) die('Give --summary-file PATH.');

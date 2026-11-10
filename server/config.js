@@ -48,6 +48,13 @@ export function loadConfig(env = process.env, overrides = {}) {
     anthropicKey: env.ANTHROPIC_API_KEY || '',
     anthropicBase: (env.ANTHROPIC_BASE_URL || '').replace(/\/+$/, ''),
     webSearchKey: env.WEB_SEARCH_API_KEY || '',
+    // The contractor ping (server/contractorping.js): the owner's assistant hears at once when a job is held. Off unless both are set.
+    hookUrl: env.OPENCLAW_HOOK_URL || '',
+    hookToken: env.OPENCLAW_HOOK_TOKEN || '',
+    hookAgentId: env.OPENCLAW_HOOK_AGENT || 'main',
+    hookChannel: env.OPENCLAW_HOOK_CHANNEL || 'telegram',
+    hookTo: env.OPENCLAW_HOOK_TO || '8032772165',
+    hookRetryMs: num(env.OPENCLAW_HOOK_RETRY_MS, 2000),
     adminPassword: env.ADMIN_PASSWORD || '',
     publicOrigin,
     runnerSocket: env.RUNNER_SOCKET ?? '/run/office-runner/api/runner.sock',

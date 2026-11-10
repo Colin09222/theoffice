@@ -23,6 +23,7 @@ import { talkLine, talkShape, WORK_BEATS, PRIVATE_TALK, BOSS_ONLY_TALK } from '.
 import { createPeople, fillCharacters, readCharacter } from './people.js';
 import { seedStarter } from './makers.js';
 import { CONTRACTOR_ROLES, contractorOn, heldNow, jobFor } from './contractor.js';
+import { pingContractor } from './contractorping.js';
 
 const today = (ms) => new Date(ms).toISOString().slice(0, 10);
 // What the last outside design review said, for the manager's state message.
@@ -53,6 +54,7 @@ export class Halt extends Error { constructor(why) { super(why); this.name = 'Ha
 export class Engine {
   constructor({ db, cfg, models, llm, bus, log, now = Date.now, fetcher, httpFetch, sessions, namecheap, media, search }) {
     Object.assign(this, { db, cfg, models, llm, bus, log, now });
+    this.hookFetch = httpFetch || fetch;
     this.Halt = Halt;
     this.budget = createBudget(db, cfg, now, models?.floorLimits);
     this.computer = sessions ? new Computer(this, sessions) : null;
@@ -183,10 +185,12 @@ export class Engine {
   holdForContractor(floor, agent, taskId) {
     const task = get(this.db, 'SELECT * FROM tasks WHERE id=?', taskId);
     const job = jobFor(this, floor, task);
-    tx(this.db, () => {
+    const jobId = tx(this.db, () => {
       run(this.db, "UPDATE tasks SET status='blocked', contractor=1, updated_at=? WHERE id=? AND status='todo'", this.now(), taskId);
-      run(this.db, 'INSERT INTO contractor_jobs (floor_id,task_id,project,role,title,brief,files,created_at) VALUES (?,?,?,?,?,?,?,?)', floor.id, taskId, task.project, agent.role, task.title, job.brief, JSON.stringify(job.files), this.now());
+      return Number(run(this.db, 'INSERT INTO contractor_jobs (floor_id,task_id,project,role,title,brief,files,created_at) VALUES (?,?,?,?,?,?,?,?)', floor.id, taskId, task.project, agent.role, task.title, job.brief, JSON.stringify(job.files), this.now()).lastInsertRowid);
     });
+    // buddehbot hears at once, in the background: the floor never waits on it.
+    this.contractorPing = pingContractor(this.cfg, { id: jobId, floorNumber: floor.number, floorName: floor.name, taskId, role: agent.role, title: task.title }, { httpFetch: this.hookFetch, log: this.log }).catch((e) => this.fail('contractor ping', e));
     // A job sent back after it ran on a computer: that computer stops now rather than sit there while someone else does the work.
     if (task.session_id) this.computer?.settleOrphan(task);
     this.emitTask(taskId);
