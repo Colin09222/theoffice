@@ -1,10 +1,12 @@
 // The contractor ping. When a job is held for the building's outside contractor (server/contractor.js), the owner's assistant, buddehbot, hears about it at once
-// through its gateway's agent hook, and asks the owner on Telegram before anything runs. One POST per job: the job's id is the idempotency key, so a retry
+// through its gateway's agent hook, and either starts a Mac worker (pre-approved floors) or asks the owner on Telegram first. One POST per job: the job's id is the idempotency key, so a retry
 // never starts a second run. It runs in the background and never holds up a floor. With no hook set up it logs and does nothing.
 import { newFence } from './help.js';
 
 const RETRY = new Set([408, 425, 429, 500, 502, 503, 504]);
 const TITLE_MAX = 160;
+// Floors Colon has pre-approved: LabStackr (3), TheTireRx (6), Cailyn (7). Every other floor's job waits for his yes.
+const PRE_APPROVED = new Set([3, 6, 7]);
 
 export const pingKey = (jobId) => `theoffice-contractor-job-${jobId}`;
 
@@ -20,8 +22,11 @@ export function pingMessage({ floorNumber, floorName, taskId, role, title }) {
     `Task #${taskId}, role ${role}`,
     `Job: ${fence.wrap('task title', line)}`,
     '',
-    'Before doing anything else, ask Colon in this Telegram chat: "Run on PC?" with the floor, task number and job title above. Do not start, queue or run this job yourself, ever, and never automatically: wait for his answer.',
-    `If he says yes, the full brief is in \`node scripts/admin.mjs contractor list\` on hz (task #${taskId}).`,
+    'Office jobs always run on buddehbot\'s Mac, never the PC.',
+    PRE_APPROVED.has(Number(floorNumber))
+      ? `Colon has pre-approved floor ${floorNumber}: start a Mac worker for task #${taskId} per the contractor runbook in memory, then tell Colon in one or two lines.`
+      : `Before doing anything else, ask Colon in this Telegram chat: "Take contractor job #${taskId}?" with the floor and job title above. Do not start, queue or run it until he says yes, and never automatically.`,
+    `The full brief is in \`node scripts/admin.mjs contractor list\` on hz (task #${taskId}).`,
   ].join('\n');
 }
 
