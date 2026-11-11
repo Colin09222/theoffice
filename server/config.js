@@ -108,6 +108,9 @@ export function loadConfig(env = process.env, overrides = {}) {
     // Not a cap: how much of the building's money one session is promised at a time. It always gets the next slice while there is money, but no session can hold everything that is left and keep the rest of the building waiting.
     sessionSliceUsd: num(env.SESSION_SLICE_USD, 2) > 0.1 ? num(env.SESSION_SLICE_USD, 2) : 2,
     sessionMaxSteps: workCap(env.SESSION_MAX_STEPS),    // model requests per session
+    // Work sent back to a computer whose conversation has grown past this many tokens starts on a fresh computer, with its saved files, its last report and the
+    // notes: every step on the old one would pay to re-read all of it (server/computer.js). SESSION_FRESH_OVER_TOKENS=off always goes back to the same computer.
+    sessionFreshOverTokens: onCap(env.SESSION_FRESH_OVER_TOKENS, 250000),
     sessionMaxMinutes: workCap(env.SESSION_MAX_MINUTES),
     maxFixTurns: workCap(env.MAX_FIX_TURNS),            // times a computer is told its save or publish didn't go through before the task fails
     maxSessionsFloor: workCap(env.MAX_SESSIONS_FLOOR),
@@ -164,6 +167,10 @@ export function loadConfig(env = process.env, overrides = {}) {
     autopilotGapMin: Math.max(0, num(env.AUTOPILOT_GAP_MIN, 5)),
     autopilotMaxFails: Math.max(1, num(env.AUTOPILOT_MAX_FAILS, 3)),
     autopilotRunTimeoutMin: num(env.AUTOPILOT_RUN_TIMEOUT_MIN, 180),
+    // A round that hands out no work makes the next one wait three times as long, up to this many minutes, unless something on the floor changes first
+    // (server/modes.js). AUTOPILOT_IDLE_BACKOFF=0 goes back to a manager turn every gap, whatever it found.
+    autopilotIdleBackoff: env.AUTOPILOT_IDLE_BACKOFF !== '0',
+    autopilotIdleMaxMin: Math.max(1, num(env.AUTOPILOT_IDLE_MAX_MIN, 360)),
     modesTickMs: num(env.MODES_TICK_MS, 5000),
     // The daily run (docs/NUMBERS.md): off per floor until its boss turns it on. These limit it across the building and per run.
     dailyMaxFloors: Math.max(0, num(env.DAILY_MAX_FLOORS, 5)),
@@ -180,6 +187,15 @@ export function loadConfig(env = process.env, overrides = {}) {
     shipCheck: env.SHIP_CHECK !== '0',
     // While a long reply is still being written, the prompt cache behind it is kept from expiring (server/anthropic.js). CACHE_KEEP_WARM=0 turns that off.
     cacheKeepWarm: env.CACHE_KEEP_WARM !== '0',
+    // How long a run on a model with a prompt cache may grow before its oldest steps are dropped, and how much is kept then (server/engine.js, trimSteps).
+    // Every cut makes the provider write the whole conversation to its cache again, so cuts are few and large. STEPS_KEEP_CHARS=240000 is the old, smaller window.
+    stepsKeepChars: Math.max(60000, num(env.STEPS_KEEP_CHARS, 400000)),
+    stepsCutToChars: Math.max(30000, num(env.STEPS_CUT_TO_CHARS, 150000)),
+    // The manager reads its last thirty messages every turn. An office note that repeats the same standing instructions (a work-mode round, the daily run)
+    // is kept whole only where it is newest. MANAGER_DEDUPE_NOTES=0 sends every copy in full again.
+    managerDedupeNotes: env.MANAGER_DEDUPE_NOTES !== '0',
+    // The most a file listing hands back before it says to ask for one folder. LIST_FILES_MAX_CHARS=off lists everything, however long.
+    listFilesMaxChars: cap(env.LIST_FILES_MAX_CHARS, 12000),
     talkGapMs: num(env.TALK_GAP_MS, env.AI_MODE === 'mock' ? 1 : 2200),
     meetingGapMs: num(env.MEETING_GAP_MS, env.AI_MODE === 'mock' ? 0 : 45000), meetingsPerFloorDay: num(env.MEETINGS_PER_FLOOR_DAY, 40),
     banterEveryMs: num(env.BANTER_EVERY_MS, 180000), banterTickMs: num(env.BANTER_TICK_MS, 20000), banterPerFloorDay: num(env.BANTER_PER_FLOOR_DAY, 60),

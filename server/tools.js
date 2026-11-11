@@ -403,7 +403,16 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     list_files(c, a) {
       const files = listFiles(db, c.floor.id, typeof a.prefix === 'string' ? a.prefix : '').filter((f) => !offLimits(c, f.path));
       c.say('reading', 'Checking the shared drive', 'looked through the shared drive');
-      return files.length ? files.map((f) => `${f.path} (${f.size} bytes)`).join('\n') : 'The workspace is empty.';
+      if (!files.length) return 'The workspace is empty.';
+      const lines = files.map((f) => `${f.path} (${f.size} bytes)`);
+      const max = cfg.listFilesMaxChars ?? Infinity;
+      if (lines.join('\n').length <= max) return lines.join('\n');
+      // A long-lived floor has hundreds of files, and the whole list would be read again on every later step. Folder totals say where to look.
+      const folders = new Map();
+      for (const f of files) { const dir = f.path.split('/').slice(0, f.path.startsWith('projects/') ? 2 : 1).join('/') + (f.path.includes('/') ? '/' : ''); folders.set(dir, (folders.get(dir) || 0) + 1); }
+      const shown = []; let used = 0;
+      for (const l of lines) { if (used + l.length + 1 > max / 2) break; shown.push(l); used += l.length + 1; }
+      return `${files.length} files, too many to list at once. By folder: ${[...folders].map(([d, n]) => `${d} (${n})`).join(', ').slice(0, max / 2)}\nAsk again with a prefix, such as projects/<slug>/ or projects/<slug>/notes/, to see one folder in full. The first ${shown.length}:\n${shown.join('\n')}`;
     },
     async publish_project(c, a) {
       const slug = str(a, 'project', 60);

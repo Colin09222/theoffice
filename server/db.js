@@ -189,6 +189,8 @@ Object.assign(ADDED.floors, { keep_code: 'INTEGER NOT NULL DEFAULT 0' });
 // The contractor hold (server/contractor.js): a floor whose Builder and Designer jobs go to the building's outside contractor, and the task that is with them now.
 Object.assign(ADDED.floors, { contractor: 'INTEGER NOT NULL DEFAULT 0' });
 Object.assign(ADDED.tasks, { contractor: 'INTEGER NOT NULL DEFAULT 0' });
+// How big a computer's conversation had grown at its last step, and whether its task was sent back since: past a size, the fix round starts on a fresh computer (server/computer.js).
+Object.assign(ADDED.tasks, { session_ctx: 'INTEGER NOT NULL DEFAULT 0', session_fresh: 'INTEGER NOT NULL DEFAULT 0' });
 
 export function openDb(dataDir) {
   let path = ':memory:';

@@ -252,6 +252,8 @@ function managerStep(meta, messages = []) {
   // A quiet floor in a work mode: the next job off the list.
   if (meta.autopilot && !meta.isFreshBoss && !meta.toReview.length) {
     const a = meta.autopilot;
+    // [idle] in the goal: everything is waiting on someone else, so the round hands out nothing.
+    if (/\[idle\]/.test(a.goal || '')) return { content: 'Nothing new this round: what is left is waiting on someone else.' };
     const item = a.nextUp[0] || 'Write a one-page plan for the company';
     if (meta.step === 0) {
       const calls = [];

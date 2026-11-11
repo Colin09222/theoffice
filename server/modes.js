@@ -134,13 +134,40 @@ export function installModes(ext) {
   const have = new Set(all(db, 'PRAGMA table_info(work_modes)').map((c) => c.name));
   if (!have.has('goal_asked')) db.exec('ALTER TABLE work_modes ADD COLUMN goal_asked INTEGER NOT NULL DEFAULT 0');
   if (!have.has('goals_done')) db.exec("ALTER TABLE work_modes ADD COLUMN goals_done TEXT NOT NULL DEFAULT '[]'");
+  // Quiet rounds: how many jobs in a row handed out no work, and what the floor looked like after the last of them.
+  if (!have.has('idle_streak')) db.exec('ALTER TABLE work_modes ADD COLUMN idle_streak INTEGER NOT NULL DEFAULT 0');
+  if (!have.has('idle_mark')) db.exec("ALTER TABLE work_modes ADD COLUMN idle_mark TEXT NOT NULL DEFAULT ''");
   const seenRunning = new Set();  // runs a tick has already seen, so a run never finishes on the tick that started it
   let timer = null, stopped = false;
   const gapMs = () => Math.max(0, Number(cfg.autopilotGapMin ?? 5)) * 60000;
   const maxFails = () => Math.max(1, Number(cfg.autopilotMaxFails ?? 3));
+  /**
+   * A round that handed out no work ("nothing new: it is all with the contractor") finds the same nothing five minutes later, and each look is a
+   * whole manager turn. So after one, the next waits three times as long as the last, up to a few hours, and nothing is asked of a model meanwhile.
+   * The moment anything on the floor changes (the boss says something, a job comes back, a question is answered, something is bought or published),
+   * the wait is over. AUTOPILOT_IDLE_BACKOFF=0 goes back to a look every gap.
+   */
+  const idleBackoff = () => cfg.autopilotIdleBackoff !== false;
+  const idleWaitMs = (streak) => Math.min(Math.max(gapMs(), 60000) * 3 ** Math.min(streak, 8), Math.max(1, Number(cfg.autopilotIdleMaxMin ?? 360)) * 60000);
+  /** What a manager would find on this floor, boiled down to something that only changes when there is something new to find. */
+  function floorMark(floorId) {
+    const count = (sql, ...a) => { try { return all(db, sql, floorId, ...a).map((r) => Object.values(r).join(':')).join(','); } catch { return ''; } };
+    return [
+      // What the boss, the help line and the office said. A round's own note and the manager's own words are not news.
+      count("SELECT COALESCE(MAX(id),0) n FROM messages WHERE floor_id=? AND (role IN ('boss','help') OR (role='note' AND text NOT LIKE ? AND text NOT LIKE ?))", `${MODE_NOTE}%`, `${GOAL_NOTE}%`),
+      count('SELECT status, COUNT(*) n FROM tasks WHERE floor_id=? GROUP BY status ORDER BY status'),
+      count('SELECT COUNT(*) n, COALESCE(SUM(answer IS NOT NULL),0) a FROM questions WHERE floor_id=?'),
+      count('SELECT status, COUNT(*) n FROM purchases WHERE floor_id=? GROUP BY status ORDER BY status'),
+      count('SELECT status, COUNT(*) n FROM domain_orders WHERE floor_id=? GROUP BY status ORDER BY status'),
+      count('SELECT status, COUNT(*) n FROM contractor_jobs WHERE floor_id=? GROUP BY status ORDER BY status'),
+      count('SELECT COUNT(*) n, COALESCE(MAX(published_at),0) p FROM projects WHERE floor_id=?'),
+      count('SELECT COUNT(*) n FROM app_forms WHERE floor_id=?'),
+      count('SELECT goal FROM work_modes WHERE floor_id=?'),
+    ].join('|');
+  }
 
   const rowOf = (floorId) => get(db, 'SELECT * FROM work_modes WHERE floor_id=?', floorId)
-    || { floor_id: floorId, mode: 'ask', days: '[1,2,3,4,5]', start_at: '09:00', end_at: '17:00', tz: 'UTC', tz_set: 0, goal: '', backlog: '[]', paused_reason: '', fail_streak: 0, next_at: 0, recapped_run: 0, open_state: -1, updated_at: 0, goal_asked: 0, goals_done: '[]' };
+    || { floor_id: floorId, mode: 'ask', days: '[1,2,3,4,5]', start_at: '09:00', end_at: '17:00', tz: 'UTC', tz_set: 0, goal: '', backlog: '[]', paused_reason: '', fail_streak: 0, next_at: 0, recapped_run: 0, open_state: -1, updated_at: 0, goal_asked: 0, goals_done: '[]', idle_streak: 0, idle_mark: '' };
   const hoursOf = (row) => ({ mode: row.mode, days: JSON.parse(row.days || '[]'), start: row.start_at, end: row.end_at, tz: row.tz });
   /** Set hours or nonstop with no goal yet: nothing starts on its own until the boss gives or picks one. */
   const wantsGoal = (row) => row.mode !== 'ask' && !row.paused_reason && !row.goal;
@@ -212,7 +239,7 @@ export function installModes(ext) {
     const h = r.hours;
     // A new mode or new hours start straight away; saving the same ones again (a new goal, say) keeps the gap after the last job.
     const fresh = JSON.stringify(was) !== JSON.stringify({ mode: h.mode, days: h.days, start: h.start, end: h.end, tz: h.tz }) || !!row.paused_reason;
-    const fields = { mode: h.mode, days: JSON.stringify(h.days), start_at: h.start, end_at: h.end, tz: h.tz, paused_reason: '', fail_streak: 0, next_at: fresh ? now() : row.next_at, open_state: -1 };
+    const fields = { mode: h.mode, days: JSON.stringify(h.days), start_at: h.start, end_at: h.end, tz: h.tz, paused_reason: '', fail_streak: 0, next_at: fresh ? now() : row.next_at, open_state: -1, ...(fresh ? { idle_streak: 0, idle_mark: '' } : {}) };
     if (input?.tz !== undefined && input?.tz !== null && input?.tz !== '') fields.tz_set = 1;
     if (typeof input?.goal === 'string') fields.goal = plain(input.goal, GOAL_MAX);
     const goal = fields.goal ?? row.goal;
@@ -329,10 +356,14 @@ export function installModes(ext) {
     const status = timedOut || brokeDown || failed > 0 ? 'failed' : 'done';
     const row = rowOf(floor.id);
     const streak = status === 'failed' ? row.fail_streak + 1 : 0;
+    // A quiet round: the manager looked and handed out nothing. The next look waits longer each time, unless something changes first (see step).
+    const idle = idleBackoff() && status === 'done' && !tasks.length && !published.length;
+    const quiet = idle ? row.idle_streak + 1 : 0;
     tx(db, () => {
       run(db, 'UPDATE mode_runs SET finished_at=?, status=?, tasks_done=?, tasks_failed=?, waiting=?, published=? WHERE id=?', t, status, done, failed, waiting, JSON.stringify(published), r.id);
-      patch(floor.id, { fail_streak: streak, next_at: t + gapMs() });
+      patch(floor.id, { fail_streak: streak, next_at: t + (idle ? idleWaitMs(quiet) : gapMs()), idle_streak: quiet, idle_mark: idle ? floorMark(floor.id) : '' });
     });
+    if (idle) log('info', 'work mode quiet round', { floorId: floor.id, streak: quiet, nextInMin: Math.round(idleWaitMs(quiet) / 60000) });
     seenRunning.delete(r.id);
     // The digest: a line or two, in the manager's voice. Never a figure about money.
     const next = JSON.parse(rowOf(floor.id).backlog || '[]')[0];
@@ -395,7 +426,13 @@ export function installModes(ext) {
     maybeRecap(floor, rowOf(floor.id), { closing });
     // No goal, no job. The boss has just turned the mode on, so the manager asks straight away, open or not, once the floor is quiet.
     if (wantsGoal(row)) { if (!row.goal_asked && !blocker(floor)) askForGoal(floor, h); return; }
-    if (h.mode === 'ask' || row.paused_reason || !open || t < row.next_at) return;
+    if (h.mode === 'ask' || row.paused_reason || !open) return;
+    // Waiting out a quiet round: something new on the floor ends the wait, and costs no more than a few counts to notice.
+    if (row.idle_streak && t < row.next_at && floorMark(floor.id) !== row.idle_mark) {
+      patch(floor.id, { idle_streak: 0, idle_mark: '', next_at: t });
+      row = rowOf(floor.id);
+    }
+    if (t < row.next_at) return;
     if (blocker(floor)) return;
     startRun(floor, rowOf(floor.id));
   }

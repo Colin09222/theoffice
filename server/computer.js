@@ -372,7 +372,14 @@ export class Computer {
     if (st.id) {
       let live = null;
       try { live = await this.client.retrieve(st.id); } catch (err) { if (err?.status !== 404) throw err; }
-      if (live && live.status !== 'terminated') {
+      // Only a send-back sets this, and only this start may act on it: a pause or a wait for room later in the round goes back to the computer it was on.
+      const sentBack = !!task.session_fresh;
+      if (sentBack) run(e.db, 'UPDATE tasks SET session_fresh=0 WHERE id=?', task.id);
+      if (sentBack && live?.status === 'idle' && task.session_ctx >= e.cfg.sessionFreshOverTokens && this.freshStart(task)) {
+        e.log('info', 'fix round on a fresh computer', { floorId: floor.id, taskId: task.id, tokens: task.session_ctx });
+        st.id = ''; st.charged = 0; live = null;
+        task = get(e.db, 'SELECT * FROM tasks WHERE id=?', task.id);
+      } else if (live && live.status !== 'terminated') {
         this.equip(st);
         // The budget is fixed at creation, so a reattached session is re-capped to what may be spent from now on.
         const spent = Number(live.usage?.list_cost?.amount) || 0;
@@ -381,14 +388,16 @@ export class Computer {
         e.feed(floor.id, agent, `went back to the computer for "${task.title}"`, task.project);
         return;
       }
-      if (task.session_tries >= MAX_LOST) {
-        // The floor pauses, and resuming it is someone deciding to try again, so the count starts over.
-        run(e.db, 'UPDATE tasks SET session_tries=0 WHERE id=?', task.id);
-        throw new ProviderError('The computer keeps disappearing.', { retryable: false });
+      if (st.id) {
+        if (task.session_tries >= MAX_LOST) {
+          // The floor pauses, and resuming it is someone deciding to try again, so the count starts over.
+          run(e.db, 'UPDATE tasks SET session_tries=0 WHERE id=?', task.id);
+          throw new ProviderError('The computer keeps disappearing.', { retryable: false });
+        }
+        run(e.db, "UPDATE tasks SET session_id='', session_charged=0, session_sent=0, session_ctx=0, session_tries=session_tries+1 WHERE id=?", task.id);
+        this.pushMessage(task.id, 'Your earlier computer was lost. /workspace/project now holds everything that had been saved, so check what is still missing and finish the job.');
+        st.id = ''; st.charged = 0;
       }
-      run(e.db, "UPDATE tasks SET session_id='', session_charged=0, session_sent=0, session_tries=session_tries+1 WHERE id=?", task.id);
-      this.pushMessage(task.id, 'Your earlier computer was lost. /workspace/project now holds everything that had been saved, so check what is still missing and finish the job.');
-      st.id = ''; st.charged = 0;
     }
     const agentRef = await this.agentRef(agent.role, { autonomous: !!task.auto, tier: e.taskTier(task) });
     const vaulted = !!task.vault && !!e.cfg.iosEnabled && !!e.cfg.iosVaultId;
@@ -436,11 +445,26 @@ export class Computer {
     }
     st.id = session.id;
     this.equip(st);
-    run(e.db, 'UPDATE tasks SET session_id=?, session_baseline=?, session_sent=0, session_charged=0 WHERE id=?', session.id, JSON.stringify(baseline), task.id);
+    run(e.db, 'UPDATE tasks SET session_id=?, session_baseline=?, session_sent=0, session_charged=0, session_ctx=0 WHERE id=?', session.id, JSON.stringify(baseline), task.id);
     e.feed(floor.id, agent, `started a computer for "${task.title}"`, task.project);
     e.setAgent(agent.id, { state: 'thinking', activity: 'Starting up the computer', project: task.project, task_id: task.id });
   }
 
+  /**
+   * A fix round on a fresh computer. A computer's conversation only grows, and every step re-reads all of it: one build measured on 11-10 went back for its
+   * fixes at half a million tokens, paid to have the lot written to the cache again, and then paid for it on each of sixty more steps. The work itself is on the
+   * drive (a send-back only follows a finished, collected turn), so the new computer gets those files, the original brief, the report the last round ended
+   * with, and the notes it was sent back with. The old one is left idle, as every finished task's is. Returns false when there is nothing to carry over.
+   */
+  freshStart(task) {
+    const e = this.engine;
+    let msgs = []; try { msgs = JSON.parse(task.transcript || '[]'); } catch { return false; }
+    const unsent = msgs.slice(task.session_sent);
+    if (!msgs.length || !unsent.length) return false;
+    const note = `[Office note, not from the boss] You did the first round of this job on another computer, and this is a fresh one. Everything you saved then is in /workspace/project, your notes included: set up again, and look at what is there before you change anything. Don't redo what already works. Your own report at the end of that round:\n${wrapUntrusted('your earlier report', String(task.result || '').slice(0, 1800))}`;
+    run(e.db, "UPDATE tasks SET transcript=?, session_id='', session_charged=0, session_sent=0, session_ctx=0 WHERE id=?", JSON.stringify([msgs[0], { role: 'user', content: note }, ...unsent]), task.id);
+    return true;
+  }
   /** With no limit of ours on sessions, the platform's own limit on starting them can be the first one anybody meets. That is a queue to wait in, not an outage to pause the floor for. */
   async whenAllowed(st, fn) {
     for (let wait = this.rateLimitWaitMs ?? 5000; ; wait = Math.min(wait * 2, 60000)) {
@@ -569,6 +593,8 @@ export class Computer {
         if (live && ev.model_usage) {
           const u = costOf(ev.model_usage, st.pricing);
           this.charge(st, st.model, u.prompt, u.completion, u.cost);
+          // How much this computer now reads on every step.
+          run(e.db, 'UPDATE tasks SET session_ctx=? WHERE id=?', u.prompt, st.taskId);
           await this.topUp(st);
           // A session stopped by its budget keeps only what was saved, and the platform gives no warning. It isn't told why, because a bot has no business knowing there is a limit.
           // While more slices are coming there is nothing to warn about, and that is nearly always.

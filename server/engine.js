@@ -30,7 +30,8 @@ const today = (ms) => new Date(ms).toISOString().slice(0, 10);
 const reviewWords = (raw) => { if (!raw) return 'not done'; try { const r = JSON.parse(raw); return `${r.verdict || 'done'}${r.score ? ` (${r.score}/10)` : ''}${r.rounds > 1 ? ` after ${r.rounds} looks` : ''}`; } catch { return 'done'; } };
 const EVENT_KEEP = 1500, KEPT_ERRORS = 100;
 // With no cap on steps, a run keeps its opening messages and its latest steps, so it can't outgrow a model's context or this process's memory.
-// It cuts well below the trigger, because every cut costs the provider's prompt cache.
+// It cuts well below the trigger, because every cut costs the provider's prompt cache. These two are the window for a model with no prompt cache, which
+// pays full price for every character on every step. A model with one gets the wider window in the settings (see trimWindow).
 const STEPS_KEEP_CHARS = 240000, STEPS_CUT_TO_CHARS = 150000, NOTES_KEPT = 12, LINKS_KEPT_CHARS = 32000;
 // How many open tasks the manager reads about at one go. The rest are still on the board and still get done.
 const OPEN_TASKS_SHOWN = 40;
@@ -282,6 +283,18 @@ export class Engine {
     task.model_tier = tier;
     return tier;
   }
+  /**
+   * How long this person's run may grow before its oldest steps go, and how much stays. On a model with a prompt cache a kept step costs a twentieth
+   * of its price to read again, while a cut makes the provider write everything that is left at a quarter over full price. Measured on 11-08 to 11-10:
+   * with the old window a long research job cut itself every five or six steps (82 times in one job) and half its bill was those rewrites. So a
+   * cached run grows much further and is cut rarely. A model with no cache keeps the old, smaller window.
+   */
+  trimWindow(agent, floorId, { autonomous = false, tier = '' } = {}) {
+    const route = routeFor(this.models, agent.role, { autonomous, tier, floorRoute: this.budget.floorRoute(floorId) });
+    if (route?.pricing?.cacheRead === undefined) return {};
+    const keep = this.cfg.stepsKeepChars ?? STEPS_KEEP_CHARS;
+    return { keep, cutTo: Math.min(this.cfg.stepsCutToChars ?? STEPS_CUT_TO_CHARS, Math.floor(keep * 0.75)) };
+  }
   /** The boss hears once that the building is out of budget, and never how much. Raising a limit and restarting clears this on the next tick, and the queue simply starts again. */
   judgeBuildingBudget(floor, stopped) {
     const was = floor.budget_out ? floor.budget_out.split(',') : [];
@@ -432,7 +445,12 @@ export class Engine {
     const msgs = all(this.db, "SELECT id,role,text,files FROM messages WHERE floor_id=? AND role NOT IN ('office','report','budget') ORDER BY id DESC LIMIT 30", floor.id).reverse();
     const roster = { manager: mgr.name, person: this.people.personBlock(mgr) };
     const out = [{ role: 'system', content: managerPrompt(floor, boss, roster, this.floorCfg(floor.id)) }];
+    // A round's note carries the same standing instructions every time, and thirty messages can hold a dozen of them. Only the newest of each kind is read whole.
+    const newest = new Map();
+    if (this.cfg.managerDedupeNotes !== false) for (const m of msgs) { const kind = m.role === 'note' && ROUND_NOTE.exec(m.text)?.[0]; if (kind) newest.set(kind, m.id); }
     for (const m of msgs) {
+      const kind = newest.size && m.role === 'note' && ROUND_NOTE.exec(m.text)?.[0];
+      if (kind && newest.get(kind) !== m.id) { out.push({ role: 'user', content: `[Office note, not from the boss] ${kind} an earlier round, since dealt with. Its instructions are the same as in the newest "${kind}" note below.` }); continue; }
       if (m.role === 'boss') {
         const files = m.files ? attachmentsOf(this.db, floor.id, JSON.parse(m.files)) : [];
         out.push({ role: 'user', content: m.text + describeFiles(files), ...(files.length ? { files: files.map((f) => f.path) } : {}) });
@@ -482,11 +500,12 @@ export class Engine {
     const call = { floorId, agent: mgr, signal, project: '', autonomous: ctx.autonomous, tier: this.budget.tier(floorId) };
     const maxSteps = this.cfg.maxManagerSteps;
     const opening = messages.length;
+    const window = this.trimWindow(mgr, floorId, call);
     try {
       let nudged = false, ended = false, acted = false;
       for (let step = 0; step < maxSteps; step++) {
         this.checkpoint(floorId, signal);
-        trimSteps(messages, opening);
+        trimSteps(messages, opening, window);
         if (step === maxSteps - 2) messages.push({ role: 'user', content: '[Office note, not from the boss] Tell the boss where things stand now.' });
         this.setAgent(mgr.id, { state: 'thinking', activity: step === 0 ? 'Thinking it over' : 'Sorting out the plan' });
         const buffer = { text: '', pending: '', timer: null };
@@ -577,6 +596,7 @@ export class Engine {
     const allBoss = all(this.db, "SELECT text FROM messages WHERE floor_id=? AND role='boss' ORDER BY id DESC LIMIT 12", floorId).map((m) => m.text).join(' ');
     const answers = () => all(this.db, 'SELECT answer FROM questions WHERE task_id=? AND answer IS NOT NULL', task.id).map((q) => q.answer);
     const maxSteps = this.cfg.maxStaffSteps;
+    const window = this.trimWindow(agent, floorId, call);
     try {
       // Step index for scripted mocks counts assistant turns already in the saved transcript.
       let step = messages.filter((m) => m.role === 'assistant').length;
@@ -604,7 +624,7 @@ export class Engine {
           messages.push(toolMessage(c.id, out));
         }
         // Done before saving, so what's stored stays as small as what's sent. The system prompt and the brief always stay.
-        this.keepLinks(task.id, trimSteps(messages, 2));
+        this.keepLinks(task.id, trimSteps(messages, 2, window));
         this.saveTranscript(task.id, messages);
         if (ctx.suspend) {
           run(this.db, "UPDATE tasks SET status='blocked', updated_at=? WHERE id=?", this.now(), task.id);
@@ -836,7 +856,8 @@ export class Engine {
     if (verdict === 'revise' && t.revisions < this.cfg.maxRevisions && !t.vault) {
       const msgs = t.transcript ? JSON.parse(t.transcript) : null;
       if (msgs) msgs.push({ role: 'user', content: `The Office Manager sent this back with notes:\n${notes || 'Please improve it.'}` });
-      run(this.db, "UPDATE tasks SET status='todo', revisions=revisions+1, transcript=?, updated_at=?, sent_back_sum=? WHERE id=?", msgs ? JSON.stringify(msgs) : '', this.now(), t.project ? projectSum(this.db, floor.id, t.project) : '', t.id);
+      // A computer's turn has ended and its files are back on the drive, so this round is free to start on a fresh one if the old one has grown too big to be worth going back to.
+      run(this.db, "UPDATE tasks SET status='todo', revisions=revisions+1, transcript=?, updated_at=?, sent_back_sum=?, session_fresh=? WHERE id=?", msgs ? JSON.stringify(msgs) : '', this.now(), t.project ? projectSum(this.db, floor.id, t.project) : '', t.session_id ? 1 : 0, t.id);
       this.feed(floor.id, mgr, `sent "${t.title}" back to ${staff?.name} with notes`, t.project);
       this.talk(floor.id, mgr, staff, notes || `"${t.title}" needs another pass.`, { kind: 'review', project: t.project });
       this.emitTask(t.id); this.kick();
@@ -1098,6 +1119,8 @@ export class Engine {
 }
 
 class ToolError extends WorkspaceError {}
+// The office notes that open a round the team runs for itself: a work-mode job, the daily run, the ask for a goal (server/modes.js, server/daily.js).
+const ROUND_NOTE = /^(Work mode:|Daily run:|Goal needed:)/;
 const ACT_WORDS = /\b(go|build|make|do it|start|create|launch|ship|act|please|a|an|the|me|us|site|website|page|about|for|and|now)\b/gi;
 const cleanName = (s) => String(s ?? '').replace(/[^\p{L}\p{N} '-]/gu, '').trim().slice(0, 24);
 
@@ -1108,17 +1131,17 @@ const LINK_LIKE = /\bhttps?:\/\/[^\s)\]>"'`]+|\b(?:[a-z0-9-]{1,63}\.){1,8}[a-z]{
  * A step is an assistant message and the tool results that answer it, and it goes whole: a result with no call in front of it is an error at every provider, while a whole
  * turn can go, thinking and all. The latest step always stays, however big it is. What the boss or the manager said stays too, because a dropped instruction is a job done wrong.
  */
-export function trimSteps(messages, head) {
+export function trimSteps(messages, head, { keep = STEPS_KEEP_CHARS, cutTo = STEPS_CUT_TO_CHARS } = {}) {
   const from = messages[head]?.content === TRIM_NOTE ? head + 1 : head;
   const size = (m) => JSON.stringify(m).length;
   let total = 0;
   for (let i = from; i < messages.length; i++) total += size(messages[i]);
-  if (total <= STEPS_KEEP_CHARS) return [];
+  if (total <= keep) return [];
   let cut = messages.length, kept = 0;
   for (let i = messages.length - 1; i >= from; i--) {
     kept += size(messages[i]);
     if (messages[i].role !== 'assistant') continue;
-    if (cut < messages.length && kept > STEPS_CUT_TO_CHARS) break;
+    if (cut < messages.length && kept > cutTo) break;
     cut = i;
   }
   if (cut <= from) return [];
