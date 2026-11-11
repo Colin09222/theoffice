@@ -205,6 +205,17 @@ export function loadConfig(env = process.env, overrides = {}) {
     // The manager reads its last thirty messages every turn. An office note that repeats the same standing instructions (a work-mode round, the daily run)
     // is kept whole only where it is newest. MANAGER_DEDUPE_NOTES=0 sends every copy in full again.
     managerDedupeNotes: env.MANAGER_DEDUPE_NOTES !== '0',
+    // How the manager handles what the boss says (docs/MANAGER.md). Each is on unless set to 0.
+    // A small request goes straight to one right-sized job: no playbook, no Tester behind it, no plan meeting (server/tools.js, server/prompts.js).
+    managerFastPath: env.MANAGER_FAST_PATH !== '0',
+    // The boss's request goes with the job in one line, the boss gets one question at a time, and only when it is really unclear or risky.
+    managerIntentCheck: env.MANAGER_INTENT_CHECK !== '0',
+    // One plan up front: each job with its acceptance checks and an estimate (admin only), a waiting job changed with amend_task rather than cancelled and written again.
+    managerPlanFirst: env.MANAGER_PLAN_FIRST !== '0',
+    // Whoever does a job ticks its acceptance checks off with evidence before handing in, and is asked once if the reply came without it.
+    staffSelfCheck: env.STAFF_SELF_CHECK !== '0',
+    // A work-mode round that found nothing to do says so once, then stays out of the boss's chat until something changes. ROUND_REPORTS=all says every one.
+    quietRoundReports: env.ROUND_REPORTS !== 'all',
     // The most a file listing hands back before it says to ask for one folder. LIST_FILES_MAX_CHARS=off lists everything, however long.
     listFilesMaxChars: cap(env.LIST_FILES_MAX_CHARS, 12000),
     talkGapMs: num(env.TALK_GAP_MS, env.AI_MODE === 'mock' ? 1 : 2200),

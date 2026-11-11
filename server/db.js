@@ -195,6 +195,8 @@ Object.assign(ADDED.floors, { contractor: 'INTEGER NOT NULL DEFAULT 0' });
 Object.assign(ADDED.tasks, { contractor: 'INTEGER NOT NULL DEFAULT 0' });
 // How big a computer's conversation had grown at its last step, and whether its task was sent back since: past a size, the fix round starts on a fresh computer (server/computer.js).
 Object.assign(ADDED.tasks, { session_ctx: 'INTEGER NOT NULL DEFAULT 0', session_fresh: 'INTEGER NOT NULL DEFAULT 0' });
+// How the manager sized a job, the boss's request in one line, its acceptance checks, what jobs like it have cost (admin only), and the doer's own check of it (docs/MANAGER.md).
+Object.assign(ADDED.tasks, { size: "TEXT NOT NULL DEFAULT ''", intent: "TEXT NOT NULL DEFAULT ''", checks: "TEXT NOT NULL DEFAULT ''", est_usd: 'REAL NOT NULL DEFAULT 0', selfcheck: "TEXT NOT NULL DEFAULT ''" });
 
 export function openDb(dataDir) {
   let path = ':memory:';

@@ -22,7 +22,8 @@ import { MAIL_DEFS, mailHandlers, mailToolsFor } from './mail-tools.js';
 import { CHAT_TOOLS, CHAT_DEFS, chatHandlers } from './cloud/chat-tools.js';
 import { LAYOUTS, TONES, VIBES } from '../public/js/looks.js';
 import { checkRound } from './rounds.js';
-import { heldNow } from './contractor.js';
+import { heldNow, contractorOn, CONTRACTOR_ROLES } from './contractor.js';
+import { SIZES, cleanChecks, checksInBrief, estimateUsd, waitingTwin, openManagerQuestion } from './brain.js';
 
 const LINK_SCAN_CHARS = 24 * 1000 * 1000, MAX_LINKS_CHECKED = 100;
 
@@ -93,6 +94,11 @@ const DEFS = {
   }, ['to', 'title', 'brief']),
   review_task: fn('review_task', 'Approve finished work or send it back with notes.', { task_id: { type: 'integer', description: 'Task id' }, verdict: { type: 'string', enum: ['approve', 'revise'] }, notes: S('Feedback for the staff member') }, ['task_id', 'verdict']),
   cancel_task: fn('cancel_task', 'Cancel a task that is no longer needed.', { task_id: { type: 'integer', description: 'Task id' } }),
+  amend_task: fn('amend_task', 'Change a job that is still waiting to start: add what the boss just said, fix its brief, or change its checks. Use it instead of cancelling a waiting job and writing it again. A job that has started, or is with the outside contractor, can\'t be changed this way.', {
+    task_id: { type: 'integer', description: 'Task id' }, add: S('A line or two to add to the brief as it stands'), brief: S('Or the whole new brief, replacing the old one'), title: S('A new short title, if the job itself changed'),
+    checks: { type: 'array', items: { type: 'string' }, description: 'The new acceptance checks, replacing the old list' },
+    size: { type: 'string', enum: SIZES, description: 'A new size, if the job turned out bigger or smaller' },
+  }, ['task_id']),
   check_domain: fn('check_domain', 'Check whether domain names can be bought and what they cost for a year. Checking costs nothing. Try .com names first: short, brandable, easy to say and spell, no hyphens or numbers, and a fit for the company or project. Other endings only when no good .com is available within the limit, or the boss asks for one.', { names: { type: 'array', items: { type: 'string' }, description: 'Up to 10 names, such as tinyteacups.com' } }),
   request_domain: fn('request_domain', 'Ask the boss to buy a domain for a project, only once the boss has picked or agreed to this name in chat. First ask them for ideas, or offer 2-3 available names from check_domain, each with its price. Prefer a .com; for another ending, say why in the why. This does not buy anything: it puts a Buy button in front of the boss, and only their click spends money. Ordinary names only, within the price limit.', { domain: S('The name, such as tinyteacups.com'), project: S('Project slug it will serve'), why: S('One sentence for the boss') }),
   generate_image: fn('generate_image', 'Make a real picture with an image model and save it in the project: hero images, logos, favicons, social previews, game art. Describe the image fully, including any exact words it must show.', {
@@ -190,6 +196,23 @@ const DEFS = {
   }, ['name', 'prompt', 'caption']),
 };
 
+// What assign_task gains when the manager sizes a job, carries the boss's request and lists its acceptance checks (docs/MANAGER.md). Each comes with its own switch,
+// and with all three off the tool is exactly what it was.
+const ASSIGN_MORE = {
+  managerFastPath: { size: { type: 'string', enum: SIZES, description: 'small: a quick change to something that already exists (a link, a few words, a name, a number, a picture, one fix), made and checked by one person, with no Tester after it. big: a first build or a rebuild. standard: anything between.' } },
+  managerIntentCheck: { intent: S('What the boss asked for, in one line, in their words where you can. Whoever does the job checks their work against it.') },
+  managerPlanFirst: { checks: { type: 'array', items: { type: 'string' }, description: 'The acceptance checks: three to six things anyone could tick by opening it, one or two for a small change. The office writes them into the brief as its "Done means:" list, so leave that line out of the brief.' } },
+};
+function defFor(name, cfg) {
+  // A size is only on offer where jobs are sized.
+  if (name === 'amend_task' && !cfg.managerFastPath) { const f = DEFS.amend_task.function; const { size: _size, ...properties } = f.parameters.properties; return { type: 'function', function: { ...f, parameters: { ...f.parameters, properties } } }; }
+  if (name !== 'assign_task') return DEFS[name];
+  const on = Object.keys(ASSIGN_MORE).filter((k) => cfg[k]);
+  if (!on.length) return DEFS.assign_task;
+  const f = DEFS.assign_task.function;
+  return { type: 'function', function: { ...f, parameters: { ...f.parameters, properties: { ...f.parameters.properties, ...Object.assign({}, ...on.map((k) => ASSIGN_MORE[k])) }, required: [...f.parameters.required, ...(cfg.managerIntentCheck ? ['intent'] : [])] } } };
+}
+
 Object.assign(DEFS, MAIL_DEFS);  // email: server/mail-tools.js
 Object.assign(DEFS, CHAT_DEFS);  // the website chat: server/cloud/chat-tools.js
 
@@ -197,7 +220,7 @@ Object.assign(DEFS, CHAT_DEFS);  // the website chat: server/cloud/chat-tools.js
 export const NOT_SEEN_AS_LINK = /^Error:|^<untrusted_data source="workspace:/;
 export const STAFF_TOOLS = ['write_file', 'read_file', 'list_files', 'search_files', 'view_file', 'copy_file', 'publish_project', 'fetch_url', 'web_search', 'ask_boss', 'ask_colleague', 'file_purchase_request'];
 // The manager has no web tools. It reads every staff result and knows private titles, so it must have no way to send anything out.
-export const MANAGER_TOOLS = ['write_file', 'read_file', 'list_files', 'search_files', 'view_file', 'copy_file', 'publish_project', 'ask_boss', 'file_purchase_request', 'assign_task', 'review_task', 'cancel_task', 'hire_staff'];
+export const MANAGER_TOOLS = ['write_file', 'read_file', 'list_files', 'search_files', 'view_file', 'copy_file', 'publish_project', 'ask_boss', 'file_purchase_request', 'assign_task', 'amend_task', 'review_task', 'cancel_task', 'hire_staff'];
 
 const SERVER_TOOLS = ['server_starter', 'deploy_server', 'server_status', 'server_logs', 'server_restart', 'server_check'];
 // Beyond the common set, by job. A tool nobody needs is a tool a hijacked agent can't use. Approving a purchase is not on this list for anyone: it isn't a tool at all.
@@ -221,9 +244,10 @@ export function toolAvailable(name, cfg, role) {
   if (name === 'ios_start' || name === 'ios_request') return !!cfg.iosEnabled;
   // Only ever the manager: anyone else who is stuck says so in their report, and the manager decides whether to ask.
   if (name === 'ask_buddehbot') return role === 'manager' && cfg.helpEnabled !== false;
+  if (name === 'amend_task') return !!cfg.managerPlanFirst && (role === undefined || role === 'manager');
   return true;
 }
-export const toolDefs = (names, cfg, role) => [...new Set(names)].filter((n) => toolAvailable(n, cfg, role)).map((n) => DEFS[n]);
+export const toolDefs = (names, cfg, role) => [...new Set(names)].filter((n) => toolAvailable(n, cfg, role)).map((n) => defFor(n, cfg));
 
 // On a computer the agent already has its own files, so these are its way to the office: the floor's other work, the guarded web, the boss and publishing.
 const COMPUTER_NAMES = { server_starter: 'server_starter', deploy_server: 'deploy_server', server_status: 'server_status', server_logs: 'server_logs', server_restart: 'server_restart', server_check: 'server_check', generate_image: 'generate_image', review_design: 'review_design', read_shared_file: 'read_file', list_shared_files: 'list_files', pull_shared_file: 'pull_shared_file', publish_project: 'publish_project', fetch_url: 'fetch_url', web_search: 'web_search', ask_boss: 'ask_boss', ask_colleague: 'ask_colleague', file_purchase_request: 'file_purchase_request' };
@@ -565,6 +589,9 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     },
     ask_boss(c, a) {
       const q = str(a, 'question', 800);
+      // One question at a time. On 11-10 a manager put the same question to its boss twice in four minutes, and again in the chat every round after.
+      const waiting = cfg.managerIntentCheck && c.agent.role === 'manager' && !c.task ? openManagerQuestion(db, c.floor.id) : null;
+      if (waiting) throw new WorkspaceError(`you already have a question waiting for the boss ("${waiting.text.slice(0, 160)}"), and they haven't answered it. One question at a time: don't ask it again and don't add another. Carry on with whatever doesn't need the answer.`);
       engine.fileQuestion(c.floor, c.agent, c.task, q);
       c.suspend = true;
       return 'Your question has been sent to the boss. Stop here; you will be resumed with the answer.';
@@ -722,9 +749,32 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (c.goalAsk) throw new WorkspaceError('nothing starts on its own until the boss has given or picked a goal. Ask them in the chat for one, or offer 2-3 to pick from, and assign nothing yet.');
       const stop = checkRound(db, cfg, c.floor.id, slugify(str(a, 'project', 60, false), ''), { plan: str(a, 'plan', 120, false), now: engine.now() });
       if (stop) throw new WorkspaceError(stop);
-      const t = engine.assignTask(c.floor, c.agent, { to: str(a, 'to', 60), title: str(a, 'title', 160), brief: str(a, 'brief', 6000), plan: str(a, 'plan', 120, false), project: slugify(str(a, 'project', 60, false), ''), private: a.private === true, dependsOn: Array.isArray(a.depends_on) ? a.depends_on : [], afterPrevious: a.after_previous === true, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files) , auto: !!c.autonomous });
+      const to = str(a, 'to', 60), title = str(a, 'title', 160), brief = str(a, 'brief', 6000), project = slugify(str(a, 'project', 60, false), '');
+      const dependsOn = Array.isArray(a.depends_on) ? a.depends_on : [], afterPrevious = a.after_previous === true;
+      const size = cfg.managerFastPath && SIZES.includes(a.size) ? a.size : '';
+      const more = { size, intent: cfg.managerIntentCheck ? str(a, 'intent', 300, false).replace(/\s+/g, ' ').trim() : '', checks: [], estUsd: 0 };
+      const target = cfg.managerFastPath || cfg.managerPlanFirst ? engine.staffFor(c.floor, to) : null;
+      if (target && cfg.managerFastPath && target.role === 'tester') {
+        // A small change is checked by whoever makes it. On floor 7 the Tester sent after each change was the whole model cost of that change (docs/MANAGER.md).
+        const small = engine.smallBefore(c.floor, { project: project || (a.private === true || c.floor.default_private ? 'private-work' : ''), dependsOn, afterPrevious, thisTurn: c.assignedTasks, bossTurn: !!c.bossTurn });
+        if (small?.back) throw new WorkspaceError(`#${small.id} "${small.title.slice(0, 80)}" was a small change, and whoever made it has checked it: their self-check is with the report. No Tester follows a small change. If you think this one needs a real test anyway, tell the boss why in a line and let them say.`);
+        if (small) throw new WorkspaceError(`#${small.id} "${small.title.slice(0, 80)}" is a small change, so no Tester follows it: whoever makes it checks it against its "Done means" list and says what they saw. If it could break something that matters (taking money, signing in, people's details), it isn't small: ${cfg.managerPlanFirst ? `change it with amend_task (size "standard")` : 'cancel it and assign it again without size small'}, then add the Tester.`);
+      }
+      if (target && cfg.managerPlanFirst) {
+        const twin = waitingTwin(db, c.floor.id, target.id, project || (a.private === true || c.floor.default_private ? 'private-work' : ''), title);
+        if (twin) throw new WorkspaceError(`#${twin.id} "${twin.title.slice(0, 80)}" is already waiting for ${target.name} on this project and hasn't started. Change that job with amend_task instead of making a second one.`);
+        more.estUsd = estimateUsd(db, c.floor.id, target.role, size, { contractor: contractorOn(db, c.floor.id) && CONTRACTOR_ROLES.has(target.role) });
+      }
+      // The acceptance checks, from the manager's list or from a "Done means:" line it typed into the brief. Whoever does the job ticks them off before handing in.
+      if (cfg.managerPlanFirst || cfg.staffSelfCheck) { more.checks = cfg.managerPlanFirst ? cleanChecks(a.checks) : []; if (!more.checks.length) more.checks = checksInBrief(brief); }
+      const t = engine.assignTask(c.floor, c.agent, { to, title, brief, plan: str(a, 'plan', 120, false), project, private: a.private === true, dependsOn, afterPrevious, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files), auto: !!c.autonomous, ...more });
       c.assigned.push(t.agentId);
+      (c.assignedTasks ||= []).push({ id: t.id, size, project: t.project });
       return `Task #${t.id} assigned to ${t.assignee}.`;
+    },
+    amend_task(c, a) {
+      const size = cfg.managerFastPath && SIZES.includes(a.size) ? a.size : null;
+      return engine.amendTask(c.floor, c.agent, Number(a.task_id), { add: str(a, 'add', 2000, false), brief: str(a, 'brief', 6000, false), title: str(a, 'title', 160, false), checks: a.checks === undefined || a.checks === null ? null : cleanChecks(a.checks), size });
     },
     review_task(c, a) {
       if (a.verdict === 'revise') {
@@ -737,7 +787,10 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     cancel_task(c, a) {
       // Only the boss can call back a job that is with the outside contractor. Cancelling it to hand it out again would just queue it for them again.
       if (!c.bossTurn && heldNow(get(db, 'SELECT status,contractor FROM tasks WHERE id=? AND floor_id=?', Number(a.task_id), c.floor.id))) throw new WorkspaceError('that job is with the building\'s outside contractor and comes back as a finished report. Leave it be, and tell the boss plainly it is with the contractor.');
-      return engine.cancelTask(c.floor, Number(a.task_id));
+      const waiting = cfg.managerPlanFirst ? get(db, "SELECT 1 x FROM tasks WHERE id=? AND floor_id=? AND status='todo' AND transcript='' AND cost_usd=0", Number(a.task_id), c.floor.id) : null;
+      const out = engine.cancelTask(c.floor, Number(a.task_id));
+      // One floor cancelled 44 of its 86 tasks, 39 of them waiting jobs, and wrote most of them again (docs/MANAGER.md).
+      return waiting ? `${out} If the job is still wanted in another form, don't write it again from scratch next time: amend_task changes a waiting job in one call.` : out;
     },
     hire_staff(c, a) { return engine.hireStaff(c.floor, str(a, 'role', 40).toLowerCase(), str(a, 'name', 24, false)); },
     async ask_colleague(c, a) {

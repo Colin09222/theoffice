@@ -5,6 +5,7 @@
 import { get, all, run } from './db.js';
 import { newFence } from './help.js';
 import { listFiles } from './workspace.js';
+import { selfCheckAsk } from './brain.js';
 
 export const CONTRACTOR_ROLES = new Set(['builder', 'designer', 'researcher']);
 export const SUMMARY_MAX = 6000;
@@ -30,7 +31,9 @@ export function jobFor(engine, floor, task) {
       return last ? `\n\n${last.content}` : '';
     } catch { return ''; }
   })();
-  const brief = `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${sentBack}${engine.handoffFor(floor, task)}`;
+  // The contractor is asked for the same self-check as anyone on the floor: put in the summary handed back, it reaches the manager with the report.
+  const checks = engine.selfChecks(task, { role: '' });
+  const brief = `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${engine.bossAsked(task)}${sentBack}${engine.handoffFor(floor, task)}${checks.length ? `\n\n${selfCheckAsk(checks)}` : ''}`;
   const uploads = engine.taskFiles(task).map((f) => f.path);
   const drive = task.project ? listFiles(engine.db, floor.id, `projects/${task.project}/`).map((f) => f.path) : [];
   return { brief, files: [...new Set([...uploads, ...drive])].slice(0, FILES_LISTED) };

@@ -372,7 +372,10 @@ export function installModes(ext) {
         : done ? `Finished ${tasks.filter((x) => x.status === 'done' || x.status === 'review').slice(0, 3).map((x) => `"${x.title}"`).join(', ')}.` : 'Looked over where things stand.';
     const live = published.length ? ` Live: ${published.slice(0, 3).map((p) => `[${p.title.replace(/[[\]]/g, '')}](${p.url})`).join(', ')}.` : '';
     const wait = waiting ? ' One thing waits on you, and the team has moved on to other work.' : '';
-    engine.officeNotice(floor.id, `**On our own:** ${did}${live}${wait}${next ? ` Next up: ${next}.` : ''}`);
+    // A quiet round after a quiet round, with nothing new on the floor in between, has nothing to tell: the first one said it. ROUND_REPORTS=all says every one.
+    const again = idle && row.idle_streak >= 1 && cfg.quietRoundReports;
+    if (again) log('info', 'work mode quiet round kept out of the chat', { floorId: floor.id, streak: quiet });
+    else engine.officeNotice(floor.id, `**On our own:** ${did}${live}${wait}${next ? ` Next up: ${next}.` : ''}`);
     if (streak >= maxFails() && row.mode !== 'ask' && !row.paused_reason) {
       patch(floor.id, { paused_reason: `${streak} jobs in a row didn't finish` });
       engine.officeNotice(floor.id, `${streak} jobs in a row didn't finish, so I've stopped picking work on our own. Have a look at what went wrong in the Work tab, then turn the work mode back on under Customise, or tell me to carry on.`);
@@ -473,6 +476,8 @@ export function installModes(ext) {
   engine.modes = {
     set, updatePlan, learnZone, stateLine, tick, busy, blocker, publicView, ownerView,
     running: (floorId) => !!runningRun(floorId),
+    // The last round handed out nothing and the floor looks as it did then: a round that starts like that only speaks up if it changes something (server/engine.js).
+    stillQuiet: (floorId) => { const row = rowOf(floorId); return row.idle_streak >= 1 && row.idle_mark === floorMark(floorId); }, mark: floorMark,
     needsGoal: (floorId) => wantsGoal(rowOf(floorId)),
     // Staff go home outside set hours, unless the boss has brought them back in for something.
     closed: (floorId) => publicView(floorId).closed && !busy(floorId),

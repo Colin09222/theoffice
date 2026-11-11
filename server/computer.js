@@ -17,6 +17,7 @@ import { COMPUTER_TOOL_DEFS, computerToolName, toolsForRole, wrapUntrusted } fro
 import { runCheck, saveCheck, gateProblem } from './launch.js';
 import { IOS_HOSTS } from './ios.js';
 import { computerPrompt, computerBriefing, ON_OUR_OWN } from './prompts.js';
+import { selfCheckAsk, selfCheckNudge, selfChecked, SELF_CHECK_MARK } from './brain.js';
 import { SOUNDS } from '../public/js/sfx-data.js';
 
 const PACKAGE_HOSTS = ['registry.npmjs.org', 'pypi.org', 'files.pythonhosted.org'];
@@ -267,12 +268,20 @@ export class Computer {
       }
       task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       if (!task.transcript) {
-        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, person: e.people.personBlock(agent, task), live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }), uploads: e.taskFiles(task), bossAsk: this.bossAsk(floor.id, agent.role) }, e.cfg) + (task.auto ? `\n\n${ON_OUR_OWN}` : '') }]), task.id);
+        run(e.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify([{ role: 'user', content: computerBriefing(floor, agent, e.models.all[agent.role], { ...task, person: e.people.personBlock(agent, task), live: e.isLive(floor.id, task.project), handoff: e.handoffFor(floor, task, { onComputer: true }), uploads: e.taskFiles(task), bossAsk: this.bossAsk(floor.id, agent.role), asked: e.bossAsked(task), selfCheck: e.selfChecks(task, agent).length ? selfCheckAsk(e.selfChecks(task, agent)) : '' }, e.cfg) + (task.auto ? `\n\n${ON_OUR_OWN}` : '') }]), task.id);
         task = get(e.db, 'SELECT * FROM tasks WHERE id=?', taskId);
       }
       st = this.newState(floor, agent, task, signal);
       await this.attach(st, task);
-      await this.finish(st, st.atCeiling ? 'budget' : await this.drive(st));
+      let outcome = st.atCeiling ? 'budget' : await this.drive(st);
+      // Handed in without ticking off its "Done means" list: asked for it once a round, on the same computer, before anything is collected or goes live.
+      const owed = outcome === 'done' && !st.ctx.suspend && !st.limit ? this.owesSelfCheck(st) : null;
+      if (owed) {
+        this.pushMessage(taskId, `${selfCheckNudge(owed)} If you change anything, run .office/save.sh again before you end your turn.`);
+        e.feed(floor.id, agent, 'is checking the work against its brief', st.project);
+        outcome = await this.drive(st);
+      }
+      await this.finish(st, outcome);
     } catch (err) {
       const why = err?.why ?? signal.reason?.why;
       // Only a shutdown leaves a session running, because the next boot picks it up. On any other way out it must not carry on spending unwatched.
@@ -298,6 +307,15 @@ export class Computer {
     const rows = all(this.engine.db, "SELECT text FROM messages WHERE floor_id=? AND role='boss' ORDER BY id DESC LIMIT 20", floorId).map((m) => m.text).reverse();
     const joined = rows.join('\n').trim();
     return joined ? wrapUntrusted('boss request', joined.slice(-4000)) : '';
+  }
+  /** The checks a finished turn still owes a self-check for, or null: there are none, the reply has it, or this round has been asked already. */
+  owesSelfCheck(st) {
+    const e = this.engine;
+    const task = get(e.db, 'SELECT * FROM tasks WHERE id=?', st.taskId);
+    const checks = task ? e.selfChecks(task, st.agent) : [];
+    if (!checks.length || selfChecked(st.lastText, checks)) return null;
+    let sent = []; try { sent = JSON.parse(task.transcript || '[]'); } catch { /* nothing sent */ }
+    return sent.filter((m) => typeof m.content === 'string' && m.content.startsWith(SELF_CHECK_MARK)).length <= task.revisions ? checks : null;
   }
   pushMessage(taskId, content) {
     const t = get(this.engine.db, 'SELECT transcript FROM tasks WHERE id=?', taskId);
@@ -796,7 +814,7 @@ export class Computer {
     if (st.limit === 'steps') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of steps before finishing.${links}${soFar}`);
     if (st.limit === 'time') return e.finishTask(floor, agent, taskId, 'failed', `Ran out of time before finishing.${links}${soFar}`);
     if (!result.ok) return e.finishTask(floor, agent, taskId, 'failed', `The work could not be saved: ${result.problem}`);
-    return e.finishTask(floor, agent, taskId, 'review', `${(st.lastText || 'Finished.').slice(0, 1800)}${links}`);
+    return e.finishTask(floor, agent, taskId, 'review', `${(e.keepSelfCheck(taskId, st.lastText || '') || 'Finished.').slice(0, 1800)}${links}`);
   }
   /** One command's worth more, asked for by name, so what a job did before the ceiling is what comes back. If this can't be done, the last save it made anyway is what's collected. */
   async lastSave(st) {

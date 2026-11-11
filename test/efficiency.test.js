@@ -62,9 +62,9 @@ describe('a work-mode round that hands out nothing', () => {
     const [, , third] = await waitRuns(t, f, 3);
     assert.equal(third.started_at, second.finished_at, 'it did not wait for the 45 minutes');
     assert.equal(modeRow(t, f).idle_streak, 1, 'and the count started again from there');
-    // The boss still hears about each round that did run, and never a figure.
+    // The boss hears about the first quiet round and the one after something changed, not the repeat in between (docs/MANAGER.md), and never a figure.
     const notices = all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='office' AND text LIKE '**On our own:**%'", f.id).map((m) => m.text);
-    assert.equal(notices.length, 3);
+    assert.equal(notices.length, 2);
     for (const m of notices) assert.ok(!/\$\d|budget/i.test(m), m);
   });
 

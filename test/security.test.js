@@ -29,8 +29,9 @@ describe('1. agents have no shell, no code execution, no real filesystem', () =>
     // ask_colleague reaches only a colleague on the same floor, answered on that colleague's own model with no tools, and its answer comes back fenced as data.
     // search_files reaches nothing read_file and list_files don't already: this floor's own text files, behind the same fence round private projects, and it comes back as untrusted data.
     assert.deepEqual([...STAFF_TOOLS].sort(), ['ask_boss', 'ask_colleague', 'copy_file', 'fetch_url', 'file_purchase_request', 'list_files', 'publish_project', 'read_file', 'search_files', 'view_file', 'web_search', 'write_file'].sort());
-    // Manager extras only touch this floor's own rows.
-    assert.deepEqual(MANAGER_TOOLS.filter((x) => !STAFF_TOOLS.includes(x)).sort(), ['assign_task', 'cancel_task', 'hire_staff', 'review_task']);
+    // Manager extras only touch this floor's own rows. amend_task changes the words of one of this floor's own tasks while it still waits to start: it reaches no
+    // other floor, no file and nothing outside, and can't change who a task is for, its project or whether it is private (manager.test.js).
+    assert.deepEqual(MANAGER_TOOLS.filter((x) => !STAFF_TOOLS.includes(x)).sort(), ['amend_task', 'assign_task', 'cancel_task', 'hire_staff', 'review_task']);
   });
   test('an agent cannot call a tool outside its list, even by inventing one', async () => {
     const t = await boot(); const a = await claim(t, 'Toolman');
