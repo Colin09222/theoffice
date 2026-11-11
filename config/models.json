@@ -49,10 +49,10 @@
   },
   "floorLimits": {
     "_comment": "What each floor may spend, counted from the first boot that had these limits. A floor's Claude spend under fableUntilUsd puts the roles listed on fableModel; from opusUntilUsd they go on sonnetModel; in between they keep their own model. At claudeStopUsd or openrouterStopUsd that provider's work pauses on that floor. One floor can be topped up with: scripts/admin.mjs floor-limit, which can also move a whole floor onto one OpenRouter model (--openrouter-only): every Claude call it makes goes there instead, and it works without a computer. For the admin's eyes only: none of it reaches a floor, a boss, a visitor or a prompt.",
-    "roles": ["builder", "designer", "manager"],
+    "roles": ["builder", "designer", "manager", "researcher", "writer"],
     "fableModel": "claude-fable-5-2",
     "sonnetModel": "claude-sonnet-5-5",
-    "sonnetEffort": "high",
+    "sonnetEffort": "medium",
     "fableUntilUsd": 35,
     "opusUntilUsd": 125,
     "claudeStopUsd": 125,

@@ -34,17 +34,16 @@ describe('per-floor models and limits', () => {
     for (const [s, tier, model, builderEffort] of [
       [0, 'fable', 'claude-fable-5-2', 'xhigh'], [19.99, 'fable', 'claude-fable-5-2', 'xhigh'],
       [20, 'opus', 'claude-opus-5-5', 'xhigh'], [49.99, 'opus', 'claude-opus-5-5', 'xhigh'],
-      [50, 'sonnet', 'claude-sonnet-5-5', 'high'], [84.99, 'sonnet', 'claude-sonnet-5-5', 'high'],
+      [50, 'sonnet', 'claude-sonnet-5-5', 'medium'], [84.99, 'sonnet', 'claude-sonnet-5-5', 'medium'],
     ]) {
       wipe(t, f.id);
       if (s) spend(t, f.id, 'anthropic', s);
       assert.equal(b.tier(f.id), tier, `tier at $${s}`);
       assert.equal(b.out('anthropic', f.id), false, `not paused at $${s}`);
-      for (const role of ['builder', 'designer', 'manager']) assert.equal(routeFor(models, role, { tier }).model, model, `${role} at $${s}`);
+      for (const role of ['builder', 'designer', 'manager', 'researcher', 'writer']) assert.equal(routeFor(models, role, { tier }).model, model, `${role} at $${s}`);
       assert.equal(routeFor(models, 'builder', { tier }).effort, builderEffort);
       assert.equal(computerRole(models, 'builder', { tier }).model, model, 'the Builder on a computer moves too');
       assert.equal(routeFor(models, 'builder', { tier }).pricing, models.prices[model], 'and is priced as that model');
-      assert.equal(routeFor(models, 'researcher', { tier }).model, 'claude-opus-5-5', 'the Researcher stays');
       assert.equal(routeFor(models, 'lawyer', { tier }).model, 'claude-sonnet-5-5', 'the Lawyer stays');
       assert.equal(computerRole(models, 'tester', { tier }).model, 'claude-opus-5-5', 'the Tester stays');
     }
@@ -153,7 +152,7 @@ describe('per-floor models and limits', () => {
     spend(t, g.id, 'anthropic', 60);
     assign(t, g, 'designer');
     await until(() => seen.some((x) => x.kind === 'staff' && x.model === 'claude-sonnet-5-5'), { what: 'the next floor to be on Sonnet' });
-    assert.equal(seen.find((x) => x.model === 'claude-sonnet-5-5').effort, 'high');
+    assert.equal(seen.find((x) => x.model === 'claude-sonnet-5-5').effort, 'medium');
     // A computer that was already running before the tiers arrived is on the role's own model.
     assert.equal(t.app.engine.taskTier({ id: 999999, floor_id: f.id, model_tier: '', session_id: 'sesn_x' }), 'opus');
   });
