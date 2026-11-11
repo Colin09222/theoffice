@@ -65,9 +65,9 @@ export function installCloud(ext) {
   const hashing = gate(2, 64);
   const uploading = gate(4, 8);
   const inFlight = new Map();
-  const limit = (bucket, key, message = 'Too many requests. Slow down a little.') => {
+  const limit = (bucket, key, message = 'Too many requests. Slow down a little.', max) => {
     const [n, w] = RATES[bucket];
-    if (!rates.allow(`${bucket}:${key}`, n, w)) throw new CloudError(429, 'rate_limited', message);
+    if (!rates.allow(`${bucket}:${key}`, max ?? n, w)) throw new CloudError(429, 'rate_limited', message);
   };
   /** At most `max` of these at once from one address, so a few slow ones can't hold every slot. */
   async function atOnce(key, max, fn, message = 'Wait for your other requests to finish.') {
@@ -294,13 +294,15 @@ export function installCloud(ext) {
         if (!b && m === 'POST') {
           const w = who();
           if (!w) throw new CloudError(401, 'no_identity', 'This needs a player token or an account.');
-          limit('upload', `${pk}:${ip}`); limit('uploadProject', pk);
-          if (Number(req.headers['content-length'] || 0) > store.L.fileMax) throw new CloudError(413, 'too_large', `A file can be at most ${Math.floor(store.L.fileMax / 1048576)} MB.`);
+          // A project the admin gave more room (cloud limits) may also take more uploads an hour.
+          const lim = store.limitsFor(F, p, w);
+          limit('upload', `${pk}:${ip}`, undefined, lim.uploadsPerHour); limit('uploadProject', pk, undefined, lim.projectUploadsPerHour);
+          if (Number(req.headers['content-length'] || 0) > lim.fileMax) throw new CloudError(413, 'too_large', `A file can be at most ${Math.floor(lim.fileMax / 1048576)} MB.`);
           // Two at a time from one address, so a few slow uploads can't hold every slot.
           if ((inFlight.get(ip) || 0) >= 2) throw new CloudError(429, 'rate_limited', 'Wait for your other uploads to finish.');
           inFlight.set(ip, (inFlight.get(ip) || 0) + 1);
           try {
-            return reply(201, await uploading(async () => store.files.put(F, p, w, { name: q.get('name'), body: await readRaw(req, store.L.fileMax) })));
+            return reply(201, await uploading(async () => store.files.put(F, p, w, { name: q.get('name'), body: await readRaw(req, lim.fileMax) })));
           } finally { const n = inFlight.get(ip) - 1; if (n > 0) inFlight.set(ip, n); else inFlight.delete(ip); }
         }
         if (!b && m === 'GET') return reply(200, { files: store.files.list(F, p, who()) });

@@ -6,7 +6,8 @@ import { payMode } from '../server/cloud/pay.js';
 import { issueCode, createSession, sha256, hashSecret, normalizeCode } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
 import { parkHiddenFloors, moveFloor, holdFloorForCode, RenumberError } from '../server/renumber.js';
-import { createStore } from '../server/cloud/store.js';
+import { createStore, CLOUD_LIMITS, LIMIT_KEYS, OWNER_LIMIT_KEYS } from '../server/cloud/store.js';
+import { CLOUD_RATES } from '../server/cloud/index.js';
 import { createPowers } from '../server/cloud/powers.js';
 import { lookupLabel } from '../server/apps.js';
 import { slugPattern } from '../server/workspace.js';
@@ -52,6 +53,8 @@ const usage = () => {
     '  node scripts/admin.mjs cloud ai status [PROJECT] [--floor N] [--json]   published apps\' AI: what is on, requests today and what is left. PROJECT is a subdomain label, or a slug with --floor',
     '  node scripts/admin.mjs cloud ai pause|resume PROJECT|--all [--floor N]   stop or restart AI for one project, or for the whole building',
     '  node scripts/admin.mjs cloud fetch status|pause|resume ...   the same, for fetching and scraping web pages',
+    '  node scripts/admin.mjs cloud limits [PROJECT] [--floor N]   projects with their own storage and upload limits, or one project\'s limits in full',
+    '  node scripts/admin.mjs cloud limits PROJECT [--floor N] [--file-bytes SIZE] [--files N] [--file-max SIZE] [--files-per-owner N] [--owner-bytes SIZE] [--hourly-uploads N] [--project-hourly-uploads N] [--owner LOGIN ...] | --clear   raise one project\'s limits (SIZE like 15MB or 1GB). With --owner, the per-owner ones (file max, files and bytes per owner, hourly uploads) apply to those accounts only',
     '  node scripts/admin.mjs runner status [--json]   server slots: how full the building is, and each server with its floor, project and state. Run it in the container',
     '  node scripts/admin.mjs runner stop <label>     stop one server. It keeps its slot and answers 503 until it is started again',
     '  node scripts/admin.mjs runner remove <label>   delete one server, its data and token, freeing its slot',
@@ -199,12 +202,13 @@ if (cmd === 'code' && rest[0] === 'hold') {
 } else if (cmd === 'chat') {
   // The website chat (docs/CHAT.md). On the database file alone: a running server sees a pause on its next message.
   if (!chatAdminCommand(db, cfg, rest, { die, floorArg, lookupLabel })) usage();
-} else if (cmd === 'cloud' && (rest[0] === 'ai' || rest[0] === 'fetch')) {
+} else if (cmd === 'cloud' && (rest[0] === 'ai' || rest[0] === 'fetch' || rest[0] === 'limits')) {
   // AI and web fetching for published apps. Works on the database file alone: a running server sees a pause on its next call. Counts only.
   const [kind, sub] = rest;
   const name = kind === 'ai' ? 'AI' : 'Web fetching';
   const powers = createPowers(db, cfg);
-  const given = rest[2] && !rest[2].startsWith('--') ? rest[2] : null;
+  const at = kind === 'limits' ? 1 : 2;
+  const given = rest[at] && !rest[at].startsWith('--') ? rest[at] : null;
   const floorRowOf = (id) => get(db, 'SELECT number, name FROM floors WHERE id=?', id);
   /** A project by the label it publishes under, or by slug (with --floor when two floors share one). */
   const findProject = () => {
@@ -218,7 +222,53 @@ if (cmd === 'code' && rest[0] === 'hold') {
     return { floorId: rows[0].floor_id, project: rows[0].slug };
   };
   const nameOf = (p) => `floor ${floorRowOf(p.floorId)?.number ?? '(closed)'} ${p.project}`;
-  if (sub === 'status') {
+  if (kind === 'limits') {
+    // One project's own storage and upload limits. The server reads them on each upload, so no restart.
+    const DEFAULTS = { ...CLOUD_LIMITS, uploadsPerHour: CLOUD_RATES.upload[0], projectUploadsPerHour: CLOUD_RATES.uploadProject[0] };
+    const FLAGS = { '--file-bytes': ['fileBytes', true], '--files': ['files'], '--file-max': ['fileMax', true], '--files-per-owner': ['filesPerOwner'], '--owner-bytes': ['fileBytesPerOwner', true], '--hourly-uploads': ['uploadsPerHour'], '--project-hourly-uploads': ['projectUploadsPerHour'] };
+    const MAX = { fileBytes: 4 * 1024 ** 3, fileBytesPerOwner: 4 * 1024 ** 3, fileMax: 50 * 1024 ** 2, files: 50000, filesPerOwner: 50000, uploadsPerHour: 5000, projectUploadsPerHour: 20000 };
+    const size = (v) => { const m = /^(\d+(?:\.\d+)?)(KB|MB|GB)?$/i.exec(String(v || '').trim()); return m ? Math.round(Number(m[1]) * (1024 ** ({ KB: 1, MB: 2, GB: 3 }[String(m[2] || '').toUpperCase()] || 0))) : NaN; };
+    const show = (k, v) => (['fileBytes', 'fileMax', 'fileBytesPerOwner'].includes(k) ? (v >= 1024 ** 3 ? `${+(v / 1024 ** 3).toFixed(2)} GB` : `${+(v / 1024 ** 2).toFixed(1)} MB`) : String(v));
+    const describe = (x) => {
+      const set = JSON.parse(x.limits), owners = JSON.parse(x.owners);
+      const who = owners.length ? owners.map((k) => { const u = get(db, 'SELECT username, email FROM cloud_users WHERE uid=?', k.slice(2)); return u?.username || (u?.email ? maskAddress(u.email) : k); }).join(', ') : 'everyone';
+      return `${nameOf({ floorId: x.floor_id, project: x.project })}: ${LIMIT_KEYS.filter((k) => set[k]).map((k) => `${k} ${show(k, set[k])} (default ${show(k, DEFAULTS[k])})${OWNER_LIMIT_KEYS.has(k) ? ` for ${who}` : ''}`).join(', ') || 'nothing set'}`;
+    };
+    if (!given) {
+      const rows = all(db, 'SELECT * FROM cloud_limits ORDER BY floor_id, project');
+      if (!rows.length) console.log('Every project uses the building\'s default limits.');
+      for (const x of rows) console.log(describe(x));
+    } else {
+      const p = findProject();
+      const row = get(db, 'SELECT * FROM cloud_limits WHERE floor_id=? AND project=?', p.floorId, p.project);
+      if (rest.includes('--clear')) {
+        run(db, 'DELETE FROM cloud_limits WHERE floor_id=? AND project=?', p.floorId, p.project);
+        console.log(`${nameOf(p)} is back on the building's default limits.`);
+      } else {
+        const set = row ? JSON.parse(row.limits) : {}; let owners = row ? JSON.parse(row.owners) : []; let changed = false;
+        for (let i = at + 1; i < rest.length; i++) {
+          const a = rest[i];
+          if (a === '--floor') { i++; continue; }
+          if (a === '--owner') {
+            const login = String(rest[++i] || '').trim().toLowerCase();
+            const u = get(db, 'SELECT uid FROM cloud_users WHERE floor_id=? AND project=? AND (uid=? OR username=? OR email=?)', p.floorId, p.project, rest[i], login, login);
+            if (!u) die(`No account on ${nameOf(p)} with that id, username or email.`);
+            const k = `u:${u.uid}`; if (!owners.includes(k)) owners = [...owners, k]; changed = true; continue;
+          }
+          const fl = FLAGS[a];
+          if (!fl) die(`Unknown option ${a}.`);
+          const [k, isSize] = fl; const v = isSize ? size(rest[++i]) : Number(rest[++i]);
+          if (!Number.isInteger(v) || v <= 0 || v > MAX[k]) die(`${a} must be a whole ${isSize ? 'size such as 15MB or 1GB' : 'number'}, at most ${show(k, MAX[k])}.`);
+          set[k] = v; changed = true;
+        }
+        if (!changed) { console.log(row ? describe(row) : `${nameOf(p)} uses the building's default limits.`); } else {
+          run(db, 'INSERT INTO cloud_limits (floor_id,project,limits,owners,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(floor_id,project) DO UPDATE SET limits=excluded.limits, owners=excluded.owners, updated_at=excluded.updated_at', p.floorId, p.project, JSON.stringify(set), JSON.stringify(owners), Date.now());
+          console.log(describe(get(db, 'SELECT * FROM cloud_limits WHERE floor_id=? AND project=?', p.floorId, p.project)));
+          if (!owners.length && Object.keys(set).some((k) => OWNER_LIMIT_KEYS.has(k))) console.log('Note: no --owner given, so the per-owner limits apply to every visitor and guest of this project.');
+        }
+      }
+    }
+  } else if (sub === 'status') {
     const report = powers.status(kind);
     if (given) { const p = findProject(); report.projects = [{ ...p, ...powers.view(p.floorId, p.project)[kind] }]; }
     if (kind === 'ai') {

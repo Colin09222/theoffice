@@ -13,6 +13,10 @@ export const CLOUD_LIMITS = {
   boards: 50, boardEntries: 5000, scoreMax: 1e12,
   fileMax: 5 * 1024 * 1024, filesPerOwner: 100, fileBytesPerOwner: 25 * 1024 * 1024, files: 2000,
 };
+/** What the admin may raise for one project. Uploads per hour default to CLOUD_RATES in index.js. */
+export const LIMIT_KEYS = ['fileBytes', 'files', 'fileMax', 'filesPerOwner', 'fileBytesPerOwner', 'uploadsPerHour', 'projectUploadsPerHour'];
+/** These follow the uploader: with owners listed, everyone else keeps the building's defaults. */
+export const OWNER_LIMIT_KEYS = new Set(['fileMax', 'filesPerOwner', 'fileBytesPerOwner', 'uploadsPerHour']);
 const ROW = 64, SCORE_ROW = 120, USER_ROW = 320, CHUNK = 256 * 1024;
 
 
@@ -90,11 +94,22 @@ export function createStore(db, limits = {}, now = Date.now) {
     f, p, d.bytes || 0, d.fileBytes || 0, d.docs || 0, d.users || 0, d.saves || 0, d.scores || 0, d.files || 0);
   }
   const totalBytes = () => get(db, 'SELECT COALESCE(SUM(bytes + file_bytes),0) n FROM cloud_usage').n;
-  function room(f, p, grow, files = false) {
+  /** The limits for one project and uploader: the building's, with any the admin set for this project on top. */
+  function limitsFor(f, p, who) {
+    const o = get(db, 'SELECT limits, owners FROM cloud_limits WHERE floor_id=? AND project=?', f, p);
+    if (!o) return L;
+    let set, owners;
+    try { set = JSON.parse(o.limits); owners = JSON.parse(o.owners); } catch { return L; }
+    const theirs = !owners.length || (!!who && owners.includes(who.key));
+    const out = { ...L };
+    for (const k of LIMIT_KEYS) if (Number.isFinite(set[k]) && set[k] > 0 && (theirs || !OWNER_LIMIT_KEYS.has(k))) out[k] = set[k];
+    return out;
+  }
+  function room(f, p, grow, files = false, lim = L) {
     if (grow <= 0) return;
     const u = usage(f, p);
-    if (files ? u.file_bytes + grow > L.fileBytes : u.bytes + grow > L.dataBytes) throw full(files ? 'This project has used all of its file space.' : 'This project has used all of its storage.');
-    if (totalBytes() + grow > L.totalBytes) throw full('The building is out of storage space for now.');
+    if (files ? u.file_bytes + grow > lim.fileBytes : u.bytes + grow > L.dataBytes) throw full(files ? 'This project has used all of its file space.' : 'This project has used all of its storage.');
+    if (totalBytes() + grow > lim.totalBytes) throw full('The building is out of storage space for now.');
   }
   /** Requests are counted in memory and written now and then, so a busy page doesn't turn every read into a write. */
   function addRequests(counts, day) {
@@ -423,15 +438,16 @@ export function createStore(db, limits = {}, now = Date.now) {
   const files = {
     put(f, p, who, { name, body }) {
       needWho(who);
+      const lim = limitsFor(f, p, who);
       if (!body.length) throw bad('empty', 'That file is empty.');
-      if (body.length > L.fileMax) throw new CloudError(413, 'too_large', `A file can be at most ${Math.floor(L.fileMax / 1048576)} MB.`);
+      if (body.length > lim.fileMax) throw new CloudError(413, 'too_large', `A file can be at most ${Math.floor(lim.fileMax / 1048576)} MB.`);
       const type = sniff(body);
       if (!type) throw new CloudError(415, 'bad_type', 'Only images (PNG, JPEG, GIF, WebP, AVIF), sound (MP3, OGG, WAV, M4A) and video (MP4, WebM) can be uploaded.');
       return tx(db, () => {
         const mine = get(db, 'SELECT COUNT(*) n, COALESCE(SUM(size),0) b FROM cloud_files WHERE floor_id=? AND project=? AND owner=?', f, p, who.key);
-        if (mine.n >= L.filesPerOwner || mine.b + body.length > L.fileBytesPerOwner) throw full('You have used all of your upload space here.');
-        if (usage(f, p).files >= L.files) throw full('This project has all the files it can hold.');
-        room(f, p, body.length, true);
+        if (mine.n >= lim.filesPerOwner || mine.b + body.length > lim.fileBytesPerOwner) throw full('You have used all of your upload space here.');
+        if (usage(f, p).files >= lim.files) throw full('This project has all the files it can hold.');
+        room(f, p, body.length, true, lim);
         const id = newId(16); const chunks = Math.ceil(body.length / CHUNK);
         for (let i = 0; i < chunks; i++) run(db, 'INSERT INTO cloud_file_chunks (floor_id,project,id,n,data) VALUES (?,?,?,?,?)', f, p, id, i, body.subarray(i * CHUNK, (i + 1) * CHUNK));
         run(db, 'INSERT INTO cloud_files (floor_id,project,id,owner,name,type,size,chunks,created_at) VALUES (?,?,?,?,?,?,?,?,?)', f, p, id, who.key, cleanFileName(name), type, body.length, chunks, now());
@@ -442,7 +458,7 @@ export function createStore(db, limits = {}, now = Date.now) {
     meta(f, p, id) { if (!FILE_ID.test(String(id))) return null; return get(db, 'SELECT * FROM cloud_files WHERE floor_id=? AND project=? AND id=?', f, p, id) || null; },
     chunk: (f, p, id, n) => get(db, 'SELECT data FROM cloud_file_chunks WHERE floor_id=? AND project=? AND id=? AND n=?', f, p, id, n)?.data || null,
     CHUNK,
-    list: (f, p, who) => all(db, 'SELECT * FROM cloud_files WHERE floor_id=? AND project=? AND owner=? ORDER BY created_at DESC LIMIT ?', f, p, needWho(who).key, L.filesPerOwner).map(fileView),
+    list: (f, p, who) => all(db, 'SELECT * FROM cloud_files WHERE floor_id=? AND project=? AND owner=? ORDER BY created_at DESC LIMIT ?', f, p, needWho(who).key, limitsFor(f, p, who).filesPerOwner).map(fileView),
     view: fileView,
     remove(f, p, who, id) {
       needWho(who);
@@ -467,7 +483,7 @@ export function createStore(db, limits = {}, now = Date.now) {
       collections: get(db, 'SELECT COUNT(DISTINCT coll) n FROM cloud_docs WHERE floor_id=? AND project=?', f, p).n,
       boards: get(db, 'SELECT COUNT(DISTINCT board) n FROM cloud_scores WHERE floor_id=? AND project=?', f, p).n,
       requestsToday: u.day === new Date(now()).toISOString().slice(0, 10) ? u.requests : 0,
-      limits: { bytes: L.dataBytes, fileBytes: L.fileBytes },
+      limits: { bytes: L.dataBytes, fileBytes: limitsFor(f, p, null).fileBytes },
     };
   }
   const projects = () => all(db, 'SELECT floor_id, project FROM cloud_usage UNION SELECT floor_id, project FROM cloud_users ORDER BY floor_id, project');
@@ -508,5 +524,5 @@ export function createStore(db, limits = {}, now = Date.now) {
   /** Drops sessions that have run out, so the table can't only grow. */
   const sweep = () => run(db, 'DELETE FROM cloud_sessions WHERE expires_at <= ?', now()).changes;
 
-  return { L, usage, summary, projects, addRequests, users, publicUser, docs, saves, scores, files, exportProject, wipeProject, wipeFloor, recount, sweep };
+  return { L, limitsFor, usage, summary, projects, addRequests, users, publicUser, docs, saves, scores, files, exportProject, wipeProject, wipeFloor, recount, sweep };
 }
