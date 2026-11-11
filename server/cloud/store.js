@@ -6,7 +6,7 @@ import { get, all, run, tx } from '../db.js';
 import { CLOUD_TABLES as TABLES, CLOUD_POWER_TABLES } from './schema.js';
 
 export const CLOUD_LIMITS = {
-  dataBytes: 20 * 1024 * 1024, fileBytes: 50 * 1024 * 1024, totalBytes: 8 * 1024 * 1024 * 1024,
+  dataBytes: 20 * 1024 * 1024, fileBytes: 50 * 1024 * 1024, totalBytes: 16 * 1024 * 1024 * 1024,
   docBytes: 32 * 1024, collections: 50, docs: 20000, docsPerOwner: 2000, queryMax: 100, responseBytes: 512 * 1024, offsetMax: 10000, filters: 8,
   saveBytes: 64 * 1024, savesPerOwner: 200, saveBytesPerOwner: 1024 * 1024,
   users: 50000, sessionsPerUser: 10, sessionDays: 30,
@@ -17,6 +17,8 @@ export const CLOUD_LIMITS = {
 export const LIMIT_KEYS = ['fileBytes', 'files', 'fileMax', 'filesPerOwner', 'fileBytesPerOwner', 'uploadsPerHour', 'projectUploadsPerHour'];
 /** These follow the uploader: with owners listed, everyone else keeps the building's defaults. */
 export const OWNER_LIMIT_KEYS = new Set(['fileMax', 'filesPerOwner', 'fileBytesPerOwner', 'uploadsPerHour']);
+/** These two may also be 'off': no hourly cap. With owners listed, 'off' reaches only them (even the project-wide one), so guests can't fill the room. */
+export const HOURLY_LIMIT_KEYS = new Set(['uploadsPerHour', 'projectUploadsPerHour']);
 const ROW = 64, SCORE_ROW = 120, USER_ROW = 320, CHUNK = 256 * 1024;
 
 
@@ -102,7 +104,11 @@ export function createStore(db, limits = {}, now = Date.now) {
     try { set = JSON.parse(o.limits); owners = JSON.parse(o.owners); } catch { return L; }
     const theirs = !owners.length || (!!who && owners.includes(who.key));
     const out = { ...L };
-    for (const k of LIMIT_KEYS) if (Number.isFinite(set[k]) && set[k] > 0 && (theirs || !OWNER_LIMIT_KEYS.has(k))) out[k] = set[k];
+    for (const k of LIMIT_KEYS) {
+      if (!theirs && OWNER_LIMIT_KEYS.has(k)) continue;
+      if (Number.isFinite(set[k]) && set[k] > 0) out[k] = set[k];
+      else if (set[k] === 'off' && HOURLY_LIMIT_KEYS.has(k) && theirs) out[k] = Infinity;
+    }
     return out;
   }
   function room(f, p, grow, files = false, lim = L) {

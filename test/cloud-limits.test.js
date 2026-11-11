@@ -86,9 +86,36 @@ test('cloud limits from the command line: set for named owners, show, list and c
     assert.equal(s2.limitsFor(f, 'other', { key: `u:${user.uid}` }).fileBytes, 50 * 1024 ** 2);
     db2.close();
 
+    assert.notEqual(cli(dir, 'cloud', 'limits', 'photos', '--floor', '3', '--files', 'off').code, 0, 'only the hourly caps can be off');
+    assert.match(cli(dir, 'cloud', 'limits', 'photos', '--floor', '3', '--hourly-uploads', 'off', '--project-hourly-uploads', 'OFF').out, /uploadsPerHour off \(default 30\) for shooter.*projectUploadsPerHour off \(default 300\)/);
+    const db3 = openDb(dir); const s3 = createStore(db3);
+    const off = s3.limitsFor(f, 'photos', { key: `u:${user.uid}` }), guest3 = s3.limitsFor(f, 'photos', { key: 'g:x' });
+    assert.deepEqual([off.uploadsPerHour, off.projectUploadsPerHour], [Infinity, Infinity]);
+    assert.deepEqual([guest3.uploadsPerHour, guest3.projectUploadsPerHour], [undefined, undefined], 'with owners named, off reaches only them');
+    db3.close();
     assert.match(cli(dir, 'cloud', 'limits', 'photos', '--floor', '3', '--files', '3000').out, /files 3000 \(default 2000\).*fileMax 15 MB/, 'a later change keeps the rest');
     assert.match(cli(dir, 'cloud', 'limits').out, /floor 3 photos: fileBytes 1 GB/);
     assert.match(cli(dir, 'cloud', 'limits', 'photos', '--floor', '3', '--clear').out, /back on the building's default limits/);
     assert.match(cli(dir, 'cloud', 'limits').out, /Every project uses the building's default limits/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('an owner with the hourly caps off can upload past them; a guest on the same project still hits the default', async () => {
+  const t = await boot({
+    appsBaseDomain: BASE, appsScheme: 'https', publicOrigin: 'https://main.test.example', trustProxy: true, cloudRateScale: 1,
+    cloudRates: { upload: [3, 3600000], uploadProject: [4, 3600000] },
+  });
+  try {
+    t.cfg.publicOrigin = '';
+    const a = get(t.db, 'SELECT * FROM floors WHERE slug=?', (await claim(t, 'Alpha Co')).slug);
+    const photos = publish(t, a, 'photos');
+    const up = (opts) => cloud(t, photos, 'POST', 'files', { raw: png(100), type: 'image/png', ...opts });
+    const signup = (await cloud(t, photos, 'POST', 'auth/signup', { body: { username: 'shooter', password: 'correct horse' } })).json;
+    run(t.db, 'INSERT INTO cloud_limits (floor_id,project,limits,owners,updated_at) VALUES (?,?,?,?,?)', a.id, 'photos',
+      JSON.stringify({ uploadsPerHour: 'off', projectUploadsPerHour: 'off', filesPerOwner: 50, files: 100 }), JSON.stringify([`u:${signup.user.id}`]), Date.now());
+    for (let i = 0; i < 8; i++) assert.equal((await up({ headers: { 'x-forwarded-for': '1.1.1.1' }, session: signup.session })).status, 201, `owner upload ${i}`);
+    // The owner's uploads don't count against the project's hour; guests from many addresses still stop at the default.
+    for (let i = 0; i < 4; i++) assert.equal((await up({ headers: { 'x-forwarded-for': `2.2.2.${i}` }, player: P2 })).status, 201, `guest upload ${i}`);
+    assert.equal((await up({ headers: { 'x-forwarded-for': '2.2.2.9' }, player: P2 })).status, 429, 'the project-wide cap still holds for guests');
+  } finally { t.close(); }
 });

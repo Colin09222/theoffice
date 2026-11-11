@@ -296,7 +296,8 @@ export function installCloud(ext) {
           if (!w) throw new CloudError(401, 'no_identity', 'This needs a player token or an account.');
           // A project the admin gave more room (cloud limits) may also take more uploads an hour.
           const lim = store.limitsFor(F, p, w);
-          limit('upload', `${pk}:${ip}`, undefined, lim.uploadsPerHour); limit('uploadProject', pk, undefined, lim.projectUploadsPerHour);
+          if (lim.uploadsPerHour !== Infinity) limit('upload', `${pk}:${ip}`, undefined, lim.uploadsPerHour);
+          if (lim.projectUploadsPerHour !== Infinity) limit('uploadProject', pk, undefined, lim.projectUploadsPerHour);
           if (Number(req.headers['content-length'] || 0) > lim.fileMax) throw new CloudError(413, 'too_large', `A file can be at most ${Math.floor(lim.fileMax / 1048576)} MB.`);
           // Two at a time from one address, so a few slow uploads can't hold every slot.
           if ((inFlight.get(ip) || 0) >= 2) throw new CloudError(429, 'rate_limited', 'Wait for your other uploads to finish.');

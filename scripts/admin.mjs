@@ -6,7 +6,7 @@ import { payMode } from '../server/cloud/pay.js';
 import { issueCode, createSession, sha256, hashSecret, normalizeCode } from '../server/auth.js';
 import { seedFillers, removeFiller, listFillers } from '../server/filler.js';
 import { parkHiddenFloors, moveFloor, holdFloorForCode, RenumberError } from '../server/renumber.js';
-import { createStore, CLOUD_LIMITS, LIMIT_KEYS, OWNER_LIMIT_KEYS } from '../server/cloud/store.js';
+import { createStore, CLOUD_LIMITS, LIMIT_KEYS, OWNER_LIMIT_KEYS, HOURLY_LIMIT_KEYS } from '../server/cloud/store.js';
 import { CLOUD_RATES } from '../server/cloud/index.js';
 import { createPowers } from '../server/cloud/powers.js';
 import { lookupLabel } from '../server/apps.js';
@@ -54,7 +54,7 @@ const usage = () => {
     '  node scripts/admin.mjs cloud ai pause|resume PROJECT|--all [--floor N]   stop or restart AI for one project, or for the whole building',
     '  node scripts/admin.mjs cloud fetch status|pause|resume ...   the same, for fetching and scraping web pages',
     '  node scripts/admin.mjs cloud limits [PROJECT] [--floor N]   projects with their own storage and upload limits, or one project\'s limits in full',
-    '  node scripts/admin.mjs cloud limits PROJECT [--floor N] [--file-bytes SIZE] [--files N] [--file-max SIZE] [--files-per-owner N] [--owner-bytes SIZE] [--hourly-uploads N] [--project-hourly-uploads N] [--owner LOGIN ...] | --clear   raise one project\'s limits (SIZE like 15MB or 1GB). With --owner, the per-owner ones (file max, files and bytes per owner, hourly uploads) apply to those accounts only',
+    '  node scripts/admin.mjs cloud limits PROJECT [--floor N] [--file-bytes SIZE] [--files N] [--file-max SIZE] [--files-per-owner N] [--owner-bytes SIZE] [--hourly-uploads N|off] [--project-hourly-uploads N|off] [--owner LOGIN ...] | --clear   raise one project\'s limits (SIZE like 15MB or 1GB; off lifts an hourly cap). With --owner, the per-owner ones (file max, files and bytes per owner, hourly uploads) apply to those accounts only',
     '  node scripts/admin.mjs runner status [--json]   server slots: how full the building is, and each server with its floor, project and state. Run it in the container',
     '  node scripts/admin.mjs runner stop <label>     stop one server. It keeps its slot and answers 503 until it is started again',
     '  node scripts/admin.mjs runner remove <label>   delete one server, its data and token, freeing its slot',
@@ -257,7 +257,9 @@ if (cmd === 'code' && rest[0] === 'hold') {
           }
           const fl = FLAGS[a];
           if (!fl) die(`Unknown option ${a}.`);
-          const [k, isSize] = fl; const v = isSize ? size(rest[++i]) : Number(rest[++i]);
+          const [k, isSize] = fl;
+          if (HOURLY_LIMIT_KEYS.has(k) && String(rest[i + 1]).toLowerCase() === 'off') { i++; set[k] = 'off'; changed = true; continue; }
+          const v = isSize ? size(rest[++i]) : Number(rest[++i]);
           if (!Number.isInteger(v) || v <= 0 || v > MAX[k]) die(`${a} must be a whole ${isSize ? 'size such as 15MB or 1GB' : 'number'}, at most ${show(k, MAX[k])}.`);
           set[k] = v; changed = true;
         }
