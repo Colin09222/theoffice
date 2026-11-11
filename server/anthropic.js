@@ -69,9 +69,12 @@ export const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
  * - cache 'system': the system breakpoint alone, for a one-off question after a prefix worth keeping. Marking the question too would pay the write
  *   price on words nobody sends again.
  * - cache false: no caching, for a call that shares nothing with any other.
+ * - systemTtl '1h': the system breakpoint is kept for an hour instead of five minutes. A one-hour write costs twice the input price where a five-minute one
+ *   costs 1.25 times, so it only pays where the same tools and system prompt come back after more than five minutes and within the hour: the Office
+ *   Manager, woken a few times an hour with twelve thousand tokens of the same instructions. The longer entry sits ahead of the five-minute one, as the API requires.
  * A request may carry four breakpoints, and this uses two at most. A prefix under the model's minimum (512 tokens on the 5.5 models) is silently not cached.
  */
-export function buildRequest({ model, effort, maxTokens, system, messages, tools = [], toolChoice, thinking = 'adaptive', fallbacks = true, cache = true, stream = true }) {
+export function buildRequest({ model, effort, maxTokens, system, messages, tools = [], toolChoice, thinking = 'adaptive', fallbacks = true, cache = true, systemTtl, stream = true }) {
   const shape = modelShape(model);
   const body = { model, max_tokens: maxTokens };
   if (stream) body.stream = true;
@@ -81,7 +84,7 @@ export function buildRequest({ model, effort, maxTokens, system, messages, tools
   if (cache && cache !== 'system') body.cache_control = { type: 'ephemeral' };
   if (effort) body.output_config = { effort };
   if (fallbacks && shape.fallbacks) { body.betas = [FALLBACK_BETA]; body.fallbacks = shape.fallbacks; }
-  if (system) body.system = cache ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : system;
+  if (system) body.system = cache ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral', ...(systemTtl === '1h' ? { ttl: '1h' } : {}) } }] : system;
   body.messages = messages;
   if (tools.length) {
     body.tools = tools;
@@ -121,7 +124,7 @@ const KEEP_WARM_MIN_TOKENS = 4000;
 export function createAnthropicClient(cfg) {
   const client = new Anthropic({ apiKey: cfg.anthropicKey, maxRetries: 0, ...(cfg.anthropicBase ? { baseURL: cfg.anthropicBase } : {}) });
   return {
-    async chat({ model, effort, messages, tools, maxTokens, onToken, onToolCall, signal, pricing, thinking, fallbacks, cache }) {
+    async chat({ model, effort, messages, tools, maxTokens, onToken, onToolCall, signal, pricing, thinking, fallbacks, cache, cacheTtl }) {
       if (!cfg.anthropicKey) throw new ProviderError('No Claude API key is configured on the server.', { status: 401 });
       const ctl = new AbortController();
       const onAbort = () => ctl.abort(signal.reason);
@@ -131,7 +134,7 @@ export function createAnthropicClient(cfg) {
       bump();
       let streamed = 0;
       const converted = toAnthropic(messages, tools);
-      const body = buildRequest({ model, effort, maxTokens, system: converted.system, messages: converted.messages, tools: converted.tools, ...(thinking ? { thinking } : {}), ...(fallbacks === false ? { fallbacks } : {}), ...(cache === undefined ? {} : { cache }) });
+      const body = buildRequest({ model, effort, maxTokens, system: converted.system, messages: converted.messages, tools: converted.tools, ...(thinking ? { thinking } : {}), ...(fallbacks === false ? { fallbacks } : {}), ...(cache === undefined ? {} : { cache }), ...(cacheTtl ? { systemTtl: cacheTtl } : {}) });
       // What keeping the cache warm cost, on top of the call itself.
       const warm = { prompt: 0, cost: 0, cached: 0, busy: false, timer: null };
       const keepWarm = () => {

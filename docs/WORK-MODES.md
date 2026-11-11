@@ -45,6 +45,7 @@ After each job the manager posts a line or two in the chat ("On our own: ..."), 
 Pace and safety:
 
 - `AUTOPILOT_GAP_MIN` (default 5): minutes between the end of one job and the start of the next.
+- A quiet round waits longer. When the manager looks and hands out no work (everything is with the contractor, or waiting on the boss), the next look comes after three gaps, then nine, then twenty-seven, up to `AUTOPILOT_IDLE_MAX_MIN` (default 360), and no model is called in between. Anything new on the floor ends the wait at once: the boss speaking, a job coming back or changing state, an answer, a purchase, a publish, a sign-up, a new goal. `AUTOPILOT_IDLE_BACKOFF=0` goes back to a look every gap. See docs/EFFICIENCY.md.
 - `AUTOPILOT_MAX_FAILS` (default 3): failed jobs in a row before the mode pauses and the boss is told. Setting the mode again starts it afresh.
 - `AUTOPILOT_RUN_TIMEOUT_MIN` (default 180), `MODES_TICK_MS` (default 5000).
 - There is no money cap per floor: the building's own limits stop it, as they stop everything else.

@@ -11,6 +11,7 @@ import { trimSteps } from '../server/engine.js';
 import { createMockSessions } from '../server/mock-sessions.js';
 import { writeFile } from '../server/workspace.js';
 import { managerPrompt, computerPrompt, taskGuide, laneBrief } from '../server/prompts.js';
+import { buildRequest, costOf } from '../server/anthropic.js';
 
 const MIN = 60000;
 const MON_NY_10 = Date.UTC(2026, 0, 5, 15, 0);
@@ -145,6 +146,41 @@ describe('how long a run grows before its oldest steps are dropped', () => {
     const t2 = await mk({ stepsKeepChars: 100000 });
     const c2 = await claim(t2);
     assert.deepEqual(t2.app.engine.trimWindow({ role: 'writer' }, floorOf(t2, c2).id), { keep: 100000, cutTo: 75000 }, 'what is kept is never more than three quarters of the trigger');
+  });
+});
+
+describe('the manager\'s tools and instructions stay cached for the hour', () => {
+  const req = (over = {}) => buildRequest({ model: 'claude-opus-5-5', effort: 'high', maxTokens: 1000, system: 'You are the Office Manager.', messages: [{ role: 'user', content: 'hi' }], ...over });
+  test('the system breakpoint takes the one-hour lifetime when asked, and nothing else about the request changes', () => {
+    const hour = req({ systemTtl: '1h' });
+    assert.deepEqual(hour.system, [{ type: 'text', text: 'You are the Office Manager.', cache_control: { type: 'ephemeral', ttl: '1h' } }]);
+    assert.deepEqual(hour.cache_control, { type: 'ephemeral' }, 'the moving breakpoint at the end keeps the five-minute lifetime, after the longer one');
+    const five = req();
+    assert.deepEqual(five.system[0].cache_control, { type: 'ephemeral' });
+    assert.deepEqual({ ...hour, system: null }, { ...five, system: null });
+    assert.equal(req({ systemTtl: '1h', cache: false }).system, 'You are the Office Manager.', 'a call that caches nothing still caches nothing');
+    // A one-hour write is charged at twice the input price, a five-minute one at 1.25 times, and a read at the cache price.
+    const price = { prompt: 4, completion: 20, cacheRead: 0.2 };
+    assert.ok(Math.abs(costOf({ cache_creation_input_tokens: 12000, cache_creation: { ephemeral_1h_input_tokens: 12000 } }, price).cost - 12000 * 8 / 1e6) < 1e-12);
+    assert.ok(Math.abs(costOf({ cache_creation_input_tokens: 12000 }, price).cost - 12000 * 5 / 1e6) < 1e-12);
+    assert.ok(Math.abs(costOf({ cache_read_input_tokens: 12000 }, price).cost - 12000 * 0.2 / 1e6) < 1e-12);
+  });
+  const scripted = () => { const calls = []; return { calls, chat: async (a) => { calls.push(a); a.onToken?.('ok'); return { content: 'ok', toolCalls: [], finish: 'stop', usage: { prompt: 10, completion: 5, cost: 0.001, real: true } }; } }; };
+  test('only the manager\'s calls ask for it, and MANAGER_CACHE_TTL=5m switches it off', async () => {
+    assert.equal(loadConfig({}).managerCacheTtl, '1h');
+    assert.equal(loadConfig({ MANAGER_CACHE_TTL: '5m' }).managerCacheTtl, '5m');
+    for (const [over, want] of [[{}, '1h'], [{ managerCacheTtl: '5m' }, undefined]]) {
+      const llm = scripted();
+      const t = await mk(over, { llm });
+      const c = await claim(t); const f = floorOf(t, c);
+      assert.equal((await c.post(`/api/floors/${c.slug}/chat`, { text: 'hello there' })).status, 202);
+      await until(() => llm.calls.some((a) => a.meta?.kind === 'manager') && !t.app.engine.runs.size, { what: 'the manager turn' });
+      assert.equal(llm.calls.find((a) => a.meta?.kind === 'manager').cacheTtl, want);
+      t.app.engine.assignTask(f, managerOf(t, f), { to: 'writer', title: 'Write', brief: 'b', plan: '', project: 'p', dependsOn: [], afterPrevious: false });
+      t.app.engine.kick();
+      await until(() => llm.calls.some((a) => a.meta?.kind === 'staff'), { what: 'the staff turn' });
+      assert.equal(llm.calls.find((a) => a.meta?.kind === 'staff').cacheTtl, undefined, 'a task\'s own prompt is used for minutes, not hours');
+    }
   });
 });
 

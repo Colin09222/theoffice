@@ -367,6 +367,8 @@ export class Engine {
         const chars = { n: 0 };
         const res = await this.llm.chat({
           model: role.model, provider: role.provider, effort: role.effort, messages: withBlocks, tools, maxTokens: role.maxTokens || 2000, signal, pricing, meta,
+          // The manager's tools and instructions are the same on every wake, and wakes come minutes apart: they are kept for the hour (server/anthropic.js).
+          ...(agent.role === 'manager' && this.cfg.managerCacheTtl === '1h' ? { cacheTtl: '1h' } : {}),
           onToken: (t) => { chars.n += t.length; onToken?.(t); },
           onToolCall: (name) => {
             const show = TOOL_LOOK[name];

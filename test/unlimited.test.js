@@ -289,25 +289,44 @@ describe('a long run stays a size a model and this server can hold', () => {
     assertWellFormed(m);
     for (const x of m) if (x.role === 'assistant') assert.equal(x.anthropic_content[0].type, 'thinking', 'a kept turn is untouched');
   });
-  test('a staff run of hundreds of big steps never sends or stores more than the window', async () => {
-    const body = 'y'.repeat(35000);
-    const llm = scripted({
-      staff: (a) => (a.meta.step === 0 ? { toolCalls: [['write_file', { path: 'projects/p/big.md', content: body }]] } : a.meta.step < 150 ? { toolCalls: [['read_file', { path: 'projects/p/big.md' }]] } : { content: 'All done.' }),
-      manager: () => ({ content: 'ok' }),
+  // The window is wider on a model with a prompt cache (docs/EFFICIENCY.md): a cut costs a whole rewrite of that cache, so there are few of them. Both windows hold.
+  for (const [name, over, bound, mostCuts] of [['the wide window a cached model gets', {}, 500000, 20], ['the old window, STEPS_KEEP_CHARS=240000', { stepsKeepChars: 240000 }, 340000, 80]]) {
+    test(`a staff run of hundreds of big steps never sends or stores more than the window: ${name}`, async () => {
+      const body = 'y'.repeat(35000);
+      const llm = scripted({
+        staff: (a) => (a.meta.step === 0 ? { toolCalls: [['write_file', { path: 'projects/p/big.md', content: body }]] } : a.meta.step < 150 ? { toolCalls: [['read_file', { path: 'projects/p/big.md' }]] } : { content: 'All done.' }),
+        manager: () => ({ content: 'ok' }),
+      });
+      const h = await floor(llm, { maxStaffSteps: Infinity, ...over });  // the step cap is off for this one: it is about what a run that long holds
+      const { id } = assign(h); h.e.kick();
+      let biggest = 0;
+      await until(() => { biggest = Math.max(biggest, get(h.t.db, 'SELECT LENGTH(transcript) n FROM tasks WHERE id=?', id).n); return ['review', 'done', 'failed'].includes(statusOf(h, id)); }, { what: 'the long task', timeout: 60000 });
+      assert.notEqual(statusOf(h, id), 'failed');
+      const calls = llm.calls.filter((c) => c.meta.kind === 'staff');
+      assert.equal(calls.length, 151);
+      let cuts = 0;
+      for (const [i, c] of calls.entries()) {
+        assertWellFormed(c.messages);
+        assert.ok(JSON.stringify(c.messages).length < bound, 'what goes to the model stays bounded');
+        assert.equal(c.messages[1].role, 'user'); assert.match(c.messages[1].content, /Task #/);
+        if (i && c.messages.length < calls[i - 1].messages.length) cuts++;
+      }
+      assert.ok(biggest < bound, `what is stored stays bounded, and was ${biggest}`);
+      assert.ok(cuts >= 1 && cuts <= mostCuts, `cut ${cuts} times in 150 steps`);
     });
-    const h = await floor(llm, { maxStaffSteps: Infinity });  // the step cap is off for this one: it is about what a run that long holds
-    const { id } = assign(h); h.e.kick();
-    let biggest = 0;
-    await until(() => { biggest = Math.max(biggest, get(h.t.db, 'SELECT LENGTH(transcript) n FROM tasks WHERE id=?', id).n); return ['review', 'done', 'failed'].includes(statusOf(h, id)); }, { what: 'the long task', timeout: 60000 });
-    assert.notEqual(statusOf(h, id), 'failed');
-    const calls = llm.calls.filter((c) => c.meta.kind === 'staff');
-    assert.equal(calls.length, 151);
-    for (const c of calls) {
-      assertWellFormed(c.messages);
-      assert.ok(JSON.stringify(c.messages).length < 340000, 'what goes to the model stays bounded');
-      assert.equal(c.messages[1].role, 'user'); assert.match(c.messages[1].content, /Task #/);
-    }
-    assert.ok(biggest < 340000, `what is stored stays bounded, and was ${biggest}`);
+  }
+  test('the wide window cuts a long run far less often than the old one did', async () => {
+    const run = async (over) => {
+      const llm = scripted({ staff: (a) => (a.meta.step < 120 ? { toolCalls: [['fetch_url', { url: `https://example.com/${a.meta.step}` }]] } : { content: 'All done.' }), manager: () => ({ content: 'ok' }) });
+      const h = await floor(llm, { maxStaffSteps: Infinity, ...over }, { fetcher: async (url) => ({ url, status: 200, text: 'z'.repeat(19000), truncated: false }) });
+      const { id } = assign(h); h.e.kick();
+      await until(() => ['review', 'done', 'failed'].includes(statusOf(h, id)), { what: 'the long task', timeout: 60000 });
+      const calls = llm.calls.filter((c) => c.meta.kind === 'staff');
+      return calls.filter((c, i) => i && c.messages.length < calls[i - 1].messages.length).length;
+    };
+    const [wide, old] = [await run({}), await run({ stepsKeepChars: 240000 })];
+    assert.ok(old >= 15, `the old window cut a 120-page research run ${old} times`);
+    assert.ok(wide >= 1 && wide * 2 <= old, `the wide one cut it ${wide} times, the old one ${old}`);
   });
 });
 

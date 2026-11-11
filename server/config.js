@@ -187,6 +187,9 @@ export function loadConfig(env = process.env, overrides = {}) {
     shipCheck: env.SHIP_CHECK !== '0',
     // While a long reply is still being written, the prompt cache behind it is kept from expiring (server/anthropic.js). CACHE_KEEP_WARM=0 turns that off.
     cacheKeepWarm: env.CACHE_KEEP_WARM !== '0',
+    // The Office Manager's tools and instructions stay in the prompt cache for an hour, so a wake ten minutes after the last one reads them instead of
+    // paying to write them again. MANAGER_CACHE_TTL=5m goes back to the five-minute cache everyone else uses.
+    managerCacheTtl: env.MANAGER_CACHE_TTL === '5m' ? '5m' : '1h',
     // How long a run on a model with a prompt cache may grow before its oldest steps are dropped, and how much is kept then (server/engine.js, trimSteps).
     // Every cut makes the provider write the whole conversation to its cache again, so cuts are few and large. STEPS_KEEP_CHARS=240000 is the old, smaller window.
     stepsKeepChars: Math.max(60000, num(env.STEPS_KEEP_CHARS, 400000)),
