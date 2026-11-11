@@ -666,6 +666,27 @@ describe('independent review: regressions', () => {
     assert.doesNotMatch(v, /ZETACORP|ZETA-PLAN/);
     await t.close();
   });
+  test('a live public site never goes private behind the boss\'s back: private work is refused there instead', async () => {
+    const t = await boot(); const a = await claim(t, 'Livewire');
+    const { floor, agent: mgr } = ctxFor(t, a.slug, 'manager');
+    const writer = ctxFor(t, a.slug, 'writer').agent;
+    writeFile(t.db, floor.id, 'projects/live/index.md', 'hello', writer.id, 1e6);
+    t.app.engine.upsertProject(floor, 'live', { title: 'Live', kind: 'doc', sources: [], published: true });
+    t.app.engine.upsertProject(floor, 'secret', { title: 'secret', makePrivate: true });
+    const priv = () => t.db.prepare('SELECT private FROM projects WHERE floor_id=? AND slug=?').get(floor.id, 'live').private;
+    assert.throws(() => t.app.engine.assignTask(floor, mgr, { to: 'writer', title: 'Words only', brief: 'b', plan: '', project: 'live', private: true, dependsOn: [] }), /live and public/);
+    const run = (ctx, tool, args) => t.app.engine.tools.exec(ctx, tool, JSON.stringify(args));
+    const inside = ctxFor(t, a.slug, 'writer', 'secret').ctx;
+    assert.match(await run(inside, 'write_file', { path: 'projects/live/notes.md', content: 'THE-SECRET' }), /live and public/);
+    assert.match(await run(inside, 'copy_file', { from: 'projects/live/index.md', to: 'projects/live/copy.md' }), /live and public/);
+    assert.match(await run(inside, 'publish_project', { project: 'live', title: 'x', kind: 'doc' }), /live and public/);
+    assert.equal(priv(), 0);
+    assert.equal(t.db.prepare("SELECT COUNT(*) n FROM files WHERE floor_id=? AND path LIKE 'projects/live/%'").get(floor.id).n, 1, 'nothing private was written into it');
+    // A project that isn't live yet still takes private work, and the private flag still sticks.
+    t.app.engine.assignTask(floor, mgr, { to: 'writer', title: 'Draft', brief: 'b', plan: '', project: 'draft', private: true, dependsOn: [] });
+    assert.equal(t.db.prepare('SELECT private FROM projects WHERE floor_id=? AND slug=?').get(floor.id, 'draft').private, 1);
+    await t.close();
+  });
   test('default-private floors hide untagged activity, in snapshots and on the live stream', async () => {
     const t = await boot(); const a = await claim(t, 'Hush');
     await a.post(`/api/floors/${a.slug}/settings`, { defaultPrivate: true });

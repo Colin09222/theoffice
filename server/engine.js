@@ -778,11 +778,17 @@ export class Engine {
   // ---- called by tools ----
   upsertProject(floor, slug, { title, description, kind, sources, published, makePrivate }) {
     const had = get(this.db, 'SELECT slug FROM projects WHERE floor_id=? AND slug=?', floor.id, slug);
+    if (makePrivate) this.keepLive(floor, slug);
     if (!had) run(this.db, 'INSERT INTO projects (floor_id,slug,title,created_at,private) VALUES (?,?,?,?,?)', floor.id, slug, title || slug, this.now(), floor.default_private || makePrivate ? 1 : 0);
     if (makePrivate) run(this.db, 'UPDATE projects SET private=1 WHERE floor_id=? AND slug=?', floor.id, slug);
     if (published) run(this.db, 'UPDATE projects SET title=?,description=?,kind=?,sources=?,published_at=? WHERE floor_id=? AND slug=?', title || slug, description || '', kind, JSON.stringify(sources || []), this.now(), floor.id, slug);
     // A shop that goes live asks the boss to put its catalogue on sale (server/shop.js).
     if (published) this.shopPublished?.(floor, slug);
+  }
+  /** A site that's live for everyone stays live: only the boss takes it private (server/app.js). Private work goes in a project of its own. */
+  keepLive(floor, slug) {
+    const p = slug && get(this.db, 'SELECT private, published_at FROM projects WHERE floor_id=? AND slug=?', floor.id, slug);
+    if (p && p.published_at && !p.private) throw new ToolError(`${slug} is live and public, so private work can't go in it: that would take the site down for every visitor. Leave private off for work on it, or put private work in a project of its own.`);
   }
   /** The boss's files the manager handed to this task. */
   taskFiles(task) {

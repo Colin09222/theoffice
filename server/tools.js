@@ -60,7 +60,7 @@ const DEFS = {
   file_purchase_request: fn('file_purchase_request', 'File a request for the boss to buy something. This never pays for anything; it only records the request.', { item: S('What to buy'), price: { type: 'number', description: 'Price in USD' }, why: S('Why it is needed'), link: S('Optional http(s) link') }, ['item', 'price', 'why']),
   assign_task: fn('assign_task', 'Give one task to a staff member. Call it once for each task in a plan.', {
     to: S('Staff role or name, e.g. researcher'), title: S('Short task title'), brief: S('What to do and what done looks like'), plan: S('Name of the plan this belongs to'),
-    project: S('Project slug this task works on'), private: { type: 'boolean', description: 'True to keep this project hidden from visitors' },
+    project: S('Project slug this task works on'), private: { type: 'boolean', description: 'True to keep a new project hidden from visitors. A project that is already live and public can\'t be made private this way' },
     depends_on: { type: 'array', items: { type: 'integer' }, description: 'Task ids that must finish first' },
     after_previous: { type: 'boolean', description: 'True to start only after the task you assigned just before this one finishes' },
     lane: { type: 'string', enum: LANES, description: 'Which lane this plan is in. The person doing the task gets their part of that playbook.' },
@@ -352,6 +352,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     write_file(c, a) {
       const content = typeof a.content === 'string' ? a.content : '';
       if (offLimits(c, a.path)) throw new WorkspaceError('that project is private, and this task can\'t change it');
+      if (isPrivate(c, c.project)) engine.keepLive(c.floor, pathProject(a.path));
       const r = writeFile(db, c.floor.id, str(a, 'path', 300), content, c.agent.id, cfg.quotaBytes);
       const fresh = pathProject(r.path);
       if (fresh && isPrivate(c, c.project)) engine.upsertProject(c.floor, fresh, { title: fresh, makePrivate: true });
@@ -385,6 +386,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const to = str(a, 'to', 300);
       if (!/^projects\/[^/]+\/./.test(to)) throw new WorkspaceError('copy into a project: projects/<project-slug>/...');
       if (offLimits(c, to)) throw new WorkspaceError('that project is private, and this task can\'t change it');
+      if (isPrivate(c, c.project)) engine.keepLive(c.floor, pathProject(to));
       const kind = (p) => { const e = String(p).split('.').pop().toLowerCase(); return e === 'jpeg' ? 'jpg' : e; };
       let r;
       if (typeof from.content === 'string') r = writeFile(db, c.floor.id, to, from.content, c.agent.id, cfg.quotaBytes);
@@ -407,6 +409,9 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const slug = str(a, 'project', 60);
       if (!slugPattern.test(slug)) throw new WorkspaceError('project must be lowercase letters, digits and hyphens');
       if (isPrivate(c, slug) && !isPrivate(c, c.project)) throw new WorkspaceError('that project is private, and this task can\'t change it');
+      // Work done under a private task stays private, whatever slug it ends up published as, so it can't go out over a live public site.
+      const inherited = isPrivate(c, c.project);
+      if (inherited) engine.keepLive(c.floor, slug);
       // These go up on the launched wall in the lobby.
       if (!isPrivate(c, slug)) outbound(c, `${a.title ?? ''} ${a.description ?? ''}`, 'title or description');
       const held = engine.daily?.publishHold(c.floor.id, slug, `${a.title ?? ''} ${a.description ?? ''}`);
@@ -431,8 +436,6 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       const notYet = await engine.shipCheck?.(c.floor, slug, { kind, directory, agent: c.agent, task: c.task, signal: c.signal });
       if (notYet) throw new WorkspaceError(notYet);
       const n = publishSnapshot(db, c.floor.id, slug, cfg.quotaBytes, directory);
-      // Work done under a private task stays private, whatever slug it ends up published as.
-      const inherited = !!(c.project && get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', c.floor.id, c.project)?.private);
       engine.upsertProject(c.floor, slug, { title: str(a, 'title', 120), description: str(a, 'description', 300, false), kind, sources, published: true, makePrivate: inherited });
       saveCheck(db, c.floor.id, slug, check, reason, engine.now());
       if (check.claims.length) engine.feed(c.floor.id, c.agent, `published ${slug} with possible invented claims for the boss to check`, slug);
