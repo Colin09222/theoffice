@@ -70,7 +70,7 @@ const readKv = (db, f, p, scope, key) => get(db, 'SELECT value,version,updated_a
 const viewKv = (key, r) => ({ key, value: JSON.parse(r.value), version: r.version, updatedAt: r.updated_at });
 
 /** Handles one request. `body()` reads the JSON body. Returns [status, object]. Isolation comes from the caller: f and p are derived from the Host, never from the request. */
-export async function handleData({ db, req, floorId: f, project: p, segments: seg, query, body, now }) {
+export async function handleData({ db, req, floorId: f, project: p, segments: seg, query, body, now, onForm }) {
   const m = req.method;
   if (seg.length > 3 || seg.some((s) => s.length > 80)) throw new DataError(404, 'not_found');
   const t = now();
@@ -140,7 +140,9 @@ export async function handleData({ db, req, floorId: f, project: p, segments: se
     const text = JSON.stringify(clean);
     if (Buffer.byteLength(text) > FORM_LIMITS.entryBytes) throw new DataError(413, 'too_large', 'That is too long.');
     if (get(db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=? AND project=?', f, p).n >= FORM_LIMITS.entries || get(db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=?', f).n >= FORM_LIMITS.floorEntries) throw new DataError(507, 'quota', 'This list is full.');
-    run(db, 'INSERT OR IGNORE INTO app_forms (floor_id,project,form,data,size,hash,created_at) VALUES (?,?,?,?,?,?,?)', f, p, form, text, Buffer.byteLength(text), createHash('sha256').update(text).digest('hex'), t);
+    const added = run(db, 'INSERT OR IGNORE INTO app_forms (floor_id,project,form,data,size,hash,created_at) VALUES (?,?,?,?,?,?,?)', f, p, form, text, Buffer.byteLength(text), createHash('sha256').update(text).digest('hex'), t).changes;
+    // Told once per new entry; the same entry sent again is a duplicate and tells no one.
+    if (added && onForm) { try { onForm(form, clean); } catch { /* the entry is saved either way */ } }
     return [200, { ok: true }];
   }
   if (seg[0] === 'board' && seg.length === 2) {

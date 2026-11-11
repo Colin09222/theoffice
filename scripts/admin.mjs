@@ -21,7 +21,7 @@ import { ensureAdSpend, resumeAds } from '../server/business.js';
 import { scrub } from '../server/llm.js';
 import { createRunnerClient, runnerConfigured } from '../server/runner.js';
 import { ensureServerSchema } from '../server/servers.js';
-import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, MailError } from '../server/mail.js';
+import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, setFormAlerts, maskAddress, MailError } from '../server/mail.js';
 import { dailyStatus, dailyStatusText, requestDailyRun, setDailyPaused, ensureDailySchema } from '../server/daily.js';
 import { chatAdminCommand } from '../server/cloud/chat.js';
 import { setContractor, contractorListing, contractorListingText, completeJob, ContractorError, SUMMARY_MAX } from '../server/contractor.js';
@@ -37,6 +37,7 @@ const usage = () => {
     '  node scripts/admin.mjs code hold --issued-at MS --floor N   make the one unused code issued at that moment hold floor N. Prints no code',
     '  node scripts/admin.mjs mail status [--json]   email: sending and receiving, today\'s counts, each floor\'s address, pauses and alerts. No message text',
     '  node scripts/admin.mjs mail pause|resume [--floor N]   stop or restart sending for one floor, or for the whole building. Receiving carries on',
+    '  node scripts/admin.mjs mail form-alerts --floor N [on|off]   email the boss each new site-form entry (on by default); shows the boss address masked',
     '  node scripts/admin.mjs mail suppress <address>   never send to this address again, from any floor',
     '  node scripts/admin.mjs login --floor N [--minutes M]   a short boss login to check floor N by hand (default 60 minutes, at most 240): the office_s cookie value, to this terminal only',
     '  node scripts/admin.mjs login revoke           end such a login now: give its cookie value on stdin',
@@ -434,6 +435,12 @@ if (cmd === 'code' && rest[0] === 'hold') {
   } else if (sub === 'pause' || sub === 'resume') {
     const on = sub === 'pause';
     if (fl !== null) { const f = floorRow(); setFloorPause(db, f.id, on, 'building manager'); console.log(`Email sending ${on ? 'paused' : 'back on'} for floor ${f.number} ${f.name}.`); } else { setBuildingPause(db, on); console.log(`Email sending ${on ? 'paused' : 'back on'} for the whole building.`); }
+  } else if (sub === 'form-alerts') {
+    // A new entry in a site form, emailed to the boss's own address. On by default; the boss's address is shown masked.
+    const f = floorRow(); const want = rest.find((x) => x === 'on' || x === 'off');
+    if (want) setFormAlerts(db, f.id, want === 'on');
+    const m = get(db, 'SELECT boss_email, form_alerts FROM mail_floor WHERE floor_id=?', f.id) || { boss_email: '', form_alerts: 1 };
+    console.log(`Form-entry emails for floor ${f.number} ${f.name}: ${m.form_alerts ? 'on' : 'off'}. Boss email: ${m.boss_email ? maskAddress(m.boss_email) : 'not set, so none go out'}.`);
   } else if (sub === 'suppress') {
     try { console.log(`${suppressAddress(db, rest[1], 'building manager')} will get no more email from the building.`); } catch (e) { if (e instanceof MailError) die(e.message); throw e; }
   } else usage();

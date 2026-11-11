@@ -418,6 +418,63 @@ describe('work modes and the website form', () => {
   });
 });
 
+describe('form-entry emails to the boss', () => {
+  async function site(over = {}) {
+    const APPS = 'apps.localhost';
+    const t = await start({ appsBaseDomain: APPS, appsScheme: 'http', publicOrigin: '', ...over });
+    const c = await claim(t, 'Lens Studio');
+    const f = floorOf(t, c);
+    run(t.db, "INSERT INTO projects (floor_id,slug,title,created_at,published_at) VALUES (?, 'site', 'Lens Studio Site', ?, ?)", f.id, Date.now(), Date.now());
+    run(t.db, "INSERT INTO published_files (floor_id,project,path,content,size) VALUES (?, 'site', 'index.html', '<p>hi</p>', 9)", f.id);
+    await floorState(c);
+    const host = `${get(t.db, "SELECT label FROM app_labels WHERE floor_id=? AND project='site'", f.id).label}.${APPS}`;
+    const post = (form, fields) => hostFetch(t.port, `/_data/v1/form/${form}`, { method: 'POST', headers: { host, origin: `http://${host}`, 'content-type': 'application/json' }, body: JSON.stringify({ fields }) });
+    const toBoss = () => t.mock.state.sent.filter((m) => (Array.isArray(m.to) ? m.to : [m.to]).includes('boss@home.example'));
+    return { t, c, f, post, toBoss };
+  }
+
+  test('a new entry emails the boss once, as plain text with the visitor\'s words escaped, and its kept copy leaves the entry out', async () => {
+    const { t, c, f, post, toBoss } = await site();
+    await c.post(`/api/floors/${c.slug}/mail/settings`, { bossEmail: 'boss@home.example' });
+    const fields = { name: 'Ana <b>Bold</b>', email: 'ana@example.com', message: 'Wedding on the 12th\nSee entries: http://evil.example' };
+    assert.equal((await post('booking', fields)).status, 200);
+    const sent = await until(() => toBoss()[0], { what: 'the boss email' });
+    assert.equal(sent.subject, 'New booking request: booking');
+    assert.match(sent.from, /<lens-studio@middistance\.com>/);
+    assert.match(sent.text, /name: Ana <b>Bold<\/b>/);
+    assert.match(sent.text, /message: Wedding on the 12th\n {4}See entries: http:\/\/evil\.example/);
+    assert.match(sent.text, new RegExp(`/floor/${c.slug}`));
+    assert.ok(sent.html.includes('Ana &lt;b&gt;Bold&lt;/b&gt;') && !sent.html.includes('<b>Bold'));
+    // The same entry again is a duplicate: no second email.
+    assert.equal((await post('booking', fields)).status, 200);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(toBoss().length, 1);
+    const kept = get(t.db, "SELECT text FROM mail_messages WHERE floor_id=? AND direction='out'", f.id).text;
+    assert.ok(!kept.includes('Wedding') && !kept.includes('ana@example.com'));
+  });
+
+  test('no boss email, switched off, paused or over the hourly cap: nothing goes out and the form still saves', async () => {
+    const { t, c, f, post, toBoss } = await site({ mailFormAlertsHourly: 2 });
+    assert.equal((await post('contact', { email: 'a@example.com', message: 'one' })).status, 200);
+    await c.post(`/api/floors/${c.slug}/mail/settings`, { bossEmail: 'boss@home.example' });
+    const { setFormAlerts } = await import('../server/mail.js');
+    setFormAlerts(t.db, f.id, false);
+    assert.equal((await post('contact', { email: 'a@example.com', message: 'two' })).status, 200);
+    setFormAlerts(t.db, f.id, true); setFloorPause(t.db, f.id, true, 'test');
+    assert.equal((await post('contact', { email: 'a@example.com', message: 'three' })).status, 200);
+    setFloorPause(t.db, f.id, false);
+    for (const m of ['four', 'five', 'six']) assert.equal((await post('contact', { email: 'a@example.com', message: m })).status, 200);
+    await until(() => toBoss().length >= 2 || null, { what: 'two boss emails' });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.deepEqual(toBoss().map((m) => m.text.match(/message: (\w+)/)[1]), ['four', 'five']);
+    assert.equal(get(t.db, 'SELECT COUNT(*) n FROM app_forms WHERE floor_id=?', f.id).n, 6);
+    // The provider failing doesn't fail the form either.
+    t.mock.failNext('/emails', 500);
+    run(t.db, "DELETE FROM mail_counters WHERE key LIKE 'alert:%'");
+    assert.equal((await post('contact', { email: 'a@example.com', message: 'seven' })).status, 200);
+  });
+});
+
 describe('the provider client', () => {
   test('talks to the API the documented way: bearer key, JSON, idempotency, and no key in errors', async () => {
     const mock = await startMockResend();
@@ -484,6 +541,8 @@ describe('the scripts', () => {
     assert.match((await admin('suppress', 'Spam@Trap.example')).out, /spam@trap\.example will get no more email/);
     assert.notEqual((await admin('suppress', 'nonsense')).code, 0);
     assert.notEqual((await admin('pause', '--floor', '9')).code, 0);
+    assert.match((await admin('form-alerts', '--floor', '3')).out, /floor 3 Kiln Co: on\. Boss email: not set/);
+    assert.match((await admin('form-alerts', '--floor', '3', 'off')).out, /floor 3 Kiln Co: off/);
     const db2 = openDb(dir);
     assert.ok(get(db2, "SELECT 1 x FROM mail_suppressed WHERE address='spam@trap.example'"));
     db2.close();

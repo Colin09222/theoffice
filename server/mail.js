@@ -57,7 +57,18 @@ CREATE INDEX IF NOT EXISTS mail_domains_next ON mail_domains(status, next_at);
 CREATE TABLE IF NOT EXISTS mail_domain_addresses (address TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, domain TEXT NOT NULL, is_primary INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS mail_domain_addresses_floor ON mail_domain_addresses(floor_id, is_primary);
 `;
-export const ensureMailSchema = (db) => db.exec(MAIL_SCHEMA);
+export function ensureMailSchema(db) {
+  db.exec(MAIL_SCHEMA);
+  // Added later: whether a new entry in one of the company's site forms is emailed to the boss. On unless switched off.
+  if (!all(db, 'PRAGMA table_info(mail_floor)').some((c) => c.name === 'form_alerts')) db.exec('ALTER TABLE mail_floor ADD COLUMN form_alerts INTEGER NOT NULL DEFAULT 1');
+}
+/** Form-entry emails to the boss on or off for one floor (admin.mjs mail form-alerts). */
+export function setFormAlerts(db, floorId, on, t = Date.now()) {
+  run(db, 'INSERT INTO mail_floor (floor_id,form_alerts,updated_at) VALUES (?,?,?) ON CONFLICT(floor_id) DO UPDATE SET form_alerts=excluded.form_alerts, updated_at=excluded.updated_at', floorId, on ? 1 : 0, t);
+}
+export const FORM_ALERTS_HOURLY = 30;
+/** a***@gmail.com: enough to tell which address it is, not enough to copy. */
+export const maskAddress = (a) => { const [l, d] = String(a || '').split('@'); return d ? `${l[0] || ''}***@${d}` : ''; };
 
 export class MailError extends Error { constructor(message, status = 400, code = 'mail_refused') { super(message); this.name = 'MailError'; this.status = status; this.code = code; } }
 export const NOT_READY = 'Email is being set up for this building, so nothing was sent. The address is saved and starts working as soon as the building manager switches email on.';
@@ -154,7 +165,7 @@ export function installMail(ext) {
     }
     return out;
   }
-  const floorMail = (floorId) => get(db, 'SELECT * FROM mail_floor WHERE floor_id=?', floorId) || { floor_id: floorId, changed: 0, paused: 0, pause_reason: '', boss_email: '', full_notice: '' };
+  const floorMail = (floorId) => get(db, 'SELECT * FROM mail_floor WHERE floor_id=?', floorId) || { floor_id: floorId, changed: 0, paused: 0, pause_reason: '', boss_email: '', full_notice: '', form_alerts: 1 };
   const touchFloor = (floorId) => run(db, 'INSERT OR IGNORE INTO mail_floor (floor_id,updated_at) VALUES (?,?)', floorId, now());
   function changeAddress(f, local) {
     const want = String(local || '').toLowerCase().replace(new RegExp(`@${domain.replace(/\./g, '\\.')}$`), '');
@@ -548,6 +559,37 @@ export function installMail(ext) {
     const m = await deliver(id);
     return { id, status: m.status, note: m.note, to: c.toList };
   }
+  /**
+   * A new entry in one of the company's site forms, emailed to the boss's own address once. Never throws and never holds up the form: the answer
+   * says what happened. The entry itself only travels in the email; the copy kept in the company's mail (which the staff can list) just says one came in.
+   */
+  async function formAlert(f, project, form, fields) {
+    try {
+      if (!f || f.status !== 'active' || !ready()) return 'off';
+      const fm = floorMail(f.id);
+      if (!fm.boss_email) return 'no_boss_email';
+      if (!fm.form_alerts) return 'switched_off';
+      if (fm.paused) return 'paused';
+      const hour = new Date(now()).toISOString().slice(0, 13);
+      const cap = Number.isFinite(set.mailFormAlertsHourly) ? set.mailFormAlertsHourly : FORM_ALERTS_HOURLY;
+      if (!tx(db, () => { if (count(db, `alert:${f.id}`, hour) >= cap) return false; bump(db, `alert:${f.id}`, hour); return true; })) return 'hourly_cap';
+      const pr = get(db, 'SELECT title FROM projects WHERE floor_id=? AND slug=?', f.id, project);
+      const site = oneLine(pr?.title || project, 80);
+      const name = oneLine(String(form).replace(/[-_]+/g, ' '), 60);
+      const subject = `${/book|appoint|reserv/i.test(form) ? 'New booking request' : 'New form entry'}: ${name}`;
+      // Whatever a visitor typed stays inside its own field: a line break in a value is indented, so it can't pose as a line of this email.
+      const lines = Object.entries(fields || {}).map(([k, v]) => `${oneLine(k, 40)}: ${cleanText(String(v), 4000).trim().replace(/\r?\n/g, '\n    ')}`);
+      const link = `${set.mailPublicUrl.replace(/\/+$/, '')}/floor/${encodeURIComponent(f.slug)}`;
+      const text = [`Someone filled in the "${name}" form on ${site}. What they typed, unchecked:`, '', ...lines, '', `See every entry in the Office (open the project, then its sign-ups): ${link}`].join('\n');
+      const kept = `Someone filled in the "${name}" form on ${site}. The entry went to the boss only; it is in the Office.`;
+      const r = await sendMail(f, { to: [fm.boss_email], subject, text: kept, secretText: text, by: 'app' });
+      if (!['sent', 'queued', 'sending'].includes(r.status)) { log('warn', 'form_alert_not_sent', { floorId: f.id, status: r.status, note: oneLine(r.note || '', 120) }); return r.status; }
+      return 'sent';
+    } catch (e) {
+      log('warn', 'form_alert_failed', { floorId: f?.id, err: hide(e?.message || e).slice(0, 160) });
+      return 'failed';
+    }
+  }
   async function decide(f, id, approve, { trust = false } = {}) {
     const m = get(db, "SELECT * FROM mail_messages WHERE id=? AND floor_id=? AND direction='out'", id, f.id);
     if (!m) throw new MailError('There is no such email.', 404, 'not_found');
@@ -754,9 +796,9 @@ export function installMail(ext) {
     out.mail = { ready: ready(), address: addressOf(f.id), unread: unreadOf(f.id), waiting: all(db, "SELECT * FROM mail_messages WHERE floor_id=? AND status='awaiting_boss' ORDER BY id DESC LIMIT 20", f.id).map((m) => msgView(m, f)) };
   });
 
-  engine.mail = { stateLine, toolInbox, toolRead, toolReply, toolSend, send: sendMail, addressOf, buildingAddress, ensureAddress, formToInbox, orderToInbox, webhook, ready, provider, drain, tick: () => tick(), settings: set, domains };
+  engine.mail = { stateLine, toolInbox, toolRead, toolReply, toolSend, send: sendMail, addressOf, buildingAddress, ensureAddress, formToInbox, formAlert, orderToInbox, webhook, ready, provider, drain, tick: () => tick(), settings: set, domains };
   return {
-    webhook, formToInbox,
+    webhook, formToInbox, formAlert,
     start() { stopped = false; backfill(); timer = setInterval(() => { tick(); }, set.mailTickMs || 4000); timer.unref?.(); },
     stop() { stopped = true; clearInterval(timer); timer = null; },
   };

@@ -969,7 +969,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       // Counted once the path is really parsed, so no spelling of it slips past.
       if (segments[0] === 'form') limit('form', `${label}:${ip}`);
       let sent = null;
-      const [status, out] = await handleData({ db, req, floorId: f.id, project: pr.slug, segments, query: url.searchParams, body: () => readJson(req, DATA_LIMITS.bodyBytes).then((b) => (sent = b)), now });
+      const [status, out] = await handleData({ db, req, floorId: f.id, project: pr.slug, segments, query: url.searchParams, body: () => readJson(req, DATA_LIMITS.bodyBytes).then((b) => (sent = b)), now,
+        onForm: (form, fields) => { mail.formAlert(f, pr.slug, form, fields); } });
       reply(status, out);
       // A contact form on the company's own site also lands in its inbox.
       if (segments[0] === 'form' && status === 200 && sent?.fields) { try { mail.formToInbox(f, pr.slug, segments[1], sent.fields); } catch (e) { log('error', 'mail_form', { err: scrub(e?.message, cfg) }); } }
