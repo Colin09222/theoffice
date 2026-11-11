@@ -4,6 +4,7 @@ import { Limiter, pause } from './limiter.js';
 import { ProviderError, scrub } from './llm.js';
 import { createBudget, providerForRole, providerOf, scrubOldSpend } from './budget.js';
 import { routeFor } from './config.js';
+import { createCostAlerts } from './costalert.js';
 import { createTools, toolDefs, toolsForRole, publicUrl, wrapUntrusted, mentionsPrivate, NOT_SEEN_AS_LINK } from './tools.js';
 import { createDomainBroker } from './domains.js';
 import { createIos } from './ios.js';
@@ -43,7 +44,7 @@ const PRIVATE_TEXT = 'Working on something private';
 // As soon as a model starts writing a tool call, the character starts acting it out. For a big file that's most of the wait.
 const TOOL_LOOK = {
   write_file: ['typing', 'Writing'], publish_project: ['typing', 'Getting it ready to publish'], fetch_url: ['browsing', 'Looking something up'], web_search: ['browsing', 'Searching the web'],
-  read_file: ['reading', 'Reading'], list_files: ['reading', 'Checking the shared drive'], ask_boss: ['thinking', 'Writing a question for the boss'], file_purchase_request: ['typing', 'Filling in a request'],
+  read_file: ['reading', 'Reading'], list_files: ['reading', 'Checking the shared drive'], search_files: ['reading', 'Searching the shared drive'], ask_boss: ['thinking', 'Writing a question for the boss'], file_purchase_request: ['typing', 'Filling in a request'],
   assign_task: ['typing', 'Writing up the plan'], review_task: ['reading', 'Reviewing the work'], hire_staff: ['typing', 'Writing a job offer'], cancel_task: ['typing', 'Crossing something off'],
   ask_buddehbot: ['thinking', 'Writing to buddehbot'], ask_colleague: ['talking', 'Asking a colleague'], set_company: ['typing', 'Setting up the company'], update_staff: ['typing', 'Updating the staff list'], let_go_staff: ['typing', 'Doing the paperwork'], make_logo: ['typing', 'Sketching a logo'],
 };
@@ -56,6 +57,7 @@ export class Engine {
   constructor({ db, cfg, models, llm, bus, log, now = Date.now, fetcher, httpFetch, sessions, namecheap, media, search }) {
     Object.assign(this, { db, cfg, models, llm, bus, log, now });
     this.hookFetch = httpFetch || fetch;
+    this.costAlerts = createCostAlerts({ db, cfg, now, log, httpFetch: this.hookFetch });
     this.Halt = Halt;
     this.budget = createBudget(db, cfg, now, models?.floorLimits);
     this.computer = sessions ? new Computer(this, sessions) : null;
@@ -174,6 +176,7 @@ export class Engine {
       if (stands) { this.finishTask(floor, agent, t.id, 'review', stands); return; }
       if (usedUp(agent)) continue;
       run(this.db, "UPDATE tasks SET status='doing', updated_at=? WHERE id=?", this.now(), t.id);
+      if (agent.role === 'builder') this.costAlerts.buildStarted(t.id, { computer: !!this.computer?.handles(agent.role, floor.id) });
       this.emitTask(t.id);
       this.passOn(floor, agent, t, deps);
       this.launch(floor, agent, (ctl) => (this.computer?.handles(agent.role, floor.id) ? this.computer.run(floor.id, agent.id, t.id, ctl) : this.runStaff(floor.id, agent.id, t.id, ctl)));
@@ -405,6 +408,7 @@ export class Engine {
   charge(floorId, agent, model, prompt, completion, cost, ctx) {
     run(this.db, 'INSERT INTO ledger (floor_id,day,agent_id,model,prompt_tokens,completion_tokens,cost_usd,created_at,kind,provider) VALUES (?,?,?,?,?,?,?,?,?,?)', floorId, today(this.now()), agent.id, model, prompt, completion, cost, this.now(), ctx?.kind || 'model', ctx?.provider || providerOf(model, ctx?.kind));
     if (ctx?.taskId) run(this.db, 'UPDATE tasks SET cost_usd=cost_usd+? WHERE id=?', cost, ctx.taskId);
+    this.costAlerts.charged(floorId, ctx?.taskId);
   }
 
   // ---- manager ----
@@ -860,6 +864,7 @@ export class Engine {
       if (msgs) msgs.push({ role: 'user', content: `The Office Manager sent this back with notes:\n${notes || 'Please improve it.'}` });
       // A computer's turn has ended and its files are back on the drive, so this round is free to start on a fresh one if the old one has grown too big to be worth going back to.
       run(this.db, "UPDATE tasks SET status='todo', revisions=revisions+1, transcript=?, updated_at=?, sent_back_sum=?, session_fresh=? WHERE id=?", msgs ? JSON.stringify(msgs) : '', this.now(), t.project ? projectSum(this.db, floor.id, t.project) : '', t.session_id ? 1 : 0, t.id);
+      this.costAlerts.sentBack(t.id);
       this.feed(floor.id, mgr, `sent "${t.title}" back to ${staff?.name} with notes`, t.project);
       this.talk(floor.id, mgr, staff, notes || `"${t.title}" needs another pass.`, { kind: 'review', project: t.project });
       this.emitTask(t.id); this.kick();

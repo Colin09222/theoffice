@@ -55,6 +55,14 @@ export function loadConfig(env = process.env, overrides = {}) {
     hookChannel: env.OPENCLAW_HOOK_CHANNEL || 'telegram',
     hookTo: env.OPENCLAW_HOOK_TO || '8032772165',
     hookRetryMs: num(env.OPENCLAW_HOOK_RETRY_MS, 2000),
+    // The cost alert (server/costalert.js), through the same hook and silent: a line in the owner's log when one task passes the first figure, a floor's day
+    // passes the second, or a task is sent back this many times, and a word to the owner only when one task passes the last. COST_ALERTS=0 turns it off.
+    costAlerts: env.COST_ALERTS !== '0',
+    costAlertTaskUsd: num(env.COST_ALERT_TASK_USD, 5),
+    costAlertFloorDayUsd: num(env.COST_ALERT_FLOOR_DAY_USD, 10),
+    costAlertSentBack: num(env.COST_ALERT_SENT_BACK, 3),
+    costAlertTellUsd: num(env.COST_ALERT_TELL_USD, 20),
+    costAlertsPerHour: num(env.COST_ALERTS_PER_HOUR, 6),
     adminPassword: env.ADMIN_PASSWORD || '',
     publicOrigin,
     runnerSocket: env.RUNNER_SOCKET ?? '/run/office-runner/api/runner.sock',

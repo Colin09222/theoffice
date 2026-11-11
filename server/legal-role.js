@@ -9,6 +9,6 @@ export const LAWYER_CHARACTER = {
   quirk: 'Initials every page he reads, including the menu.',
 };
 // No spending, no email out, no publishing: the boss's tap does that. He reads, writes notes, asks the boss and fetches public pages (untrusted).
-export const LAWYER_TOOLS = ['write_file', 'read_file', 'list_files', 'view_file', 'fetch_url', 'ask_boss', 'ask_colleague'];
+export const LAWYER_TOOLS = ['write_file', 'read_file', 'list_files', 'search_files', 'view_file', 'fetch_url', 'ask_boss', 'ask_colleague'];
 // Said once, plainly, on every draft the boss sees.
 export const HONESTY_LINE = 'Drafted by AI, not legal advice. Have a real lawyer check it before relying on it.';

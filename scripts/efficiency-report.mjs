@@ -1,5 +1,6 @@
 // Where the floors' money went, read-only: by role, how much of each role's prompt was written to the cache against read from it, the manager's wakes,
-// work-mode rounds that handed out nothing, runs that kept cutting their own history, and the dearest tasks. See docs/EFFICIENCY.md.
+// work-mode rounds that handed out nothing, runs that kept cutting their own history, whether each role's work finished and finished first time, the
+// cost alerts sent, and the dearest tasks. See docs/EFFICIENCY.md.
 //   docker compose exec -T theoffice node scripts/efficiency-report.mjs [days] </dev/null
 // For the admin's terminal only: it prints dollar figures, and nothing here reaches a floor.
 import { DatabaseSync } from 'node:sqlite';
@@ -50,6 +51,18 @@ console.log('\nTasks: by how they ended');
 for (const r of q('SELECT status, COUNT(*) n, SUM(cost_usd) usd, SUM(revisions) rev FROM tasks WHERE updated_at>=? GROUP BY status ORDER BY usd DESC', since)) console.log(`  ${pad(r.status, 10)} ${pad(r.n, 5)} ${pad(usd(r.usd), 9)} sent back ${r.rev} times`);
 const cut = q("SELECT COUNT(*) n, COALESCE(SUM(cost_usd),0) usd FROM tasks WHERE updated_at>=? AND session_id='' AND transcript LIKE '%Earlier steps of this job were dropped%'", since)[0];
 console.log(`  ${cut.n} tasks without a computer had their oldest steps dropped at least once (${usd(cut.usd)})`);
+
+const out = q("SELECT COUNT(*) n, COALESCE(SUM(cost_usd),0) usd FROM tasks WHERE updated_at>=? AND status='failed' AND result LIKE 'Ran out of steps%'", since)[0];
+const searched = q("SELECT COUNT(*) n FROM tasks WHERE updated_at>=? AND session_id='' AND transcript LIKE '%\"search_files\"%'", since)[0];
+console.log(`  ${out.n} tasks ran out of steps (${usd(out.usd)}); ${searched.n} tasks without a computer used search_files`);
+
+// Did the work finish, and first time? A floor that is cheap because half its jobs fail is not cheap.
+console.log('\nBy floor and role: tasks, done, failed, cancelled after money was spent, spent, per finished task, finished without being sent back');
+for (const r of q("SELECT f.number, COALESCE(a.role,'-') role, COUNT(*) n, SUM(t.status='done') done, SUM(t.status='failed') failed, SUM(t.status='cancelled' AND t.cost_usd>0) dropped, SUM(t.cost_usd) usd, SUM(t.status='done' AND t.revisions=0) first FROM tasks t LEFT JOIN agents a ON a.id=t.agent_id JOIN floors f ON f.id=t.floor_id WHERE t.updated_at>=? AND f.filler=0 GROUP BY t.floor_id, role HAVING usd>0 ORDER BY f.number, usd DESC", since)) console.log(`  floor ${pad(r.number, 4)} ${pad(r.role, 11)} ${pad(r.n, 4)} ${pad(r.done, 4)} ${pad(r.failed, 3)} ${pad(r.dropped, 3)} ${pad(usd(r.usd), 9)} ${pad(r.done ? usd(r.usd / r.done) : '-', 8)} ${r.done ? `${r.first}/${r.done}` : '-'}`);
+
+// The cost alert (server/costalert.js): what the owner's log was sent.
+console.log('\nCost alerts sent: kind, how many');
+for (const r of q('SELECT kind, COUNT(*) n FROM cost_alerts WHERE created_at>=? GROUP BY kind ORDER BY n DESC', since)) console.log(`  ${pad(r.kind, 10)} ${r.n}`);
 
 console.log('\nThe dearest tasks: id, floor, role, how it ended, sent back, cost, biggest computer conversation (tokens), title');
 for (const t of q("SELECT t.id, f.number, COALESCE(a.role,'-') role, t.status, t.revisions rev, t.cost_usd usd, t.session_ctx ctx, t.title FROM tasks t LEFT JOIN agents a ON a.id=t.agent_id LEFT JOIN floors f ON f.id=t.floor_id WHERE t.updated_at>=? ORDER BY t.cost_usd DESC LIMIT 15", since)) console.log(`  #${pad(t.id, 6)} ${pad(t.number, 4)} ${pad(t.role, 11)} ${pad(t.status, 10)} ${t.rev}  ${pad(usd(t.usd), 8)} ${pad(t.ctx || '', 8)} ${String(t.title).slice(0, 60)}`);

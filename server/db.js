@@ -147,6 +147,10 @@ CREATE TABLE IF NOT EXISTS work_rounds (
   id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, triggers TEXT NOT NULL, created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS work_rounds_project ON work_rounds(floor_id, project, created_at);
+CREATE TABLE IF NOT EXISTS cost_alerts (
+  key TEXT PRIMARY KEY, kind TEXT NOT NULL, floor_id INTEGER NOT NULL, task_id INTEGER, usd REAL NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cost_alerts_created ON cost_alerts(created_at);
 `;
 // Columns added after the first release. SQLite has no ADD COLUMN IF NOT EXISTS.
 const ADDED = { tasks: { session_id: "TEXT NOT NULL DEFAULT ''", session_sent: 'INTEGER NOT NULL DEFAULT 0', session_charged: 'REAL NOT NULL DEFAULT 0', session_baseline: "TEXT NOT NULL DEFAULT ''", session_publish: "TEXT NOT NULL DEFAULT '[]'", session_tries: 'INTEGER NOT NULL DEFAULT 0' }, app_scores: { lower: 'INTEGER NOT NULL DEFAULT 0' },

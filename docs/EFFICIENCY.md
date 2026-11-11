@@ -162,6 +162,61 @@ Per typical task:
 On 2026-11-11 the building's lifetime Claude total stood at **$395.01 against a limit of $395** (`BUDGET_ANTHROPIC_USD`). Every floor that works on
 Claude has stopped until that is raised; floor 7 is marked as stopped for it. Floor 6 carries on, on OpenRouter ($42.05 of $140).
 
+## Second pass (2026-11-11, 35 minutes after the first went live)
+
+Too soon to judge the first pass on money: $0.27 was spent in those 35 minutes, all on floor 6, and every Claude floor is still stopped at the building's
+Claude limit. What could be seen: floor 6's quiet rounds went from one every 5 minutes to 15 and then 45 minutes apart, as change 1 intends.
+
+So this pass looked at whether the work finishes, which the first did not. Over the three days to 2026-11-11 17:10 UTC:
+
+| Who | Jobs that ran | Finished | Failed | Cancelled after money was spent | Finished without being sent back |
+|---|---|---|---|---|---|
+| Tester on floor 6 (Gemini, no computer) | 8 | 3 | 3 | 2 | 3 of 3 |
+| Tester on floor 7 (Opus, on a computer) | 13 | 12 | 0 | 0 (one still open) | 12 of 12 |
+| Builder, every floor | 39 | 39 | 0 | 0 | 36 of 39 |
+| Researcher on floor 6 | 11 | 8 | 0 | 3 | 8 of 8 |
+
+Send-backs are rare everywhere (8 tasks in three days). The one role that does not finish is the Tester with no computer, and its transcripts say why:
+
+- **It has no way to find a line in a file.** Task 3114 read the same 23,599-character page five times; task 3653 read one of 29,105 characters four
+  times. On a model with no prompt cache each of those is paid for again on every later step: 30,000 to 38,000 prompt tokens a step, forty steps.
+- **It could not see the end of a long page.** `read_file` stopped at 40,000 characters and said nothing. The three pages task 3111 was asked to
+  check are 43,000 bytes each.
+- **It wrote scripts nothing could run.** Task 3653 spent 25 of its 40 steps writing `check.js`, `check2.js`, `run_tests.js` into the live project's
+  folder, then ran out of steps having tested nothing.
+- **It was briefed as if it had a browser.** "Test https://thetirerx.com/ as a stranger at phone (390px) and desktop (1280px)", to someone who can open
+  neither a browser nor, from where it works, its own floor's live site.
+
+All three "ran out of steps" failures since the 40-step cap went on are this one role on this one floor: $3.93, and nothing to show for it.
+
+| # | Change | Where | Switch off with |
+|---|---|---|---|
+| 10 | **`search_files`.** Staff without a computer, the manager and the Lawyer can find a word, link or phrase across the drive and get `file:line: text` back: a few hundred characters where reading the page was 40,000. Private projects stay out of it, as with reading. Computers are untouched (they have grep). | `server/tools.js` | take `search_files` out of `STAFF_TOOLS`, `MANAGER_TOOLS` and `LAWYER_TOOLS` |
+| 11 | **A long file can be read to the end.** `read_file` now ends a part on a whole line, says "Lines 1 to 812 of 2,340. Read on with from_line: 813", and takes `from_line`. A file under 40,000 characters comes back exactly as before. | `server/tools.js` `readPart` | revert the commit |
+| 12 | **Said plainly: nothing runs there.** Staff without a computer are told there is no shell, Node or browser, that a script written to check something never runs, that their own floor's live pages can't be opened from there, and to check by searching and reading. The manager of such a floor is told to brief a Tester with the files and the exact words to look for, never "at phone and desktop size". | `server/prompts.js` `NOTHING_RUNS`, `managerPrompt` | prompt text; revert the commit |
+
+Expected: a reading Tester's job at about half the prompt tokens (one search and one part of a page, not the page five times), and jobs that end with
+a report. To be checked at the next pass with `scripts/efficiency-report.mjs`, which now prints, by floor and role, how many jobs finished, failed,
+were dropped after money was spent, what a finished one cost and how many finished first time, and counts jobs that ran out of steps.
+
+### The cost alert
+
+`server/costalert.js`. The owner's assistant gets one line, silently, through the gateway hook the contractor ping already uses
+(`OPENCLAW_HOOK_URL`, `OPENCLAW_HOOK_TOKEN`), sent with `deliver: false`:
+
+| When | Told |
+|---|---|
+| One task passes $5 | once; and once more when it passes $20, which is the only alert that asks the assistant to tell the owner |
+| A floor's day (UTC) passes $10 | once, then again at $25, $50, $100, $200 and $400 |
+| A task is sent back for the third time | once |
+| A Builder starts the first build of a project that has never been live | once per project |
+
+Each message asks for exactly one line appended to `~/.openclaw/workspace/memory/office-cost-alerts.md` and nothing else. The floor's name and the task's
+title are fenced as untrusted data. Each thing is told once (the `cost_alerts` table), six an hour at most across the building (one that is held goes
+when the hour has passed; the $20 one is never held), in the background, and a dead gateway never fails a charge. Demo floors are left out.
+`COST_ALERTS=0` turns it off; `COST_ALERT_TASK_USD`, `COST_ALERT_FLOOR_DAY_USD`, `COST_ALERT_SENT_BACK`, `COST_ALERT_TELL_USD` and
+`COST_ALERTS_PER_HOUR` move the lines.
+
 ## How to measure it again
 
 The scripts used are read-only and take the database path as it is inside the container. The useful queries:
