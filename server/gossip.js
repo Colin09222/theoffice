@@ -81,3 +81,36 @@ export function quotesHonest(text, { boss = 'the boss', bossSaid = [], titles = 
   const allowed = [...bossSaid, ...titles, ...(aboutBoss ? [] : known)].map(words);
   return quotes.every((q) => { const w = words(q); return allowed.some((a) => a.includes(w)); });
 }
+
+// A third net, for the kettle saying the same thing over. Lines are compared as words only.
+const wordList = (s) => words(s).trim().split(' ').filter(Boolean);
+const opener = (s, n = 3) => wordList(s).slice(0, n).join(' ');
+/** How much two lines share: the words they have in common over the shorter line's words, 0 to 1. Lines under 4 words share nothing. */
+export function overlap(a, b) {
+  const x = new Set(wordList(a)), y = new Set(wordList(b));
+  if (Math.min(x.size, y.size) < 4) return 0;
+  let both = 0;
+  for (const w of x) if (y.has(w)) both++;
+  return both / Math.min(x.size, y.size);
+}
+/** Whether a line is a near repeat of any earlier one: the same first three words, or more than `most` of its words shared. */
+export const nearRepeat = (text, earlier, most = 0.7) => earlier.some((e) => (opener(text) && opener(text) === opener(e)) || overlap(text, e) > most);
+/**
+ * Keeps an exchange's lines that don't repeat the last few exchanges on the floor (`before`, oldest first, each a list of lines) or an earlier line of this one.
+ * The first line may not lean on the last exchange's first line at all: no shared opener and at most half its words.
+ */
+export function freshLines(lines, before = []) {
+  const earlier = before.flat(), opening = before.at(-1)?.[0];
+  const out = [];
+  for (const l of lines) {
+    if (nearRepeat(l.text, [...earlier, ...out.map((o) => o.text)])) continue;
+    if (!out.length && opening && nearRepeat(l.text, [opening], 0.5)) continue;
+    out.push(l);
+  }
+  return out;
+}
+/** Whether a speaker talks about themself by name ("Nico's own note", said by Nico). People say I, me and my. */
+export const selfNamed = (text, name) => {
+  const first = String(name ?? '').split(/\s+/)[0];
+  return first.length >= 2 && new RegExp(`(?<![\\p{L}\\p{N}])${escape(first)}(?![\\p{L}\\p{N}])`, 'u').test(String(text ?? ''));
+};

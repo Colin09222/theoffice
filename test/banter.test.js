@@ -5,7 +5,7 @@ import { boot, claim, Client, floorState, waitDone, sse, until, sleep } from './
 import { loadConfig } from '../server/config.js';
 import { get, all, run } from '../server/db.js';
 import { createMockClient } from '../server/mock.js';
-import { floorGossip, banterStyle, fitToSay, sassOn, quotesHonest, quotesIn } from '../server/gossip.js';
+import { floorGossip, banterStyle, fitToSay, sassOn, quotesHonest, quotesIn, overlap, nearRepeat, freshLines, selfNamed } from '../server/gossip.js';
 
 const row = (t, slug) => get(t.db, 'SELECT * FROM floors WHERE slug=?', slug);
 const banterPaid = (t, floorId) => all(t.db, "SELECT * FROM ledger WHERE floor_id=? AND kind='talk-banter'", floorId);
@@ -77,6 +77,29 @@ describe('what the floor gossips about', () => {
     for (const bad of ['what a f4ggot', 'he is a retard', 'paste the API key here', 'I will kill you', 'that was sexy']) assert.equal(fitToSay(bad), false, bad);
     for (const ok of ['Justin changed his mind again, the asshole.', 'Spicy take, Tess.', 'Nah, Justin\'s alright actually.', 'Damn, that map is ugly.']) assert.equal(fitToSay(ok), true, ok);
   });
+  test('near repeats: the same opener or over 70% of the words; the first line keeps clear of the last exchange\'s first', () => {
+    const was = 'Justin\'s alright actually. He just wants the open bits first, so he stops sending messages every hour.';
+    assert.equal(nearRepeat('Justin\'s alright actually, he only wants the map done.', [was]), true, 'same opener');
+    assert.equal(nearRepeat('Honestly he just wants the open bits first so he stops sending messages.', [was]), true, 'mostly the same words');
+    assert.equal(nearRepeat('The PennDOT page is still unchecked, so that stays open.', [was]), false);
+    assert.ok(overlap('a b c', 'a b c') === 0, 'too short to judge');
+    const L = (text, who = 'A') => ({ who, text });
+    const before = [['Split pages are live, the old address forwards.', 'Calling it sorted is not checked.'], [was, 'Three messages in three hours is a lot.']];
+    assert.deepEqual(freshLines([L("Justin's alright actually, leave him be."), L('Baltimore still needs a tenth listing, though.'), L('Baltimore still needs a tenth listing, honestly though.')], before).map((l) => l.text),
+      ['Baltimore still needs a tenth listing, though.'], 'repeats of earlier exchanges and of this one are dropped');
+    assert.deepEqual(freshLines([L('He just wants the open bits first, nothing more to it.'), L('Maryland links are still unchecked.')], before).map((l) => l.text),
+      ['Maryland links are still unchecked.'], 'the first line may share at most half of the last exchange\'s first');
+    assert.equal(freshLines([L('He just wants the open bits first, nothing more to it.')], [before[0]]).length, 1, 'later lines only need to stay under 70%');
+  });
+
+  test('nobody talks about themself by name', () => {
+    assert.equal(selfNamed('Nico\'s own note says the map is done.', 'Nico'), true);
+    assert.equal(selfNamed('Nico Park thinks so too.', 'Nico Park'), true);
+    assert.equal(selfNamed('My note says the map is done, Arlo.', 'Nico'), false);
+    assert.equal(selfNamed('I will check it later.', 'Will'), false, 'a name that is also a word only counts capitalised');
+    assert.equal(selfNamed('Nicolette finished it.', 'Nico'), false);
+  });
+
   test('a quote next to the boss must be the boss\'s real words; paraphrase is fine', () => {
     const real = { boss: 'Justin Reyes', bossSaid: ['Can I get a status update please? And make the header blue.'], titles: ['Landing page'], known: ['Arlo finished "Fix the map"'] };
     for (const ok of [
@@ -236,6 +259,38 @@ describe('banter on the floor', () => {
       assert.ok(said.includes('Boss changed the buttons again.'));
       assert.ok(!said.some((x) => /"/.test(x)), 'the chat is closed and nothing private was told, so there is nothing to quote');
     } finally { await t.close(); }
+  });
+
+  test('the kettle drops near repeats of the last exchanges and lines where someone names themself', async () => {
+    let n = 0;
+    const { llm } = recorder((m) => (n++ === 0 ? [
+      { who: m.speakers[0], text: 'The boss is alright actually, just wants the open bits first.' },
+      { who: m.speakers[1], text: 'Small thing shipped and nobody even clapped for it.' },
+    ] : [
+      { who: m.speakers[0], text: 'The boss is alright actually, I said it before.' },
+      { who: m.speakers[1], text: `${m.speakers[1]}'s own note says the small thing works.` },
+      { who: m.speakers[0], text: 'Shipped the small thing and nobody even clapped for it.' },
+      { who: m.speakers[1], text: 'Somebody should check the footer before Friday.' },
+      { who: m.speakers[0], text: 'Footer is mine, I will look after lunch.' },
+    ]));
+    const t = await boot({}, { llm });
+    try {
+      const c = await busyFloor(t);
+      const f = row(t, c.slug);
+      await t.app.engine.people.banter(f.id); await t.app.engine.people.settled();
+      await t.app.engine.people.banter(f.id); await t.app.engine.people.settled();
+      const said = (await floorState(c)).talk.filter((l) => l.kind === 'banter').map((l) => l.text);
+      assert.equal(said.filter((x) => /^The boss is alright/.test(x)).length, 1, JSON.stringify(said));
+      assert.equal(said.filter((x) => /nobody even clapped/.test(x)).length, 1, JSON.stringify(said));
+      assert.ok(!said.some((x) => /own note/.test(x)), JSON.stringify(said));
+      assert.ok(said.includes('Somebody should check the footer before Friday.'));
+      assert.ok(said.includes('Footer is mine, I will look after lunch.'));
+    } finally { await t.close(); }
+  });
+
+  test('banter stops at 4000 calls a floor a day by default, so the $2 cap is the real limit', () => {
+    assert.equal(loadConfig({ AI_MODE: 'mock' }).banterPerFloorDay, 4000);
+    assert.equal(loadConfig({ AI_MODE: 'mock', BANTER_PER_FLOOR_DAY: '50' }).banterPerFloorDay, 50);
   });
 
   test('talk built on what a visitor can\'t see stays with the boss', async () => {

@@ -12,7 +12,7 @@ import { talkLine } from './talk.js';
 import { settingText } from './brief.js';
 import { scrub } from './llm.js';
 import { routeFor, overFloor } from './config.js';
-import { floorGossip, banterStyle, bossNameOf, sassOn, fitToSay, quotesHonest } from './gossip.js';
+import { floorGossip, banterStyle, bossNameOf, sassOn, fitToSay, quotesHonest, freshLines, selfNamed } from './gossip.js';
 
 const MEMORY_KEEP = 24, MEMORY_SHOWN = 8, NOTE_CHARS = 170;
 // An answer to a colleague is a few sentences, so the role's own model gets room to think and write that, not the room it has for a whole job, and no more than high effort.
@@ -106,7 +106,7 @@ export function createPeople(engine) {
   const spec = () => engine.models.tools?.talk;
   const ctl = new AbortController();
   const running = new Set();
-  const lastMeeting = new Map(), lastBanter = new Map(), castTried = new Map(), lastTopic = new Map();
+  const lastMeeting = new Map(), lastBanter = new Map(), castTried = new Map(), lastTopic = new Map(), lastExchanges = new Map();
   let timer = null;
 
   const dayStart = () => Date.parse(`${new Date(engine.now()).toISOString().slice(0, 10)}T00:00:00Z`);
@@ -365,7 +365,7 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
     const f = floorRow(floorId);
     if (!speakable(f) || !f.name || engine.spentOver(floorId, 0)) return false;
     if (engine.modes?.closed(floorId)) return false;  // outside set hours everyone has gone home
-    if (usedToday(floorId, 'talk-banter') >= (cfg.banterPerFloorDay ?? 600)) return false;
+    if (usedToday(floorId, 'talk-banter') >= (cfg.banterPerFloorDay ?? 4000)) return false;
     // The day's cap is hard. Paced, a floor may only be a quarter of it ahead of the clock, so a long morning of watching doesn't leave the evening silent.
     const cap = cfg.banterUsdPerFloorDay ?? 2, paid = paidToday(floorId, 'talk-banter');
     if (paid >= cap) return false;
@@ -390,19 +390,23 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
     const closed = news.some((n) => !n.open) && Math.random() < (cfg.banterClosedShare ?? 0.35);
     const told = closed ? news : news.filter((n) => n.open);
     const heard = told.map((n) => n.text);
-    const notes = group.flatMap((a) => notesFor(a).slice(-1).map((n) => `${a.name}'s note: ${n}`));
+    const notes = group.flatMap((a) => notesFor(a).slice(-1).map((n) => `${a.name}'s note (${a.name} would say "my note"): ${n}`));
     const facts = work.slice(0, 5).map((t) => `${everyone.find((a) => a.id === t.agent_id)?.name || 'someone'} ${t.status === 'failed' ? 'could not finish' : 'finished'} "${t.title}": ${String(t.result).slice(0, 220)}`);
     const said = recentLines(floorId, 'banter', 20);
     const heardSaid = overheard(floorId, f);
     const text = await cheap(floorId, group[0], {
       // Written straight off: thinking on, Haiku spent all 1,500 tokens on floor 6 thinking and wrote no lines.
       purpose: 'banter', maxTokens: 1500, thinking: 'off', meta: { speakers: group.map((a) => a.name), title: topic.title, said, boss, sass, news: heard, overheard: heardSaid },
-      system: `${WRITER_RULES} ${boss}, the boss, is the one person outside the room they may talk about.\nThis is idle small talk at the kettle in an office whose boss is ${boss}. ${banterStyle(boss, sass)}\n3 to 6 lines in all, each under 110 characters, at most two sentences. Everyone speaks at least once.\nPeople:\n${castSheet(group)}\nReply with JSON only: {"lines":[{"who":"name","text":"..."}]}`,
+      system: `${WRITER_RULES} ${boss}, the boss, is the one person outside the room they may talk about.\nThis is idle small talk at the kettle in an office whose boss is ${boss}. ${banterStyle(boss, sass)}\n3 to 6 lines in all, each under 110 characters, at most two sentences. Everyone speaks at least once. Nobody says their own name or talks about themself in the third person: it's I, me, my. Every line opens differently, and the first line must not echo how the last exchange began.\nPeople:\n${castSheet(group)}\nReply with JSON only: {"lines":[{"who":"name","text":"..."}]}`,
       user: `${wrapUntrusted('what happened on this floor lately, newest first', [...heard, ...facts, ...notes].join('\n'))}${heardSaid.length ? `\n${wrapUntrusted('what was said around the office lately, newest first (meetings and questions, not the kettle)', heardSaid.join('\n'))}` : ''}\nThe work they could start from: "${settingText(topic.title, 120)}".${said.length ? `\nThey have already said these. Don't reuse any of their topics, phrases or jokes; start somewhere new:\n${wrapUntrusted('said before', said.join('\n'))}` : ''}`,
     });
     // Only the boss's real words, as given above, may go in quote marks next to the boss.
     const honest = { boss, bossSaid: told.map((n) => n.bossSaid).filter(Boolean), titles: work.map((t) => t.title), known: [...heard, ...facts, ...heardSaid] };
-    const lines = castLines(text, group, floorId, 'banter', 6).filter((l) => fitToSay(l.text) && quotesHonest(l.text, honest) && !mentionsPrivate(db, floorId, '', l.text));
+    const kept = castLines(text, group, floorId, 'banter', 6).filter((l) => fitToSay(l.text) && quotesHonest(l.text, honest) && !selfNamed(l.text, l.who.name) && !mentionsPrivate(db, floorId, '', l.text));
+    // Nothing near what the last three exchanges said, and the opening line doesn't lean on the last one's. After a restart the last 18 lines stand in for them, with no opening line known.
+    const before = lastExchanges.get(floorId) ?? [said.slice(0, 18).reverse(), []];
+    const lines = freshLines(kept, before);
+    if (lines.length) lastExchanges.set(floorId, [...before, lines.map((l) => l.text)].slice(-3));
     await saySoon(floorId, lines, 'banter', topic.project, closed ? { hush: true } : {});
     return lines.length > 0;
   }

@@ -27,6 +27,10 @@ const CSS = `:root{--ink:#1d2433;--paper:#f7f1e3;--hot:#d9774a}*{box-sizing:bord
 const JS = `let n=0;const o=document.getElementById('o');document.getElementById('b').addEventListener('click',()=>{n++;o.textContent=n+(n===1?' clap':' claps')});`;
 const EVIL = `<!doctype html><title>probe</title><h1 id="r">probe</h1><script>let c='none';try{c=document.cookie}catch(e){c='blocked:'+e.name}document.getElementById('r').textContent=c</script>`;
 
+// Mock banter, one opening per exchange: no two share their first three words or most of their words.
+const BANTER_OPEN = ['I can\'t stop thinking about', 'Honestly the best bit this week was', 'Nobody warned me how long it took to do', 'Quick question, who signed off', 'Still proud of', 'Remind me why we rushed', 'Lunch talk was all about'];
+const BANTER_BACK = ['You said that about the last one', 'Bold claim from someone who left early', 'Took me ages too, no shame', 'Not me, check the board', 'Fair, it came out well', 'Because it was due, obviously', 'Better than talking about printers'];
+const BANTER_BOSS = ['$ will change their mind again by lunch', 'Wait until $ sees the colours', '$ will want a second version tomorrow', 'Give $ a day and it\'s a new plan', '$ will ask for a status any minute', 'Bet $ already has notes', 'Nah, $ is alright actually'];
 const LANE_OPENERS = {
   game: 'A game! Three small ideas, boss:\n\n1. **Pigeon Post:** dodge the wind.\n2. **Night Bakery:** catch falling buns.\n3. **Tiny Tide:** outrun the sea.\n\nPick one, or tell me to choose.',
   website: 'A website! Two quick questions, boss: what is it for, and what should a visitor do when they get there?',
@@ -44,8 +48,12 @@ function talkStep(meta) {
     case 'meeting': return JSON.stringify({ lines: meta.trigger === 'plan'
       ? [{ who: a, text: `"${meta.titles[0]}" goes first. Who is nervous?` }, { who: b, text: `Not me. Ask me again once "${meta.titles.at(-1)}" is on my desk.` }]
       : [{ who: b, text: `"${meta.titles.at(-1)}" is with you now.` }, { who: a, text: `Then I'll read the report before I say anything.` }] });
-    case 'banter': return JSON.stringify({ lines: [{ who: a, text: `I can't stop thinking about "${meta.title}" (${meta.said?.length ?? 0}).` }, { who: b, text: `You said that about the last one (${meta.said?.length ?? 0}).` },
-      ...(meta.sass ? [{ who: meta.speakers.at(-1), text: `${meta.boss} will change their mind again by lunch (${meta.said?.length ?? 0}).` }] : [])] });
+    case 'banter': {
+      // A different opening each exchange (by how much was said before), so the near-repeat net in server/people.js has something fresh to keep.
+      const n = meta.said?.length ?? 0, i = n % BANTER_OPEN.length;
+      return JSON.stringify({ lines: [{ who: a, text: `${BANTER_OPEN[i]} "${meta.title}" (${n}).` }, { who: b, text: `${BANTER_BACK[i]} (${n}).` },
+        ...(meta.sass ? [{ who: meta.speakers.at(-1), text: `${BANTER_BOSS[i].replace('$', meta.boss)} (${n}).` }] : [])] });
+    }
     default: return '';
   }
 }
