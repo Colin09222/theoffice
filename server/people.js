@@ -390,7 +390,7 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
     const facts = work.slice(0, 3).map((t) => `${everyone.find((a) => a.id === t.agent_id)?.name || 'someone'} ${t.status === 'failed' ? 'could not finish' : 'finished'} "${t.title}": ${String(t.result).slice(0, 160)}`);
     const said = recentLines(floorId, 'banter', 12);
     const text = await cheap(floorId, group[0], {
-      purpose: 'banter', maxTokens: 900, meta: { speakers: group.map((a) => a.name), title: topic.title, said, boss, sass, news: heard },
+      purpose: 'banter', maxTokens: 1500, meta: { speakers: group.map((a) => a.name), title: topic.title, said, boss, sass, news: heard },
       system: `${WRITER_RULES} ${boss}, the boss, is the one person outside the room they may talk about.\nThis is idle small talk at the kettle in an office whose boss is ${boss}. ${banterStyle(boss, sass)}\n3 to 5 lines in all, each under 110 characters, at most two sentences. Everyone speaks at least once.\nPeople:\n${castSheet(group)}\nReply with JSON only: {"lines":[{"who":"name","text":"..."}]}`,
       user: `${wrapUntrusted('what happened on this floor lately, newest first', [...heard, ...facts, ...notes].join('\n'))}\nThe work they could start from: "${settingText(topic.title, 120)}".${said.length ? `\nThey have already said these. Don't reuse any of their topics, phrases or jokes; start somewhere new:\n${wrapUntrusted('said before', said.join('\n'))}` : ''}`,
     });
