@@ -12,6 +12,7 @@ import { talkLine } from './talk.js';
 import { settingText } from './brief.js';
 import { scrub } from './llm.js';
 import { routeFor, overFloor } from './config.js';
+import { floorGossip, banterStyle, bossNameOf, sassOn, fitToSay } from './gossip.js';
 
 const MEMORY_KEEP = 24, MEMORY_SHOWN = 8, NOTE_CHARS = 170;
 // An answer to a colleague is a few sentences, so the role's own model gets room to think and write that, not the room it has for a whole job, and no more than high effort.
@@ -49,6 +50,7 @@ const POOL = [
   { persona: 'Unbothered and deadpan. Treats a crisis and a stapler jam with exactly the same tone.', bio: 'Spent years on a helpdesk and can no longer be surprised, only mildly interested.', quirk: 'Answers the phone by saying the time.' },
 ];
 const scriptedMood = (i) => MOODS[i % 4];
+const shuffle = (list) => { const l = [...list]; for (let i = l.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [l[i], l[j]] = [l[j], l[i]]; } return l; };
 export const officeFor = (role) => (role === 'manager' ? 'manager' : `office-${role}`);
 
 export function readCharacter(row) {
@@ -109,6 +111,7 @@ export function createPeople(engine) {
 
   const dayStart = () => Date.parse(`${new Date(engine.now()).toISOString().slice(0, 10)}T00:00:00Z`);
   const usedToday = (floorId, kind) => get(db, 'SELECT COUNT(*) n FROM ledger WHERE floor_id=? AND kind=? AND created_at>=?', floorId, kind, dayStart()).n;
+  const paidToday = (floorId, kind) => get(db, 'SELECT COALESCE(SUM(cost_usd),0) c FROM ledger WHERE floor_id=? AND kind=? AND created_at>=?', floorId, kind, dayStart()).c;
   const isPrivateSlug = (floorId, slug) => !!(slug && get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', floorId, slug)?.private);
   const floorRow = (floorId) => get(db, 'SELECT * FROM floors WHERE id=?', floorId);
   const speakable = (f) => !!f && f.status === 'active' && !f.paused && !f.filler && !engine.globalPaused() && !engine.stopped;
@@ -245,12 +248,12 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
 
   // ---- saying it on the floor ----
   /** A few lines, one after another, as people really take turns. */
-  async function saySoon(floorId, lines, kind, project) {
+  async function saySoon(floorId, lines, kind, project, { hush = false } = {}) {
     for (let i = 0; i < lines.length; i++) {
       if (i) await pause(cfg.talkGapMs ?? 2200, ctl.signal);
       if (!speakable(floorRow(floorId))) return;
       const next = lines.slice(i + 1).find((l) => l.who.id !== lines[i].who.id) || lines.slice(0, i).reverse().find((l) => l.who.id !== lines[i].who.id);
-      engine.talk(floorId, lines[i].who, next?.who ?? null, lines[i].text, { kind, project });
+      engine.talk(floorId, lines[i].who, next?.who ?? null, lines[i].text, { kind, project, hush });
     }
   }
   const recentLines = (floorId, kind, n = 14) => all(db, "SELECT data FROM events WHERE floor_id=? AND type='talk' ORDER BY id DESC LIMIT 120", floorId).map((e) => JSON.parse(e.data)).filter((d) => d.kind === kind).slice(0, n).map((d) => d.text);
@@ -355,11 +358,15 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
   }
 
   // ---- banter ----
+  // A few lines between two or three people about what really happened on the floor lately, ribbing the boss when the boss allows it (server/gossip.js).
+  // One cheap call writes the whole exchange. It stops at a count and a cost a day per floor, and BANTER=0 stops it everywhere.
   async function banter(floorId) {
+    if (cfg.banter === false) return false;
     const f = floorRow(floorId);
     if (!speakable(f) || !f.name || engine.spentOver(floorId, 0)) return false;
     if (engine.modes?.closed(floorId)) return false;  // outside set hours everyone has gone home
     if (usedToday(floorId, 'talk-banter') >= (cfg.banterPerFloorDay ?? 60)) return false;
+    if (paidToday(floorId, 'talk-banter') >= (cfg.banterUsdPerFloorDay ?? 0.1)) return false;
     // Only finished, open work, so a line can't reach a visitor about anything else or claim something that never happened.
     const work = all(db, "SELECT t.id,t.title,t.result,t.project,t.agent_id,t.status FROM tasks t LEFT JOIN projects p ON p.floor_id=t.floor_id AND p.slug=t.project WHERE t.floor_id=? AND t.status IN ('done','review','failed') AND COALESCE(p.private,0)=0 AND (t.project!='' OR ?=0) ORDER BY t.id DESC LIMIT 6", floorId, f.default_private);
     if (!work.length) return false;
@@ -370,20 +377,25 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
     const topic = (fresh.length ? fresh : work)[Math.floor(Math.random() * (fresh.length || work.length))];
     lastTopic.set(floorId, topic.id);
     const doer = everyone.find((a) => a.id === topic.agent_id);
-    const others = everyone.filter((a) => a.id !== doer?.id);
+    const others = shuffle(everyone.filter((a) => a.id !== doer?.id));
     if (!others.length) return false;
-    const pair = [doer || others[0], others[Math.floor(Math.random() * others.length)]].filter((a, i, l) => l.findIndex((x) => x.id === a.id) === i);
-    if (pair.length < 2) return false;
-    const notes = pair.flatMap((a) => notesFor(a).slice(-2).map((n) => `${a.name}'s note: ${n}`));
-    const facts = work.slice(0, 4).map((t) => `${everyone.find((a) => a.id === t.agent_id)?.name || 'someone'} ${t.status === 'failed' ? 'could not finish' : 'finished'} "${t.title}": ${String(t.result).slice(0, 220)}`);
-    const said = recentLines(floorId, 'banter', 10);
-    const text = await cheap(floorId, pair[0], {
-      purpose: 'banter', maxTokens: 1200, meta: { speakers: pair.map((a) => a.name), title: topic.title, said },
-      system: `${WRITER_RULES}\nThis is idle small talk between two colleagues at the coffee machine. Start from "${settingText(topic.title, 120)}", the real work they are ribbing each other about, or from their own quirks. It should be funny or human, and small. 2 or 3 lines, each under 95 characters.\nPeople:\n${castSheet(pair)}\nReply with JSON only: {"lines":[{"who":"name","text":"..."}]}`,
-      user: `${wrapUntrusted('real recent work on this floor', [...facts, ...notes].join('\n'))}${said.length ? `\nThey have already said these. Don't reuse any of their topics, phrases or jokes; start somewhere new:\n${wrapUntrusted('said before', said.join('\n'))}` : ''}`,
+    const group = [doer || others[0], ...others.filter((a) => a.id !== (doer || others[0]).id).slice(0, Math.random() < 0.5 ? 2 : 1)];
+    if (group.length < 2) return false;
+    const boss = settingText(bossNameOf(f), 30) || 'the boss', sass = sassOn(cfg, f);
+    // What a visitor can't see goes in now and then, and the lines it brings stay with the boss.
+    const news = floorGossip(db, f, { now: engine.now() });
+    const closed = news.some((n) => !n.open) && Math.random() < (cfg.banterClosedShare ?? 0.35);
+    const heard = (closed ? news : news.filter((n) => n.open)).map((n) => n.text);
+    const notes = group.flatMap((a) => notesFor(a).slice(-1).map((n) => `${a.name}'s note: ${n}`));
+    const facts = work.slice(0, 3).map((t) => `${everyone.find((a) => a.id === t.agent_id)?.name || 'someone'} ${t.status === 'failed' ? 'could not finish' : 'finished'} "${t.title}": ${String(t.result).slice(0, 160)}`);
+    const said = recentLines(floorId, 'banter', 12);
+    const text = await cheap(floorId, group[0], {
+      purpose: 'banter', maxTokens: 900, meta: { speakers: group.map((a) => a.name), title: topic.title, said, boss, sass, news: heard },
+      system: `${WRITER_RULES} ${boss}, the boss, is the one person outside the room they may talk about.\nThis is idle small talk at the kettle in an office whose boss is ${boss}. ${banterStyle(boss, sass)}\n3 to 5 lines in all, each under 110 characters, at most two sentences. Everyone speaks at least once.\nPeople:\n${castSheet(group)}\nReply with JSON only: {"lines":[{"who":"name","text":"..."}]}`,
+      user: `${wrapUntrusted('what happened on this floor lately, newest first', [...heard, ...facts, ...notes].join('\n'))}\nThe work they could start from: "${settingText(topic.title, 120)}".${said.length ? `\nThey have already said these. Don't reuse any of their topics, phrases or jokes; start somewhere new:\n${wrapUntrusted('said before', said.join('\n'))}` : ''}`,
     });
-    const lines = castLines(text, pair, floorId, 'banter', 3).filter((l) => !mentionsPrivate(db, floorId, '', l.text));
-    await saySoon(floorId, lines, 'banter', topic.project);
+    const lines = castLines(text, group, floorId, 'banter', 5).filter((l) => fitToSay(l.text) && !mentionsPrivate(db, floorId, '', l.text));
+    await saySoon(floorId, lines, 'banter', topic.project, closed ? { hush: true } : {});
     return lines.length > 0;
   }
   function banterTick() {

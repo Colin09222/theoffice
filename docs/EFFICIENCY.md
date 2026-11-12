@@ -233,3 +233,21 @@ SELECT id, title, session_ctx, revisions, ROUND(cost_usd,2) usd FROM tasks WHERE
 
 A call missed the cache when `(cost_usd - completion_tokens * completion_price / 1e6) / prompt_tokens` is near 1.25 times the input price, and hit it when near the cache-read price.
 The server log says `work mode quiet round` each time change 1 holds a floor back, and `fix round on a fresh computer` each time change 6 acts.
+
+## Small talk with some cheek (11-11)
+
+The staff's kettle chat (`server/people.js` banter, `server/gossip.js`) now starts from what really happened on the floor in the last 12 hours:
+work finished, sent back, approved or published, plans scrapped, what the boss last said, a day the work stopped early. Two or three people,
+3 to 5 lines from one call on the talk model (`tools.talk`: Claude Haiku 5.5, low effort). When sass is on they rib the boss by name, someone
+sticks up for them, and mild swearing is allowed; slurs, threats, anything sexual or about protected traits, keys and money are ruled out in
+the prompt and a line that trips the word net is dropped. A fact a visitor couldn't see (private work, a closed chat, a stopped day) goes in
+about one call in three, and the lines it brings are shown to visitors as private talk.
+
+It only runs while someone has the floor open, never on a paused, closed or out-of-money floor, and never touches the work.
+
+| Switch | Default | What it does |
+|---|---|---|
+| `BANTER=0` | on | No banter on any floor. |
+| `BANTER_SASS=0` | on | Banter everywhere stays warm and clean, whatever each boss chose. |
+| Boss's settings: "My staff can poke fun at me" | on | The same for one floor (`floors.banter_sass`). |
+| `BANTER_USD_PER_FLOOR_DAY` | 0.10 | What one floor's banter may cost in a day, on top of `BANTER_PER_FLOOR_DAY` (60 calls). |

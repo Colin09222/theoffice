@@ -1134,7 +1134,7 @@ export class Engine {
   }
   bossOf(floor) { let name = 'The boss'; try { name = JSON.parse(floor.boss).name || name; } catch { /* a saved boss always parses, but a name is not worth a crash */ } return { id: 'boss', name }; }
   /** Words passing between two people, cut down from the real thing. The room acts it out and the Talk tab keeps it, under the same privacy rules as the feed. */
-  talk(floorId, from, to, text, { kind, project = '' }) {
+  talk(floorId, from, to, text, { kind, project = '', hush = false }) {
     if (!from) return;
     const said = scrub(this.daily ? this.daily.clean(floorId, text) : text, this.cfg);
     const line = talkLine(said);
@@ -1142,7 +1142,7 @@ export class Engine {
     // Only the cut is kept, and the cut can fall inside a private name, so what a visitor gets is worked out here. A name goes before cutting.
     // What still touches private work after that, in another spelling or in words lifted from a private brief or the boss's private settings, stays with the boss.
     const open = redactChat(this.db, floorId, said);
-    const quiet = { ...(open === said ? {} : { pub: talkLine(open) }), ...(mentionsPrivate(this.db, floorId, '', open) || quotesSettings(this.db, floorId, open) ? { hush: true } : {}), ...(quotesBoss(this.db, floorId, open) ? { quote: true } : {}) };
+    const quiet = { ...(open === said ? {} : { pub: talkLine(open) }), ...(hush || mentionsPrivate(this.db, floorId, '', open) || quotesSettings(this.db, floorId, open) ? { hush: true } : {}), ...(quotesBoss(this.db, floorId, open) ? { quote: true } : {}) };
     this.emit(floorId, 'talk', { from: from.id, to: to?.id ?? null, fromName: from.name, toName: to?.name ?? '', text: line, ...(WORK_BEATS.has(kind) ? { kind: 'work', beat: kind } : { kind }), ts: this.now(), ...quiet }, { project });
   }
   /** Anything about the budget or a purchase: the boss's alone, even on a floor with public chat, and it never reaches the model. */

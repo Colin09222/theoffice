@@ -218,7 +218,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       .map((e) => engine.publicView({ floorId: f.id, type: 'talk', project: e.project, data: JSON.parse(e.data), id: e.id, ts: e.created_at }, viewer)).filter(Boolean)
       .map((v) => ({ id: v.id, ...v.data }));
     const out = {
-      viewer: { owner: viewer.owner }, floor: { number: f.number, slug: f.slug, name: f.name, setup: !f.name, tagline: f.tagline, colors: JSON.parse(f.colors), boss: JSON.parse(f.boss), decor: JSON.parse(f.decor), publicChat: !!f.public_chat, defaultPrivate: !!f.default_private, ...engine.floorState(f.id) },
+      viewer: { owner: viewer.owner }, floor: { number: f.number, slug: f.slug, name: f.name, setup: !f.name, tagline: f.tagline, colors: JSON.parse(f.colors), boss: JSON.parse(f.boss), decor: JSON.parse(f.decor), publicChat: !!f.public_chat, defaultPrivate: !!f.default_private, ...(viewer.owner ? { banterSass: !!f.banter_sass } : {}), ...engine.floorState(f.id) },
       agents, tasks, projects, feed, talk, lastEventId: get(db, 'SELECT COALESCE(MAX(id),0) n FROM events WHERE floor_id=?', f.id).n,
     };
     // Whether the money has run out is between the boss and the owner.
@@ -484,6 +484,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     run(db, 'UPDATE floors SET name=?, tagline=?, colors=?, boss=?, decor=?, public_chat=?, default_private=? WHERE id=?',
       name.length >= 2 ? name : f.name, hasTag ? clean(b.tagline, 120) : f.tagline, JSON.stringify(validColors(b.colors, JSON.parse(f.colors))), JSON.stringify(boss), JSON.stringify(validDecor(b.decor, JSON.parse(f.decor))),
       typeof b.publicChat === 'boolean' ? Number(b.publicChat) : f.public_chat, typeof b.defaultPrivate === 'boolean' ? Number(b.defaultPrivate) : f.default_private, f.id);
+    if (typeof b.banterSass === 'boolean') run(db, 'UPDATE floors SET banter_sass=? WHERE id=?', Number(b.banterSass), f.id);
     if (name.length >= 2 && !f.name) adoptNameSlug(f, name);
   };
   POST('/api/floors/:slug/staff/:id', async ({ req, res, p, ip }) => {
