@@ -90,6 +90,7 @@ describe('banter on the floor', () => {
       await t.app.engine.people.settled();
       const call = seen.at(-1);
       assert.equal(call.provider, 'anthropic'); assert.equal(call.model, 'claude-haiku-5-5', 'the cheap model');
+      assert.equal(call.thinking, 'off', 'written straight off, so the reply isn\'t spent thinking');
       const sys = call.messages[0].content, user = call.messages[1].content;
       assert.match(sys, /Boss, the boss/); assert.match(sys, /Roast Boss playfully/); assert.match(sys, /no slurs/);
       assert.match(user, /Office published kettle-co \(4 files\)/);

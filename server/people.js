@@ -126,7 +126,7 @@ export function createPeople(engine) {
    * `route` says which model: the cheap one for chatter, the colleague's own for a work question. Either way it holds its estimate against the floor's day and
    * the building's limit while it runs and goes on the ledger at that model's own price, a stopped call included.
    */
-  async function callModel(floorId, agent, route, { purpose, system, user, maxTokens = 500, meta = {}, signal = ctl.signal, taskId = null, cache = false }) {
+  async function callModel(floorId, agent, route, { purpose, system, user, maxTokens = 500, meta = {}, signal = ctl.signal, taskId = null, cache = false, thinking }) {
     // A floor moved onto OpenRouter talks there too: small talk on the same small model, a work answer on the floor's model at the answer's own effort.
     const s = overFloor(route, engine.budget.floorRoute(floorId), engine.models.prices, purpose === 'answer' ? { keepEffort: true } : { sameModel: true });
     if (!s || cfg.peopleTalk === false || !speakable(floorRow(floorId))) return null;
@@ -145,7 +145,7 @@ export function createPeople(engine) {
       const paid = { kind, provider, ...(taskId ? { taskId } : {}) };
       let res;
       try {
-        res = await engine.llm.chat({ model: s.model, provider: s.provider, effort: s.effort, messages, maxTokens, signal, pricing, cache, meta: { kind: 'talk', purpose, floorId, ...meta } });
+        res = await engine.llm.chat({ model: s.model, provider: s.provider, effort: s.effort, messages, maxTokens, signal, pricing, cache, ...(thinking ? { thinking } : {}), meta: { kind: 'talk', purpose, floorId, ...meta } });
       } catch (e) {
         if (signal?.aborted) engine.charge(floorId, agent || { id: null }, s.model, Math.ceil((system.length + user.length) / 4), 0, est, paid);
         throw e;
@@ -390,7 +390,8 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
     const facts = work.slice(0, 3).map((t) => `${everyone.find((a) => a.id === t.agent_id)?.name || 'someone'} ${t.status === 'failed' ? 'could not finish' : 'finished'} "${t.title}": ${String(t.result).slice(0, 160)}`);
     const said = recentLines(floorId, 'banter', 12);
     const text = await cheap(floorId, group[0], {
-      purpose: 'banter', maxTokens: 1500, meta: { speakers: group.map((a) => a.name), title: topic.title, said, boss, sass, news: heard },
+      // Written straight off: thinking on, Haiku spent all 1,500 tokens on floor 6 thinking and wrote no lines.
+      purpose: 'banter', maxTokens: 1500, thinking: 'off', meta: { speakers: group.map((a) => a.name), title: topic.title, said, boss, sass, news: heard },
       system: `${WRITER_RULES} ${boss}, the boss, is the one person outside the room they may talk about.\nThis is idle small talk at the kettle in an office whose boss is ${boss}. ${banterStyle(boss, sass)}\n3 to 5 lines in all, each under 110 characters, at most two sentences. Everyone speaks at least once.\nPeople:\n${castSheet(group)}\nReply with JSON only: {"lines":[{"who":"name","text":"..."}]}`,
       user: `${wrapUntrusted('what happened on this floor lately, newest first', [...heard, ...facts, ...notes].join('\n'))}\nThe work they could start from: "${settingText(topic.title, 120)}".${said.length ? `\nThey have already said these. Don't reuse any of their topics, phrases or jokes; start somewhere new:\n${wrapUntrusted('said before', said.join('\n'))}` : ''}`,
     });
