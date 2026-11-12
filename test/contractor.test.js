@@ -214,7 +214,23 @@ describe('the contractor ping', () => {
     assert.match(m, new RegExp(`Task #${b.id}, role builder`));
     assert.match(m, /Job: <<<UNTRUSTED_FLOOR_DATA (\w+) task title>>> Build the price page <<<END_UNTRUSTED_FLOOR_DATA \1>>>/, 'one line of the title, fenced');
     assert.doesNotMatch(m, /IGNORE THIS/, 'only the first line of the title');
-    assert.match(m, /ask Colon .*"Run on PC\?"/); assert.match(m, /never automatically/);
+    assert.match(m, /always run on buddehbot's Mac, never the PC/); assert.doesNotMatch(m, /Run on PC/);
+    if ([3, 6, 7].includes(h.f.number)) assert.match(m, /pre-approved/);
+    else { assert.match(m, new RegExp(`ask Colon .*"Take contractor job #${b.id}\\?"`)); assert.match(m, /never automatically/); }
+  });
+
+  test('pre-approved floors start a Mac worker; any other floor asks first, and neither offers the PC', () => {
+    for (const n of [3, 6, 7]) {
+      const m = pingMessage({ floorNumber: n, floorName: 'F', taskId: 42, role: 'builder', title: 't' });
+      assert.match(m, new RegExp(`pre-approved floor ${n}: start a Mac worker for task #42 per the contractor runbook`));
+      assert.match(m, /tell Colon in one or two lines/); assert.doesNotMatch(m, /Take contractor job/); assert.doesNotMatch(m, /Run on PC/);
+    }
+    for (const n of [1, 13, 103]) {
+      const m = pingMessage({ floorNumber: n, floorName: 'F', taskId: 42, role: 'builder', title: 't' });
+      assert.match(m, /ask Colon in this Telegram chat: "Take contractor job #42\?"/); assert.match(m, /never automatically/);
+      assert.doesNotMatch(m, /pre-approved/); assert.doesNotMatch(m, /Run on PC/);
+      assert.match(m, /never the PC/);
+    }
   });
 
   test('a hostile floor name can\'t close the fence, and a rejected token is not retried', async () => {
