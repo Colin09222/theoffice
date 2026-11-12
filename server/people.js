@@ -359,14 +359,17 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
 
   // ---- banter ----
   // A few lines between two or three people about what really happened on the floor lately, ribbing the boss when the boss allows it (server/gossip.js).
-  // One cheap call writes the whole exchange. It stops at a count and a cost a day per floor, and BANTER=0 stops it everywhere.
+  // One cheap call writes the whole exchange. It stops at a count and a hard cost a day per floor (BANTER_USD_PER_FLOOR_DAY, $2), and BANTER=0 stops it everywhere.
   async function banter(floorId) {
     if (cfg.banter === false) return false;
     const f = floorRow(floorId);
     if (!speakable(f) || !f.name || engine.spentOver(floorId, 0)) return false;
     if (engine.modes?.closed(floorId)) return false;  // outside set hours everyone has gone home
-    if (usedToday(floorId, 'talk-banter') >= (cfg.banterPerFloorDay ?? 60)) return false;
-    if (paidToday(floorId, 'talk-banter') >= (cfg.banterUsdPerFloorDay ?? 0.1)) return false;
+    if (usedToday(floorId, 'talk-banter') >= (cfg.banterPerFloorDay ?? 600)) return false;
+    // The day's cap is hard. Paced, a floor may only be a quarter of it ahead of the clock, so a long morning of watching doesn't leave the evening silent.
+    const cap = cfg.banterUsdPerFloorDay ?? 2, paid = paidToday(floorId, 'talk-banter');
+    if (paid >= cap) return false;
+    if (cfg.banterPace !== false && paid >= cap * Math.min(1, (engine.now() - dayStart()) / 86400000 + 0.25)) return false;
     // Only finished, open work, so a line can't reach a visitor about anything else or claim something that never happened.
     const work = all(db, "SELECT t.id,t.title,t.result,t.project,t.agent_id,t.status FROM tasks t LEFT JOIN projects p ON p.floor_id=t.floor_id AND p.slug=t.project WHERE t.floor_id=? AND t.status IN ('done','review','failed') AND COALESCE(p.private,0)=0 AND (t.project!='' OR ?=0) ORDER BY t.id DESC LIMIT 6", floorId, f.default_private);
     if (!work.length) return false;
@@ -383,28 +386,38 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
     if (group.length < 2) return false;
     const boss = settingText(bossNameOf(f), 30) || 'the boss', sass = sassOn(cfg, f);
     // What a visitor can't see goes in now and then, and the lines it brings stay with the boss.
-    const news = floorGossip(db, f, { now: engine.now() });
+    const news = floorGossip(db, f, { now: engine.now(), most: 10 });
     const closed = news.some((n) => !n.open) && Math.random() < (cfg.banterClosedShare ?? 0.35);
     const heard = (closed ? news : news.filter((n) => n.open)).map((n) => n.text);
     const notes = group.flatMap((a) => notesFor(a).slice(-1).map((n) => `${a.name}'s note: ${n}`));
-    const facts = work.slice(0, 3).map((t) => `${everyone.find((a) => a.id === t.agent_id)?.name || 'someone'} ${t.status === 'failed' ? 'could not finish' : 'finished'} "${t.title}": ${String(t.result).slice(0, 160)}`);
-    const said = recentLines(floorId, 'banter', 12);
+    const facts = work.slice(0, 5).map((t) => `${everyone.find((a) => a.id === t.agent_id)?.name || 'someone'} ${t.status === 'failed' ? 'could not finish' : 'finished'} "${t.title}": ${String(t.result).slice(0, 220)}`);
+    const said = recentLines(floorId, 'banter', 20);
+    const heardSaid = overheard(floorId, f);
     const text = await cheap(floorId, group[0], {
       // Written straight off: thinking on, Haiku spent all 1,500 tokens on floor 6 thinking and wrote no lines.
-      purpose: 'banter', maxTokens: 1500, thinking: 'off', meta: { speakers: group.map((a) => a.name), title: topic.title, said, boss, sass, news: heard },
-      system: `${WRITER_RULES} ${boss}, the boss, is the one person outside the room they may talk about.\nThis is idle small talk at the kettle in an office whose boss is ${boss}. ${banterStyle(boss, sass)}\n3 to 5 lines in all, each under 110 characters, at most two sentences. Everyone speaks at least once.\nPeople:\n${castSheet(group)}\nReply with JSON only: {"lines":[{"who":"name","text":"..."}]}`,
-      user: `${wrapUntrusted('what happened on this floor lately, newest first', [...heard, ...facts, ...notes].join('\n'))}\nThe work they could start from: "${settingText(topic.title, 120)}".${said.length ? `\nThey have already said these. Don't reuse any of their topics, phrases or jokes; start somewhere new:\n${wrapUntrusted('said before', said.join('\n'))}` : ''}`,
+      purpose: 'banter', maxTokens: 1500, thinking: 'off', meta: { speakers: group.map((a) => a.name), title: topic.title, said, boss, sass, news: heard, overheard: heardSaid },
+      system: `${WRITER_RULES} ${boss}, the boss, is the one person outside the room they may talk about.\nThis is idle small talk at the kettle in an office whose boss is ${boss}. ${banterStyle(boss, sass)}\n3 to 6 lines in all, each under 110 characters, at most two sentences. Everyone speaks at least once.\nPeople:\n${castSheet(group)}\nReply with JSON only: {"lines":[{"who":"name","text":"..."}]}`,
+      user: `${wrapUntrusted('what happened on this floor lately, newest first', [...heard, ...facts, ...notes].join('\n'))}${heardSaid.length ? `\n${wrapUntrusted('what was said around the office lately, newest first (meetings and questions, not the kettle)', heardSaid.join('\n'))}` : ''}\nThe work they could start from: "${settingText(topic.title, 120)}".${said.length ? `\nThey have already said these. Don't reuse any of their topics, phrases or jokes; start somewhere new:\n${wrapUntrusted('said before', said.join('\n'))}` : ''}`,
     });
-    const lines = castLines(text, group, floorId, 'banter', 5).filter((l) => fitToSay(l.text) && !mentionsPrivate(db, floorId, '', l.text));
+    const lines = castLines(text, group, floorId, 'banter', 6).filter((l) => fitToSay(l.text) && !mentionsPrivate(db, floorId, '', l.text));
     await saySoon(floorId, lines, 'banter', topic.project, closed ? { hush: true } : {});
     return lines.length > 0;
   }
+  /** The last few open lines from meetings and questions in the last three hours, so the kettle can pick up on them. Nothing private or kept from visitors. */
+  function overheard(floorId, f) {
+    return all(db, "SELECT project, data FROM events WHERE floor_id=? AND type='talk' AND created_at>=? ORDER BY id DESC LIMIT 60", floorId, engine.now() - 3 * 3600000)
+      .map((e) => ({ project: e.project, d: JSON.parse(e.data) }))
+      .filter(({ project, d }) => ['meeting', 'ask', 'answer'].includes(d.kind) && !d.hush && (project ? !isPrivateSlug(floorId, project) : !f.default_private))
+      .slice(0, 5).map(({ d }) => `${d.fromName}: ${String(d.pub ?? d.text).slice(0, 160)}`);
+  }
   function banterTick() {
     if (engine.stopped || engine.globalPaused()) return;
-    const every = cfg.banterEveryMs ?? 180000, t = engine.now();
+    const t = engine.now();
     for (const [floorId, subs] of bus.floors || []) {
       if (!subs?.size) continue;
-      if (!lastBanter.has(floorId)) lastBanter.set(floorId, t - every + Math.min(every, 45000));
+      // Livelier with a crowd: two or more people watching hear the kettle more often.
+      const every = subs.size >= 2 ? (cfg.banterBusyEveryMs ?? 45000) : (cfg.banterEveryMs ?? 75000);
+      if (!lastBanter.has(floorId)) lastBanter.set(floorId, t - every + Math.min(every, 20000));
       if (t - lastBanter.get(floorId) < every) continue;
       lastBanter.set(floorId, t + Math.random() * every * 0.4);
       background(() => banter(floorId));

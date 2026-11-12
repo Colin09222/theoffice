@@ -250,4 +250,10 @@ It only runs while someone has the floor open, never on a paused, closed or out-
 | `BANTER=0` | on | No banter on any floor. |
 | `BANTER_SASS=0` | on | Banter everywhere stays warm and clean, whatever each boss chose. |
 | Boss's settings: "My staff can poke fun at me" | on | The same for one floor (`floors.banter_sass`). |
-| `BANTER_USD_PER_FLOOR_DAY` | 0.10 | What one floor's banter may cost in a day, on top of `BANTER_PER_FLOOR_DAY` (60 calls). |
+| `BANTER_USD_PER_FLOOR_DAY` | 2 | Hard cap on what one floor's banter may cost in a UTC day (was 0.10 until 11-11), on top of `BANTER_PER_FLOOR_DAY` (600 calls). |
+| `BANTER_PACE=0` | on | Paced, a floor may only be 25% of its day's cap ahead of the clock, so a long watched morning doesn't leave the evening silent. Off lets it spend the cap at once. |
+| `BANTER_EVERY_MS` / `BANTER_BUSY_EVERY_MS` | 75000 / 45000 | Gap between exchanges with one viewer / with two or more. Nobody watching means no calls at all. |
+
+Livelier from 11-11 (Colon: $2/floor/day, more chat when watched): 3 to 6 lines an exchange, first one about 20 s after someone opens the floor, and the
+prompt carries more of what happened: up to 10 news items, 5 finished jobs, and the last few open lines from meetings and questions in the past
+three hours (never private projects or hushed lines). Still the cheap talk model with thinking off; still silent on a paused, closed, filler or out-of-money floor.

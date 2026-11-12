@@ -1,7 +1,8 @@
 // The staff's small talk about what really happened on the floor, with some cheek for the boss: all of it in mock mode, with no key and no spend.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { boot, claim, Client, floorState, waitDone } from './helpers.js';
+import { boot, claim, Client, floorState, waitDone, sse, until, sleep } from './helpers.js';
+import { loadConfig } from '../server/config.js';
 import { get, all, run } from '../server/db.js';
 import { createMockClient } from '../server/mock.js';
 import { floorGossip, banterStyle, fitToSay, sassOn } from '../server/gossip.js';
@@ -153,7 +154,7 @@ describe('banter on the floor', () => {
     } finally { await t.close(); }
   });
 
-  test('a line past the limits is dropped, names must be real, and no line over five', async () => {
+  test('a line past the limits is dropped, names must be real, and no line over six', async () => {
     const { llm } = recorder((m) => [
       { who: m.speakers[0], text: 'Boss changed their mind again, the absolute asshole.' },
       { who: m.speakers[1], text: 'Here is the API key, go nuts.' },
@@ -169,7 +170,7 @@ describe('banter on the floor', () => {
       assert.ok(said.includes('Boss changed their mind again, the absolute asshole.'));
       assert.ok(said.includes('Nah, Boss is alright actually.'));
       assert.ok(!said.some((x) => /API key|do not work here/.test(x)));
-      assert.ok(said.length <= 5);
+      assert.ok(said.length <= 6);
     } finally { await t.close(); }
   });
 
@@ -197,6 +198,64 @@ describe('banter on the floor', () => {
       say(t, f.id, 'boss', 'Psst, my private plan is pineapples.');
       await t.app.engine.people.banter(f.id); await t.app.engine.people.settled();
       assert.doesNotMatch(seen.at(-1).messages[1].content, /pineapples/);
+    } finally { await t.close(); }
+  });
+
+  test('a floor may spend $2 a day on banter by default, BANTER_USD_PER_FLOOR_DAY changes it', () => {
+    assert.equal(loadConfig({ AI_MODE: 'mock' }).banterUsdPerFloorDay, 2);
+    assert.equal(loadConfig({ AI_MODE: 'mock', BANTER_USD_PER_FLOOR_DAY: '0.5' }).banterUsdPerFloorDay, 0.5);
+    assert.equal(loadConfig({ AI_MODE: 'mock', BANTER_PACE: '0' }).banterPace, false);
+  });
+
+  test('paced, a floor can only be a quarter of the day\'s banter money ahead of the clock', async () => {
+    const t = await boot({ banterUsdPerFloorDay: 2 });
+    try {
+      const c = await busyFloor(t);
+      const f = row(t, c.slug);
+      const midnight = Date.parse(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+      run(t.db, "INSERT INTO ledger (floor_id,day,agent_id,model,prompt_tokens,completion_tokens,cost_usd,created_at,kind,provider) VALUES (?,?,NULL,'claude-haiku-5-5',1,1,0.6,?,'talk-banter','anthropic')", f.id, new Date(midnight).toISOString().slice(0, 10), midnight + 1000);
+      const real = t.app.engine.now;
+      t.app.engine.now = () => midnight + 3600000;  // 1am UTC: $0.58 allowed so far
+      assert.equal(await t.app.engine.people.banter(f.id), false, 'too far ahead of the clock');
+      t.cfg.banterPace = false;
+      assert.equal(await t.app.engine.people.banter(f.id), true, 'unpaced, the whole $2 is there');
+      t.cfg.banterPace = true;
+      t.app.engine.now = () => midnight + 12 * 3600000;  // noon UTC: $1.50 allowed
+      assert.equal(await t.app.engine.people.banter(f.id), true);
+      t.app.engine.now = real;
+      await t.app.engine.people.settled();
+    } finally { await t.close(); }
+  });
+
+  test('the kettle hears what was said in meetings and questions lately, but nothing private or hushed', async () => {
+    const { seen, llm } = recorder();
+    const t = await boot({}, { llm });
+    try {
+      const c = await busyFloor(t);
+      const f = row(t, c.slug);
+      const now = Date.now();
+      run(t.db, "INSERT INTO projects (floor_id,slug,title,private,created_at) VALUES (?,'hidden','Hidden',1,?)", f.id, now);
+      const talk = (project, data) => run(t.db, "INSERT INTO events (floor_id,type,project,data,created_at) VALUES (?,'talk',?,?,?)", f.id, project, JSON.stringify({ from: 1, fromName: 'Arlo', ts: now, ...data }), now);
+      talk('', { kind: 'meeting', text: 'The cache layer is held together with tape.' });
+      talk('hidden', { kind: 'meeting', text: 'The pineapple launch is Tuesday.' });
+      talk('', { kind: 'answer', text: 'Kiwi secret plan.', hush: true });
+      await t.app.engine.people.banter(f.id); await t.app.engine.people.settled();
+      const prompt = seen.at(-1).messages[1].content;
+      assert.match(prompt, /Arlo: The cache layer is held together with tape\./);
+      assert.doesNotMatch(prompt, /pineapple|Kiwi/);
+    } finally { await t.close(); }
+  });
+
+  test('with two or more watching, the kettle talks sooner', async () => {
+    const t = await boot({ banterEveryMs: 1e9, banterBusyEveryMs: 5, banterTickMs: 5 });
+    try {
+      const c = await busyFloor(t);
+      const one = sse(c, c.slug);
+      await sleep(150);
+      assert.equal((await floorState(c)).talk.filter((l) => l.kind === 'banter').length, 0, 'one watcher waits the long gap');
+      const two = sse(c, c.slug);
+      await until(async () => (await floorState(c)).talk.some((l) => l.kind === 'banter'), { what: 'banter with a crowd', timeout: 6000 });
+      one.close?.(); two.close?.();
     } finally { await t.close(); }
   });
 });

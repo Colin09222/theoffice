@@ -220,9 +220,11 @@ export function loadConfig(env = process.env, overrides = {}) {
     listFilesMaxChars: cap(env.LIST_FILES_MAX_CHARS, 12000),
     talkGapMs: num(env.TALK_GAP_MS, env.AI_MODE === 'mock' ? 1 : 2200),
     meetingGapMs: num(env.MEETING_GAP_MS, env.AI_MODE === 'mock' ? 0 : 45000), meetingsPerFloorDay: num(env.MEETINGS_PER_FLOOR_DAY, 40),
-    banterEveryMs: num(env.BANTER_EVERY_MS, 180000), banterTickMs: num(env.BANTER_TICK_MS, 20000), banterPerFloorDay: num(env.BANTER_PER_FLOOR_DAY, 60),
-    // Small talk building-wide (BANTER=0 stops it), whether it may rib the boss (BANTER_SASS=0, and each boss's own setting), and what one floor's banter may cost in a day.
-    banter: env.BANTER !== '0', banterSass: env.BANTER_SASS !== '0', banterUsdPerFloorDay: num(env.BANTER_USD_PER_FLOOR_DAY, 0.1),
+    // Small talk only runs while someone has the floor open: one exchange about every BANTER_EVERY_MS, sooner (BANTER_BUSY_EVERY_MS) once two or more are watching.
+    banterEveryMs: num(env.BANTER_EVERY_MS, 75000), banterBusyEveryMs: num(env.BANTER_BUSY_EVERY_MS, 45000), banterTickMs: num(env.BANTER_TICK_MS, 15000), banterPerFloorDay: num(env.BANTER_PER_FLOOR_DAY, 600),
+    // Small talk building-wide (BANTER=0 stops it), whether it may rib the boss (BANTER_SASS=0, and each boss's own setting), and the hard cap on what one floor's banter may cost in a day.
+    // BANTER_PACE=0 lets a floor spend its whole day's allowance at once; by default it may only be a quarter ahead of the clock (UTC day), so an evening still has some left.
+    banter: env.BANTER !== '0', banterSass: env.BANTER_SASS !== '0', banterUsdPerFloorDay: num(env.BANTER_USD_PER_FLOOR_DAY, 2), banterPace: env.BANTER_PACE !== '0',
     asksPerTask: num(env.ASKS_PER_TASK, 4), asksPerFloorDay: num(env.ASKS_PER_FLOOR_DAY, 80),
     // The help line: a manager can ask the owner's assistant for guidance. No credential is involved: the assistant answers through scripts/admin.mjs or the admin view.
     helpEnabled: env.HELP_ENABLED !== '0',
