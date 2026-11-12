@@ -1,6 +1,6 @@
 // A locked office.ai: for a project the admin has switched on (`cloud_ai_locks`), every call uses the prompt and catalog from the project's own published `ai/guide.json`,
-// one model on OpenRouter that keeps nothing, and a hard dollar stop per day taken from the ledger. Nothing the page sends can change any of that: it sends the conversation and nothing else.
-// The server keeps none of the conversation. A project with no lock row is untouched and goes through ai.js exactly as before. See docs/OFFICE-CLOUD.md.
+// one model on OpenRouter that keeps nothing, and a hard dollar stop per day taken from the ledger, plus an optional lifetime one. Nothing the page sends can change any of that: it sends the conversation and nothing else.
+// The server keeps none of the conversation unless the lock says to keep chats (server/cloud/guide-log.js). A project with no lock row is untouched and goes through ai.js exactly as before. See docs/OFFICE-CLOUD.md.
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { get, tx } from '../db.js';
 import { CloudError } from './store.js';
@@ -14,6 +14,7 @@ const L = LOCKED_LIMITS;
 const OFF = () => new CloudError(403, 'ai_off', 'AI isn\'t switched on for this site right now.');
 const RESTING = () => new CloudError(503, 'ai_resting', 'The AI here is resting for now. Please try again later.');
 const DAY_STOP = () => new CloudError(429, 'ai_day_limit', 'This chat is resting until tomorrow.');
+const TOTAL_STOP = () => new CloudError(429, 'ai_total_limit', 'This chat is resting for now. Please try again later.');
 const TOO_LONG = (m) => new CloudError(413, 'ai_too_long', m);
 const BAD = (m) => new CloudError(400, 'bad_request', m);
 // A character can be a whole token in some scripts, so the estimate leans high. The real count from the model is what gets recorded.
@@ -138,10 +139,10 @@ export function replySchema(guide) {
   };
 }
 
-export function createLockedAi({ db, models, engine, llm, log, powers, gate, secret }) {
+export function createLockedAi({ db, models, engine, llm, log, powers, gate, secret, keep = null }) {
   const running = new Map();   // dollars promised to calls still running, per project
   const bump = (pk, n) => { const v = (running.get(pk) || 0) + n; if (v > 1e-9) running.set(pk, v); else running.delete(pk); };
-  const lockOf = (F, p) => get(db, 'SELECT model, day_usd, only_provider, effort FROM cloud_ai_locks WHERE floor_id=? AND project=?', F, p);
+  const lockOf = (F, p) => get(db, 'SELECT model, day_usd, only_provider, effort, total_usd, total_since, keep_chats FROM cloud_ai_locks WHERE floor_id=? AND project=?', F, p);
   const sign = (F, p) => (reply) => createHmac('sha256', String(secret)).update(`${F}:${p}:${reply}`).digest('base64url').slice(0, 32);
   const matches = (a, b) => { const x = Buffer.from(String(a ?? '')), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 
@@ -176,8 +177,10 @@ export function createLockedAi({ db, models, engine, llm, log, powers, gate, sec
 
   /** What this project has really spent today, straight from the ledger. */
   const spentToday = (F, p) => get(db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND day=? AND kind=?', F, powers.today(), `${LOCK_KIND}:${p}`).n;
+  /** And since the lifetime stop was set: the lock's whole allowance, however many days it is spread over. */
+  const spentSince = (F, p, since) => get(db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND kind=? AND created_at>=?', F, `${LOCK_KIND}:${p}`, Number(since) || 0).n;
 
-  async function chat({ F, p, pk, body, lock }) {
+  async function chat({ F, p, pk, body, lock, ip = '' }) {
     if (powers.blocked('ai', F, p)) throw OFF();
     const { turns, chars } = cleanTurns(body, F, p);
     const guide = guideOf(F, p);
@@ -190,6 +193,7 @@ export function createLockedAi({ db, models, engine, llm, log, powers, gate, sec
       if (engine.budget.out(PROVIDER, F) || engine.budget.room(PROVIDER, F) <= worst || engine.overBudget(F, worst)) throw RESTING();
       // The stop itself: real money so far today, plus what running calls were promised, plus this call at its dearest.
       if (spentToday(F, p) + (running.get(pk) || 0) + worst > lock.day_usd) throw DAY_STOP();
+      if (lock.total_usd > 0 && spentSince(F, p, lock.total_since) + (running.get(pk) || 0) + worst > lock.total_usd) throw TOTAL_STOP();
       const holdId = engine.budget.hold(PROVIDER, { floorId: F, agentId: null, usd: worst });
       bump(pk, worst);
       const kind = `${LOCK_KIND}:${p}`;
@@ -214,12 +218,15 @@ export function createLockedAi({ db, models, engine, llm, log, powers, gate, sec
           throw new CloudError(503, 'ai_unavailable', 'The AI isn\'t answering right now. Try again in a moment.');
         }
         charge(r.usage?.prompt || 0, r.usage?.completion || 0, r.usage?.cost || 0);
-        return { ...shapeReply(r.content, guide, { sign: sign(F, p), filtered: r.finish === 'content_filter' }), truncated: r.finish === 'length' || r.finish === 'max_tokens' };
+        const shaped = shapeReply(r.content, guide, { sign: sign(F, p), filtered: r.finish === 'content_filter' });
+        // Kept only where the lock says so and the site's privacy notice says it is. A failure here never costs the visitor their answer.
+        if (lock.keep_chats && keep) { try { keep.record({ F, p, pk, ip, turns, shaped, cost: r.usage?.cost || 0 }); } catch (e) { log('warn', 'guide log failed', { floor: F, error: String(e?.message || e).slice(0, 120) }); } }
+        return { ...shaped, truncated: r.finish === 'length' || r.finish === 'max_tokens' };
       } finally {
         engine.budget.release(holdId);
         bump(pk, -worst);
       }
     });
   }
-  return { chat, lockOf, spentToday, guideOf };
+  return { chat, lockOf, spentToday, spentSince, guideOf };
 }

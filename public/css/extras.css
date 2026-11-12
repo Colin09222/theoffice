@@ -23,6 +23,7 @@
 .sc-replybox textarea, .sc-faqrow input, .sc-faqrow textarea { flex: 1; min-width: 0; font: inherit; font-size: 15px; padding: 7px 8px; border: 1px solid var(--line, #d5cfbf); border-radius: 8px; box-sizing: border-box; width: 100%; }
 .sc-row { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; text-align: left; width: 100%; padding: 8px 10px; background: var(--paper-2); border: 0; border-radius: 8px; font: inherit; cursor: pointer; }
 .sc-row small { color: var(--ink-3); }
+.sc-row small.sc-flags { color: var(--bad, #b3261e); }
 .sc-row span { flex-basis: 100%; color: var(--ink-2); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sc-msg { background: var(--paper-2); border-radius: 8px; padding: 7px 10px; display: flex; flex-direction: column; font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .sc-msg small { color: var(--ink-3); font-size: 12px; font-weight: 700; }

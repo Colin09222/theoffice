@@ -11,6 +11,7 @@ import { scrapeHtml } from './scrape.js';
 import { slugPattern } from '../workspace.js';
 import { cleanText, oneLine, parseAddress } from '../mail-sanitize.js';
 import { wrapUntrusted, mentionsPrivate } from '../tools.js';
+import { guideLogCommand, GUIDE_KIND } from './guide-log.js';
 
 const CLIENT = join(dirname(fileURLToPath(import.meta.url)), '../app-client');
 /** The bubble, on every page with the chat on. Tiny, and it waits for the page to finish before it does anything. */
@@ -61,15 +62,25 @@ const buildingPaused = (db) => !!settingsOf(db, ...BUILDING)?.paused;
 export function chatState(db, cfg, f, pr) {
   const r = settingsOf(db, f.id, pr.slug);
   const choice = r?.enabled === null || r?.enabled === undefined ? null : !!r.enabled;
-  const stopped = cfg?.officeChatEnabled === false || buildingPaused(db) ? 'building' : r?.paused ? 'paused' : null;
+  // A project the admin let through stays on while the rest of the building is paused.
+  const stopped = cfg?.officeChatEnabled === false || (buildingPaused(db) && !r?.exempt) ? 'building' : r?.paused ? 'paused' : null;
   const wanted = choice ?? chatDefaultOn(f, pr);
-  return { on: wanted && !stopped && !pr.private, wanted, stopped, boss: choice, private: !!pr.private };
+  return { on: wanted && !stopped && !pr.private, wanted, stopped, boss: choice, private: !!pr.private, exempt: !!r?.exempt };
 }
 function upsertSettings(db, F, p, column, value, t) {
   run(db, `INSERT INTO chat_settings (floor_id,project,${column},updated_at) VALUES (?,?,?,?) ON CONFLICT(floor_id,project) DO UPDATE SET ${column}=excluded.${column}, updated_at=excluded.updated_at`, F, p, value, t);
 }
 export const setChatPaused = (db, F, p, on, t = Date.now()) => upsertSettings(db, F, p, 'paused', on ? 1 : 0, t);
-export const setChatBuildingPaused = (db, on, t = Date.now()) => setChatPaused(db, ...BUILDING, on, t);
+export const setChatExempt = (db, F, p, on, t = Date.now()) => upsertSettings(db, F, p, 'exempt', on ? 1 : 0, t);
+// Pausing the whole building is the emergency stop, so it takes back every exception as well.
+export const setChatBuildingPaused = (db, on, t = Date.now()) => tx(db, () => {
+  setChatPaused(db, ...BUILDING, on, t);
+  if (on) run(db, 'UPDATE chat_settings SET exempt=0 WHERE floor_id>0');
+});
+
+// What the boss reads about a conversation the automated guide had. Words only: a boss never sees a dollar figure.
+const BOSS_FLAGS = { crisis: 'may be in crisis', jailbreak: 'tried to get round the rules', 'off-topic': 'kept asking off-topic', 'rule-pushing': 'kept asking for doses or advice', long: 'very long', 'busy-visitor': 'very busy visitor', costly: 'heavy use' };
+const bossFlags = (raw) => String(raw || '').split(',').filter((x) => BOSS_FLAGS[x]).map((x) => BOSS_FLAGS[x]);
 
 // ---- what goes into a page ----
 /** The page with the widget's one script added, before its closing body tag when that really is the end of it, or else at the very end. Twice is the same as once. */
@@ -261,7 +272,7 @@ export function chatAdminCommand(db, cfg, rest, { die, floorArg, lookupLabel, pr
     if (rest.includes('--json')) { print(JSON.stringify(report, null, 2)); return true; }
     print(`Website chat: ${!report.on ? 'switched off in the settings' : report.buildingPaused ? 'paused for the whole building' : 'on'}.`);
     if (!report.projects.length) print('No project has used it yet or has a switch set.');
-    for (const x of report.projects) print(`${nameOf(x)}: ${x.stopped === 'paused' ? 'PAUSED' : x.on ? 'on' : x.private ? 'off (private)' : 'off'}, ${x.conversations} conversation${x.conversations === 1 ? '' : 's'}, ${x.waiting} waiting for the boss`);
+    for (const x of report.projects) print(`${nameOf(x)}: ${x.stopped === 'paused' ? 'PAUSED' : x.on ? 'on' : x.private ? 'off (private)' : 'off'}, ${x.conversations} conversation${x.conversations === 1 ? '' : 's'}, ${x.waiting} waiting for the boss${x.exempt ? ', let through the building pause' : ''}`);
     return true;
   }
   if (sub === 'pause' || sub === 'resume') {
@@ -269,10 +280,13 @@ export function chatAdminCommand(db, cfg, rest, { die, floorArg, lookupLabel, pr
     if (rest.includes('--all')) { setChatBuildingPaused(db, on); print(`Website chat ${on ? 'paused' : 'back on'} for the whole building.`); return true; }
     if (!given) die('Name a project, or use --all for the whole building.');
     const p = findProject();
-    setChatPaused(db, p.floorId, p.project, on);
-    print(`Website chat ${on ? 'paused' : 'back on'} for ${nameOf(p)}.`);
+    // Resuming one project while the building is paused lets just that one through; pausing it takes that back.
+    const through = !on && buildingPaused(db);
+    tx(db, () => { setChatPaused(db, p.floorId, p.project, on); setChatExempt(db, p.floorId, p.project, through); });
+    print(`Website chat ${on ? 'paused' : 'back on'} for ${nameOf(p)}${through ? ' (the rest of the building stays paused)' : ''}.`);
     return true;
   }
+  if (sub === 'log') return guideLogCommand(db, rest, { die, floorArg, print });
   return false;
 }
 
@@ -469,8 +483,8 @@ export function createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, eng
     const byslug = new Map(projects.map((x) => [x.slug, x]));
     const waiting = all(db, `SELECT q.id, q.conversation_id, q.project, q.question, q.reason, q.created_at, c.email FROM chat_questions q JOIN chat_conversations c ON c.id=q.conversation_id WHERE q.floor_id=? AND q.status='waiting' ORDER BY q.id DESC LIMIT 100`, f.id)
       .map((r) => ({ id: r.id, conversation: r.conversation_id, project: r.project, projectTitle: titleOf(byslug, r.project), question: r.question, reason: r.reason, at: r.created_at, email: r.email }));
-    const conversations = all(db, `SELECT c.id, c.project, c.status, c.email, c.unread, c.last_at, (SELECT text FROM chat_messages m WHERE m.conversation_id=c.id AND m.role='visitor' ORDER BY m.id DESC LIMIT 1) preview, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id=c.id) n FROM chat_conversations c WHERE c.floor_id=? ORDER BY c.last_at DESC LIMIT 60`, f.id)
-      .map((c) => ({ id: c.id, project: c.project, projectTitle: titleOf(byslug, c.project), status: c.status, email: c.email, unread: !!c.unread, at: c.last_at, preview: oneLine(c.preview || '', 200), messages: c.n }));
+    const conversations = all(db, `SELECT c.id, c.project, c.status, c.email, c.unread, c.last_at, c.kind, c.flags, (SELECT text FROM chat_messages m WHERE m.conversation_id=c.id AND m.role='visitor' ORDER BY m.id DESC LIMIT 1) preview, (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id=c.id) n FROM chat_conversations c WHERE c.floor_id=? ORDER BY c.last_at DESC LIMIT 60`, f.id)
+      .map((c) => ({ id: c.id, project: c.project, projectTitle: titleOf(byslug, c.project), status: c.status, email: c.email, unread: !!c.unread, at: c.last_at, preview: oneLine(c.preview || '', 200), messages: c.n, guide: c.kind === GUIDE_KIND, flags: bossFlags(c.flags) }));
     return {
       waiting, conversations, emailOn: !!engine.mail?.ready?.(),
       projects: projects.map((x) => { const s = state(f, x); return { slug: x.slug, title: x.title, kind: x.kind, on: s.on, wanted: s.wanted, stopped: s.stopped, private: s.private, faq: faqFrom(settingsOf(db, f.id, x.slug)) }; }),
@@ -481,13 +495,15 @@ export function createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, eng
     if (!c) return null;
     if (c.unread) run(db, 'UPDATE chat_conversations SET unread=0 WHERE id=?', c.id);
     return {
-      id: c.id, project: c.project, status: c.status, email: c.email, at: c.last_at,
+      id: c.id, project: c.project, status: c.status, email: c.email, at: c.last_at, guide: c.kind === GUIDE_KIND, flags: bossFlags(c.flags),
       messages: all(db, 'SELECT id, role, text, created_at FROM chat_messages WHERE conversation_id=? ORDER BY id', c.id).map((m) => ({ id: m.id, role: m.role, text: m.text, at: m.created_at })),
     };
   }
   async function bossReply(f, id, text) {
     const c = get(db, 'SELECT * FROM chat_conversations WHERE id=? AND floor_id=?', id, f.id);
     if (!c) return null;
+    // The automated guide's visitors can't see a reply: its page never asks for one.
+    if (c.kind === GUIDE_KIND) throw new CloudError(409, 'guide_conversation', 'This was the automated guide on your site. Visitors there can\'t see replies.');
     const said = cleanText(text, L.replyChars + 1).trim();
     if (!said || said.length > L.replyChars) throw new CloudError(400, 'bad_reply', `A reply is 1 to ${L.replyChars} characters.`);
     const t = now();

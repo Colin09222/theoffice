@@ -48,7 +48,8 @@ function conversationsView(page, wrap, v) {
   if (!v.conversations.length) { wrap.append(h('p.sc-empty', {}, 'No conversations yet.')); return; }
   for (const c of v.conversations) {
     const open = h('button.sc-row', { type: 'button', 'data-chat-conversation': c.id, onclick: () => showConversation(page, wrap, v, c.id) },
-      h('b', {}, c.projectTitle), h('small', {}, ` ${timeAgo(c.at)}${c.status === 'waiting' ? ' · waiting' : ''}`), h('span', {}, c.preview || '(nothing yet)'));
+      h('b', {}, c.projectTitle), h('small', {}, ` ${timeAgo(c.at)}${c.status === 'waiting' ? ' · waiting' : ''}${c.guide ? ' · automated guide' : ''}`),
+      c.flags?.length ? h('small.sc-flags', {}, ` · ${c.flags.join(', ')}`) : null, h('span', {}, c.preview || '(nothing yet)'));
     wrap.append(open);
   }
 }
@@ -60,9 +61,11 @@ async function showConversation(page, wrap, v, id) {
   clear(wrap);
   wrap.append(h('button.btn.ghost.small', { type: 'button', onclick: () => loadChat(page) }, 'Back'));
   if (c.email) wrap.append(h('p.sc-email', {}, `Left an address: ${c.email}`));
-  const names = { visitor: 'Visitor', ai: 'AI assistant', boss: 'You' };
+  if (c.guide) wrap.append(h('p.sc-email', {}, `Your site's automated guide. Kept for 30 days so you can see how it's used.${c.flags?.length ? ` Flagged: ${c.flags.join(', ')}.` : ''}`));
+  const names = { visitor: 'Visitor', ai: c.guide ? 'Automated guide' : 'AI assistant', boss: 'You' };
   for (const m of c.messages) wrap.append(h(`div.sc-msg.${m.role}`, {}, h('small', {}, names[m.role] || m.role), h('span', {}, m.text)));
-  wrap.append(reply(page, c.id, () => showConversation(page, wrap, v, id)));
+  // The guide's visitors never see a reply, so there is nothing to send.
+  if (!c.guide) wrap.append(reply(page, c.id, () => showConversation(page, wrap, v, id)));
 }
 
 function faqView(page, wrap, v) {
