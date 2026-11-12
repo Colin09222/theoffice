@@ -44,7 +44,8 @@ function talkStep(meta) {
     case 'meeting': return JSON.stringify({ lines: meta.trigger === 'plan'
       ? [{ who: a, text: `"${meta.titles[0]}" goes first. Who is nervous?` }, { who: b, text: `Not me. Ask me again once "${meta.titles.at(-1)}" is on my desk.` }]
       : [{ who: b, text: `"${meta.titles.at(-1)}" is with you now.` }, { who: a, text: `Then I'll read the report before I say anything.` }] });
-    case 'banter': return JSON.stringify({ lines: [{ who: a, text: `I can't stop thinking about "${meta.title}" (${meta.said?.length ?? 0}).` }, { who: b, text: `You said that about the last one (${meta.said?.length ?? 0}).` }] });
+    case 'banter': return JSON.stringify({ lines: [{ who: a, text: `I can't stop thinking about "${meta.title}" (${meta.said?.length ?? 0}).` }, { who: b, text: `You said that about the last one (${meta.said?.length ?? 0}).` },
+      ...(meta.sass ? [{ who: meta.speakers.at(-1), text: `${meta.boss} will change their mind again by lunch (${meta.said?.length ?? 0}).` }] : [])] });
     default: return '';
   }
 }

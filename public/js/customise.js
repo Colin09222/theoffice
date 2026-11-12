@@ -45,7 +45,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
   let cleanup = () => {}, saved = false, timer = null;
   const staffDraft = (a) => ({ id: a.id, role: a.role, name: a.name, title: a.title, persona: { vibe: settings(a).vibe || '', notes: settings(a).notes || '', focus: settings(a).focus || '' }, look: { ...a.look } });
   const draft = {
-    name: s.floor.name, tagline: s.floor.tagline, colors: { ...s.floor.colors }, decor: { ...DEFAULT_DECOR, ...s.floor.decor }, publicChat: s.floor.publicChat, defaultPrivate: s.floor.defaultPrivate,
+    name: s.floor.name, tagline: s.floor.tagline, colors: { ...s.floor.colors }, decor: { ...DEFAULT_DECOR, ...s.floor.decor }, publicChat: s.floor.publicChat, defaultPrivate: s.floor.defaultPrivate, banterSass: s.floor.banterSass !== false,
     boss: { name: s.floor.boss.name, look: { ...s.floor.boss.look } },
     identity: { about: '', tone: '', rules: '', avoid: '', routing: {}, ...(s.identity || {}) },
     staff: s.agents.map(staffDraft),
@@ -76,7 +76,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
         // The hours have their own route: they start or stop the team working on its own, and the chat gets a line about it.
         if (JSON.stringify(work) !== workBefore) await api(`/floors/${page.slug}/work-mode`, { method: 'POST', body: work });
         if (daily.changed()) await api(`/floors/${page.slug}/daily`, { method: 'POST', body: daily.value() });
-        await api(`/floors/${page.slug}/customise`, { method: 'POST', body: { name: draft.name, tagline: draft.tagline, colors: draft.colors, decor: draft.decor, publicChat: draft.publicChat, defaultPrivate: draft.defaultPrivate, boss: draft.boss, identity: draft.identity, staff } });
+        await api(`/floors/${page.slug}/customise`, { method: 'POST', body: { name: draft.name, tagline: draft.tagline, colors: draft.colors, decor: draft.decor, publicChat: draft.publicChat, defaultPrivate: draft.defaultPrivate, banterSass: draft.banterSass, boss: draft.boss, identity: draft.identity, staff } });
         saved = true; toast('Saved'); close();
       } catch (x) { toast(x.message, 'bad'); }
     };
@@ -128,6 +128,7 @@ export function openCustomisePanel(page, tab = 'vibe', agentId) {
           routes.length ? h('div.stack', {}, ...routes.map(([k, w]) => h('div.field', {}, h('span', {}, `${w.label} go to`), chips(w.roles, draft.identity.routing[k] || w.roles[0], (v) => { draft.identity.routing[k] = v; }, `${w.label} go to`, Object.fromEntries(w.roles.map((r) => [r, titleOf(r)])))))) : h('small.field-hint', {}, 'Hire a Marketer, Analyst or Illustrator and you can choose who gets the words, facts and looks.'),
           h('small.field-hint', {}, 'These shape how your staff write. They can\'t change the building\'s rules, what anyone can buy, or anything on another floor.')),
         h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.publicChat, onchange: (e) => { draft.publicChat = e.target.checked; } }), h('span', {}, 'Visitors can read my chat with the manager. Private project names are hidden, but anything else said about them isn\'t')),
+        h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.banterSass, onchange: (e) => { draft.banterSass = e.target.checked; } }), h('span', {}, 'My staff can poke fun at me in their small talk')),
         h('label.toggle', {}, h('input', { type: 'checkbox', checked: draft.defaultPrivate, onchange: (e) => { draft.defaultPrivate = e.target.checked; } }), h('span', {}, 'New projects start private')),
         h('button.btn.ghost.wide', { type: 'button', onclick: async () => { try { await api('/logout', { method: 'POST' }); await refreshMe(); close(); window.officeGo('/'); } catch (e) { toast(e.message, 'bad'); } } }, 'Sign out of this floor')));
     };
