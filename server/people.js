@@ -12,7 +12,7 @@ import { talkLine } from './talk.js';
 import { settingText } from './brief.js';
 import { scrub } from './llm.js';
 import { routeFor, overFloor } from './config.js';
-import { floorGossip, banterStyle, bossNameOf, sassOn, fitToSay } from './gossip.js';
+import { floorGossip, banterStyle, bossNameOf, sassOn, fitToSay, quotesHonest } from './gossip.js';
 
 const MEMORY_KEEP = 24, MEMORY_SHOWN = 8, NOTE_CHARS = 170;
 // An answer to a colleague is a few sentences, so the role's own model gets room to think and write that, not the room it has for a whole job, and no more than high effort.
@@ -388,7 +388,8 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
     // What a visitor can't see goes in now and then, and the lines it brings stay with the boss.
     const news = floorGossip(db, f, { now: engine.now(), most: 10 });
     const closed = news.some((n) => !n.open) && Math.random() < (cfg.banterClosedShare ?? 0.35);
-    const heard = (closed ? news : news.filter((n) => n.open)).map((n) => n.text);
+    const told = closed ? news : news.filter((n) => n.open);
+    const heard = told.map((n) => n.text);
     const notes = group.flatMap((a) => notesFor(a).slice(-1).map((n) => `${a.name}'s note: ${n}`));
     const facts = work.slice(0, 5).map((t) => `${everyone.find((a) => a.id === t.agent_id)?.name || 'someone'} ${t.status === 'failed' ? 'could not finish' : 'finished'} "${t.title}": ${String(t.result).slice(0, 220)}`);
     const said = recentLines(floorId, 'banter', 20);
@@ -399,7 +400,9 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
       system: `${WRITER_RULES} ${boss}, the boss, is the one person outside the room they may talk about.\nThis is idle small talk at the kettle in an office whose boss is ${boss}. ${banterStyle(boss, sass)}\n3 to 6 lines in all, each under 110 characters, at most two sentences. Everyone speaks at least once.\nPeople:\n${castSheet(group)}\nReply with JSON only: {"lines":[{"who":"name","text":"..."}]}`,
       user: `${wrapUntrusted('what happened on this floor lately, newest first', [...heard, ...facts, ...notes].join('\n'))}${heardSaid.length ? `\n${wrapUntrusted('what was said around the office lately, newest first (meetings and questions, not the kettle)', heardSaid.join('\n'))}` : ''}\nThe work they could start from: "${settingText(topic.title, 120)}".${said.length ? `\nThey have already said these. Don't reuse any of their topics, phrases or jokes; start somewhere new:\n${wrapUntrusted('said before', said.join('\n'))}` : ''}`,
     });
-    const lines = castLines(text, group, floorId, 'banter', 6).filter((l) => fitToSay(l.text) && !mentionsPrivate(db, floorId, '', l.text));
+    // Only the boss's real words, as given above, may go in quote marks next to the boss.
+    const honest = { boss, bossSaid: told.map((n) => n.bossSaid).filter(Boolean), titles: work.map((t) => t.title), known: [...heard, ...facts, ...heardSaid] };
+    const lines = castLines(text, group, floorId, 'banter', 6).filter((l) => fitToSay(l.text) && quotesHonest(l.text, honest) && !mentionsPrivate(db, floorId, '', l.text));
     await saySoon(floorId, lines, 'banter', topic.project, closed ? { hush: true } : {});
     return lines.length > 0;
   }

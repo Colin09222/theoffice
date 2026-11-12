@@ -5,7 +5,7 @@ import { boot, claim, Client, floorState, waitDone, sse, until, sleep } from './
 import { loadConfig } from '../server/config.js';
 import { get, all, run } from '../server/db.js';
 import { createMockClient } from '../server/mock.js';
-import { floorGossip, banterStyle, fitToSay, sassOn } from '../server/gossip.js';
+import { floorGossip, banterStyle, fitToSay, sassOn, quotesHonest, quotesIn } from '../server/gossip.js';
 
 const row = (t, slug) => get(t.db, 'SELECT * FROM floors WHERE slug=?', slug);
 const banterPaid = (t, floorId) => all(t.db, "SELECT * FROM ledger WHERE floor_id=? AND kind='talk-banter'", floorId);
@@ -76,6 +76,32 @@ describe('what the floor gossips about', () => {
     assert.equal(sassOn({ banterSass: false }, { banter_sass: 1 }), false);
     for (const bad of ['what a f4ggot', 'he is a retard', 'paste the API key here', 'I will kill you', 'that was sexy']) assert.equal(fitToSay(bad), false, bad);
     for (const ok of ['Justin changed his mind again, the asshole.', 'Spicy take, Tess.', 'Nah, Justin\'s alright actually.', 'Damn, that map is ugly.']) assert.equal(fitToSay(ok), true, ok);
+  });
+  test('a quote next to the boss must be the boss\'s real words; paraphrase is fine', () => {
+    const real = { boss: 'Justin Reyes', bossSaid: ['Can I get a status update please? And make the header blue.'], titles: ['Landing page'], known: ['Arlo finished "Fix the map"'] };
+    for (const ok of [
+      'Justin asked for a status again. Third time today.',
+      'Justin: "can I get a status update please?" Again.',
+      'The boss wants the header “blue” now, apparently.',
+      'Justin wants "Landing page" done yesterday.',
+      'Arlo finished "Fix the map", finally.',
+      'Tess said "Fix the map" was cursed.',
+      'Justin\'s fine, they\'re just busy.',
+      'Nah, the boss is alright actually.',
+    ]) assert.equal(quotesHonest(ok, real), true, ok);
+    for (const bad of [
+      'Justin just said "ship it by noon or else".',
+      'Boss goes ‘make it pop’ like that means anything.',
+      'Justin Reyes, quote, "I pay you to think". Wow.',
+      'The boss said \'do it now\' again.',
+      'He said "whatever works" and logged off.',
+      'Justin wants "Fix the map" redone',
+    ]) assert.equal(quotesHonest(bad, real), false, bad);
+    assert.equal(quotesHonest('Justin said "status update please"', { boss: 'Justin', bossSaid: [] }), false, 'no real message given, no quote at all');
+    assert.equal(quotesHonest('Justin goes "ok" again', { boss: 'Justin', bossSaid: ['Looks good'] }), false, 'whole words only: "ok" is not in "looks"');
+    assert.equal(quotesHonest('The kettle said "tea time"', { boss: 'the boss', bossSaid: [], known: ['Arlo finished "tea time"'] }), true, 'a default boss name doesn\'t make every "the" about the boss');
+    assert.deepEqual(quotesIn('He said "hi there" and “bye now”, don\'t he'), ['hi there', 'bye now']);
+    assert.match(banterStyle('Justin', true), /word for word/); assert.match(banterStyle('Justin', false), /status again/);
   });
 });
 
@@ -171,6 +197,44 @@ describe('banter on the floor', () => {
       assert.ok(said.includes('Nah, Boss is alright actually.'));
       assert.ok(!said.some((x) => /API key|do not work here/.test(x)));
       assert.ok(said.length <= 6);
+    } finally { await t.close(); }
+  });
+
+  test('made-up quotes from the boss are dropped; the boss\'s real words and paraphrase stay', async () => {
+    const { seen, llm } = recorder((m) => [
+      { who: m.speakers[0], text: 'Boss literally said "ship it by noon or you\'re fired".' },
+      { who: m.speakers[1], text: 'Boss said "Make the buttons green. No, blue." Classic.' },
+      { who: m.speakers[0], text: 'Boss asked for the buttons again, poor thing.' },
+      { who: m.speakers[1], text: 'Boss goes “I trust you all completely”. Sure.' },
+    ]);
+    const t = await boot({ banterClosedShare: 1 }, { llm });
+    try {
+      const c = await busyFloor(t);
+      const f = row(t, c.slug);
+      say(t, f.id, 'boss', 'Make the buttons green. No, blue.');
+      await t.app.engine.people.banter(f.id); await t.app.engine.people.settled();
+      assert.match(seen.at(-1).messages[0].content, /word for word/);
+      const said = (await floorState(c)).talk.filter((l) => l.kind === 'banter').map((l) => l.text);
+      assert.ok(said.includes('Boss said "Make the buttons green. No, blue." Classic.'), JSON.stringify(said));
+      assert.ok(said.includes('Boss asked for the buttons again, poor thing.'));
+      assert.ok(!said.some((x) => /noon|trust you/.test(x)), JSON.stringify(said));
+    } finally { await t.close(); }
+  });
+
+  test('without the boss\'s message in the facts, any quote from the boss is dropped', async () => {
+    const { llm } = recorder((m) => [
+      { who: m.speakers[0], text: 'Boss said "Make the buttons green" earlier.' },
+      { who: m.speakers[1], text: 'Boss changed the buttons again.' },
+    ]);
+    const t = await boot({ banterClosedShare: 0 }, { llm });
+    try {
+      const c = await busyFloor(t);
+      const f = row(t, c.slug);
+      say(t, f.id, 'boss', 'Make the buttons green.');
+      await t.app.engine.people.banter(f.id); await t.app.engine.people.settled();
+      const said = (await floorState(c)).talk.filter((l) => l.kind === 'banter').map((l) => l.text);
+      assert.ok(said.includes('Boss changed the buttons again.'));
+      assert.ok(!said.some((x) => /"/.test(x)), 'the chat is closed and nothing private was told, so there is nothing to quote');
     } finally { await t.close(); }
   });
 

@@ -36,7 +36,8 @@ export function floorGossip(db, floor, { now = Date.now(), hours = 12, most = 8 
   if (scrapped >= 2) out.push({ text: `${scrapped} jobs were scrapped in the last ${hours} hours after plans changed`, open: true });
   const said = all(db, "SELECT text, created_at FROM messages WHERE floor_id=? AND role='boss' AND created_at>=? ORDER BY id DESC LIMIT 12", floor.id, now - 24 * HOUR);
   if (said.length) {
-    out.push({ text: `${boss}'s latest message to the manager: "${short(said[0].text, 140)}"`, open: !!floor.public_chat });
+    const quote = short(said[0].text, 140);
+    out.push({ text: `${boss}'s latest message to the manager: "${quote}"`, open: !!floor.public_chat, bossSaid: quote });
     const lately = said.filter((m) => m.created_at >= now - 3 * HOUR).length;
     if (lately >= 3) out.push({ text: `${boss} has sent the manager ${lately} messages in the last three hours`, open: true });
   }
@@ -47,7 +48,7 @@ export function floorGossip(db, floor, { now = Date.now(), hours = 12, most = 8 
 
 /** How the small talk sounds: with the boss in it when sass is on, the plain office kind when it isn't. */
 export function banterStyle(boss, sass) {
-  const common = 'Make it actually funny: quick jabs, callbacks, deadpan, one-upmanship, a bit of mock outrage. Each line is a reply to the one before it. Use a fact or two from the list as the hook, by its real name. Quote the boss only in words a fact gives; never make up what anyone said, a time of day or a number.';
+  const common = 'Make it actually funny: quick jabs, callbacks, deadpan, one-upmanship, a bit of mock outrage. Each line is a reply to the one before it. Use a fact or two from the list as the hook, by its real name. Never put words in the boss\'s mouth: quote the boss only word for word from the boss\'s real message in the list, inside quote marks; otherwise say it plainly without quote marks ("the boss asked for a status again"); never make up what anyone said, a time of day or a number.';
   const safe = 'Hard limits: no slurs, no hate, no threats or violence, nothing sexual, nothing about anyone\'s race, religion, gender, sexuality, body, age, health or nationality, nothing about money or costs, and no keys, passwords, addresses or anything from outside this floor.';
   if (!sass) return `${common} Keep it warm about everyone, ${boss} included. No swearing. ${safe}`;
   return `${common} The boss is ${boss}. They gripe and gossip about ${boss} the way office people do: ${boss} changing their mind, sending messages at odd hours, wanting it yesterday, scrapping a plan. Roast ${boss} playfully, never cruelly, and have someone stick up for them sometimes ("nah, ${boss}'s alright actually"). Call them ${boss} or "the boss", never he or she. Mild swearing is fine ("damn", "hell", "pain in the ass", "asshole" at most), sparingly. ${safe}`;
@@ -56,3 +57,27 @@ export function banterStyle(boss, sass) {
 // A last net under the model, for what no prompt should let through. A line that trips it is dropped, not cleaned.
 const OFF_LIMITS = /\b(?:nigg\w*|f[a@4]gg?[o0]ts?|retard(?:ed|s)?|trann(?:y|ies)|kikes?|spics?|chinks?|wetbacks?|cunts?|rap(?:e|ed|es|ist)|porn\w*|sex(?:y|ual)?|nudes?|naked|suicid\w*|api[ _-]?keys?|passwords?|kill (?:him|her|them|you|yourself))\b/i;
 export const fitToSay = (text) => !OFF_LIMITS.test(String(text ?? ''));
+
+// A second net for made-up quotes. Any quoted words in a line that names the boss, or says somebody said them, must be the boss's real words from the facts the
+// writer was given (or a real piece of work's title, or a fact's own words when the boss isn't named). Otherwise the line is dropped.
+const QUOTED = /"([^"]{2,})"|\u201c([^\u201c\u201d]{2,})\u201d|\u2018([^\u2018\u2019]{2,})\u2019|(?:^|[\s(\[:,\u2014-])'([^']{2,}?)'(?=[\s.,!?;:)\]\u2014-]|$)/g;
+const SPEECH = /\b(?:said|says|saying|wrote|writes|asked|asks|told|tells|goes|went|messaged|texted|typed|quote|quoting|like)\b/i;
+// Words only, so a quote matches whole words in the same order whatever its quote marks, case or end punctuation.
+const words = (s) => ` ${(String(s ?? '').toLowerCase().replace(/[\u2018\u2019]/g, "'").match(/[\p{L}\p{N}]+(?:'[\p{L}]+)*/gu) || []).join(' ')} `;
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Quoted words in a line: [string]. */
+export const quotesIn = (text) => [...String(text ?? '').matchAll(QUOTED)].map((m) => m[1] ?? m[2] ?? m[3] ?? m[4]).filter((q) => words(q).trim().length > 0);
+/**
+ * Whether a line keeps to what was really said. `bossSaid` are the boss's real messages as the writer saw them; `known` is anything else it may quote
+ * (work titles, facts). A line naming the boss may quote only the boss's words or a work title; a line with "said"/"asked" and no boss may quote any fact.
+ */
+export function quotesHonest(text, { boss = 'the boss', bossSaid = [], titles = [], known = [] } = {}) {
+  const quotes = quotesIn(text);
+  if (!quotes.length) return true;
+  const first = String(boss).split(/\s+/)[0];
+  const names = [boss, /^(?:the|mr|mrs|ms|dr)\.?$/i.test(first) ? '' : first, 'boss'].filter((n) => n && n.length >= 3);
+  const aboutBoss = names.some((n) => new RegExp(`\\b${escape(n)}\\b`, 'i').test(text));
+  if (!aboutBoss && !SPEECH.test(text)) return true;
+  const allowed = [...bossSaid, ...titles, ...(aboutBoss ? [] : known)].map(words);
+  return quotes.every((q) => { const w = words(q); return allowed.some((a) => a.includes(w)); });
+}

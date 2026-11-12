@@ -243,6 +243,11 @@ sticks up for them, and mild swearing is allowed; slurs, threats, anything sexua
 the prompt and a line that trips the word net is dropped. A fact a visitor couldn't see (private work, a closed chat, a stopped day) goes in
 about one call in three, and the lines it brings are shown to visitors as private talk.
 
+Nobody puts words in the boss's mouth. The prompt allows quote marks next to the boss only around the boss's real message as given in the
+facts, and otherwise asks for a plain paraphrase ("the boss asked for a status again"). A second net (`quotesHonest`) drops any line that
+names the boss, or says someone said something, and quotes words that aren't, word for word, in the boss's real message from the facts or a
+real work title. With no boss message in the facts, any quote from the boss is dropped.
+
 It only runs while someone has the floor open, never on a paused, closed or out-of-money floor, and never touches the work.
 
 | Switch | Default | What it does |
