@@ -33,7 +33,7 @@ const cfg = loadConfig();
 const usage = () => {
   console.log(['Usage:',
     '  node scripts/admin.mjs code [--floor N]       issue a one-time office code',
-    '  node scripts/admin.mjs cloud ai lock PROJECT --model ID --day-usd N [--only HOSTS] [--effort E]   give a project a locked AI (its own prompt, one model, a hard daily stop)',
+    '  node scripts/admin.mjs cloud ai lock PROJECT --model ID --day-usd N [--total-usd N [--reset-total]] [--keep-chats|--no-keep-chats] [--only HOSTS] [--effort E]   give a project a locked AI (its own prompt, one model, a hard daily stop, an optional lifetime stop, and whether its conversations are kept 30 days for chat log)',
     '  node scripts/admin.mjs cloud ai unlock PROJECT | locks                                            remove a lock | list locks and today\'s spend',
     '  node scripts/admin.mjs code hold --issued-at MS --floor N   make the one unused code issued at that moment hold floor N. Prints no code',
     '  node scripts/admin.mjs mail status [--json]   email: sending and receiving, today\'s counts, each floor\'s address, pauses and alerts. No message text',
@@ -51,7 +51,7 @@ const usage = () => {
     '  node scripts/admin.mjs backend export --floor N --project SLUG [--files] [--out FILE]   everything one project keeps, as JSON. Accounts leave without their passwords',
     '  node scripts/admin.mjs backend wipe --floor N --project SLUG --yes   delete everything one project keeps: accounts, documents, saves, scores and files',
     '  node scripts/admin.mjs cloud ai status [PROJECT] [--floor N] [--json]   published apps\' AI: what is on, requests today and what is left. PROJECT is a subdomain label, or a slug with --floor',
-    '  node scripts/admin.mjs cloud ai pause|resume PROJECT|--all [--floor N]   stop or restart AI for one project, or for the whole building',
+    '  node scripts/admin.mjs cloud ai pause|resume PROJECT|--all [--floor N]   stop or restart AI for one project, or for the whole building. Resuming one project while the building is paused lets just that one through; pause --all takes every such exception back',
     '  node scripts/admin.mjs cloud fetch status|pause|resume ...   the same, for fetching and scraping web pages',
     '  node scripts/admin.mjs cloud limits [PROJECT] [--floor N]   projects with their own storage and upload limits, or one project\'s limits in full',
     '  node scripts/admin.mjs cloud limits PROJECT [--floor N] [--file-bytes SIZE] [--files N] [--file-max SIZE] [--files-per-owner N] [--owner-bytes SIZE] [--hourly-uploads N|off] [--project-hourly-uploads N|off] [--owner LOGIN ...] | --clear   raise one project\'s limits (SIZE like 15MB or 1GB; off lifts an hourly cap). With --owner, the per-owner ones (file max, files and bytes per owner, hourly uploads) apply to those accounts only',
@@ -64,6 +64,8 @@ const usage = () => {
     '  node scripts/admin.mjs pay disconnect <floor>   stop new sales on a floor. Its Stripe account stays the boss\'s own, and their existing customers are theirs to manage',
     '  node scripts/admin.mjs chat status [PROJECT] [--floor N] [--json]   the website chat: what is on, conversations and questions waiting. Counts only, never what anyone said',
     '  node scripts/admin.mjs chat pause|resume PROJECT|--all [--floor N]   stop or restart the website chat for one project, or for the whole building',
+    '  node scripts/admin.mjs chat log --floor N [PROJECT] [--since 24h|7d|90m] [--flagged] [--limit N] [--json]   what visitors said to the site chat and a locked AI that keeps chats: time, visitor code, first and last message, count, cost, abuse flags',
+    '  node scripts/admin.mjs chat log --show ID   one conversation in full',
     '  node scripts/admin.mjs filler list            list filler (demo) companies and removed ones',
     '  node scripts/admin.mjs filler seed            seed the filler companies, bringing back any that were removed',
     '  node scripts/admin.mjs filler remove --floor N  remove the filler company on floor N (stays removed)',
@@ -272,7 +274,7 @@ if (cmd === 'code' && rest[0] === 'hold') {
     }
   } else if (sub === 'status') {
     const report = powers.status(kind);
-    if (given) { const p = findProject(); report.projects = [{ ...p, ...powers.view(p.floorId, p.project)[kind] }]; }
+    if (given) { const p = findProject(); report.projects = report.projects.filter((x) => x.floorId === p.floorId && x.project === p.project); if (!report.projects.length) report.projects = [{ ...p, ...powers.view(p.floorId, p.project)[kind] }]; }
     if (kind === 'ai') {
       const used = get(db, "SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE day=? AND kind='app_ai'", powers.today()).n;
       report.ceilingUsedPercent = powers.AI.buildingDayUsd > 0 ? Math.round(used / powers.AI.buildingDayUsd * 1000) / 10 : 100;
@@ -281,7 +283,7 @@ if (cmd === 'code' && rest[0] === 'hold') {
     else {
       console.log(`${name} for published apps: ${report.on && !report.buildingPaused ? 'on' : report.buildingPaused ? 'paused for the whole building' : 'switched off in the settings'}${kind === 'ai' ? `. All app AI today: ${report.ceilingUsedPercent}% of the building's daily ceiling` : ''}`);
       if (!report.projects.length) console.log('No project has used it today or has a switch set.');
-      for (const x of report.projects) console.log(`${nameOf(x)}: ${x.paused ? 'PAUSED' : x.on ? 'on' : 'off (by its boss)'}, ${kind === 'ai' ? `${x.callsToday} requests today, ${x.fastLeft} fast and ${x.smartLeft} smart tokens left` : `${x.fetchedToday} pages today, ${x.left} left`}`);
+      for (const x of report.projects) console.log(`${nameOf(x)}: ${x.paused ? 'PAUSED' : x.on ? (x.exempt && report.buildingPaused ? 'on (let through the building pause)' : 'on') : 'off (by its boss)'}, ${kind === 'ai' ? `${x.callsToday} requests today, ${x.fastLeft} fast and ${x.smartLeft} smart tokens left` : `${x.fetchedToday} pages today, ${x.left} left`}`);
     }
   } else if (kind === 'ai' && sub === 'lock') {
     // A project whose AI uses only its own published prompt, one OpenRouter model and a hard stop per day. Off for every project unless switched on here.
@@ -291,8 +293,16 @@ if (cmd === 'code' && rest[0] === 'hold') {
     const model = flag('--model'), dayUsd = Number(flag('--day-usd')), only = flag('--only') || '', effort = flag('--effort') || 'low';
     if (!model || !loadModels().prices?.[model]) die('Give --model with a model that has a price in config/models.json.');
     if (!(dayUsd > 0 && dayUsd <= 25)) die('Give --day-usd between 0 and 25.');
-    run(db, 'INSERT INTO cloud_ai_locks (floor_id,project,model,day_usd,only_provider,effort,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(floor_id,project) DO UPDATE SET model=excluded.model, day_usd=excluded.day_usd, only_provider=excluded.only_provider, effort=excluded.effort', p.floorId, p.project, model, dayUsd, only, effort, Date.now());
-    console.log(`AI locked for ${nameOf(p)}: ${model}, stop at ${dayUsd} a day${only ? `, hosts: ${only}` : ''}.`);
+    const before = get(db, 'SELECT * FROM cloud_ai_locks WHERE floor_id=? AND project=?', p.floorId, p.project);
+    // The lifetime stop counts from when it was first set, so changing the model or the daily stop later doesn't hand the allowance back. --reset-total starts it again.
+    const totalUsd = rest.includes('--total-usd') ? Number(flag('--total-usd')) : (before?.total_usd ?? 0);
+    if (!(totalUsd >= 0 && totalUsd <= 500)) die('Give --total-usd between 0 (no lifetime stop) and 500.');
+    const totalSince = totalUsd > 0 && before?.total_since && before.total_usd > 0 && !rest.includes('--reset-total') ? before.total_since : (totalUsd > 0 ? Date.now() : 0);
+    const keepChats = rest.includes('--keep-chats') ? 1 : rest.includes('--no-keep-chats') ? 0 : (before?.keep_chats ?? 0);
+    run(db, `INSERT INTO cloud_ai_locks (floor_id,project,model,day_usd,only_provider,effort,created_at,total_usd,total_since,keep_chats) VALUES (?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(floor_id,project) DO UPDATE SET model=excluded.model, day_usd=excluded.day_usd, only_provider=excluded.only_provider, effort=excluded.effort, total_usd=excluded.total_usd, total_since=excluded.total_since, keep_chats=excluded.keep_chats`,
+    p.floorId, p.project, model, dayUsd, only, effort, Date.now(), totalUsd, totalSince, keepChats);
+    console.log(`AI locked for ${nameOf(p)}: ${model}, stop at ${dayUsd} a day${totalUsd > 0 ? `, ${totalUsd} in all since ${new Date(totalSince).toISOString().slice(0, 16)}Z` : ''}${only ? `, hosts: ${only}` : ''}, conversations ${keepChats ? 'kept 30 days (chat log)' : 'not kept'}.`);
   } else if (kind === 'ai' && sub === 'unlock') {
     if (!given) die('Name a project.');
     const p = findProject();
@@ -302,13 +312,17 @@ if (cmd === 'code' && rest[0] === 'hold') {
     const rows = all(db, 'SELECT * FROM cloud_ai_locks ORDER BY floor_id, project');
     if (!rows.length) console.log('No project has a locked AI.');
     for (const x of rows) console.log(`${nameOf({ floorId: x.floor_id, project: x.project })}: ${x.model}, stop ${x.day_usd} a day, spent today ${get(db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND day=? AND kind=?', x.floor_id, powers.today(), `app_ai_locked:${x.project}`).n.toFixed(4)}, calls today ${powers.counts(x.floor_id, x.project).ai_calls}.`);
+    for (const x of rows) if (x.total_usd > 0) console.log(`  lifetime stop ${x.total_usd}, spent ${get(db, 'SELECT COALESCE(SUM(cost_usd),0) n FROM ledger WHERE floor_id=? AND kind=? AND created_at>=?', x.floor_id, `app_ai_locked:${x.project}`, x.total_since).n.toFixed(4)} since ${new Date(x.total_since).toISOString().slice(0, 16)}Z (${x.project}); conversations ${x.keep_chats ? 'kept' : 'not kept'}`);
   } else if (sub === 'pause' || sub === 'resume') {
     const on = sub === 'pause';
     if (rest.includes('--all')) { powers.setBuildingPaused(kind, on); console.log(`${name} ${on ? 'paused' : 'back on'} for the whole building.`); } else {
       if (!given) die('Name a project, or use --all for the whole building.');
       const p = findProject();
+      // Resuming one project while the building is paused lets just that one through; pausing it takes that back.
+      const through = !on && powers.status(kind).buildingPaused;
       powers.setPaused(p.floorId, p.project, kind, on);
-      console.log(`${name} ${on ? 'paused' : 'back on'} for ${nameOf(p)}.`);
+      powers.setExempt(p.floorId, p.project, kind, through);
+      console.log(`${name} ${on ? 'paused' : 'back on'} for ${nameOf(p)}${through ? ' (the rest of the building stays paused)' : ''}.`);
     }
   } else usage();
 } else if (cmd === 'filler') {

@@ -198,6 +198,14 @@ Object.assign(ADDED.tasks, { session_ctx: 'INTEGER NOT NULL DEFAULT 0', session_
 // How the manager sized a job, the boss's request in one line, its acceptance checks, what jobs like it have cost (admin only), and the doer's own check of it (docs/MANAGER.md).
 Object.assign(ADDED.tasks, { size: "TEXT NOT NULL DEFAULT ''", intent: "TEXT NOT NULL DEFAULT ''", checks: "TEXT NOT NULL DEFAULT ''", est_usd: 'REAL NOT NULL DEFAULT 0', selfcheck: "TEXT NOT NULL DEFAULT ''" });
 
+// A locked AI's lifetime stop and whether its conversations are kept for the admin and the boss; a project let through while the rest of the building is paused (server/cloud/ai-locked.js, guide-log.js, powers.js, chat.js).
+Object.assign(ADDED, {
+  cloud_ai_locks: { total_usd: 'REAL NOT NULL DEFAULT 0', total_since: 'INTEGER NOT NULL DEFAULT 0', keep_chats: 'INTEGER NOT NULL DEFAULT 0' },
+  cloud_powers: { ai_exempt: 'INTEGER NOT NULL DEFAULT 0', fetch_exempt: 'INTEGER NOT NULL DEFAULT 0' },
+  chat_settings: { exempt: 'INTEGER NOT NULL DEFAULT 0' },
+  chat_conversations: { kind: "TEXT NOT NULL DEFAULT 'chat'", visitor: "TEXT NOT NULL DEFAULT ''", cost_usd: 'REAL NOT NULL DEFAULT 0', screened: 'INTEGER NOT NULL DEFAULT 0', off_topic: 'INTEGER NOT NULL DEFAULT 0', flags: "TEXT NOT NULL DEFAULT ''" },
+});
+
 export function openDb(dataDir) {
   let path = ':memory:';
   if (dataDir !== ':memory:') { mkdirSync(dataDir, { recursive: true }); path = join(dataDir, 'office.db'); }

@@ -18,6 +18,7 @@ import { createWebFetcher } from './web.js';
 import { bearerToken, findByToken, CLOUD_PATH } from '../servers.js';
 import { createChat, CHAT_RATES, CHAT_JS, CHAT_PANEL_JS } from './chat.js';
 import { createLockedAi, LOCKED_RATES } from './ai-locked.js';
+import { createGuideLog } from './guide-log.js';
 import { createAuthMail, AUTH_MAIL_RATES, RESET_HTML, RESET_JS, RESET_CSS } from './auth-mail.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -77,7 +78,7 @@ export function installCloud(ext) {
   }
   const powers = createPowers(db, cfg, now);
   const ai = createAppAi({ db, models: ext.models, engine, llm: ext.llm, log, powers, gate: gate(8, 16) });
-  const lockedAi = createLockedAi({ db, models: ext.models, engine, llm: ext.llm, log, powers, gate: gate(8, 16), secret });
+  const lockedAi = createLockedAi({ db, models: ext.models, engine, llm: ext.llm, log, powers, gate: gate(8, 16), secret, keep: createGuideLog({ db, secret, now }) });
   const web = createWebFetcher({ db, cfg, powers, gate: gate(8, 24), net: ext.cloudNet, now, log });
   // Website chat: server/cloud/chat.js.
   const chat = createChat({ db, cfg, log, now, ai, limit, atOnce, readBody, engine });
@@ -323,7 +324,7 @@ export function installCloud(ext) {
         const tooFast = 'You\'re asking very quickly. Give it a minute and try again.';
         limit('lockedVisitor', `${pk}:${ip}`, tooFast); limit('lockedVisitorDay', `${pk}:${ip}`, 'You\'ve used your chat for today. Come back tomorrow.'); limit('lockedProject', pk, tooFast);
         const body = await readBody(req, BODY.json);
-        return reply(200, await atOnce(`ai:${ip}`, 1, () => atOnce(`aiP:${pk}`, 6, () => lockedAi.chat({ F, p, pk, body, lock: lockedAi.lockOf(F, p) }), 'The AI is busy on this site right now. Try again in a moment.'), 'One message at a time, please.'));
+        return reply(200, await atOnce(`ai:${ip}`, 1, () => atOnce(`aiP:${pk}`, 6, () => lockedAi.chat({ F, p, pk, body, lock: lockedAi.lockOf(F, p), ip }), 'The AI is busy on this site right now. Try again in a moment.'), 'One message at a time, please.'));
       }
       if (a === 'ai' && b === 'chat' && !c && m === 'POST') {
         const tooFast = 'You\'re asking very quickly. Give it a minute and try again.';
