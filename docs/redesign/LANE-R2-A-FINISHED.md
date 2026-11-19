@@ -20,12 +20,12 @@ on office-r2-j71-photo (also claude/office-redesign-r2-lane-a-a7s9se).
 | r2-j57 Launch checklist | office-r2-j57-checklist | GREEN | 7c14518986b142b89012875e4ddc4bfee318d050 |
 | r2-j58 CHECKED mark | office-r2-j58-checked | GREEN | 537afd8bf0aba3a74b5ef2f78002002edcd57776 |
 | r2-j59 Fresh-eyes review | office-r2-j59-fresheyes | GREEN | 39b4f573973378492c026b824e492387b158c233 |
-| r2-j60 Share cards | office-r2-j60-sharecards | GREEN | 1ff29b16e169b6ea32e7370fb405eee07797cb45 (the DONE commit a6..., then the first naming fix) |
+| r2-j60 Share cards | office-r2-j60-sharecards | GREEN | 1ff29b16e169b6ea32e7370fb405eee07797cb45 (the first naming fix, on top of its DONE 96459439) |
 | r2-j63 Upkeep rounds | office-r2-j63-upkeep | GREEN | 7500870b31fe899c0cf8181d70efc9dae069ec8b |
 | r2-j67 Milestones and real counts | office-r2-j67-counts | GREEN | b8e0a71944c20f1ab6f418c869b80cdbffc39afa |
 | r2-j69 Building library | office-r2-j69-library | GREEN | a6f7803b4f3dcb67b77c8f1168c11c05530fc2e4 |
 | r2-j70 Feedback button (OFF by default) | office-r2-j70-feedback | GREEN | 3feef475141d6f055d4d5f6ad9b08f70ed2d3ccb |
-| r2-j71 Photo button | office-r2-j71-photo | GREEN | see the head below |
+| r2-j71 Photo button | office-r2-j71-photo | GREEN | 050dcf7aabe27943b1ab118bd7463361ee098b58 (its DONE); branch head 91c27f1 with the fixes and this file |
 
 ## Fixes after the jobs (on the head; earlier branches do not have them)
 - 1ff29b1 and 95204ca (the orchestrator's names): the phone limits never put "budget" in a snapshot key or a page literal: room.phoneFit (cfg.phoneBudget,
