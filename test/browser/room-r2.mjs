@@ -316,6 +316,24 @@ try {
     if (shots) { const { writeFileSync } = await import('node:fs'); writeFileSync(`${shots}/r2-j60-sharecard.jpg`, got); }
     t.cfg.shotsCdpUrl = ''; t.cfg.shotsOrigin = '';
   }
+  if (want('j67')) {
+    // r2-j67: bean cards show jobs finished and launches; the plaque shows launches and visits; no level appears anywhere.
+    const boss = await claim(t, 'Count Room');
+    await boss.post(`/api/floors/${boss.slug}/chat`, { text: 'go build soup finder' });
+    await waitDone(boss);
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    const builder = get(t.db, "SELECT id FROM agents WHERE floor_id=? AND role='builder'", f.id).id;
+    const p = await openRoom(boss.slug);
+    const plaque = await p.ev('document.querySelector(".floor-counts")?.hidden ? null : document.querySelector(".floor-counts")?.textContent');
+    check(/^\d+ launched · \d+ visits?$/.test(plaque || ''), `j67 the plaque reads "${plaque}"`);
+    await p.ev(`window.__office.openAgent(window.__office.state.agents.find((a) => a.id === ${builder}))`);
+    await p.until('!!document.querySelector(".id-counts")', 'the ID card', 10000);
+    const card = await p.ev('({ counts: document.querySelector(".id-counts").textContent, all: document.querySelector(".profile").textContent })');
+    check(/\d+ jobs? finished/.test(card.counts) && /\d+ launch(es)? worked on/.test(card.counts), `j67 the Builder's ID card reads "${card.counts}"`);
+    check(!/\blevel\b|\blvl\b|\brank\b/i.test(card.all + plaque), 'j67 no level on the card or the plaque');
+    if (shots) await p.shot(`${shots}/r2-j67-idcard.jpg`);
+    check(!p.errors.length, `j67 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+  }
 } finally {
   b.close(); await t.close();
 }

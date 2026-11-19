@@ -68,13 +68,28 @@ export function roomMilestones(db, f) {
   return { launches, visits };
 }
 
+/**
+ * r2-j67: real counts, not levels. For each person on the floor: jobs finished (their tasks marked done) and launches worked on (public launches
+ * they finished a task for). Counts only: no titles, nothing private, and never a level, a rank or a badge.
+ */
+export function roomPeople(db, f) {
+  const out = {};
+  for (const r of all(db, `SELECT a.id,
+      (SELECT COUNT(*) FROM tasks t WHERE t.agent_id = a.id AND t.status = 'done') jobs,
+      (SELECT COUNT(DISTINCT p.slug) FROM tasks t JOIN projects p ON p.floor_id = t.floor_id AND p.slug = t.project
+        WHERE t.agent_id = a.id AND t.status IN ('done','review') AND p.published_at IS NOT NULL AND p.private = 0) launches
+    FROM agents a WHERE a.floor_id = ?`, f.id)) out[r.id] = { jobs: r.jobs, launches: f.filler ? 0 : r.launches };
+  return out;
+}
+
 /** The room's part of a floor's snapshot. Later jobs add their pieces here. */
 export function roomView(db, cfg, f, viewer) {
   return {
     idleLife: cfg.idleLife !== false,
     frames: cfg.roomFrames === false ? null : roomFrames(db, f),
     whiteboard: cfg.roomWhiteboard === false ? null : roomWhiteboard(db, f, viewer),
-    milestones: cfg.roomProps === false ? null : roomMilestones(db, f),
+    milestones: roomMilestones(db, f),
+    people: cfg.realCounts === false ? null : roomPeople(db, f),
     props: cfg.roomProps !== false,
     phoneLimits: cfg.phoneLimits !== false,
     camera: cfg.roomCamera !== false,

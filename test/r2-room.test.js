@@ -352,7 +352,7 @@ describe('r2-j42 paper piles and trophies', () => {
     assert.ok(!trophiesFor(m).some((x) => x.id === 'visits-10000'));
     t.cfg.roomProps = false;
     const off = (await visitor.get(`/api/floors/${six.slug}`)).data.room;
-    assert.equal(off.milestones, null); assert.equal(off.props, false);
+    assert.equal(off.props, false, 'no piles or trophies (the counts stay for the plaque, r2-j67)');
     t.cfg.roomProps = true;
   });
 });
@@ -545,5 +545,42 @@ describe('r2-j48 replay', () => {
     assert.equal((await visitor.get(`/api/floors/${c.slug}`)).data.room.replay, undefined);
     assert.equal((await visitor.get(`/api/floors/${c.slug}/replay`)).data.replay, null);
     t.cfg.replay = true;
+  });
+});
+
+describe('r2-j67 milestones and real counts', () => {
+  let t, c, visitor;
+  before(async () => { t = await boot(); c = await claim(t, 'Count Floor'); visitor = new Client(t, { origin: null }); });
+  after(async () => { await t.close(); });
+  test('DONE MEANS: bean cards show jobs finished and launches; the plaque shows launches and visits; no level appears anywhere', async () => {
+    await c.post(`/api/floors/${c.slug}/chat`, { text: 'go build soup finder' });
+    await waitDone(c);
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const s = (await visitor.get(`/api/floors/${c.slug}`)).data;
+    const builder = s.agents.find((a) => a.role === 'builder');
+    const want = get(t.db, "SELECT COUNT(*) n FROM tasks WHERE agent_id=? AND status='done'", builder.id).n;
+    assert.ok(want >= 1);
+    assert.equal(s.room.people[builder.id].jobs, want, 'jobs finished: their tasks marked done');
+    assert.ok(s.room.people[builder.id].launches >= 1, 'launches worked on');
+    assert.ok(s.room.milestones.launches >= 1);
+    sql(t.db, 'INSERT INTO app_visits (floor_id,project,day,path,views,uniques) SELECT floor_id, slug, ?, ?, 7, 7 FROM projects WHERE floor_id=? AND published_at IS NOT NULL AND private=0 LIMIT 1', '2026-11-18', '/', f.id);
+    assert.equal((await visitor.get(`/api/floors/${c.slug}`)).data.room.milestones.visits, 7);
+    // A private launch is not a launch worked on, to a visitor.
+    sql(t.db, 'UPDATE projects SET private=1 WHERE floor_id=?', f.id);
+    assert.equal((await visitor.get(`/api/floors/${c.slug}`)).data.room.people[builder.id].launches, 0);
+    sql(t.db, 'UPDATE projects SET private=0 WHERE floor_id=?', f.id);
+    const all = JSON.stringify((await visitor.get(`/api/floors/${c.slug}`)).data);
+    assert.ok(!/"(level|rank|xp|badges?)"\s*:/i.test(all), 'no level, rank or badge field anywhere in the floor');
+    t.cfg.realCounts = false;
+    assert.equal((await visitor.get(`/api/floors/${c.slug}`)).data.room.people, null);
+    t.cfg.realCounts = true;
+  });
+  test('no level is shown anywhere: no page script says Level N', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    for (const fl of readdirSync(new URL('../public/js/', import.meta.url)).filter((x) => x.endsWith('.js'))) {
+      const src = readFileSync(new URL(`../public/js/${fl}`, import.meta.url), 'utf8');
+      const literals = [...src.matchAll(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g)].map((m) => m[0]);
+      for (const l of literals) assert.ok(!/\b(level|lvl)\s*\$?\{?\d|\bLevel\b/.test(l), `${fl}: ${l.slice(0, 80)}`);
+    }
   });
 });

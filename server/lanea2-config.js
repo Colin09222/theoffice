@@ -38,5 +38,7 @@ export function laneA2Settings(env = process.env) {
     // r2-j63: Tuesday upkeep from 09:00 New York, code checks on every live site, a small fix job only when one fails (at most 3 a site a week),
     // a domain renewal told to the boss 30 days ahead (UPKEEP=0: none).
     upkeep: on(env.UPKEEP),
+    // r2-j67: real counts on each bean's ID card (jobs finished, launches worked on) and the floor plaque (launches, visits) (REAL_COUNTS=0: none).
+    realCounts: on(env.REAL_COUNTS),
   };
 }

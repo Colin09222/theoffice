@@ -76,3 +76,7 @@
 /* r2-j59: the fresh-eyes score on the boss's Launch tab. */
 .maker-fresh { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: #f4efe4; }
 .maker-fresh p { margin: 4px 0 0; font-size: 14px; white-space: pre-line; }
+/* r2-j67: real counts, not levels: on the bean's ID card and the floor plaque. */
+.id-counts { display: flex; gap: 12px; justify-content: center; margin-top: 6px; font-size: 13px; color: #3c4150; }
+.id-counts b { font-size: 15px; color: #1f2330; }
+.floor-counts { font-size: 13px; color: #3c4150; white-space: nowrap; }

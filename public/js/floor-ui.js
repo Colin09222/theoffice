@@ -201,7 +201,7 @@ class FloorPage {
       h('header.floor-top', {},
         h('div.plaque-top', {}, h('button.btn.chrome.back', { type: 'button', 'aria-label': 'Back to building', onclick: () => window.officeGo('/') }, icon('elevator'), h('span', {}, 'Back to building')), muteButton()),
         h('div.floor-title', {}, h('span.floor-num', {}, `Floor ${s.floor.number}`), this.logoEl, this.titleEl, this.tagEl),
-        h('div.floor-meta', {}, this.statusEl, this.hoursEl = h('div.hours-sign', { 'data-hours': '' }, h('b'), h('small'))),
+        h('div.floor-meta', {}, this.statusEl, this.hoursEl = h('div.hours-sign', { 'data-hours': '' }, h('b'), h('small')), this.countsEl = h('span.floor-counts', { 'data-counts': '', hidden: true })),
         this.cardEl),
       this.controlsEl,
       this.journeyEl,
@@ -379,6 +379,9 @@ class FloorPage {
     this.hoursEl.firstChild.textContent = w.label; this.hoursEl.lastChild.textContent = w.days || (w.mode === 'nonstop' ? 'Every day' : 'When the boss calls');
     this.view?.setClosed?.(this.closedNow);
     this.view?.setFloorState?.(f.state || 'idle');
+    // r2-j67: the plaque's real counts: launches and total real visits. Facts, not a level; nothing until the first launch.
+    const m = s.room?.milestones; const showCounts = s.room?.people && m && m.launches > 0;
+    if (this.countsEl) { this.countsEl.hidden = !showCounts; this.countsEl.textContent = showCounts ? `${m.launches.toLocaleString('en-US')} launched · ${m.visits.toLocaleString('en-US')} ${m.visits === 1 ? 'visit' : 'visits'}` : ''; }
     // Real work starts: a replay stops at once, so live and replayed never mix (r2-j48).
     if (this.replay && state !== 'idle') this.replay.stop();
   }
@@ -466,6 +469,10 @@ class FloorPage {
           h('div.id-band', { css: { '--brand': f.colors?.primary || 'var(--teal)' } }, `${f.name || 'The Office'} · Floor ${f.number}`),
           this.face(a), h('div.id-title', {}, a.title), h('div.id-name', {}, a.name),
           h(`div.id-state${busy ? '.busy' : ''}`, {}, busy ? (STATE_LABEL[a.state] || a.state) : 'At desk'),
+          // r2-j67: two real counts, not a level: jobs finished and launches worked on.
+          this.state.room?.people?.[a.id] ? h('div.id-counts', { 'data-counts': '' },
+            h('span', {}, h('b', {}, String(this.state.room.people[a.id].jobs)), this.state.room.people[a.id].jobs === 1 ? ' job finished' : ' jobs finished'),
+            h('span', {}, h('b', {}, String(this.state.room.people[a.id].launches)), this.state.room.people[a.id].launches === 1 ? ' launch worked on' : ' launches worked on')) : null,
           h('div.id-bars', { 'aria-hidden': 'true' })),
         h('div.file-rows', {},
           bio ? row('identification-badge', 'About', h('p', {}, bio)) : h('section.file-row.dim', {}, h('p', {}, `${a.name} hasn't filled in the staff form yet.`)),
