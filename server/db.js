@@ -323,6 +323,7 @@ CREATE TABLE IF NOT EXISTS job_events (
 );
 CREATE INDEX IF NOT EXISTS job_events_card ON job_events(card_id, created_at);
 CREATE INDEX IF NOT EXISTS job_events_floor ON job_events(floor_id, created_at);
+CREATE TABLE IF NOT EXISTS launch_checklists (floor_id INTEGER NOT NULL, project TEXT NOT NULL, result TEXT NOT NULL, checked_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project));
 `;
 
 export function openDb(dataDir) {
