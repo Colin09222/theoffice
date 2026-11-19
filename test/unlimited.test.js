@@ -73,7 +73,7 @@ describe('the settings', () => {
     for (const v of ['off', '', 'lots', '0', '-3', 'Infinity', 'NaN']) assert.equal(loadConfig({ MAX_MANAGER_STEPS: v, MAX_SESSIONS_GLOBAL: v }).maxManagerSteps, Infinity, v);
     // The caps that are on by default: only "off" switches one off, and a typo keeps the default.
     for (const [v, want] of [['off', Infinity], [' OFF ', Infinity], ['', 40], ['lots', 40], ['0', 40], ['-3', 40], ['Infinity', 40], ['25', 25]]) assert.equal(loadConfig({ MAX_STAFF_STEPS: v }).maxStaffSteps, want, v);
-    for (const [v, want] of [['off', Infinity], ['5', 5], ['x', 2]]) assert.equal(loadConfig({ LOOP_MAX_RETESTS: v }).loopMaxRetests, want, v);
+    for (const [v, want] of [['off', Infinity], ['5', 5], ['x', 1]]) assert.equal(loadConfig({ LOOP_MAX_RETESTS: v }).loopMaxRetests, want, v);  // 1 since the redesign (job 10)
     for (const v of ['off', '', 'lots', 'Infinity']) assert.equal(loadConfig({ SESSION_MAX_USD: v, TASK_MAX_USD: v }).sessionMaxUsd, Infinity, v);
   });
   test('a typo can still never switch off the building\'s own limits', () => {
@@ -153,7 +153,8 @@ describe('staff and managers with no step limit', () => {
     assert.ok(llm.calls.some((c) => c.messages.some((m) => /Save your work now/.test(String(m.content)))));
   });
   test('sending work back has no limit by default, and has one when set', async () => {
-    const h = await floor(scripted({ staff: () => ({ content: 'Again.' }), manager: () => ({ content: 'ok' }) }));
+    // MAX_REVISIONS itself; the redesign's one fix round per job (LOOP_MAX_FIX_ROUNDS, job 10) is lifted here and tested in loop.test.js.
+    const h = await floor(scripted({ staff: () => ({ content: 'Again.' }), manager: () => ({ content: 'ok' }) }), { loopMaxFixRounds: Infinity });
     const { id } = assign(h); h.e.setGlobalPause(true);
     for (let i = 0; i < 5; i++) {
       run(h.t.db, "UPDATE tasks SET status='review' WHERE id=?", id);

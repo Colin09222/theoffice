@@ -21,7 +21,7 @@ import { BusinessError } from './business.js';
 import { MAIL_DEFS, mailHandlers, mailToolsFor } from './mail-tools.js';
 import { CHAT_TOOLS, CHAT_DEFS, chatHandlers } from './cloud/chat-tools.js';
 import { LAYOUTS, TONES, VIBES } from '../public/js/looks.js';
-import { checkRound } from './rounds.js';
+import { checkRound, roundsSince } from './rounds.js';
 import { heldNow, contractorOn, CONTRACTOR_ROLES } from './contractor.js';
 import { SIZES, cleanChecks, checksInBrief, estimateUsd, waitingTwin, openManagerQuestion } from './brain.js';
 import { linesProblem, testedLines, LINES_MAX } from './donemeans.js';
@@ -786,7 +786,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       }
       // The tight loop (redesign job 10): at most 5 jobs in a plan, and no new plan while one is open.
       const planName = str(a, 'plan', 120, false);
-      if (planName && Number.isFinite(cfg.loopMaxPlanJobs) && get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND plan=? AND status!='cancelled'", c.floor.id, planName).n >= cfg.loopMaxPlanJobs) throw new WorkspaceError(`plan "${planName.slice(0, 80)}" already has ${cfg.loopMaxPlanJobs} jobs, the most a plan can have. Ship what it makes first; anything more is the next plan, once this one is done.`);
+      if (planName && Number.isFinite(cfg.loopMaxPlanJobs) && get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND plan=? AND status!='cancelled' AND (status IN ('todo','doing','blocked','review') OR created_at>=?)", c.floor.id, planName, roundsSince(db, c.floor.id, engine.now())).n >= cfg.loopMaxPlanJobs) throw new WorkspaceError(`plan "${planName.slice(0, 80)}" already has ${cfg.loopMaxPlanJobs} jobs, the most a plan can have. Ship what it makes first; anything more is the next plan, once this one is done.`);
       const openPlan = cfg.loopOnePlan && planName ? get(db, "SELECT plan, GROUP_CONCAT(id) ids FROM tasks WHERE floor_id=? AND plan!='' AND plan!=? AND status IN ('todo','doing','blocked','review') GROUP BY plan ORDER BY MIN(id) LIMIT 1", c.floor.id, planName) : null;
       if (openPlan) throw new WorkspaceError(`plan "${openPlan.plan.slice(0, 80)}" is still open (jobs #${openPlan.ids.split(',').slice(0, 5).join(', #')}). No new plan starts while one is open: finish it, or if the boss changed direction, cancel what is left of it first. More work for the same plan goes under its name.`);
       const t = engine.assignTask(c.floor, c.agent, { to, title, brief, plan: planName, project, private: a.private === true, dependsOn, afterPrevious, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files), auto: !!c.autonomous, ...more });
