@@ -88,7 +88,12 @@ export async function runChecklist({ files, liveUrl = '', fetchUrl = null, formT
   const scripts = [html, ...[...byPath.entries()].filter(([p]) => /\.(m?js)$/i.test(p)).map(([, f]) => text(f.data))].join('\n');
   const names = [...new Set([...scripts.matchAll(/_data\/v1\/form\/([A-Za-z0-9_-]{1,40})/g)].map((m) => m[1]))];
   const external = attrs(html, 'form', 'action').filter((a) => /^https?:\/\//i.test(a));
+  // A form the page handles itself (an app's input, a search box, a game's name box) sends nothing anywhere, and that is fine. A form nothing
+  // handles, with no address to go to, is the broken one: a visitor fills it in and it goes nowhere.
+  const handled = /addEventListener\(\s*['"]submit['"]|\.onsubmit\s*=|\bonsubmit\s*=|new\s+FormData\b|requestSubmit\(/i.test(scripts);
+  const ownAction = attrs(html, 'form', 'action').some((a) => ownPath(a) !== null && a.trim() !== '' && a.trim() !== '#');
   if (!forms) put('form', true, 'No form on the main page');
+  else if (!names.length && !external.length && (handled || ownAction)) put('form', true, 'The page handles its own form');
   else if (!names.length && !external.length) put('form', false, 'The form sends nowhere');
   else {
     const failed = [];

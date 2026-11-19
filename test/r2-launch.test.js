@@ -46,6 +46,11 @@ describe('r2-j57 launch checklist', () => {
     assert.deepEqual(r.warnings.sort(), ['fits', 'icon', 'notfound', 'preview', 'speed']);
     assert.match(r.checks.find((c) => c.id === 'speed').note, /s on a slow phone connection/);
   });
+  test('a form the page handles itself is fine (an app\'s input, a search box); one nothing handles is broken', async () => {
+    const own = files({ 'app.js': "document.getElementById('f').addEventListener('submit', (e) => { e.preventDefault(); add(e.target.email.value); });" });
+    assert.equal(by(await runChecklist({ files: own, liveUrl: 'https://t.example/', fetchUrl: ok, formTest: async () => false })).form, true);
+    assert.equal(by(await runChecklist({ files: files({ 'app.js': '// nothing' }), liveUrl: 'https://t.example/', fetchUrl: ok, formTest: async () => true })).form, false);
+  });
   test('no form at all is fine', async () => {
     const r = await runChecklist({ files: files({ 'index.html': GOOD.replace(/<form[\s\S]*?<\/form>/, '') }), liveUrl: 'https://t.example/', fetchUrl: ok, formTest: async () => false });
     assert.equal(by(r).form, true);
@@ -93,7 +98,7 @@ describe('r2-j57 launch checklist', () => {
     assert.ok(get(t.db, 'SELECT checked_at FROM launch_checklists WHERE floor_id=?', fid()), 'the result is kept for the boss and the mark');
     t.cfg.launchChecklist = false;
     run(t.db, 'UPDATE maker_jobs SET launched_at=NULL WHERE id=?', job().id);
-    run(t.db, "UPDATE files SET content=replace(content, '_data/v1/form/join', 'nowhere') WHERE floor_id=? AND path=?", fid(), page());
+    run(t.db, "UPDATE files SET content=replace(replace(content, '_data/v1/form/join', 'nowhere'), '.onsubmit =', '.dataset.off =') WHERE floor_id=? AND path=?", fid(), page());
     const go = await c.post(`/api/floors/${c.slug}/makers/launch`, {});
     assert.equal(go.status, 200, JSON.stringify(go.data));
     assert.deepEqual(JSON.parse(get(t.db, 'SELECT result FROM launch_checklists WHERE floor_id=? AND project=?', fid(), job().project).result).blocked, ['form']);
