@@ -35,5 +35,8 @@ export function laneA2Settings(env = process.env) {
     freshEyes: on(env.FRESH_EYES),
     // r2-j60: share cards, 1,200 by 630 under 200 KB, remade on each launch and weekly, the floor link's preview picture (SHARE_CARDS=0: none).
     shareCards: on(env.SHARE_CARDS),
+    // r2-j63: Tuesday upkeep from 09:00 New York, code checks on every live site, a small fix job only when one fails (at most 3 a site a week),
+    // a domain renewal told to the boss 30 days ahead (UPKEEP=0: none).
+    upkeep: on(env.UPKEEP),
   };
 }

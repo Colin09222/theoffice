@@ -255,3 +255,68 @@ describe('r2-j60 share cards', () => {
     t.cfg.shareCards = true;
   });
 });
+
+describe('r2-j63 upkeep rounds', () => {
+  const TUE = Date.UTC(2026, 10, 24, 14, 1);  // Tuesday 24 November 2026, 09:01 in New York
+  let t, c, f, slug;
+  before(async () => {
+    t = await boot({ checklistFetch: async () => ({ ok: true }) });
+    c = await claim(t, 'TheTireRx', { floor: 6 });
+    await c.post(`/api/floors/${c.slug}/chat`, { text: 'go build tyre site' });
+    const { waitDone } = await import('./helpers.js');
+    await waitDone(c);
+    f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    slug = get(t.db, "SELECT p.slug FROM projects p WHERE p.floor_id=? AND p.published_at IS NOT NULL AND p.kind='site' AND EXISTS (SELECT 1 FROM published_files x WHERE x.floor_id=p.floor_id AND x.project=p.slug AND x.path='index.html')", f.id).slug;
+    const { setFloorPlans } = await import('../server/weekplan.js');
+    setFloorPlans(t.db, f.id, false);  // like TheTireRx: out of weekly plans, on upkeep only
+  });
+  after(() => t.close());
+  const testerWork = () => get(t.db, "SELECT COUNT(*) n FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='tester'", f.id).n;
+  const testerCalls = () => get(t.db, "SELECT COUNT(*) n FROM ledger l JOIN agents a ON a.id=l.agent_id WHERE l.floor_id=? AND a.role='tester'", f.id).n;
+
+  test('DONE MEANS: a planted broken link on a test site is found and fixed on the Tuesday run with no Tester call', async () => {
+    const { upkeepDue } = await import('../server/upkeep.js');
+    assert.equal(upkeepDue(TUE), true); assert.equal(upkeepDue(TUE - 2 * 60000), false, '08:59 is too early'); assert.equal(upkeepDue(TUE - 86400000), false, 'Monday');
+    const page = get(t.db, "SELECT content FROM published_files WHERE floor_id=? AND project=? AND path='index.html'", f.id, slug).content;
+    run(t.db, "UPDATE published_files SET content=? WHERE floor_id=? AND project=? AND path='index.html'", page.replace('</body>', '<a href="old-prices.html">Prices</a></body>'), f.id, slug);
+    const testers = [testerWork(), testerCalls()];
+    assert.deepEqual(await t.app.ext.upkeepTick(TUE - 86400000), [], 'nothing on a Monday');
+    const [round] = (await t.app.ext.upkeepTick(TUE)).filter((r) => r.floor === 6);
+    const site = round.sites.find((s) => s.slug === slug);
+    assert.equal(site.ok, false); assert.equal(site.failed[0].id, 'links'); assert.match(site.failed[0].note, /old-prices\.html/);
+    const fix = get(t.db, 'SELECT t.*, a.role FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.id=?', site.fix);
+    assert.equal(fix.role, 'builder'); assert.equal(fix.size, 'small'); assert.match(fix.title, /^Upkeep: fix /); assert.match(fix.brief, /old-prices\.html/);
+    const { waitDone } = await import('./helpers.js');
+    await waitDone(c);
+    await t.app.ext.upkeepTick(TUE + 3600000);
+    const after = get(t.db, 'SELECT * FROM upkeep_fixes WHERE task_id=?', site.fix);
+    assert.equal(after.fixed, 1, 'checked again after the fix: the link is gone');
+    assert.ok(!get(t.db, "SELECT content FROM published_files WHERE floor_id=? AND project=? AND path='index.html'", f.id, slug).content.includes('old-prices.html'));
+    assert.deepEqual([testerWork(), testerCalls()], testers, 'no Tester was given work or called');
+    assert.deepEqual(await t.app.ext.upkeepTick(TUE + 7200000), [], 'once a week');
+  });
+  test('at most 3 fixes a site a week; a paused floor gets its report and no fix; a domain due within 30 days is told once', async () => {
+    const { weekOf } = await import('../server/weekplan.js');
+    const week = weekOf(TUE + 7 * 86400000);
+    for (let i = 0; i < 3; i++) run(t.db, 'INSERT INTO upkeep_fixes (floor_id, project, week, task_id, created_at) VALUES (?,?,?,?,?)', f.id, slug, week, 900000 + i, TUE);
+    run(t.db, "UPDATE published_files SET content=content || '<a href=\"gone.html\">x</a>' WHERE floor_id=? AND project=? AND path='index.html'", f.id, slug);
+    run(t.db, "INSERT INTO domain_orders (floor_id, domain, project, status, quoted_usd, created_at, updated_at, bought_at) VALUES (?, 'thetirerx.com', ?, 'live', 12, ?, ?, ?)", f.id, slug, TUE - 400 * 86400000, TUE, TUE + 7 * 86400000 - 340 * 86400000);
+    const [round] = (await t.app.ext.upkeepTick(TUE + 7 * 86400000)).filter((r) => r.floor === 6);
+    assert.equal(round.sites.find((s) => s.slug === slug).fix, null, 'the week\'s 3 are used');
+    assert.deepEqual(round.renewals, ['thetirerx.com']);
+    assert.equal(all(t.db, "SELECT text FROM messages WHERE floor_id=? AND text LIKE 'thetirerx.com is due for renewal%'", f.id).length, 1);
+    const p2 = await claim(t, 'Paused Floor');
+    await p2.post(`/api/floors/${p2.slug}/chat`, { text: 'go build cake site' });
+    const { waitDone } = await import('./helpers.js');
+    await waitDone(p2);
+    const f2 = get(t.db, 'SELECT * FROM floors WHERE slug=?', p2.slug);
+    const s2 = get(t.db, "SELECT project FROM published_files WHERE floor_id=? AND path='index.html' LIMIT 1", f2.id).project;
+    run(t.db, "UPDATE published_files SET content=content || '<a href=\"nope.html\">x</a>' WHERE floor_id=? AND project=? AND path='index.html'", f2.id, s2);
+    run(t.db, 'UPDATE floors SET paused=1 WHERE id=?', f2.id);
+    const [r2] = (await t.app.ext.upkeepTick(TUE + 14 * 86400000)).filter((r) => r.floor === f2.number);
+    assert.equal(r2.paused, true); assert.equal(r2.sites.find((s) => s.slug === s2).ok, false); assert.equal(r2.sites.find((s) => s.slug === s2).fix, null);
+    t.cfg.upkeep = false;
+    assert.deepEqual(await t.app.ext.upkeepTick(TUE + 21 * 86400000), []);
+    t.cfg.upkeep = true;
+  });
+});
