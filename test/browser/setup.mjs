@@ -15,7 +15,7 @@ const step = async (name, fn) => { try { await fn(); } catch (e) {
   try { await lastPage?.shot(join(SHOTS, `fail-${name.replace(/[^a-z0-9]+/gi, '-').slice(0, 60)}.jpg`)); } catch {}
   check(name, false, `${e.message} ${info}`); } };
 
-const t = await boot({ mockDelayMs: 350, peopleTalk: false });
+const t = await boot({ onboarding: false, mockDelayMs: 350, peopleTalk: false });
 const base = t.base;
 const q = JSON.stringify;
 const ID = /favicon|Office Cloud: no Office server/;

@@ -68,7 +68,7 @@ async function run(label, opts, t, adminCode) {
     await p.until('document.querySelector(".code-input") !== null', 'code dialog');
     await p.type('.code-input', 'OFFICE-NOPE-NOPE');
     await p.click('.modal button[type=submit]');
-    await p.until('(() => { const e = document.querySelector(".form-error"); return e && !e.hidden && /recognise that code/.test(e.textContent); })()', 'error message');
+    await p.until('(() => { const e = document.querySelector(".form-error"); return e && !e.hidden && /That code didn't work/.test(e.textContent); })()', 'error message');
   });
   await step(tag('claim: a code alone opens the office, recovery code, secure cookie'), async () => {
     const code = await adminCode(); // from the real admin CLI path
@@ -616,7 +616,7 @@ async function runAdmin(t) {
 }
 
 // FILLER_COMPANIES=1 runs the same suite with the demo companies seeded, so their floors can't break the lobby or the counts.
-const t = await boot({ mockDelayMs: Number(process.env.E2E_DELAY || 260), rateScale: 50, fillerCompanies: process.env.FILLER_COMPANIES === '1', fillerTickMs: 1500, ordersTickMs: 1200, towerFloors: 10 });
+const t = await boot({ onboarding: false, mockDelayMs: Number(process.env.E2E_DELAY || 260), rateScale: 50, fillerCompanies: process.env.FILLER_COMPANIES === '1', fillerTickMs: 1500, ordersTickMs: 1200, towerFloors: 10 });
 await claim(t, 'Hat Museum', { body: { tagline: 'A history of hats', colors: { primary: '#2f7ec7', accent: '#a9c4ff' } } });
 const seed = await claim(t, 'Soup Finder', { body: { tagline: 'Every soup, ranked', colors: { primary: '#c8455a', accent: '#f4c95d' } } });
 await seed.post(`/api/floors/${seed.slug}/chat`, { text: 'go build soup finder [buy]' });
