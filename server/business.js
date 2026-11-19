@@ -377,24 +377,29 @@ export function installBusiness(ext) {
   }
 
   // ---- step 3: customers ----
+  /** How many video ads to make: none unless the boss asked for video (redesign job 27, VIDEO_ADS_ON_REQUEST), else the usual number. */
+  const videosWanted = (notes = '') => (cfg.videoAdsOnRequest && !/\bvideos?\b/i.test(String(notes)) ? 0 : CONFIG.ads.videos);
   function adsBriefs(floor, row, idea, notes = '') {
     const slug = row.project; const url = engine.liveUrl(floor, slug);
+    const videos = videosWanted(notes);
     const extra = notes ? ` What the boss asked for this time: "${plain(notes, 300)}".` : '';
     return {
       pictures: `Business mode, Customers. Make ${CONFIG.ads.pictures} picture ads for "${idea.name}" (${idea.sell}, for ${idea.whoPays}; live at ${url}) with generate_image in project ${slug}, directory ads: name one ad-1 (aspect 1:1, for sharing in a feed) and one ad-2 (aspect 9:16, for sharing as a story). They are for the boss to share; paid ads run as a Google search ad. Each an illustration, never a photo pretending to be real; any words in the picture short and spelled out in your prompt. No prices, customer counts or claims.${extra} Don't publish.`,
-      ads: `Business mode, Customers. Plan the ads for "${idea.name}" (${idea.sell}, for ${idea.whoPays}; live at ${url}; the offer is in projects/${slug}/notes/offer.md). Paid ads run as a Google search ad (Facebook and Instagram come later); the picture and video ads are for sharing. First call save_ad_plan with the headline and the primary text (for sharing), the goal, who it is for, an A-versus-B test (two headlines), and the Google search ad: ${LIMITS.headlines[0]} to ${LIMITS.headlines[1]} search_headlines of ${LIMITS.headline} characters or fewer with no exclamation marks, ${LIMITS.descriptions[0]} to ${LIMITS.descriptions[1]} search_descriptions of ${LIMITS.description} characters or fewer, and ${LIMITS.keywords[0]} to ${LIMITS.keywords[1]} keywords, the short phrases someone types into Google when they want this. Then make ${CONFIG.ads.videos} short vertical video ads with make_video_ad in project ${slug}: ${CONFIG.video.minSeconds} to ${CONFIG.video.maxSeconds} seconds each, one caption line each, named video-1 and video-2, showing the idea rather than any real person or place. Nothing invented: no customer numbers, testimonials or prices that aren't marked as planned in the offer.${extra} Don't publish.`,
+      ads: `Business mode, Customers. Plan the ads for "${idea.name}" (${idea.sell}, for ${idea.whoPays}; live at ${url}; the offer is in projects/${slug}/notes/offer.md). Paid ads run as a Google search ad (Facebook and Instagram come later); the picture and video ads are for sharing. First call save_ad_plan with the headline and the primary text (for sharing), the goal, who it is for, an A-versus-B test (two headlines), and the Google search ad: ${LIMITS.headlines[0]} to ${LIMITS.headlines[1]} search_headlines of ${LIMITS.headline} characters or fewer with no exclamation marks, ${LIMITS.descriptions[0]} to ${LIMITS.descriptions[1]} search_descriptions of ${LIMITS.description} characters or fewer, and ${LIMITS.keywords[0]} to ${LIMITS.keywords[1]} keywords, the short phrases someone types into Google when they want this. ${videos ? `Then make ${videos} short vertical video ads with make_video_ad in project ${slug}: ${CONFIG.video.minSeconds} to ${CONFIG.video.maxSeconds} seconds each, one caption line each, named video-1 and video-2, showing the idea rather than any real person or place.` : 'No video ads this time: they are made only when the boss asks for them.'} Nothing invented: no customer numbers, testimonials or prices that aren't marked as planned in the offer.${extra} Don't publish.`,
     };
   }
   function startCustomers(floor, row, { notes = '' } = {}) {
     const idea = parse(row.ideas, [])[row.picked];
     if (!idea) return;
     let writer = 'marketer';
-    if (!has(floor.id, 'marketer')) { try { engine.hireStaff(floor, 'marketer'); } catch { writer = 'writer'; } }
+    // The Writer takes the Marketer's words (redesign job 27): no Marketer is hired for them.
+    if (cfg.roleMerge && has(floor.id, 'writer')) writer = 'writer';
+    else if (!has(floor.id, 'marketer')) { try { engine.hireStaff(floor, 'marketer'); } catch { writer = 'writer'; } }
     const briefs = adsBriefs(floor, row, idea, notes);
     const ids = { ...tasksOf(row) };
     const plan = `Business mode: find customers for ${idea.name}`;
     ids.pictures = give(floor, 'pictures', { to: has(floor.id, 'designer') ? 'designer' : writer, title: 'Make the picture ads', brief: briefs.pictures, project: row.project }, plan);
-    ids.ads = give(floor, 'ads', { to: writer, title: 'Write the ads and make the videos', brief: briefs.ads, project: row.project }, plan);
+    ids.ads = give(floor, 'ads', { to: writer, title: videosWanted(notes) ? 'Write the ads and make the videos' : 'Write the ads', brief: briefs.ads, project: row.project }, plan);
     delete ids.fallback;
     const ads = notes ? { ...adsOf(row), plan: null, videoFailed: '' } : {};
     patch(floor.id, { step: 'customers', tasks: JSON.stringify(ids), ads: JSON.stringify(ads), money_set: 0 });
@@ -434,6 +439,8 @@ export function installBusiness(ext) {
     patch(c.floor.id, { ads: JSON.stringify({ ...adsOf(row), plan }) });
     c.say('typing', 'Planning the campaign', 'wrote the ad words and the campaign plan', { project: row.project });
     changed(c.floor.id);
+    const videos = /make_video_ad/.test(c.task?.brief || '') ? CONFIG.ads.videos : 0;
+    if (cfg.videoAdsOnRequest && !videos) return 'Saved the ad words and the plan. No video ads this time: the boss asks for those when they want them. You are done.';
     return `Saved the ad words and the plan. ${engine.media ? `Now make the ${CONFIG.ads.videos} video ads with make_video_ad.` : 'Video making is not switched on here, so say so in your reply.'}`;
   }
   /** Where a video ad goes, checked before any money is spent on it. */
@@ -762,8 +769,9 @@ export function installBusiness(ext) {
     if (row.step === 'build') { const d = tracks.reduce((n, t) => n + t.done, 0), all2 = tracks.reduce((n, t) => n + t.total, 0) || 1; return Math.round(25 + 25 * d / all2); }
     if (row.step === 'customers') {
       if (phase === 'money') return 72;
-      const f = adFiles(row.floor_id, row.project); const want = CONFIG.ads.pictures + CONFIG.ads.videos + 1;
-      return Math.round(50 + 20 * Math.min(want, Math.min(f.pictures.length, CONFIG.ads.pictures) + Math.min(f.videos.length, CONFIG.ads.videos) + (adsOf(row).plan ? 1 : 0)) / want);
+      const vids = cfg.videoAdsOnRequest ? Math.min(CONFIG.ads.videos, adFiles(row.floor_id, row.project).videos.length) : CONFIG.ads.videos;
+      const f = adFiles(row.floor_id, row.project); const want = CONFIG.ads.pictures + vids + 1;
+      return Math.round(50 + 20 * Math.min(want, Math.min(f.pictures.length, CONFIG.ads.pictures) + Math.min(f.videos.length, vids) + (adsOf(row).plan ? 1 : 0)) / want);
     }
     return phase === 'launched' ? 100 : 88;
   }

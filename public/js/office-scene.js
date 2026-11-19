@@ -1509,7 +1509,8 @@ export class OfficeView {
     this.synced = true;
     this.setFloorName(state.floor.name);
     // Last in the list, so the real staff have first pick of the rooms.
-    const staff = [...state.agents.filter((a) => a.role !== 'manager'), BIZ_DEV];
+    // The Business Development bean is off unless the building turns it back on (redesign job 27).
+    const staff = [...state.agents.filter((a) => a.role !== 'manager'), ...(state.bizDev ? [BIZ_DEV] : [])];
     const fresh = staff.filter((a) => !this.actors.has(a.id));
     this.owners = assignRooms(this.plan, staff, this.owners);
     for (const a of fresh) {

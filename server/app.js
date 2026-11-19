@@ -237,6 +237,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
       out.storage = { used: floorBytes(db, f.id), quota: cfg.quotaBytes };
       out.files = listFiles(db, f.id).map((x) => ({ path: x.path, size: x.size, updatedAt: x.updated_at }));
     }
+    out.bizDev = !!cfg.bizDevBean;  // the Business Development bean is off unless BIZ_DEV_BEAN=1 (redesign job 27)
     applyHooks(hooks.snapshot, f, viewer, out);
     return out;
   }

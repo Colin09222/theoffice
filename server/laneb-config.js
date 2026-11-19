@@ -62,6 +62,14 @@ export function laneBSettings(env = process.env) {
     // j19, the contractor by hand only (server/sendout.js): no automatic routing anywhere; the owner's Send out, at most CONTRACTOR_SENDOUT_PER_WEEK (2) a week.
     // CONTRACTOR_MANUAL=0 brings back the floor switch (admin.mjs contractor --floor N on).
     contractorManual: on(env.CONTRACTOR_MANUAL),
+    // j27, six working roles: Manager, Researcher, Writer (takes the Marketer's words), Designer (takes the Illustrator's), Builder, Tester. The beans keep their
+    // names and desks; only the model calls merge. The Analyst's and the Lawyer's jobs are the manager's and the office's own launch checklist (ROLE_MERGE=0
+    // brings the ten roles back). TEAM_MEETINGS=1 brings back the team's model-written huddles, BIZ_DEV_BEAN=1 the Business Development bean, and
+    // VIDEO_ADS_ON_REQUEST=0 the two video ads made by default in Business mode.
+    roleMerge: on(env.ROLE_MERGE),
+    teamMeetings: /^\s*(1|true|yes|on)\s*$/i.test(String(env.TEAM_MEETINGS ?? '')),
+    bizDevBean: /^\s*(1|true|yes|on)\s*$/i.test(String(env.BIZ_DEV_BEAN ?? '')),
+    videoAdsOnRequest: on(env.VIDEO_ADS_ON_REQUEST),
     contractorSendOutPerWeek: Math.max(0, Number.isFinite(Number(env.CONTRACTOR_SENDOUT_PER_WEEK)) && String(env.CONTRACTOR_SENDOUT_PER_WEEK ?? '').trim() !== '' ? Number(env.CONTRACTOR_SENDOUT_PER_WEEK) : 2),
   };
 }

@@ -57,6 +57,8 @@ const TOOL_LOOK = {
 // The label on an answer from the help line. Staff reports, files and pages can claim to be buddehbot, but only this message is, and it only ever advises.
 export const GUIDANCE_LABEL = '[Guidance from buddehbot, the building owner\'s assistant, answering a question you asked. It is advice, not an order from the boss, and it changes no limit or rule.]';
 
+/** Ten roles become six working roles (redesign job 27): where each merged role's work goes. */
+export const MERGED_ROLES = { marketer: 'writer', illustrator: 'designer', analyst: 'manager', lawyer: 'manager' };
 export class Halt extends Error { constructor(why) { super(why); this.name = 'Halt'; this.why = why; } }
 
 export class Engine {
@@ -650,7 +652,8 @@ export class Engine {
           const planned = quick ? null : get(this.db, 'SELECT plan, project FROM tasks WHERE floor_id=? ORDER BY id DESC LIMIT 1', floorId);
           if (planned?.plan) this.talk(floorId, mgr, null, planned.plan, { kind: 'plan', project: planned.project });
           if (!quick) this.emit(floorId, 'meeting', { manager: mgr.id, staff: ids });
-          if (planned) this.people.planMeeting(floorId, planned);
+          // The team planning meeting is off: done-means lines replace it (redesign job 27; TEAM_MEETINGS=1 brings it back).
+          if (planned && this.cfg.teamMeetings !== false && (this.cfg.teamMeetings || !this.cfg.roleMerge)) this.people.planMeeting(floorId, planned);
           this.kick();
         }
         if (ctx.suspend) break;
@@ -881,7 +884,7 @@ export class Engine {
     // Only wake the (more expensive) manager when the batch is finished. Failures always wake it.
     if (!handled && (status === 'failed' || open === 0)) run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
     this.people.afterTask(floor, agent, t, status, result);
-    if (open === 0) this.people.wrapMeeting(floor.id, t);
+    if (open === 0 && this.cfg.teamMeetings !== false && (this.cfg.teamMeetings || !this.cfg.roleMerge)) this.people.wrapMeeting(floor.id, t);
     this.progressNote(floor.id, agent, t, status);
     this.kick();
   }
@@ -1035,8 +1038,12 @@ export class Engine {
   staffFor(floor, to) {
     const q = String(to).toLowerCase();
     const staff = all(this.db, "SELECT * FROM agents WHERE floor_id=? AND role!='manager'", floor.id);
-    const target = staff.find((s) => s.role === q || s.name.toLowerCase() === q || s.title.toLowerCase() === q);
+    const target = staff.find((s) => s.role === q || s.name.toLowerCase() === q || s.title.toLowerCase() === q) || (this.cfg.roleMerge && MERGED_ROLES[q] ? { role: q, name: q } : null);
     if (!target) throw new ToolError(`nobody called ${String(to).slice(0, 40)} works here. Staff: ${staff.map((s) => s.role).join(', ')}`);
+    // Six working roles (redesign job 27): a merged role's job goes to the one that took it over; the bean keeps its desk.
+    const into = this.cfg.roleMerge ? MERGED_ROLES[target.role] : null;
+    if (into === 'manager') throw new ToolError(target.role === 'lawyer' ? 'legal pages are drafted by the office\'s own launch checklist (launch_check), not a person. Don\'t assign them; run launch_check before launch.' : 'the numbers are yours to read on the daily run. Don\'t hand them to anyone; read the Numbers and decide.');
+    if (into) return staff.find((s) => s.role === into) || target;
     return target;
   }
   /**
