@@ -199,3 +199,32 @@ export function trianglesOf(root) {
 export const skipFrame = (now, lastDraw, cap) => !!cap && now - (lastDraw ?? -1e9) < 1000 / cap - 3;
 /** The pixel ratio a phone may draw at, under the budget. */
 export const phoneDpr = (want, budget = true) => (budget ? Math.min(want, PHONE_BUDGET.dpr) : want);
+
+// ---- r2-j45: auto quality (Q9) ----
+/** Frame test 2 s, uncapped: 50 fps or more = high, 30 to 49 = medium, under 30 = low. Drop one level, once, under 24 fps for 5 s. Low still under
+ * 15 fps for 5 s: a still picture of the room with a note. */
+export const QUALITY = { TEST_MS: 2000, HIGH: 50, MID: 30, DROP_FPS: 24, STILL_FPS: 15, WINDOW_S: 5 };
+export const levelFor = (fps) => (fps >= QUALITY.HIGH ? 'high' : fps >= QUALITY.MID ? 'mid' : 'low');
+const DOWN = { high: 'mid', mid: 'low', low: 'low' };
+
+/**
+ * Watches the frames actually drawn after the frame test. Feed it each drawn frame's time (s); it answers at most one { drop: level } for the visit,
+ * and { still: true } once the room is on low and still averaging under 15 fps over 5 s. Averages are over whole 5 s windows, so one slow frame
+ * never moves anything.
+ */
+export class QualityWatch {
+  constructor(level) { this.level = level; this.dropped = false; this.stilled = false; this.t0 = null; this.frames = 0; }
+  frame(t) {
+    if (this.t0 === null) { this.t0 = t; this.frames = 0; return null; }
+    this.frames++;
+    const span = t - this.t0;
+    if (span < QUALITY.WINDOW_S) return null;
+    const fps = this.frames / span;
+    this.t0 = t; this.frames = 0;
+    if (!this.dropped && this.level !== 'low' && fps < QUALITY.DROP_FPS) { this.dropped = true; this.level = DOWN[this.level]; return { drop: this.level, fps }; }
+    if (this.level === 'low' && !this.stilled && fps < QUALITY.STILL_FPS) { this.stilled = true; return { still: true, fps }; }
+    return null;
+  }
+  /** After "Try the moving room": watch again from scratch, still allowed once more. */
+  reset() { this.stilled = false; this.t0 = null; this.frames = 0; }
+}

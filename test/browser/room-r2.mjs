@@ -188,6 +188,24 @@ try {
     check((h.tier !== 'high' || h.dpr === 1.5) && h.cap === 30, `j44 on the top tier a 2x phone still draws at ${h.dpr} (tier ${h.tier}), capped at ${h.cap} fps`);
     check(!p.errors.length, `j44 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
   }
+  if (want('j45')) {
+    // r2-j45: a slow test phone lands on low and shows no shadows; under 15 fps on low it gets a still picture with a note.
+    const boss = await claim(t, 'Slow Phone');
+    const p = await b.newPage({ phone: { width: 390, height: 844 } });
+    await p.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    await p.goto(`${base}/floor/${boss.slug}`); await p.room();
+    await p.until('window.__stage.quality !== undefined', 'the frame test', 120000);
+    const r = await p.ev('({ q: window.__stage.quality, fps: window.__stage.qualityFps, tier: window.__stage.tier, shadows: window.__stage.renderer.shadowMap.enabled, sun: !!window.__office?.view?.sun?.castShadow, steps: window.__stage.steps })');
+    check(r.q === 'low' && r.tier === 'low' && !r.shadows && !r.sun, `j45 the slow phone's frame test (${r.fps?.toFixed(1)} fps) puts it on low, with no shadows (${r.steps.join(', ')})`);
+    await p.until('!!document.querySelector(".room-still img")', 'the still picture', 60000);
+    const st = await p.ev('({ note: document.querySelector(".room-still-note")?.textContent, paused: window.__stage.paused, img: document.querySelector(".room-still img").naturalWidth })');
+    check(st.paused && st.img > 0 && /too slow for the moving room/.test(st.note), `j45 still too slow on low: a still picture of the room (${st.img}px wide) and the note`);
+    if (shots) await p.shot(`${shots}/r2-j45-still.jpg`);
+    await p.click('.room-still-note .btn');
+    const back = await p.ev('({ still: !!document.querySelector(".room-still"), paused: window.__stage.paused })');
+    check(!back.still && !back.paused, 'j45 Try the moving room brings it back');
+    check(!p.errors.length, `j45 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+  }
 } finally {
   b.close(); await t.close();
 }

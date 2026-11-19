@@ -5,7 +5,7 @@
 // then the pixels, then the tier, for the rest of the visit, and tells the current view.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { loadAddons } from './addons.js';
-import { PHONE_BUDGET, skipFrame, phoneDpr } from './room-rules.js';
+import { PHONE_BUDGET, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY } from './room-rules.js';
 
 const TIERS = {
   high: { dpr: 2, shadow: 4096, soft: true, post: true, ao: 'full', bloom: 1, density: 1 },
@@ -206,6 +206,9 @@ class Stage {
     this.view = view;
     this.renderer.shadowMap.enabled = false;
     this.graceUntil = performance.now() + 2000;  // the first frames of a new view compile shaders, which says nothing about the device
+    // A phone's room starts with a 2 s frame test, uncapped, once the shaders are built (r2-j45, spec Q9); then the watch takes over.
+    this.clearStill();
+    if (this.phoneBudget && view && this.quality === undefined) this.qtest = { start: this.graceUntil, end: this.graceUntil + QUALITY.TEST_MS, frames: 0 };
     this.applyPost();
     if (view) { view.enter?.(); view.resize?.(this.w ?? window.innerWidth, this.h ?? window.innerHeight); }
   }
@@ -260,7 +263,7 @@ class Stage {
       this.idle = now - this.lastInput > 6000 && !!this.view?.idle?.();
       if (this.idle && (this.frame & 1) && this.frameMs < 24) { this.frame++; return; }
       // A phone draws at most 30 frames a second (r2-j44): a frame that comes too soon after the last one drawn is skipped.
-      if (skipFrame(now, this.lastDraw, this.fpsCap)) { this.frame++; return; }
+      if (!this.qtest && skipFrame(now, this.lastDraw, this.fpsCap)) { this.frame++; return; }
       this.lastDraw = now;
       const real = Math.max(0, now - this.last); this.last = now;
       const dt = Math.min(real / 1000, 0.1);
@@ -268,14 +271,51 @@ class Stage {
       this.adapt(Math.min(gap / 1000, 0.1), now);
       this.renderOnce(dt);
       this.drawn = (this.drawn || 0) + 1;  // frames really drawn, as against ticks of the loop
+      if (this.phoneBudget) this.judge(now);
     };
     requestAnimationFrame(tick);
   }
   wake() { this.lastInput = performance.now(); }
+  /**
+   * r2-j45, phones: the frame test sets the tier (50 fps or more high, 30 to 49 mid, under 30 low), once a visit; then one drop of a tier, once,
+   * when 5 s average under 24 fps; and on low, still under 15 fps for 5 s, a still picture of the room with a note. `?q=` pins the tier for testing.
+   */
+  judge(now) {
+    const q = this.qtest;
+    if (q) {
+      if (now >= q.start) q.frames++;
+      if (now < q.end) return;
+      const fps = q.frames / Math.max(0.001, (now - q.start) / 1000);
+      this.qtest = null; this.qualityFps = fps; this.quality = levelFor(fps);
+      if (!this.forced && this.quality !== this.tier) { this.setTier(this.quality); if (this.quality === 'low') this.setAO('off'); }
+      this.watch = new QualityWatch(this.tier);
+      this.steps.push(`test-${this.quality}`);
+      return;
+    }
+    const r = this.watch?.frame(now / 1000);
+    if (r?.drop && !this.forced) { this.setTier(r.drop); if (r.drop === 'low') this.setAO('off'); this.steps.push(`drop-${r.drop}`); }
+    if (r?.still) this.showStill();
+  }
+  /** Too slow even on low: the room stops moving and a still picture of it stays, with a note and a way to try again. */
+  showStill() {
+    let src = '';
+    try { this.renderOnce(0); src = this.canvas.toDataURL('image/jpeg', 0.82); } catch { /* the canvas keeps its last frame anyway */ }
+    this.paused = true; this.steps.push('still');
+    const box = document.createElement('div'); box.className = 'room-still';
+    if (src) { const img = document.createElement('img'); img.src = src; img.alt = 'A still picture of the room'; box.append(img); }
+    const note = document.createElement('p'); note.className = 'room-still-note';
+    note.append('This phone is too slow for the moving room, so here is a still picture of it. ');
+    const again = document.createElement('button'); again.type = 'button'; again.className = 'btn chrome'; again.textContent = 'Try the moving room';
+    again.addEventListener('click', () => { this.clearStill(); this.watch?.reset(); });
+    note.append(again);
+    this.canvas.after(box); document.body.append(note); this.still = box; this.stillNote = note;
+  }
+  clearStill() { if (!this.still) return; this.still.remove(); this.stillNote?.remove(); this.still = this.stillNote = null; this.paused = false; this.last = this.lastTick = performance.now(); }
   // A device that keeps missing 30fps first loses occlusion, then pixels, then shadows and post. Each step is permanent for the visit, so
   // nothing flickers between looks. It goes by time, not frames: at 8fps, counting frames would mean twenty seconds of slideshow per step.
   adapt(dt, now) {
     if (this.forced || now < this.graceUntil) return;  // ?q= means someone wants to see exactly that tier
+    if (this.phoneBudget) return;  // a phone goes by its frame test and its one drop instead (judge, r2-j45)
     // A desktop should hold well above 30. A phone is fine at 30: 37ms, not 33, because an iPhone in Low Power Mode caps at a steady 30fps, and that should cost it nothing.
     if (this.frameMs > (this.mobile ? 36 : 24)) this.slowFor += dt; else this.slowFor = Math.max(0, this.slowFor - dt);
     // Far too slow to bother stepping: the lightest look straight away.

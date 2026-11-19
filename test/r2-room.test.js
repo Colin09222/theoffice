@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr } from '../public/js/room-rules.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY } from '../public/js/room-rules.js';
 import { weekOf } from '../server/weekplan.js';
 import { get, all, run as sql } from '../server/db.js';
 import { REAL_JPEG, publish } from './r2-fixtures.js';
@@ -377,5 +377,36 @@ describe('r2-j44 phone hard budget', () => {
     assert.deepEqual(shedPlan(112000, steps), { shed: ['city', 'shore', 'detail'], left: 58500 });
     assert.deepEqual(shedPlan(50000, steps), { shed: [], left: 50000 });
     assert.deepEqual(shedPlan(70000, [['city', 0], ['shore', 20000]]), { shed: ['shore'], left: 50000 }, 'a part that saves nothing is left alone');
+  });
+});
+
+describe('r2-j45 auto quality', () => {
+  test('the 2 s frame test: 50 fps or more high, 30 to 49 medium, under 30 low', () => {
+    assert.deepEqual([90, 50, 49.9, 30, 29.9, 4].map(levelFor), ['high', 'high', 'mid', 'mid', 'low', 'low']);
+    assert.equal(QUALITY.TEST_MS, 2000);
+  });
+  const feed = (w, fps, secs, from = 0) => { const out = []; for (let t = from; t < from + secs; t += 1 / fps) { const r = w.frame(t); if (r) out.push(r); } return out; };
+  test('one drop of one level, once, after 5 s averaging under 24 fps; never on a single slow frame; never twice', () => {
+    const w = new QualityWatch('high');
+    assert.deepEqual(feed(w, 40, 30), [], '40 fps is fine');
+    const slow = feed(w, 20, 6, 30);
+    assert.equal(slow.length, 1); assert.equal(slow[0].drop, 'mid');
+    assert.deepEqual(feed(w, 20, 30, 36), [], 'never a second drop');
+    const v = new QualityWatch('mid'); let t = 0;
+    for (; t < 20; t += 1 / 40) v.frame(t);
+    v.frame(t + 0.9);  // one long frame
+    assert.deepEqual(feed(v, 40, 10, t + 1), [], 'one slow frame moves nothing');
+  });
+  test('on low, still under 15 fps for 5 s: a still picture, once; try again watches afresh', () => {
+    const w = new QualityWatch('low');
+    assert.deepEqual(feed(w, 20, 20), [], '20 fps on low stays moving');
+    const r = feed(w, 8, 6, 20);
+    assert.equal(r.length, 1); assert.equal(r[0].still, true);
+    assert.deepEqual(feed(w, 8, 20, 26), [], 'once');
+    w.reset();
+    assert.equal(feed(w, 8, 6, 50).length, 1, 'after Try again, a phone still too slow gets the picture again');
+    const m = new QualityWatch('mid');
+    const steps = feed(m, 8, 12);
+    assert.deepEqual(steps.map((x) => x.drop || (x.still && 'still')), ['low', 'still'], 'mid drops to low, then the still');
   });
 });
