@@ -137,6 +137,7 @@ try {
     const six = await claim(t, 'Tyre Trophies', { floor: 7 });
     const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', six.slug);
     const builder = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='builder'", f.id);
+    run(t.db, 'UPDATE floors SET paused=1 WHERE id=?', f.id);  // the jobs stay queued: a running team would start them before the check looks
     for (const x of ['One', 'Two', 'Three']) run(t.db, "INSERT INTO tasks (floor_id,title,brief,agent_id,status,created_at,updated_at) VALUES (?,?,?,?,'todo',?,?)", f.id, x, x, builder.id, Date.now(), Date.now());
     publish(t.db, f.id, 'tyres', 'Tyres', Date.now() - 86400000);
     run(t.db, "INSERT INTO app_visits (floor_id,project,day,path,views,uniques) VALUES (?,'tyres','2026-11-01','/',2241,2241)", f.id);
