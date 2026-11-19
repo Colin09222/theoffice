@@ -1,0 +1,22 @@
+/* Round 2, lane B (docs/redesign/ROUND2.md): the building and home. One file of its own, loaded just before skin.css (which stays last), so the
+   two lanes merge cleanly. Its rules are new classes, or more specific than skin.css's. */
+
+/* r2-j33: the hero card's second picture layer, faded in over the first in 0.6 s. */
+.lcard-shot { position: relative; }
+.lcard-shot img.lcard-fade { position: absolute; inset: 0; transition: opacity .6s ease; }
+/* r2-j33: on a phone, a Working floor's badge has a pulsing dot (spec Q1: "Phone home: a pulsing dot on the badge of any floor that is Working"). */
+@keyframes r2-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .3; transform: scale(.7); } }
+@media (max-width: 760px) {
+  .dir-row .badge[data-state="working"]::before { animation: r2-pulse 1.4s ease-in-out infinite; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lcard-shot img.lcard-fade { transition: none; }
+  .dir-row .badge[data-state="working"]::before { animation: none; }
+}
+
+/* r2-j36: where there is no live tower (a phone, or no 3D), a floor where a job is running gets a pulsing dot in the floor list. */
+.dir-row[data-live="work"] .dir-num { position: relative; }
+.dir-row[data-live="work"] .dir-num::after { content: ''; position: absolute; top: -2px; right: -8px; width: 7px; height: 7px; border-radius: 50%; background: var(--c-amber, #f2a33a); display: none; }
+@media (max-width: 760px) { .dir-row[data-live="work"] .dir-num::after { display: block; animation: r2-pulse 1.4s ease-in-out infinite; } }
+.home:has(.home-tower[hidden]) .dir-row[data-live="work"] .dir-num::after { display: block; animation: r2-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .dir-row[data-live="work"] .dir-num::after { animation: none !important; } }

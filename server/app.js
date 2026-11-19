@@ -37,6 +37,7 @@ import { installEstimates } from './estimate.js';
 import { installWeekPlans } from './weekplan.js';
 import { installOnboarding } from './onboarding.js';
 import { installBuilding } from './building.js';
+import { installR2B } from './r2b.js';
 import { installOwnSpend } from './ownspend.js';
 import { installRanked } from './ranked.js';
 import { installLife } from './life.js';
@@ -751,6 +752,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext), installShots(ext), installJobCards(ext), installEstimates(ext), installWeekPlans(ext), installOnboarding(ext), installOwnSpend(ext), installRanked(ext)].filter(Boolean);  // estimates after job cards: they add to the boss's cards
   // Round 2, lane A: the floor room's own data (server/room.js).
   extensions.push(...[installRoom(ext)].filter(Boolean));
+  extensions.push(...installR2B(ext));  // round 2, lane B (server/r2b.js)
   // The budget check, inside the server: a spend record every two hours (server/spendcheck.js, redesign job 5).
   const spendCheck = installSpendCheck({ db, cfg, log, now });
   extensions.push(spendCheck);

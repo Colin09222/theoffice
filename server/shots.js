@@ -59,6 +59,21 @@ export function heroLaunches(db, opts = {}) {
   return launches(db, opts).filter((l) => !l.wip).sort((a, b) => b.visits - a.visits || b.published_at - a.published_at || a.slug.localeCompare(b.slug)).slice(0, HERO);
 }
 
+/**
+ * The real screenshots a hero card fades between (round 2, r2-j33; spec Q1): the launch photo first, then the newest step photos of the same
+ * project (job 13's camera), newest first, up to 3 in all. Only photos that were really taken; none at all is an empty list.
+ */
+export const HERO_SHOTS = 3;
+export function heroShots(db, l, base) {
+  const out = [];
+  if (l.shot_at) out.push(`${base}/api/building/shot/${l.fslug}/${l.slug}?v=${l.shot_at}`);
+  for (const s of all(db, 'SELECT id FROM job_shots WHERE floor_id=? AND project=? AND image IS NOT NULL ORDER BY taken_at DESC, id DESC LIMIT ?', l.floor_id, l.slug, HERO_SHOTS)) {
+    if (out.length >= HERO_SHOTS) break;
+    out.push(`${base}/api/floors/${l.fslug}/jobshot/${s.id}`);
+  }
+  return out;
+}
+
 /** Launches whose photo is missing or older than 7 days (a failure waits 6 hours before another try). `force` takes every one. */
 export function dueShots(db, { now = Date.now(), force = false } = {}) {
   return launches(db, { now }).filter((l) => {

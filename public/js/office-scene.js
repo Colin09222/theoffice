@@ -16,6 +16,7 @@ import { tidyLabels } from './labels.js';
 import { cutaway, cutAmount, onWall, CUT } from './cutaway.js';
 import { toonMaterial, warmFlat } from './toon.js';
 import { frameCrew, aimAt } from './framing.js';
+import { roomLight } from './room-light.js';  // round 2 lane B, r2-j35: the New York clock switches the room lights
 
 stage.onRestored.add(forgetEnvironment);  // the shared panorama lived on the GPU
 
@@ -781,7 +782,7 @@ export class OfficeView {
     const s = this.scene; const { primary, accent } = this.colors; const d = this.decor; const L = this.plan;
     this.lounge = hasSofa(L);
     for (const [x, z, w, dd, bake] of planBlocks(L, { coffee: d.coffee, arcade: d.arcade, plants: d.plants, staffCount: this.staffCount })) this.nav.block(x, z, w, dd, { bake });
-    s.add(new THREE.HemisphereLight('#fff1dc', '#b89b84', 0.8));
+    this.hemi = new THREE.HemisphereLight('#fff1dc', '#b89b84', 0.8); s.add(this.hemi);
     const sun = new THREE.DirectionalLight('#ffd49c', 3.15);
     sun.position.copy(SUN_DIR).multiplyScalar(SUN_FAR); sun.target.position.set(0, 0, 0);
     const size = stage.q?.shadow || 0;
@@ -1926,13 +1927,21 @@ export class OfficeView {
     const r = stage.renderer;
     CUT.uCutOn.value = 1;  // the walls facing the camera are cut away, here as in the tower (none, from the front)
     r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true;  // the stage redraws it every other frame
-    r.toneMappingExposure = 0.92;
+    r.toneMappingExposure = this.roomLightsOn === false ? 0.74 : 0.92;
     const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WORLD_SCALE); w.group.position.set(0, this.worldLift, 0);
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
   }
   /** Nothing moving but the people: the stage may draw every other frame. */
   idle() { return !this.host && this.intro >= 1 && !this.pts?.size && Math.abs(this.targetZoom - this.zoom) < 1e-3 && Math.abs(this.targetYaw - this.yaw) < 1e-3 && this.pan.distanceTo(this.targetPan) < 1e-3; }
   leave() { const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; r.toneMappingExposure = 0.84; }
+  /** Round 2 lane B, r2-j35: room lights and desk lamps on or off (off from 23:00 to 08:00 New York time), and the sun as strong as the hour's. */
+  setRoomLights(on, look) {
+    if (look) this.daylight = Math.min(1, look.sunI / 4.5);
+    if (this.roomLightsOn === on) return;
+    this.roomLightsOn = on;
+    if (this.hemi) this.hemi.intensity = on ? 0.8 : 0.3;
+    if (!this.host && stage.renderer && stage.view === this) stage.renderer.toneMappingExposure = on ? 0.92 : 0.74;
+  }
   setTier(q) {
     this.detailOn = q.density >= 0.6;
     this.detail.visible = this.detailOn;
@@ -2124,8 +2133,9 @@ export class OfficeView {
       this.camDist = dist;
       this.placeCamera(dist, this.pan.x, this.pan.y, this.tilt());
       this.sun.position.set(SUN_DIR.x + drift * 0.05, SUN_DIR.y, SUN_DIR.z + Math.cos(this.time * 0.05) * 0.04).multiplyScalar(SUN_FAR);
-      this.sun.intensity = 2.5 + drift * 0.25;
+      this.sun.intensity = (2.5 + drift * 0.25) * (this.daylight ?? 1);
     }
+    (this.nyLight ||= roomLight(this)).tick();  // round 2 lane B, r2-j35
     // Scrolling screens read as real work.
     this.codeTex.offset.y = (this.time * 0.25) % 1;
     this.pageTex.offset.y = (this.time * 0.05) % 1;

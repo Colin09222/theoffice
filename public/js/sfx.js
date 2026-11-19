@@ -1,12 +1,14 @@
 // Small sounds for a building you can touch: a click on every button, paper on a tab, and the ding of the lift. Quiet by nature, off with one button.
+// Round 2, r2-j34 (docs/redesign/OFFICE-ANSWERS-2.md, Q7): sound is OFF until someone turns it on, the choice is remembered, and a hidden tab
+// is silent. The rules are in sound-state.js, which a node test reads.
 import { h } from './dom.js';
 import { icon } from './icons.js';
+import { SOUND_KEY as KEY, mutedAtStart, mayPlay } from './sound-state.js';
 
 let ctx = null, gain = null, loading = null;
 const buffers = {};
-const KEY = 'office.muted';
-let muted = false;
-try { muted = localStorage.getItem(KEY) === '1'; } catch { /* private mode */ }
+let muted = true;
+try { muted = mutedAtStart(localStorage.getItem(KEY)); } catch { /* private mode: off, as for anyone new */ }
 const buttons = new Set();
 
 // Browsers only allow sound after a touch, so nothing loads before the first one.
@@ -26,7 +28,7 @@ function unlock() {
 }
 
 export function sfx(name, { volume = 1, rate = 1 } = {}) {
-  if (muted || !ctx || !buffers[name]) return;
+  if (!mayPlay({ muted, hidden: document.hidden }) || !ctx || !buffers[name]) return;
   try {
     const src = ctx.createBufferSource(); src.buffer = buffers[name]; src.playbackRate.value = rate;
     const g = ctx.createGain(); g.gain.value = volume;
@@ -47,6 +49,7 @@ export function muteButton() {
   const b = h('button.mute-btn', { type: 'button', 'data-mute': '', onclick: () => {
     muted = !muted;
     try { localStorage.setItem(KEY, muted ? '1' : '0'); } catch { /* private mode */ }
+    if (!muted) unlock();
     paint();
   } });
   buttons.add(b);
@@ -57,7 +60,12 @@ export function muteButton() {
 }
 
 /** One listener for the whole page: whatever a button does, it clicks when pressed. Tabs sound like paper. */
+/** Whether sound is on right now (the button's choice). */
+export const soundOn = () => !muted;
+
 export function wireSounds() {
+  // A hidden tab is silent: the sound system itself is suspended until the tab is seen again (and only resumed if sound is on).
+  document.addEventListener('visibilitychange', () => { if (!ctx) return; if (document.hidden) ctx.suspend?.(); else if (!muted) ctx.resume?.(); });
   document.addEventListener('pointerdown', unlock, { capture: true, passive: true });
   document.addEventListener('keydown', unlock, { capture: true, passive: true });
   document.addEventListener('click', (e) => {

@@ -6,6 +6,7 @@ import { mailSettings } from './mail-config.js';
 import { paySettings } from './cloud/pay-config.js';
 import { laneBSettings } from './laneb-config.js';
 import { laneA2Settings } from './lanea2-config.js';
+import { r2bSettings } from './r2b-config.js';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -250,6 +251,7 @@ export function loadConfig(env = process.env, overrides = {}) {
     ...paySettings(env),  // payments: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET (docs/PAYMENTS.md)
     ...laneA2Settings(env),  // round 2, lane A: the floor room, launch quality and the library (server/lanea2-config.js)
     ...laneBSettings(env),  // the redesign's lane B: worker loop, costs and alerts (server/laneb-config.js)
+    ...r2bSettings(env),  // round 2's lane B: the building, home, mailroom, alerts and reports (server/r2b-config.js)
     ...overrides,
   };
 }

@@ -8,6 +8,9 @@ import { icon } from './icons.js';
 import { muteButton, sfx } from './sfx.js';
 import { stateBadge, idleNote } from './badge.js';
 import { launchCard } from './launch-card.js';
+import { heroFrames, crossfade } from './hero-fade.js';
+import { billboardImages } from './billboard.js';
+import { shouldFlyIn, FLYIN_KEY, SKIP_EVENTS } from './flyin.js';
 
 // The claim wizard and its character builder are only fetched when someone opens them.
 const claimModule = () => import('./claim.js');
@@ -15,11 +18,18 @@ const openClaim = () => claimModule().then((m) => m.openClaim());
 const openLogin = () => claimModule().then((m) => m.openLogin());
 
 const NOW_LINES = 5;
-let floors = [], toLet = [], poll = null, nowPoll = null, tower = null, tip = null, alive = false;
+let floors = [], toLet = [], poll = null, nowPoll = null, tower = null, tip = null, alive = false, fades = [];
+// Round 2, r2-j36: the live tower's signals (/api/building/live), read every 5 s while the tab is in view, so a job that starts lights its
+// floor within 10 s. The tower draws them; on a phone (and wherever there is no tower) the floor list's dot pulses for a floor at work.
+const LIVE_MS = 5000;
+let live = null, livePoll = null;
+// Round 2, r2-j37: the crown billboard shows the same 3 launches as the hero, from the same list.
+let heroList = [];
+const liveWork = (n) => !!live?.floors?.find((f) => f.number === n)?.work;
 
 /** One open floor, one line: number, name, what it does, and its state. */
 function floorRow(card, onEnter) {
-  return h('button.dir-row', { type: 'button', 'data-floor': card.number, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => tower?.setHover?.(card.number), onpointerleave: () => tower?.setHover?.(-1) },
+  return h('button.dir-row', { type: 'button', 'data-floor': card.number, 'data-live': liveWork(card.number) ? 'work' : null, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => tower?.setHover?.(card.number), onpointerleave: () => tower?.setHover?.(-1) },
     h('span.dir-num', {}, String(card.number)),
     h('span.dir-mark', { 'aria-hidden': 'true' }),
     h('span.dir-text', {}, h('b', {}, card.name || 'Moving in'), h('small', {}, idleNote(card) || card.tagline || (card.name ? 'A tiny company' : 'Boxes still in the corridor'))),
@@ -67,7 +77,11 @@ function buildNow() {
 function buildHero(onFloor) {
   const strip = h('section.hero-strip', { 'data-hero': '', 'aria-label': 'The best launches this week', hidden: true });
   strip.ready = api('/building/hero').then(({ projects }) => {
-    const cards = (projects || []).map((pr) => launchCard(pr, { hero: true, onFloor }));
+    const list = projects || [];
+    heroList = list; tower?.setBillboard?.(billboardImages(heroList));
+    const cards = list.map((pr) => launchCard(pr, { hero: true, onFloor }));
+    // Round 2, r2-j33: a card with more than one real screenshot fades between them while it is on screen.
+    fades.forEach((f) => f?.stop()); fades = cards.map((c, i) => crossfade(c, heroFrames(list[i])));
     if (cards.length < 3) cards.push(h('article.lcard.lcard-open', {}, h('div.lcard-body', {}, h('h3.lcard-title', {}, 'Your company could be here'), h('p.lcard-line', {}, 'A floor of your own, a team of AI staff, and a real thing on the web.'), h('button.btn.small.lcard-go', { type: 'button', onclick: () => openClaim() }, 'Open an office'))));
     strip.replaceChildren(...cards);
     strip.hidden = false;
@@ -130,6 +144,15 @@ export async function showLobby(root) {
         towerFrame)),
     tip);
 
+  const readLive = async () => {
+    try { live = await api('/building/live'); } catch { return; }
+    if (!alive) return;
+    for (const row of list.querySelectorAll('.dir-row')) { if (liveWork(Number(row.dataset.floor))) row.dataset.live = 'work'; else delete row.dataset.live; }
+    tower?.setLive?.(live.floors);
+  };
+  readLive();
+  livePoll = setInterval(() => { if (!document.hidden) readLive(); }, LIVE_MS);
+
   poll = setInterval(async () => {
     if (document.hidden) return;  // a tab nobody is looking at asks for nothing
     try { const fresh = await api('/floors'); floors = fresh.floors; toLet = fresh.toLet; renderFloors(); tower?.setFloors?.(fresh.floors, fresh.toLet); } catch { /* retried next time */ }
@@ -144,9 +167,23 @@ export async function showLobby(root) {
         if (!alive) return;
         tower = await m.showTower({ frame: towerFrame, floorCount: data.towerFloors, floors, toLet, onPick: (n) => { const c = floors.find((f) => f.number === n); if (c) enterFloor(c); else if (toLet.includes(n)) openClaim(); }, onHover: showTip });
         if (!tower) towerFrame.hidden = true;  // no 3D here: the floor list is the way round, and it is already on screen
+        else { if (live) tower.setLive(live.floors); tower.setBillboard(billboardImages(heroList)); flyInOnce(); }
       } catch (e) { console.warn('tower', e?.message); towerFrame.hidden = true; }
     }, 0)));
   }
+}
+
+/** Round 2, r2-j38: the fly-in, once ever, on the desktop, never under reduce motion. The mark is set as it starts, so it never plays twice;
+ *  any input (a tap, a click, a key, the wheel) skips it. The page content was already on screen before the tower began to load. */
+function flyInOnce() {
+  let seen = false;
+  try { seen = localStorage.getItem(FLYIN_KEY) === '1'; } catch { seen = true; /* no storage: we could not keep it to once, so not at all */ }
+  if (!shouldFlyIn({ phone: isPhone(), reduce: window.matchMedia('(prefers-reduced-motion: reduce)').matches, seen })) return;
+  try { localStorage.setItem(FLYIN_KEY, '1'); } catch { return; }
+  tower.flyIn();
+  const skip = () => { tower?.skipFlyIn?.(); for (const e of SKIP_EVENTS) window.removeEventListener(e, skip, true); };
+  for (const e of SKIP_EVENTS) window.addEventListener(e, skip, { capture: true, passive: true });
+  setTimeout(skip, 3000);
 }
 
 function showTip(n, x, y) {
@@ -161,5 +198,7 @@ function showTip(n, x, y) {
 export function hideLobby() {
   alive = false;
   clearInterval(poll); poll = null; clearInterval(nowPoll); nowPoll = null; tip = null;
+  clearInterval(livePoll); livePoll = null;
+  fades.forEach((f) => f?.stop()); fades = [];
   tower?.leave?.(); tower = null;
 }
