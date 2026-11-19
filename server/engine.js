@@ -27,6 +27,8 @@ import { CONTRACTOR_ROLES, contractorOn, heldNow, jobFor } from './contractor.js
 import { pingContractor } from './contractorping.js';
 import { testerFailed, testedBy, refuseHold, firstPing } from './handback.js';
 import { createOwnerAlerts, nightFrozen } from './owneralerts.js';
+import { TESTER_LINES, readTestReport, testReportText, keepLater, linesProblem } from './donemeans.js';
+import { smokeProject, testerNeedsComputer } from './smoke.js';
 import { briefWithChecks, briefWithoutChecks, checksInBrief, readChecks, selfCheckAsk, selfCheckNudge, selfChecked, readSelfCheck, selfCheckWords, estimateUsd, SELF_CHECK_MARK } from './brain.js';
 import { markQuiet } from './jobcards.js';
 
@@ -161,7 +163,7 @@ export class Engine {
       this.launch(floor, mgr, (ctl) => this.runManager(floor.id, mgr.id, ctl));
     }
     // Named columns: this runs every second, and any number of queued tasks can be holding a transcript.
-    const todo = all(this.db, "SELECT id,agent_id,depends_on,project,contractor_route,handed_back_at FROM tasks WHERE floor_id=? AND status='todo' ORDER BY id", floor.id);
+    const todo = all(this.db, "SELECT id,floor_id,agent_id,depends_on,project,lane,contractor_route,handed_back_at FROM tasks WHERE floor_id=? AND status='todo' ORDER BY id", floor.id);
     const held = [];
     for (const t of todo) {
       if (this.runs.has(t.agent_id)) continue;
@@ -182,17 +184,19 @@ export class Engine {
         if (h) { held.push(h); continue; }
       }
       // A computer works from its own copy of the project. Two at once on one project means testing yesterday's version and fighting over the merge.
-      if (t.project && this.computer?.handles(agent.role, floor.id) && get(this.db, "SELECT 1 x FROM tasks WHERE floor_id=? AND project=? AND status='doing' AND id!=?", floor.id, t.project, t.id)) continue;
+      const computer = this.onComputer(agent, floor.id, t);
+      if (t.project && computer && get(this.db, "SELECT 1 x FROM tasks WHERE floor_id=? AND project=? AND status='doing' AND id!=?", floor.id, t.project, t.id)) continue;
       // A maker job's test of files the Tester has already been through, byte for byte: the last report stands, and nobody is put to work (server/makers.js).
       // The loop it feeds may queue or cancel tasks, so the rest of this floor waits for a fresh look at the board.
       const stands = agent.role === 'tester' ? this.makers?.sameAsTested?.(floor, t) : null;
       if (stands) { this.finishTask(floor, agent, t.id, 'review', stands); return; }
       if (usedUp(agent)) continue;
-      run(this.db, "UPDATE tasks SET status='doing', updated_at=? WHERE id=?", this.now(), t.id);
-      if (agent.role === 'builder') this.costAlerts.buildStarted(t.id, { computer: !!this.computer?.handles(agent.role, floor.id) });
+      // The done-means lines freeze when work starts (redesign job 9): from here only the boss can change them.
+      run(this.db, "UPDATE tasks SET status='doing', updated_at=?, checks_frozen_at=COALESCE(checks_frozen_at, ?) WHERE id=?", this.now(), this.now(), t.id);
+      if (agent.role === 'builder') this.costAlerts.buildStarted(t.id, { computer });
       this.emitTask(t.id);
       this.passOn(floor, agent, t, deps);
-      this.launch(floor, agent, (ctl) => (this.computer?.handles(agent.role, floor.id) ? this.computer.run(floor.id, agent.id, t.id, ctl) : this.runStaff(floor.id, agent.id, t.id, ctl)));
+      this.launch(floor, agent, (ctl) => (computer ? this.computer.run(floor.id, agent.id, t.id, ctl) : this.runStaff(floor.id, agent.id, t.id, ctl)));
     }
     if (held.length) this.toldContractor(floor, held);
     this.judgeBuildingBudget(floor, stopped);
@@ -289,6 +293,28 @@ export class Engine {
     this.emitFloor(floor.id);
   }
   // ---- the building's lifetime limits, one per provider ----
+  /** Whether this task runs on a computer. The Tester gets one only for games and shops (redesign job 11). */
+  onComputer(agent, floorId, task) {
+    if (!this.computer?.handles(agent.role, floorId)) return false;
+    return agent.role !== 'tester' || !this.cfg.testerComputerGamesShops || testerNeedsComputer(this.db, task);
+  }
+  /**
+   * After a job publishes: the smoke check, by script (redesign job 11). A failure goes to the manager as a note and wakes it; a pass says nothing.
+   * Runs in the background; this.smoking holds the latest so a test can wait for it.
+   */
+  afterPublish(floor, slug, task) {
+    // A private project isn't open to the public, so there is no live page to check; and the result is the boss's, never a visitor's.
+    if (!this.cfg.smokeCheck || get(this.db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', floor.id, slug)?.private) return;
+    this.smoking = smokeProject(this, floor, slug, task, { now: this.now() }).then((r) => {
+      this.emit(floor.id, 'smoke', { project: slug, taskId: task?.id ?? null, ok: r.ok, shot: r.shotPath || '' }, { persist: true, project: slug, ownerOnly: true });
+      if (!r.ok) {
+        this.addMessage(floor.id, 'note', null, `The smoke check on ${slug} after it went live found a problem: ${r.errors.join('; ')}. The live page is ${r.url}. Fix it with one small job, or tell the boss in a line.`);
+        run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
+        this.kick();
+      }
+      return r;
+    }).catch((e) => this.fail('smoke check', e));
+  }
   /** Who gets paid when this person works. A computer is always Claude, whatever the role's own model is. */
   agentProvider(agent, floorId) {
     if (this.computer?.handles(agent.role, floorId)) return 'anthropic';
@@ -655,7 +681,8 @@ export class Engine {
     const call = { floorId, agent, signal, project: task.project, taskId: task.id, autonomous: !!task.auto, tier: this.taskTier(task) };
     const allBoss = all(this.db, "SELECT text FROM messages WHERE floor_id=? AND role='boss' ORDER BY id DESC LIMIT 12", floorId).map((m) => m.text).join(' ');
     const answers = () => all(this.db, 'SELECT answer FROM questions WHERE task_id=? AND answer IS NOT NULL', task.id).map((q) => q.answer);
-    const maxSteps = this.cfg.maxStaffSteps;
+    // An edit gets 15 steps, a build 40 (redesign job 10).
+    const maxSteps = task.size === 'small' ? Math.min(this.cfg.maxStaffSteps, this.cfg.maxEditSteps ?? Infinity) : this.cfg.maxStaffSteps;
     const window = this.trimWindow(agent, floorId, call);
     try {
       // Step index for scripted mocks counts assistant turns already in the saved transcript.
@@ -791,8 +818,16 @@ export class Engine {
   finishTask(floor, agent, taskId, status, result) {
     const t = get(this.db, 'SELECT * FROM tasks WHERE id=?', taskId);
     if (t.status === 'cancelled') return;
+    // A Tester's report lists only the job's done-means lines; anything else it noticed goes to the project's Later list, never back to the Builder (job 9).
+    const lines = this.cfg.doneMeans && agent.role === 'tester' && status === 'review' ? readChecks(t) : [];
+    const tested = lines.length ? readTestReport(result, lines) : null;
+    if (tested) {
+      keepLater(this.db, { floorId: floor.id, project: t.project, taskId, items: tested.later, now: this.now() });
+      run(this.db, 'UPDATE tasks SET test_lines=? WHERE id=?', JSON.stringify(tested.lines), taskId);
+      result = testReportText(tested);
+    }
     run(this.db, 'UPDATE tasks SET status=?, result=?, updated_at=? WHERE id=?', status, result, this.now(), taskId);
-    if (agent.role === 'tester' && status === 'review' && testerFailed(result)) this.testerFailedOn(floor, agent, t, result);
+    if (agent.role === 'tester' && status === 'review' && (tested ? tested.failed : testerFailed(result))) this.testerFailedOn(floor, agent, t, result);
     // A maker job runs its own passes (server/makers.js): it decides the next step, and the manager isn't woken for it.
     const handled = !!this.makers?.afterTask(floor, agent, t, status, result);
     this.emitTask(taskId);
@@ -991,6 +1026,8 @@ export class Engine {
     // The same care for the words that travel with the brief: a figure from the day's private numbers stays out of them too.
     const tidy = (s) => (this.daily ? this.daily.taskWords(floor.id, '', { title: s, brief: '', plan: '' }).title : s);
     checks = checks.map(tidy); intent = tidy(intent);
+    // A Tester checks the done-means lines of the job it tests and nothing else (redesign job 9): its own list replaces any the brief carried.
+    if (this.cfg.doneMeans && target.role === 'tester' && checks.length) brief = `${briefWithChecks(String(brief).replace(/\n*\s*done means\s*:[\s\S]*$/i, '').trimEnd(), checks)}\n\n${TESTER_LINES}`;
     brief = briefWithChecks(brief, checks);
     const project = wanted || (priv || floor.default_private ? 'private-work' : '');
     if (project) this.upsertProject(floor, project, { title: project, makePrivate: priv });
@@ -1015,9 +1052,21 @@ export class Engine {
    * A job that hasn't started gets what changed, in place. Without this the only way to change a waiting job was to cancel it and write it again, and one floor
    * cancelled 44 of its 86 tasks that way (docs/MANAGER.md). A job that has started keeps the brief it started on, and one with the contractor is theirs.
    */
-  amendTask(floor, mgr, taskId, { add = '', brief = '', title = '', checks = null, size = null }) {
+  amendTask(floor, mgr, taskId, { add = '', brief = '', title = '', checks = null, size = null, bossTurn = false }) {
     const t = get(this.db, 'SELECT * FROM tasks WHERE id=? AND floor_id=?', taskId, floor.id);
     if (!t) throw new ToolError('no such task on this floor');
+    const role = get(this.db, 'SELECT role FROM agents WHERE id=?', t.agent_id)?.role;
+    const started = !!(t.checks_frozen_at || t.transcript || t.cost_usd > 0 || t.revisions > 0 || t.status !== 'todo');
+    if (this.cfg.doneMeans && checks?.length && role !== 'tester') { const problem = linesProblem(checks); if (problem) throw new ToolError(problem); }
+    // Done-means lines are frozen once work starts; the boss alone can change them, through a message the manager turns into this amend (redesign job 9).
+    if (this.cfg.doneMeans && started && checks?.length && !add && !brief && !title && size === null && !['done', 'failed', 'cancelled'].includes(t.status)) {
+      if (!bossTurn) throw new ToolError(`#${t.id} has started, so its "done means" lines are frozen. Only the boss can change them: if they ask for that, amend it on their turn. Anything else they want is a job of its own, or the project's Later list.`);
+      const had = readChecks(t);
+      run(this.db, 'UPDATE tasks SET brief=?, checks=?, checks_amended_at=?, updated_at=? WHERE id=?', briefWithChecks(briefWithoutChecks(t.brief, had), checks), JSON.stringify(checks), this.now(), this.now(), t.id);
+      this.emitTask(t.id);
+      this.feed(floor.id, mgr, `changed the "done means" lines for "${t.title}", as the boss asked`, t.project);
+      return `Changed the "done means" lines of #${t.id}, as the boss asked. Whoever checks it next goes by the new lines.`;
+    }
     if (heldNow(t)) throw new ToolError('that job is with the building\'s outside contractor already, so it can\'t be changed from here. Give what changed as a new job after it, and tell the boss plainly it is with the contractor.');
     // A maker job runs its own passes, and each pass's brief is the office's (server/makers.js).
     if (t.plan.startsWith('Make ') && this.makers?.holds(floor.id, t.project)) throw new ToolError(`#${t.id} is one pass of a build the office is running step by step, so its brief isn't yours to change. Give what the boss wants as a job of its own after it.`);
@@ -1044,7 +1093,8 @@ export class Engine {
     if (t.status !== 'review') throw new ToolError(`task #${taskId} is ${t.status}, not waiting for review`);
     const staff = get(this.db, 'SELECT * FROM agents WHERE id=?', t.agent_id);
     // A task holding the Expo vault ran on the boss's click. Going round again would take another click.
-    if (verdict === 'revise' && t.revisions < this.cfg.maxRevisions && !t.vault) {
+    // One fix round per job (redesign job 10): LOOP_MAX_FIX_ROUNDS, under MAX_REVISIONS when that is set lower.
+    if (verdict === 'revise' && t.revisions < Math.min(this.cfg.maxRevisions, this.cfg.loopMaxFixRounds ?? Infinity) && !t.vault) {
       const msgs = t.transcript ? JSON.parse(t.transcript) : null;
       if (msgs) msgs.push({ role: 'user', content: `The Office Manager sent this back with notes:\n${notes || 'Please improve it.'}` });
       // A computer's turn has ended and its files are back on the drive, so this round is free to start on a fresh one if the old one has grown too big to be worth going back to.
@@ -1060,8 +1110,23 @@ export class Engine {
     this.talk(floor.id, mgr, staff, notes || `Approved "${t.title}".`, { kind: 'review', project: t.project });
     this.emitTask(t.id);
     // Fix rounds end. The model has to know this was not the send-back it asked for, or it will tell the boss a fix is coming.
+    if (verdict === 'revise' && Number.isFinite(this.cfg.loopMaxFixRounds)) {
+      // Ship the best honest version: what failed is listed under "Not done yet", and the boss is asked one plain question (redesign job 10).
+      const missing = this.notDoneYet(t, notes);
+      run(this.db, 'UPDATE tasks SET wip=1, not_done=? WHERE id=?', JSON.stringify(missing), t.id);
+      return `#${t.id} has had its one fix round, so it ships as it stands, marked Work in progress. Not done yet: ${missing.join('; ')}. Publish it as it is, tell the boss in a line what is still missing, and ask them one plain question with ask_boss about the one thing that matters most. Don't send it back or plan it again.`;
+    }
     if (verdict === 'revise') return `#${t.id} can't go round again, so it stands as it is. Ship what works and tell the boss what is still rough.`;
     return `Approved #${t.id}.`;
+  }
+  /** What is still missing from a job: its done-means lines a Tester (or the doer) didn't pass, else the manager's own notes. */
+  notDoneYet(t, notes = '') {
+    const lines = readChecks(t);
+    const test = get(this.db, "SELECT x.test_lines FROM tasks x JOIN agents a ON a.id=x.agent_id WHERE x.floor_id=? AND a.role='tester' AND x.test_lines!='' AND (x.depends_on LIKE ? OR x.project=?) ORDER BY x.id DESC LIMIT 1", t.floor_id, `%${t.id}%`, t.project)?.test_lines;
+    let marks = []; try { marks = JSON.parse(test || t.selfcheck || '[]'); } catch { /* none */ }
+    const passed = new Set(marks.filter((m) => m.verdict === 'pass').map((m) => m.n));
+    const missing = lines.filter((_, i) => !passed.has(i + 1));
+    return missing.length ? missing : [String(notes || 'what the last review asked for').replace(/\s+/g, ' ').trim().slice(0, 300)];
   }
   cancelTask(floor, taskId) {
     const t = get(this.db, 'SELECT * FROM tasks WHERE id=? AND floor_id=?', taskId, floor.id);

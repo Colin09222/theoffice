@@ -250,7 +250,7 @@ describe('ending a job', () => {
     assert.deepEqual(h.e.unpublishedWork(h.f.id), [], 'someone is still on it');
   });
   test('fix rounds end when a limit is set, and the manager is told so rather than told it was approved', async () => {
-    const h = await start(scripted(), { maxRevisions: 2 });
+    const h = await start(scripted(), { maxRevisions: 2, loopMaxFixRounds: Infinity });  // MAX_REVISIONS's own words; job 10's one fix round is in loop.test.js
     h.e.runManager = async () => {};
     const { id } = h.e.assignTask(h.f, h.mgr, { to: 'writer', title: 'W', brief: 'b', plan: '', project: 'p', dependsOn: [], afterPrevious: false });
     run(h.t.db, "UPDATE tasks SET status='review', revisions=2 WHERE id=?", id);
@@ -422,7 +422,7 @@ describe('one computer at a time on a project', () => {
       await api.message('Done.');
       order.push(`end ${title}`);
     } });
-    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0 }, { sessions });
+    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0, testerComputerGamesShops: false }, { sessions });  // a Tester on a computer, as before job 11
     h.e.runManager = async () => {};
     await h.e.hireStaff(h.f, 'tester');
     const a = h.e.assignTask(h.f, h.mgr, { to: 'builder', title: 'Build', brief: 'b', plan: '', project: 'same', dependsOn: [], afterPrevious: false });

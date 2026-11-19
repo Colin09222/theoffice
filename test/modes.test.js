@@ -194,7 +194,8 @@ describe('working on its own', () => {
   });
 
   test('three failed jobs in a row pause the mode and tell the boss', async () => {
-    const t = await mk({ autopilotGapMin: 0, taskMaxUsd: 1e-9 });
+    // The old stop at the task cap is how this test makes a job fail; the redesign's hard cap ships what was saved instead (job 7, hardcap.test.js).
+    const t = await mk({ autopilotGapMin: 0, taskMaxUsd: 1e-9, hardCapEnds: false, loopMaxRetests: 2 });  // and the old re-test cap, so a third go is allowed (job 10)
     try {
       const c = await claim(t);
       const f = floorOf(t, c);

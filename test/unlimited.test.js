@@ -55,7 +55,7 @@ describe('the settings', () => {
     assert.equal(c.sessionWrapUp, undefined, 'nothing can tell a job to stop polishing any more');
     assert.equal(c.taskMaxUsd, 5, 'the hard stop per task is the one money limit left on by default ($5 since the redesign, job 7)');
     // Since 11-10, a staff job's steps and a project's rounds are capped unless set to off (test/rounds.test.js).
-    assert.deepEqual([c.maxStaffSteps, c.loopMaxRetests, c.loopMaxReplans], [40, 2, 3]);
+    assert.deepEqual([c.maxStaffSteps, c.loopMaxRetests, c.loopMaxReplans], [40, 1, 1], 'one re-test and one re-plan since the redesign (job 10)');
   });
   test('what was kept on purpose is still on', () => {
     const c = loadConfig({});
@@ -73,7 +73,7 @@ describe('the settings', () => {
     for (const v of ['off', '', 'lots', '0', '-3', 'Infinity', 'NaN']) assert.equal(loadConfig({ MAX_MANAGER_STEPS: v, MAX_SESSIONS_GLOBAL: v }).maxManagerSteps, Infinity, v);
     // The caps that are on by default: only "off" switches one off, and a typo keeps the default.
     for (const [v, want] of [['off', Infinity], [' OFF ', Infinity], ['', 40], ['lots', 40], ['0', 40], ['-3', 40], ['Infinity', 40], ['25', 25]]) assert.equal(loadConfig({ MAX_STAFF_STEPS: v }).maxStaffSteps, want, v);
-    for (const [v, want] of [['off', Infinity], ['5', 5], ['x', 2]]) assert.equal(loadConfig({ LOOP_MAX_RETESTS: v }).loopMaxRetests, want, v);
+    for (const [v, want] of [['off', Infinity], ['5', 5], ['x', 1]]) assert.equal(loadConfig({ LOOP_MAX_RETESTS: v }).loopMaxRetests, want, v);  // 1 since the redesign (job 10)
     for (const v of ['off', '', 'lots', 'Infinity']) assert.equal(loadConfig({ SESSION_MAX_USD: v, TASK_MAX_USD: v }).sessionMaxUsd, Infinity, v);
   });
   test('a typo can still never switch off the building\'s own limits', () => {
@@ -153,13 +153,14 @@ describe('staff and managers with no step limit', () => {
     assert.ok(llm.calls.some((c) => c.messages.some((m) => /Save your work now/.test(String(m.content)))));
   });
   test('sending work back has no limit by default, and has one when set', async () => {
-    const h = await floor(scripted({ staff: () => ({ content: 'Again.' }), manager: () => ({ content: 'ok' }) }));
+    // MAX_REVISIONS itself; the redesign's one fix round per job (LOOP_MAX_FIX_ROUNDS, job 10) is lifted here and tested in loop.test.js.
+    const h = await floor(scripted({ staff: () => ({ content: 'Again.' }), manager: () => ({ content: 'ok' }) }), { loopMaxFixRounds: Infinity });
     const { id } = assign(h); h.e.setGlobalPause(true);
     for (let i = 0; i < 5; i++) {
       run(h.t.db, "UPDATE tasks SET status='review' WHERE id=?", id);
       assert.match(h.e.reviewTask(h.f, h.mgr, id, 'revise', 'more'), /Sent #\d+ back/);
     }
-    const capped = await floor(scripted(), { maxRevisions: 1 });
+    const capped = await floor(scripted(), { maxRevisions: 1, loopMaxFixRounds: Infinity });
     const t = assign(capped); capped.e.setGlobalPause(true);
     run(capped.t.db, "UPDATE tasks SET status='review' WHERE id=?", t.id);
     assert.match(capped.e.reviewTask(capped.f, capped.mgr, t.id, 'revise', 'more'), /Sent #\d+ back/);
@@ -451,7 +452,7 @@ describe('computers with no limits of their own', () => {
   test('more sessions run at once than the old limits allowed', async () => {
     let live = 0, peak = 0;
     const sessions = createMockSessions({}, { async onTurn(api) { live++; peak = Math.max(peak, live); await api.step(); while (peak < 6) await sleep(5); live--; finished(api); } });
-    const t = await boot({ computerEnabled: true, outputLagMs: 0 }, { sessions });
+    const t = await boot({ computerEnabled: true, outputLagMs: 0, testerComputerGamesShops: false }, { sessions });  // Testers on computers too, as before job 11
     open.push(t);
     t.app.engine.runManager = async () => {};
     const ids = [];
@@ -501,7 +502,7 @@ describe('computers with no limits of their own', () => {
     let uploading = 0, mostUp = 0;
     const realUpload = sessions.upload;
     sessions.upload = async (...a) => { uploading++; mostUp = Math.max(mostUp, uploading); await sleep(15); uploading--; return realUpload(...a); };
-    const t = await boot({ computerEnabled: true, outputLagMs: 0 }, { sessions });
+    const t = await boot({ computerEnabled: true, outputLagMs: 0, testerComputerGamesShops: false }, { sessions });  // Testers on computers too, as before job 11
     open.push(t);
     t.app.engine.runManager = async () => {};
     const ids = [];

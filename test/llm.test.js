@@ -108,7 +108,7 @@ describe('the real tool loop, end to end against the stub', () => {
           if (!body.messages.some((m) => m.role === 'tool')) return streamCall(res, 'review_task', { task_id: id, verdict: 'approve' }, usage);
           return streamText(res, 'All approved boss, see /theoffice/f/ for the site', usage);
         }
-        if (toolMsgs === 0 && !/Recently finished: #/.test(state)) return streamCall(res, 'assign_task', { to: 'builder', title: 'Make page', brief: 'Build it', project: 'real-site', plan: 'P' }, usage);
+        if (toolMsgs === 0 && !/Recently finished: #/.test(state)) return streamCall(res, 'assign_task', { to: 'builder', title: 'Make page', brief: 'Build it', project: 'real-site', plan: 'P', checks: ['It is saved where the brief says', 'It does what the brief asks', 'It fits a phone'] }, usage);
         return streamText(res, 'On it boss', usage);
       }
       if (toolMsgs === 0) return streamCall(res, 'write_file', { path: 'projects/real-site/index.html', content: '<h1>Real</h1>' }, usage);

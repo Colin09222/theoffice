@@ -15,7 +15,10 @@ const sleep = (ms, signal) => new Promise((res, rej) => {
   const onAbort = () => { clearTimeout(t); rej(signal.reason); };
   signal?.addEventListener?.('abort', onAbort, { once: true });
 });
-const call = (name, args, i = 0) => ({ id: `mock_${name}_${i}`, name, args: JSON.stringify(args) });
+// Every job carries 3 to 5 done-means lines (docs/redesign, job 9), so the scripted manager writes three when its brief has none of its own.
+const MOCK_LINES = ['It is saved where the brief says', 'It does what the brief asks', 'It reads well on a phone'];
+const withLines = (name, args) => (name === 'assign_task' && !args.checks && !/done means\s*:/i.test(args.brief || '') ? { ...args, checks: MOCK_LINES } : args);
+const call = (name, args, i = 0) => ({ id: `mock_${name}_${i}`, name, args: JSON.stringify(withLines(name, args)) });
 const ACT = /\b(go|build|make|do it|start|create|launch|ship|act)\b/i;
 
 const SITE = (name, brief) => `<!doctype html>

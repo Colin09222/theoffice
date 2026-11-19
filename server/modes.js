@@ -280,7 +280,8 @@ export function installModes(ext) {
       else refused = row.goal ? 'The goal changes only when the boss asks, or once it has been reached (goal_reached). It was not changed.'
         : `The goal comes from the boss. Ask them for one, or propose 2–3 (like ${GOAL_EXAMPLES}) and let them pick; nothing starts on its own until they have.`;
     }
-    if (Array.isArray(nextUp)) fields.backlog = JSON.stringify(nextUp.map((x) => plain(x, ITEM_MAX)).filter(Boolean).slice(0, ITEMS_KEPT));
+    // At most 3 jobs queued ahead on the team's own list (redesign job 10, LOOP_MAX_QUEUED).
+    if (Array.isArray(nextUp)) fields.backlog = JSON.stringify(nextUp.map((x) => plain(x, ITEM_MAX)).filter(Boolean).slice(0, Math.min(ITEMS_KEPT, cfg.loopMaxQueued ?? ITEMS_KEPT)));
     if (Object.keys(fields).length) patch(floor.id, fields);
     const r = runningRun(floor.id);
     if (r && typeof summary === 'string' && summary.trim()) run(db, 'UPDATE mode_runs SET summary=? WHERE id=?', plain(summary, SUMMARY_MAX), r.id);

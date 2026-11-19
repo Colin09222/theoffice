@@ -1164,6 +1164,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   });
   // Multiplayer rooms: WebSockets on a project's own origin. Everything else that asks to upgrade is refused there.
   server.on('upgrade', (req, socket, head) => cloud.upgrade(req, socket, head));
+  // Where this process answers, for a check that opens one of its own pages (the smoke check, server/smoke.js) when there is no public origin.
+  engine.selfOrigin = () => { const a = server.address(); return cfg.publicOrigin ? new URL(cfg.publicOrigin).origin : `http://127.0.0.1:${a?.port ?? cfg.port}`; };
   server.requestTimeout = Math.max(cfg.requestTimeoutMs, cfg.uploadTimeoutMs); server.headersTimeout = 15000; server.keepAliveTimeout = 5000; server.maxConnections = 1200;
   return {
     server, engine, bus, rates, cloud,

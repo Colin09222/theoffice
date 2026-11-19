@@ -21,9 +21,11 @@ import { BusinessError } from './business.js';
 import { MAIL_DEFS, mailHandlers, mailToolsFor } from './mail-tools.js';
 import { CHAT_TOOLS, CHAT_DEFS, chatHandlers } from './cloud/chat-tools.js';
 import { LAYOUTS, TONES, VIBES } from '../public/js/looks.js';
-import { checkRound } from './rounds.js';
+import { checkRound, roundsSince } from './rounds.js';
 import { heldNow, contractorOn, CONTRACTOR_ROLES } from './contractor.js';
 import { SIZES, cleanChecks, checksInBrief, estimateUsd, waitingTwin, openManagerQuestion } from './brain.js';
+import { linesProblem, testedLines, LINES_MAX } from './donemeans.js';
+import { touchesSensitive } from './smoke.js';
 
 const LINK_SCAN_CHARS = 24 * 1000 * 1000, MAX_LINKS_CHECKED = 100;
 
@@ -210,7 +212,10 @@ function defFor(name, cfg) {
   const on = Object.keys(ASSIGN_MORE).filter((k) => cfg[k]);
   if (!on.length) return DEFS.assign_task;
   const f = DEFS.assign_task.function;
-  return { type: 'function', function: { ...f, parameters: { ...f.parameters, properties: { ...f.parameters.properties, ...Object.assign({}, ...on.map((k) => ASSIGN_MORE[k])) }, required: [...f.parameters.required, ...(cfg.managerIntentCheck ? ['intent'] : [])] } } };
+  const more = Object.assign({}, ...on.map((k) => ASSIGN_MORE[k]));
+  // Done-means lines (redesign job 9): three to five on every job, and the Tester's come from the job it tests.
+  if (cfg.doneMeans && more.checks) more.checks = { ...more.checks, description: 'The "done means" lines: three to five short things anyone could tick by opening it, small changes too (a job with fewer or more is refused). A Tester\'s job takes the lines of the job it tests, so leave them out there. The office writes them into the brief as its "Done means:" list, so leave that line out of the brief.' };
+  return { type: 'function', function: { ...f, parameters: { ...f.parameters, properties: { ...f.parameters.properties, ...more }, required: [...f.parameters.required, ...(cfg.managerIntentCheck ? ['intent'] : [])] } } };
 }
 
 Object.assign(DEFS, MAIL_DEFS);  // email: server/mail-tools.js
@@ -537,6 +542,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (notYet) throw new WorkspaceError(notYet);
       const n = publishSnapshot(db, c.floor.id, slug, cfg.quotaBytes, directory);
       engine.upsertProject(c.floor, slug, { title: str(a, 'title', 120), description: str(a, 'description', 300, false), kind, sources, published: true, makePrivate: inherited });
+      engine.afterPublish?.(c.floor, slug, c.task);  // the smoke check, by script (redesign job 11)
       saveCheck(db, c.floor.id, slug, check, reason, engine.now());
       if (check.claims.length) engine.feed(c.floor.id, c.agent, `published ${slug} with possible invented claims for the boss to check`, slug);
       c.say('typing', `Publishing ${slug}`, `published ${slug}`, { project: slug });
@@ -757,8 +763,10 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (target && cfg.managerFastPath && target.role === 'tester') {
         // A small change is checked by whoever makes it. On floor 7 the Tester sent after each change was the whole model cost of that change (docs/MANAGER.md).
         const small = engine.smallBefore(c.floor, { project: project || (a.private === true || c.floor.default_private ? 'private-work' : ''), dependsOn, afterPrevious, thisTurn: c.assignedTasks, bossTurn: !!c.bossTurn });
-        if (small?.back) throw new WorkspaceError(`#${small.id} "${small.title.slice(0, 80)}" was a small change, and whoever made it has checked it: their self-check is with the report. No Tester follows a small change. If you think this one needs a real test anyway, tell the boss why in a line and let them say.`);
-        if (small) throw new WorkspaceError(`#${small.id} "${small.title.slice(0, 80)}" is a small change, so no Tester follows it: whoever makes it checks it against its "Done means" list and says what they saw. If it could break something that matters (taking money, signing in, people's details), it isn't small: ${cfg.managerPlanFirst ? `change it with amend_task (size "standard")` : 'cancel it and assign it again without size small'}, then add the Tester.`);
+        // An edit that touches checkout, a form or signing in still gets one Tester pass (redesign job 11).
+        const once = small && cfg.editSkipsTester && touchesSensitive(get(db, 'SELECT title,brief,intent FROM tasks WHERE id=?', small.id)) && !get(db, "SELECT 1 x FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='tester' AND t.status!='cancelled' AND (t.depends_on LIKE ? OR t.depends_on LIKE ? OR t.depends_on LIKE ?)", c.floor.id, `[${small.id}]`, `[${small.id},%`, `%,${small.id}]`);
+        if (once) { /* one Tester pass, allowed */ } else if (small?.back) throw new WorkspaceError(`#${small.id} "${small.title.slice(0, 80)}" was a small change, and whoever made it has checked it: their self-check is with the report. No Tester follows a small change. If you think this one needs a real test anyway, tell the boss why in a line and let them say.`);
+        else if (small) throw new WorkspaceError(`#${small.id} "${small.title.slice(0, 80)}" is a small change, so no Tester follows it: whoever makes it checks it against its "Done means" list and says what they saw. If it could break something that matters (taking money, signing in, people's details), it isn't small: ${cfg.managerPlanFirst ? `change it with amend_task (size "standard")` : 'cancel it and assign it again without size small'}, then add the Tester.`);
       }
       if (target && cfg.managerPlanFirst) {
         const twin = waitingTwin(db, c.floor.id, target.id, project || (a.private === true || c.floor.default_private ? 'private-work' : ''), title);
@@ -767,14 +775,32 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       }
       // The acceptance checks, from the manager's list or from a "Done means:" line it typed into the brief. Whoever does the job ticks them off before handing in.
       if (cfg.managerPlanFirst || cfg.staffSelfCheck) { more.checks = cfg.managerPlanFirst ? cleanChecks(a.checks) : []; if (!more.checks.length) more.checks = checksInBrief(brief); }
-      const t = engine.assignTask(c.floor, c.agent, { to, title, brief, plan: str(a, 'plan', 120, false), project, private: a.private === true, dependsOn, afterPrevious, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files), auto: !!c.autonomous, ...more });
+      // Done-means lines (redesign job 9): every job has 3 to 5 before it starts. A Tester's job checks the lines of the job it tests, and nothing else.
+      if (cfg.doneMeans) {
+        const who = target || engine.staffFor(c.floor, to);
+        if (who.role === 'tester') {
+          const deps = [...dependsOn];
+          if (afterPrevious) { const prev = get(db, "SELECT id FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked') ORDER BY id DESC LIMIT 1", c.floor.id); if (prev) deps.push(prev.id); }
+          const tested = testedLines(db, c.floor.id, { dependsOn: deps, project });
+          more.checks = tested.length ? tested : more.checks.slice(0, LINES_MAX);
+        } else {
+          const problem = linesProblem(more.checks);
+          if (problem) throw new WorkspaceError(problem);
+        }
+      }
+      // The tight loop (redesign job 10): at most 5 jobs in a plan, and no new plan while one is open.
+      const planName = str(a, 'plan', 120, false);
+      if (planName && Number.isFinite(cfg.loopMaxPlanJobs) && get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND plan=? AND status!='cancelled' AND (status IN ('todo','doing','blocked','review') OR created_at>=?)", c.floor.id, planName, roundsSince(db, c.floor.id, engine.now())).n >= cfg.loopMaxPlanJobs) throw new WorkspaceError(`plan "${planName.slice(0, 80)}" already has ${cfg.loopMaxPlanJobs} jobs, the most a plan can have. Ship what it makes first; anything more is the next plan, once this one is done.`);
+      const openPlan = cfg.loopOnePlan && planName ? get(db, "SELECT plan, GROUP_CONCAT(id) ids FROM tasks WHERE floor_id=? AND plan!='' AND plan!=? AND status IN ('todo','doing','blocked','review') GROUP BY plan ORDER BY MIN(id) LIMIT 1", c.floor.id, planName) : null;
+      if (openPlan) throw new WorkspaceError(`plan "${openPlan.plan.slice(0, 80)}" is still open (jobs #${openPlan.ids.split(',').slice(0, 5).join(', #')}). No new plan starts while one is open: finish it, or if the boss changed direction, cancel what is left of it first. More work for the same plan goes under its name.`);
+      const t = engine.assignTask(c.floor, c.agent, { to, title, brief, plan: planName, project, private: a.private === true, dependsOn, afterPrevious, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files), auto: !!c.autonomous, ...more });
       c.assigned.push(t.agentId);
       (c.assignedTasks ||= []).push({ id: t.id, size, project: t.project });
       return `Task #${t.id} assigned to ${t.assignee}.`;
     },
     amend_task(c, a) {
       const size = cfg.managerFastPath && SIZES.includes(a.size) ? a.size : null;
-      return engine.amendTask(c.floor, c.agent, Number(a.task_id), { add: str(a, 'add', 2000, false), brief: str(a, 'brief', 6000, false), title: str(a, 'title', 160, false), checks: a.checks === undefined || a.checks === null ? null : cleanChecks(a.checks), size });
+      return engine.amendTask(c.floor, c.agent, Number(a.task_id), { add: str(a, 'add', 2000, false), brief: str(a, 'brief', 6000, false), title: str(a, 'title', 160, false), checks: a.checks === undefined || a.checks === null ? null : cleanChecks(a.checks), size, bossTurn: !!c.bossTurn });
     },
     review_task(c, a) {
       if (a.verdict === 'revise') {

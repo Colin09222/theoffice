@@ -20,7 +20,9 @@ function scripted({ manager, staff } = {}) {
   } };
 }
 async function floor(llm, overrides = {}) {
-  const t = await boot({ peopleTalk: false, ...overrides }, llm ? { llm } : {});
+  // These count the caps' mechanics at their old settings (2 re-tests, 3 re-plans, free-form plans). The redesign's tighter defaults (one fix round, one
+  // rewrite, five jobs a plan, one open plan; job 10) and done-means lines (job 9) are tested in loop.test.js and donemeans.test.js.
+  const t = await boot({ peopleTalk: false, loopMaxRetests: 2, loopMaxReplans: 3, loopMaxFixRounds: Infinity, loopOnePlan: false, doneMeans: false, ...overrides }, llm ? { llm } : {});
   open.push(t);
   const c = await claim(t, `Round ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);

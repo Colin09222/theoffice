@@ -230,10 +230,24 @@ CREATE TABLE IF NOT EXISTS denied_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, floor_id INTEGER, action TEXT NOT NULL, status INTEGER NOT NULL, code TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS denied_requests_created ON denied_requests(created_at);
+-- j09: what a Tester noticed beyond a job's done-means lines, kept on the project for the boss, never sent back to the Builder (server/donemeans.js).
+CREATE TABLE IF NOT EXISTS project_later (id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, task_id INTEGER, text TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS project_later_project ON project_later(floor_id, project);
+-- j11: each smoke check after a publish: did the live page load with no errors, and where its screenshot is on the floor's drive (server/smoke.js).
+CREATE TABLE IF NOT EXISTS smoke_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, task_id INTEGER, url TEXT NOT NULL, ok INTEGER NOT NULL, how TEXT NOT NULL,
+  status INTEGER NOT NULL DEFAULT 0, errors TEXT NOT NULL DEFAULT '[]', shot_path TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS smoke_checks_task ON smoke_checks(task_id);
+CREATE INDEX IF NOT EXISTS smoke_checks_project ON smoke_checks(floor_id, project, id);
 `;
 Object.assign(ADDED.tasks, { contractor_route: 'INTEGER NOT NULL DEFAULT 0', handed_back_at: 'INTEGER', tester_fails: 'INTEGER NOT NULL DEFAULT 0', fix_of: 'INTEGER' });
 // j07: a task's own cap when it isn't the building's (Tier 3 is $6), when it was ended at its cap, whether what it saved shipped as Work in progress, and what is not done yet.
 Object.assign(ADDED.tasks, { cap_usd: 'REAL NOT NULL DEFAULT 0', capped_at: 'INTEGER', wip: 'INTEGER NOT NULL DEFAULT 0', not_done: "TEXT NOT NULL DEFAULT ''" });
+// j09: when a job's done-means lines froze (work started), when the boss last changed them, and a Tester's verdict on each line.
+Object.assign(ADDED.tasks, { checks_frozen_at: 'INTEGER', checks_amended_at: 'INTEGER', test_lines: "TEXT NOT NULL DEFAULT ''" });
+// j11: the job's last smoke check (smoke_checks.id).
+Object.assign(ADDED.tasks, { smoke_id: 'INTEGER' });
 /** Lane B's one-time fills, each guarded by a settings row so it runs once. */
 function laneBFills(db) {
   // A database from long before these columns (one with no agent_id on its tasks, say) has nothing to fill, and is never kept from booting by it.

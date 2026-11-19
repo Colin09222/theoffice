@@ -2,6 +2,8 @@
 // so config.js reads them in one line. Each behaviour change that could hurt a live floor has a switch here; the default is the new behaviour.
 
 const on = (v) => !/^\s*(0|false|no|off)\s*$/i.test(String(v ?? ''));
+/** A cap that is on unless set to "off" (as in config.js). A typo keeps the default. */
+const onCap = (v, dflt) => { if (/^\s*off\s*$/i.test(String(v ?? ''))) return Infinity; const n = Number(v); return v !== undefined && String(v).trim() !== '' && Number.isFinite(n) && n > 0 ? Math.floor(n) : dflt; };
 
 /** The settings, from the environment through config.js. Tests override any of them. */
 export function laneBSettings(env = process.env) {
@@ -28,5 +30,23 @@ export function laneBSettings(env = process.env) {
     nightFreezeTz: env.NIGHT_FREEZE_TZ || 'America/New_York',
     // j07, the hard cap (TASK_MAX_USD, default 5, in config.js): a task that reaches it is ended and ships or closes. HARD_CAP_ENDS=0 goes back to the old stop.
     hardCapEnds: on(env.HARD_CAP_ENDS),
+    // j09, done-means lines (server/donemeans.js): every job has 3 to 5, frozen once work starts; the Tester checks only those and its report lists only
+    // those; anything else goes to the project's Later list. DONE_MEANS=0 goes back to the free-form checks.
+    doneMeans: on(env.DONE_MEANS),
+    // j10, the tight loop (LOOP_MAX_RETESTS and LOOP_MAX_REPLANS, now 1 and 1, are in config.js): one fix round per job (LOOP_MAX_FIX_ROUNDS), at most 5 jobs
+    // in a plan (LOOP_MAX_PLAN_JOBS), at most 3 jobs on the team's own next-up list (LOOP_MAX_QUEUED), no new plan while one is open (LOOP_ONE_PLAN=0 lifts
+    // it), and 15 steps for an edit (MAX_EDIT_STEPS; builds keep MAX_STAFF_STEPS, 40). "off" lifts a number.
+    loopMaxFixRounds: onCap(env.LOOP_MAX_FIX_ROUNDS, 1),
+    loopMaxPlanJobs: onCap(env.LOOP_MAX_PLAN_JOBS, 5),
+    loopMaxQueued: onCap(env.LOOP_MAX_QUEUED, 3),
+    loopOnePlan: on(env.LOOP_ONE_PLAN),
+    maxEditSteps: onCap(env.MAX_EDIT_STEPS, 15),
+    // j11, the smoke check (server/smoke.js): after each publish a script opens the live page (SMOKE_CHECK=0 stops it), in a real browser when Playwright is
+    // on the machine (SMOKE_BROWSER=0 keeps it to plain HTTP). An edit ships on it with no Tester, unless it touches paying, forms or sign-in, which get one
+    // Tester pass (EDIT_SKIPS_TESTER=0 lifts the rule). The Tester gets a computer only for games and shops (TESTER_COMPUTER_GAMES_SHOPS=0: always, as before).
+    smokeCheck: on(env.SMOKE_CHECK),
+    smokeBrowser: on(env.SMOKE_BROWSER),
+    editSkipsTester: on(env.EDIT_SKIPS_TESTER),
+    testerComputerGamesShops: on(env.TESTER_COMPUTER_GAMES_SHOPS),
   };
 }
