@@ -5,7 +5,7 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import { specFor, Creature, drawnFace, PORTRAIT_FRAME } from './cast.js';
 import { stage } from './stage.js';
 
-const ANIMS = ['walk', 'sit', 'type', 'talk', 'carry', 'cheer', 'think', 'listen', 'stretch', 'sip', 'phone', 'pour'];
+const ANIMS = ['walk', 'sit', 'type', 'talk', 'carry', 'cheer', 'think', 'listen', 'stretch', 'sip', 'phone', 'pour', 'slump', 'five'];
 /** Unscaled height of the top of the head: where the name label hangs from. */
 export const HEAD_TOP = 1.7;
 
@@ -20,6 +20,7 @@ function wantFor(anim, speed, carrying, inChair) {
     walk: speed > 0.01 ? 1 : 0, sit: seated ? 1 : 0, type: a === 'type' ? 1 : 0, talk: a === 'talk' ? 1 : 0,
     carry: carrying ? 1 : 0, cheer: a === 'cheer' ? 1 : 0, think: a === 'think' ? 1 : 0, listen: a === 'listen' ? 1 : 0,
     stretch: a === 'stretch' ? 1 : 0, sip: a === 'sip' ? 1 : 0, phone: a === 'phone' ? 1 : 0, pour: a === 'pour' ? 1 : 0,
+    slump: a === 'slump' ? 1 : 0, five: a === 'five' ? 1 : 0,
   };
 }
 /**
@@ -32,10 +33,11 @@ function typing(self, dt, w) {
   if (!s) s = self.typist = { rate: 4.6 + Math.random() * 1.8, ph: Math.random() * 6.3, burst: 2 + Math.random() * 5, gap: 0, on: 0, glance: 0 };
   if (w < 0.01) { s.on = 0; return { l: 0, r: 0, on: 0, look: 0, glance: 0, nod: 0 }; }
   if (s.gap > 0) { s.gap -= dt; if (s.gap <= 0) s.burst = 2.5 + Math.random() * 5; }
-  else if ((s.burst -= dt) <= 0) { s.gap = 0.5 + Math.random() * 1.2; s.glance = (Math.random() - 0.5) * 0.5; }
+  else if ((s.burst -= dt) <= 0) { s.gap = (self.fast ? 0.25 : 0.5) + Math.random() * (self.fast ? 0.5 : 1.2); s.glance = (Math.random() - 0.5) * 0.5; }
   s.on += ((s.gap > 0 ? 0 : 1) - s.on) * Math.min(1, dt * 7);  // hands settle and pick up again over about 0.2s
   // Frantic: about five taps a second per hand; the pace drifts a little so it never reads as a loop.
-  s.ph += dt * s.rate * Math.PI * 2 * (0.85 + 0.3 * Math.sin(s.ph * 0.13));
+  // A Builder on a running job (`fast`, r2-j39) types a third quicker with shorter pauses.
+  s.ph += dt * s.rate * (self.fast ? 1.35 : 1) * Math.PI * 2 * (0.85 + 0.3 * Math.sin(s.ph * 0.13));
   const lift = (x) => { const c = Math.sin(x); return c > 0 ? c * c : 0; };
   return { l: lift(s.ph) * s.on, r: lift(s.ph + Math.PI) * s.on, on: s.on, look: 1 - s.on, glance: s.glance * (1 - s.on), nod: Math.sin(s.ph) * s.on };
 }

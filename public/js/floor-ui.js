@@ -110,6 +110,9 @@ class FloorPage {
       this.labels = $('#labels'); clear(this.labels);
       this.view = this.adoptView() || this.makeView();
       stage.setView(this.view);
+      // The "Follow the work" switch follows the room's own state (r2-j46): a drag turns it off.
+      this.onFollow = () => this.renderControls();
+      window.addEventListener('office:follow', this.onFollow);
       wirePins(this);
     } else this.pinsEl.hidden = true;  // no room to float over
     this.renderAll();
@@ -379,6 +382,8 @@ class FloorPage {
   renderControls() {
     clear(this.controlsEl);
     const f = this.state.floor;
+    // r2-j46: following the work, on a desktop. Off after a drag; this turns it back on.
+    const follow = this.view?.follow?.allowed ? h('button.btn.chrome.follow-switch', { type: 'button', 'aria-pressed': String(!!this.view.follow.on), title: 'The camera goes to real handoffs and comes back', onclick: () => this.view.setFollow(!this.view.follow.on) }, icon('sparkle'), this.view.follow.on ? 'Following the work' : 'Follow the work') : null;
     if (this.owner) {
       const pause = f.paused
         ? h('button.btn.chrome.resume', { type: 'button', onclick: () => this.control('resume') }, icon('play'), 'Resume')
@@ -386,11 +391,11 @@ class FloorPage {
       this.controlsEl.append(pause,
         h('button.btn.chrome', { type: 'button', onclick: () => this.confirmStop() }, icon('stop'), 'Stop all'),
         h('button.btn.chrome', { type: 'button', onclick: () => this.openRedirect() }, icon('arrow-bend-up-right'), 'Redirect'),
-        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'), startButton(this) || '');
+        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'), startButton(this) || '', follow || '');
     } else {
       put(this.controlsEl,
         h('span.visitor-note', {}, f.filler ? 'Demo company: scripted and fictional' : 'You\'re visiting. Watch all you like.'),
-        session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'));
+        session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'), follow);
     }
   }
   async control(action, text) {
@@ -1273,11 +1278,12 @@ class FloorPage {
     // Replayed events are for the record. Only fresh ones get acted out by the characters.
     const fresh = (d) => Date.now() - (d._ts || 0) < 15000;
     on('meeting', (d) => { if (fresh(d)) this.view?.meeting(d.manager, d.staff); });
-    on('handoff', (d) => { if (fresh(d)) this.view?.handoff(d.from, d.to); });
+    on('handoff', (d) => { if (fresh(d)) this.view?.handoff(d.from, d.to, d._id ?? d._ts ?? null); });
+    // A Tester's check came back (r2-j40): a high five when it passed, a slump when it failed. The record is the task.
+    on('beat', (d) => { if (fresh(d) && d.kind === 'check') this.view?.beat?.({ kind: 'check', passed: !!d.passed, agent: d.agent, record: { type: 'task', id: d.task } }); });
     on('project', (d) => {
       this.reload();
       if (fresh(d)) {
-        this.view?.cheer();
         // One publish can raise two project events; the boss gets one toast.
         if (this.lastToast?.slug !== d.slug || Date.now() - this.lastToast.at > 15000) toast(`Published: ${d.slug}`);
         this.lastToast = { slug: d.slug, at: Date.now() };
@@ -1299,10 +1305,12 @@ class FloorPage {
   async launchParty(slug) {
     await this.reloadSettled().catch(() => {});
     const p = this.state?.projects?.find((x) => x.slug === slug);
-    if (this.dead || !p?.publishedAt || Date.now() - p.publishedAt > 120000 || !mayParty()) return;
+    if (this.dead || !p?.publishedAt || Date.now() - p.publishedAt > 120000) return;
+    // One cheer for a real launch (r2-j40), whatever else the page does; its record is the project and when it launched.
+    this.view?.beat?.({ kind: 'launch', record: { type: 'launch', id: `${slug}@${p.publishedAt}` } });
+    if (!mayParty()) return;
     confetti({ brand: this.state.floor?.colors?.primary });
     fanfare();
-    setTimeout(() => { if (!this.dead) this.view?.cheer(); }, 2100);
   }
   async reloadSettled() {
     while (this.reloading) await new Promise((r) => setTimeout(r, 30));
@@ -1382,6 +1390,7 @@ class FloorPage {
     clearTimeout(this.cardTimer);
     if (this.onResize) window.removeEventListener('resize', this.onResize);
     window.removeEventListener('office:agent-tap', this.tapAgent);
+    if (this.onFollow) window.removeEventListener('office:follow', this.onFollow);
     this.unwireTaps?.();
     this.unwireLift?.();
     delete document.body.dataset.sheet;

@@ -5,8 +5,9 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES } from '../public/js/room-rules.js';
-import { get } from '../server/db.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY, CameraFollow, driftYaw, CAMERA } from '../public/js/room-rules.js';
+import { weekOf } from '../server/weekplan.js';
+import { get, all, run as sql } from '../server/db.js';
 import { REAL_JPEG, publish } from './r2-fixtures.js';
 import { storeShot } from '../server/shots.js';
 import { roomFrames } from '../server/room.js';
@@ -192,5 +193,258 @@ describe('r2-j32 framed launches', () => {
     t.cfg.roomFrames = false;
     assert.equal((await visitor.get(`/api/floors/${six.slug}`)).data.room.frames, null);
     t.cfg.roomFrames = true;
+  });
+});
+
+describe('r2-j39 state-true poses', () => {
+  test('DONE MEANS (rules): a Builder on a running job types fast with the monitor glow, even between keystrokes', () => {
+    for (const state of ['typing', 'thinking', 'browsing', 'queued']) {
+      const p = poseFor({ role: 'builder', state, running: true });
+      assert.deepEqual([p.anim, p.screen, p.glow, p.fast], ['type', 'code', true, true], state);
+    }
+    assert.equal(poseFor({ role: 'builder', state: 'idle', running: true }).anim, 'type', 'a running task with the state not caught up yet');
+    const off = poseFor({ role: 'builder', state: 'idle', running: false });
+    assert.deepEqual([off.anim, off.glow, off.fast], ['sit', false, false], 'no running job: no typing');
+  });
+  test('researching spreads papers, testing holds a clipboard, others keep their state; an Idle floor never types', () => {
+    assert.equal(poseFor({ role: 'researcher', state: 'reading' }).prop, 'papers');
+    assert.equal(poseFor({ role: 'researcher', state: 'reading' }).anim, 'think');
+    assert.equal(poseFor({ role: 'tester', state: 'thinking', running: true }).prop, 'clipboard');
+    assert.equal(poseFor({ role: 'tester', state: 'idle', running: false }).prop, null, 'a prop only while on a job');
+    assert.equal(poseFor({ role: 'manager', state: 'talking' }).anim, 'talk');
+    for (const role of ['builder', 'researcher', 'tester', 'manager']) {
+      const p = poseFor({ role, state: 'idle', floorIdle: true });
+      assert.deepEqual([p.anim, p.screen, p.glow, p.prop], ['sit', 'off', false, null], role);
+    }
+  });
+  test('a waiting floor\'s beans glance at the boss door once every 15 s, each on its own beat; never on other floors', () => {
+    for (const id of ['1', '2', 'nico', 'bea']) {
+      const on = []; for (let t = 0; t < 60; t += 0.1) on.push(glancing(t, id, 'waiting'));
+      const starts = on.filter((x, i) => x && !on[i - 1]).length;
+      assert.ok(starts >= 4 && starts <= 5, `${id}: ${starts} glances in 60 s`);
+      const share = on.filter(Boolean).length / on.length;
+      assert.ok(Math.abs(share - GLANCE.HOLD / GLANCE.EVERY) < 0.02, `${id} glances ${share}`);
+    }
+    for (const st of ['working', 'idle', 'paused']) for (let t = 0; t < 30; t += 0.5) assert.equal(glancing(t, '1', st), false);
+    const a = [], b = []; for (let t = 0; t < 15; t += 0.1) { a.push(glancing(t, '1', 'waiting')); b.push(glancing(t, '2', 'waiting')); }
+    assert.notDeepEqual(a, b, 'not in step');
+  });
+});
+
+describe('r2-j40 result beats', () => {
+  test('DONE MEANS (rules): a real launch gives one cheer; a failed check one slump; a passed check one high five', () => {
+    const g = new BeatGate();
+    const launch = g.plan({ kind: 'launch', record: { type: 'launch', id: 'shop@1700000000000' } });
+    assert.deepEqual([launch.anim, launch.hold, launch.who], ['cheer', 2, 'all']);
+    assert.equal(g.plan({ kind: 'launch', record: { type: 'launch', id: 'shop@1700000000000' } }), null, 'the same launch never cheers twice');
+    const fail = g.plan({ kind: 'check', passed: false, agent: 7, record: { type: 'task', id: 41 } });
+    assert.deepEqual([fail.anim, fail.hold, fail.who], ['slump', 1.5, 7]);
+    assert.equal(g.plan({ kind: 'check', passed: false, agent: 7, record: { type: 'task', id: 41 } }), null, 'one slump per check');
+    const pass = g.plan({ kind: 'check', passed: true, agent: 7, record: { type: 'task', id: 42 } });
+    assert.deepEqual([pass.anim, pass.hold], ['five', 1.5]);
+    assert.deepEqual(BEATS, { launch: { anim: 'cheer', hold: 2 }, pass: { anim: 'five', hold: 1.5 }, fail: { anim: 'slump', hold: 1.5 } });
+  });
+  test('the gate refuses anything without a record type and number, and anything that is not a launch or a check', () => {
+    const g = new BeatGate();
+    for (const ev of [{ kind: 'launch' }, { kind: 'launch', record: { id: 3 } }, { kind: 'launch', record: { type: 'launch' } }, { kind: 'launch', record: { type: 'launch', id: '' } }, { kind: 'check', passed: true, record: { type: 'task', id: 1 } }, { kind: 'party', record: { type: 'x', id: 1 } }, null]) assert.equal(g.plan(ev), null, JSON.stringify(ev));
+    assert.equal(g.refused, 7);
+  });
+
+  let t, c;
+  before(async () => { t = await boot(); c = await claim(t, 'Beat Box'); });
+  after(async () => { await t.close(); });
+  test('a Tester\'s finished check sends one beat event: passed or failed, the task as its record; RESULT_BEATS=0 sends none', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const tid = Number(sql(t.db, "INSERT INTO agents (floor_id,role,title,name,look,created_at) VALUES (?,'tester','Tester','Tess','{}',1)", f.id).lastInsertRowid);
+    const tester = get(t.db, 'SELECT * FROM agents WHERE id=?', tid);
+    const task = (title) => Number(sql(t.db, "INSERT INTO tasks (floor_id,title,brief,agent_id,status,created_at,updated_at) VALUES (?,?,?,?, 'doing', ?, ?)", f.id, title, 'check it', tester.id, Date.now(), Date.now()).lastInsertRowid);
+    const beats = () => all(t.db, "SELECT data FROM events WHERE floor_id=? AND type='beat' ORDER BY id", f.id).map((e) => JSON.parse(e.data));
+    const a = task('Check the page'); t.app.engine.finishTask(f, tester, a, 'review', 'PASS: the page loads and the form sends.');
+    const b = task('Check the form'); t.app.engine.finishTask(f, tester, b, 'review', 'FAIL: the form does not send.');
+    assert.deepEqual(beats(), [{ kind: 'check', passed: true, agent: tester.id, task: a }, { kind: 'check', passed: false, agent: tester.id, task: b }]);
+    const builder = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='builder'", f.id);
+    const d = Number(sql(t.db, "INSERT INTO tasks (floor_id,title,brief,agent_id,status,created_at,updated_at) VALUES (?,?,?,?, 'doing', ?, ?)", f.id, 'Build', 'b', builder.id, Date.now(), Date.now()).lastInsertRowid);
+    t.app.engine.finishTask(f, builder, d, 'review', 'Built it.');
+    assert.equal(beats().length, 2, 'only a Tester\'s check is a check');
+    t.cfg.resultBeats = false;
+    const e = task('Check again'); t.app.engine.finishTask(f, tester, e, 'review', 'PASS');
+    assert.equal(beats().length, 2);
+    t.cfg.resultBeats = true;
+  });
+});
+
+describe('r2-j41 whiteboard plan', () => {
+  let t, c, f, visitor;
+  const task = (title, plan, status, project = '') => Number(sql(t.db, 'INSERT INTO tasks (floor_id,title,brief,plan,status,project,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)', f.id, title, title, plan, status, project, Date.now(), Date.now()).lastInsertRowid);
+  before(async () => { t = await boot(); c = await claim(t, 'Board Room'); f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug); visitor = new Client(t, { origin: null }); });
+  after(async () => { await t.close(); });
+
+  test('DONE MEANS: the whiteboard lists the current plan\'s jobs and ticks one when it is done', async () => {
+    const ids = ['Sketch the page', 'Build the page', 'Write the words', 'Test the form', 'Launch it', 'A sixth job'].map((x, i) => task(x, 'This week: A tyre shop page', i === 0 ? 'doing' : 'todo'));
+    sql(t.db, "INSERT INTO weekly_plans (floor_id,week,status,goal,jobs,created_at,started_at,task_ids) VALUES (?,?,'started','A tyre shop page','[]',?,?,?)", f.id, weekOf(Date.now()), Date.now(), Date.now(), JSON.stringify(ids));
+    const wb = (await visitor.get(`/api/floors/${c.slug}`)).data.room.whiteboard;
+    assert.equal(wb.source, 'week'); assert.equal(wb.goal, 'A tyre shop page');
+    assert.deepEqual(wb.jobs.map((j) => j.title), ['Sketch the page', 'Build the page', 'Write the words', 'Test the form', 'Launch it'], 'up to 5');
+    let rows = whiteboardRows(wb, []);
+    assert.equal(rows.done, 0); assert.equal(rows.total, 5); assert.equal(rows.rows[0].now, true);
+    sql(t.db, "UPDATE tasks SET status='done' WHERE id=?", ids[0]);
+    const after = (await visitor.get(`/api/floors/${c.slug}`)).data.room.whiteboard;
+    rows = whiteboardRows(after, []);
+    assert.deepEqual(rows.rows.map((r) => r.tick), [true, false, false, false, false], 'one tick for the one job done');
+    assert.equal(rows.done, 1);
+    // Live: the page's own task list ticks the next one before any reload.
+    rows = whiteboardRows(after, [{ id: ids[1], status: 'done' }]);
+    assert.equal(rows.done, 2); assert.equal(rows.rows[1].tick, true);
+    assert.equal(whiteboardRows(after, [{ id: ids[1], status: 'review' }]).rows[1].tick, false, 'a job waiting for review is not done yet');
+  });
+  test('with no started week plan: the newest open plan; a visitor never sees a private job; nothing to show is null; ROOM_WHITEBOARD=0', async () => {
+    sql(t.db, "UPDATE weekly_plans SET status='draft' WHERE floor_id=?", f.id);
+    sql(t.db, "INSERT INTO projects (floor_id,slug,title,private,created_at) VALUES (?,'hush','Hush',1,?)", f.id, Date.now());
+    task('Plan the menu', 'Open the cafe', 'done'); task('Hush hush', 'Open the cafe', 'doing', 'hush'); task('Print the menu', 'Open the cafe', 'todo');
+    const wb = (await visitor.get(`/api/floors/${c.slug}`)).data.room.whiteboard;
+    assert.equal(wb.source, 'plan'); assert.equal(wb.goal, 'Open the cafe');
+    assert.deepEqual(wb.jobs.map((j) => [j.title, j.done]), [['Plan the menu', true], ['Private task', false], ['Print the menu', false]]);
+    assert.ok(!JSON.stringify(wb).includes('Hush'));
+    assert.equal((await c.get(`/api/floors/${c.slug}`)).data.room.whiteboard.jobs[1].title, 'Hush hush', 'the boss sees their own');
+    assert.equal(whiteboardRows(null), null); assert.equal(whiteboardRows({ goal: 'x', jobs: [] }), null);
+    t.cfg.roomWhiteboard = false;
+    assert.equal((await visitor.get(`/api/floors/${c.slug}`)).data.room.whiteboard, null);
+    t.cfg.roomWhiteboard = true;
+    const fresh = await claim(t, 'Empty Board');
+    assert.equal((await visitor.get(`/api/floors/${fresh.slug}`)).data.room.whiteboard, null, 'a floor with no plan has none');
+  });
+});
+
+/** Real visits, the way the visit counter keeps them: unique visitors a day, per path. */
+const visit = (db, floorId, project, day, uniques, path = '/') => sql(db, 'INSERT INTO app_visits (floor_id,project,day,path,views,uniques) VALUES (?,?,?,?,?,?)', floorId, project, day, path, uniques, uniques);
+
+describe('r2-j42 paper piles and trophies', () => {
+  test('one sheet per queued job, at most 5; an empty queue is an empty tray; phone low is one flat sheet or none', () => {
+    assert.deepEqual([0, 1, 3, 5, 9].map((n) => pileSheets(n)), [0, 1, 3, 5, PILE_MAX]);
+    assert.deepEqual([0, 1, 3, 9].map((n) => pileSheets(n, { low: true })), [0, 1, 1, 1]);
+    const tasks = [{ agentId: 4, status: 'todo' }, { agentId: 4, status: 'todo' }, { agent_id: 4, status: 'todo' }, { agentId: 4, status: 'doing' }, { agentId: 5, status: 'todo' }, { agentId: 4, status: 'done' }];
+    assert.equal(queuedFor(tasks, 4), 3, 'only their own jobs waiting to start');
+    assert.equal(pileSheets(queuedFor(tasks, 4)), 3, 'DONE MEANS (rules): a bean with 3 queued jobs has 3 sheets');
+    assert.equal(queuedFor(tasks, 9), 0);
+  });
+  test('trophies: first launch, 100, 1,000, 10,000 real visits; never more than 4; none for nothing', () => {
+    assert.deepEqual(trophiesFor({ launches: 0, visits: 0 }), []);
+    assert.deepEqual(trophiesFor({ launches: 1, visits: 99 }).map((x) => x.id), ['first-launch']);
+    assert.deepEqual(trophiesFor({ launches: 3, visits: 2241 }).map((x) => x.id), ['first-launch', 'visits-100', 'visits-1000']);
+    assert.equal(trophiesFor({ launches: 9, visits: 99999 }).length, 4);
+    assert.deepEqual(trophiesFor(null), []);
+  });
+
+  let t, six, visitor;
+  before(async () => { t = await boot(); six = await claim(t, 'TheTireRx', { floor: 6 }); visitor = new Client(t, { origin: null }); });
+  after(async () => { await t.close(); });
+  test('DONE MEANS: floor 6 shows the 1,000-visit trophy, from the launch cards\' own visit counts', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', six.slug);
+    publish(t.db, f.id, 'thetirerx', 'TheTireRx', Date.now() - 30 * 86400000);
+    publish(t.db, f.id, 'gallery', 'Gallery', Date.now() - 20 * 86400000);
+    publish(t.db, f.id, 'secret', 'Secret', Date.now(), { priv: 1 });
+    visit(t.db, f.id, 'thetirerx', '2026-10-01', 900); visit(t.db, f.id, 'thetirerx', '2026-11-01', 700, '/menu'); visit(t.db, f.id, 'gallery', '2026-11-10', 641);
+    visit(t.db, f.id, 'secret', '2026-11-10', 50000);
+    visit(t.db, f.id, 'never-launched', '2026-11-10', 50000);
+    const m = (await visitor.get(`/api/floors/${six.slug}`)).data.room.milestones;
+    assert.deepEqual(m, { launches: 2, visits: 2241 }, 'private work and unlaunched pages count for nothing');
+    assert.ok(trophiesFor(m).some((x) => x.id === 'visits-1000'));
+    assert.ok(!trophiesFor(m).some((x) => x.id === 'visits-10000'));
+    t.cfg.roomProps = false;
+    const off = (await visitor.get(`/api/floors/${six.slug}`)).data.room;
+    assert.equal(off.milestones, null); assert.equal(off.props, false);
+    t.cfg.roomProps = true;
+  });
+});
+
+describe('r2-j44 phone hard budget', () => {
+  test('the numbers are the spec\'s: 30 fps, pixel ratio 1.5, one shadow light, 60,000 triangles, 2 MB', () => {
+    assert.deepEqual(PHONE_BUDGET, { fps: 30, dpr: 1.5, shadowLights: 1, triangles: 60000, bytes: 2 * 1024 * 1024 });
+  });
+  test('the frame cap holds a 60 Hz and a 120 Hz screen to 30 frames a second, and lets every frame through with no cap', () => {
+    for (const hz of [60, 120]) {
+      let last, drawn = 0;
+      for (let now = 0; now < 10000; now += 1000 / hz) if (!skipFrame(now, last, 30)) { last = now; drawn++; }
+      assert.ok(drawn >= 295 && drawn <= 301, `${hz} Hz drew ${drawn} frames in 10 s`);
+    }
+    let n = 0; for (let now = 0; now < 1000; now += 1000 / 60) if (!skipFrame(now, undefined, 0)) n++;
+    assert.equal(n, 61);
+    assert.deepEqual([phoneDpr(2), phoneDpr(1.5), phoneDpr(1), phoneDpr(2, false)], [1.5, 1.5, 1, 2]);
+  });
+  test('shedding goes in order and stops as soon as the room fits; nothing is shed when it already fits', () => {
+    const steps = [['city', 48000], ['shore', 3000], ['detail', 2500]];
+    assert.deepEqual(shedPlan(107800, steps), { shed: ['city'], left: 59800 });
+    assert.deepEqual(shedPlan(112000, steps), { shed: ['city', 'shore', 'detail'], left: 58500 });
+    assert.deepEqual(shedPlan(50000, steps), { shed: [], left: 50000 });
+    assert.deepEqual(shedPlan(70000, [['city', 0], ['shore', 20000]]), { shed: ['shore'], left: 50000 }, 'a part that saves nothing is left alone');
+  });
+});
+
+describe('r2-j45 auto quality', () => {
+  test('the 2 s frame test: 50 fps or more high, 30 to 49 medium, under 30 low', () => {
+    assert.deepEqual([90, 50, 49.9, 30, 29.9, 4].map(levelFor), ['high', 'high', 'mid', 'mid', 'low', 'low']);
+    assert.equal(QUALITY.TEST_MS, 2000);
+  });
+  const feed = (w, fps, secs, from = 0) => { const out = []; for (let t = from; t < from + secs; t += 1 / fps) { const r = w.frame(t); if (r) out.push(r); } return out; };
+  test('one drop of one level, once, after 5 s averaging under 24 fps; never on a single slow frame; never twice', () => {
+    const w = new QualityWatch('high');
+    assert.deepEqual(feed(w, 40, 30), [], '40 fps is fine');
+    const slow = feed(w, 20, 6, 30);
+    assert.equal(slow.length, 1); assert.equal(slow[0].drop, 'mid');
+    assert.deepEqual(feed(w, 20, 30, 36), [], 'never a second drop');
+    const v = new QualityWatch('mid'); let t = 0;
+    for (; t < 20; t += 1 / 40) v.frame(t);
+    v.frame(t + 0.9);  // one long frame
+    assert.deepEqual(feed(v, 40, 10, t + 1), [], 'one slow frame moves nothing');
+  });
+  test('on low, still under 15 fps for 5 s: a still picture, once; try again watches afresh', () => {
+    const w = new QualityWatch('low');
+    assert.deepEqual(feed(w, 20, 20), [], '20 fps on low stays moving');
+    const r = feed(w, 8, 6, 20);
+    assert.equal(r.length, 1); assert.equal(r[0].still, true);
+    assert.deepEqual(feed(w, 8, 20, 26), [], 'once');
+    w.reset();
+    assert.equal(feed(w, 8, 6, 50).length, 1, 'after Try again, a phone still too slow gets the picture again');
+    const m = new QualityWatch('mid');
+    const steps = feed(m, 8, 12);
+    assert.deepEqual(steps.map((x) => x.drop || (x.still && 'still')), ['low', 'still'], 'mid drops to low, then the still');
+  });
+});
+
+describe('r2-j46 camera follow and drift', () => {
+  const ev = (id, at = [3, 4]) => ({ record: { type: 'handoff', id }, at });
+  test('DONE MEANS (rules): the camera eases to a real handoff in 1.2 s, holds 3 s, eases back in 1.2 s', () => {
+    const f = new CameraFollow();
+    assert.equal(f.ask(10, ev(1)), true);
+    assert.equal(f.pose(10).k, 0);
+    assert.ok(f.pose(10.6).k > 0.3 && f.pose(10.6).k < 0.7, 'half way in');
+    assert.equal(f.pose(11.2).k, 1); assert.deepEqual(f.pose(13).at, [3, 4]); assert.equal(f.pose(14.19).k, 1);
+    assert.ok(f.pose(14.8).k > 0.3 && f.pose(14.8).k < 0.7, 'half way back');
+    assert.equal(f.pose(15.41).k, 0, 'home after 5.4 s');
+    assert.deepEqual([CAMERA.IN, CAMERA.HOLD, CAMERA.OUT, CAMERA.EVERY], [1.2, 3, 1.2, 20]);
+  });
+  test('at most once every 20 s; never without a record; a drag turns it off until the switch turns it on', () => {
+    const f = new CameraFollow();
+    assert.equal(f.ask(0, ev(1)), true);
+    assert.equal(f.ask(10, ev(2)), false, 'too soon');
+    assert.equal(f.ask(20, ev(3)), true);
+    assert.equal(f.ask(41, { at: [1, 1] }), false, 'no record, no follow');
+    assert.equal(f.ask(41, { record: { type: 'handoff' }, at: [1, 1] }), false);
+    f.drag();
+    assert.equal(f.pose(21).k, 0, 'a drag stops it at once');
+    assert.equal(f.ask(60, ev(4)), false, 'off after a drag');
+    f.set(true);
+    assert.equal(f.ask(61, ev(5)), true, 'the switch turns it back on');
+    assert.equal(new CameraFollow({ allowed: false }).ask(100, ev(6)), false, 'never on a phone, under reduce motion, or with ROOM_CAMERA=0');
+  });
+  test('idle drift: nothing for 8 s, then 2 degrees a second, swinging 15 degrees each way', () => {
+    const deg = (s) => (driftYaw(s) * 180) / Math.PI;
+    assert.equal(driftYaw(0), 0); assert.equal(driftYaw(8), 0);
+    assert.ok(Math.abs(deg(9) - 2) < 1e-9, '2 degrees a second');
+    assert.ok(Math.abs(deg(15.5) - 15) < 1e-9, 'out to 15');
+    assert.ok(Math.abs(deg(23) - 0) < 1e-9 && Math.abs(deg(30.5) + 15) < 1e-9, 'back through 0 to -15');
+    let max = 0; for (let s = 8; s < 200; s += 0.05) max = Math.max(max, Math.abs(deg(s)));
+    assert.ok(max <= 15 + 1e-9);
+    assert.equal(driftYaw(100, { allowed: false }), 0);
   });
 });

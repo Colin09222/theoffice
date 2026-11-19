@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { frameLayout } from './room-rules.js';
+import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows, pileSheets, queuedFor, trophiesFor, PHONE_BUDGET, shedPlan, trianglesOf, CameraFollow, driftYaw } from './room-rules.js';
 import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
@@ -471,7 +471,7 @@ export class Actor {
     if (rest.length) { const r = document.createElement('span'); r.className = 'char-rest'; r.textContent = ` ${rest.join(' ')}`; this.nameEl.append(r); }
     this.nameW = 0; this.nameH = 0;
   }
-  destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); }
+  destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); for (const g of [this.papers, this.pile]) if (g) { g.removeFromParent(); for (const m of g.children) { m.geometry.dispose(); m.material.dispose(); } } }
   sitDown() {
     this.seated = true; this.char.inChair = true; this.char.bigDesk = !!this.seat.big;
     // Hips land on the seat cushion; the legs hang in front of the chair, toward the desk. The height eases in with the
@@ -543,24 +543,70 @@ export class Actor {
     if (Math.hypot(this.group.position.x - sx, this.group.position.z - sz) > 0.3) { this.goTo(sx, sz, () => this.sitDown()); return; }
     this.sitDown();
   }
+  /** Whether a task of this person's is running right now: a true thing the pose can show (r2-j39). */
+  get running() { const id = String(this.id); return (this.view.tasks || []).some((t) => t.status === 'doing' && String(t.agentId ?? t.agent_id) === id); }
   applyStatePose() {
     const s = this.state;
     const screen = this.seat.screenMat;
+    const v = this.view;
+    // The pose from true things only (room-rules.js poseFor): own state, a running task, an Idle floor. A Builder on a running job types fast
+    // with the glow on; a Researcher's desk has papers spread; a Tester holds a clipboard; an Idle floor's screens are off (r2-j31).
+    const pose = this.pose = this.isBoss ? null : poseFor({ role: this.isManager ? 'manager' : this.info.role, state: s, running: this.running, floorIdle: !!v.life?.wasIdle });
     if (screen) {
-      const v = this.view;
-      const on = s !== 'idle';
+      const look = pose?.screen ?? (s === 'idle' ? 'saver' : 'dim');
       // A screen at work glows a little past white, untouched by the tone curve, so the bloom picks it out: the room's own little lights.
-      if (s === 'typing') { screen.map = v.codeTex; screen.color.setScalar(1.3); }
-      else if (s === 'browsing' || s === 'reading') { screen.map = v.pageTex; screen.color.setScalar(1.18); }
-      else if (on) { screen.map = v.pageTex; screen.color.set('#c9c4ba'); }
-      else if (v.life?.wasIdle) { screen.map = v.idleTex; screen.color.set('#2e2e33'); }  // an Idle floor's screens are off: no glow at all (r2-j31)
+      if (look === 'code') { screen.map = v.codeTex; screen.color.setScalar(1.3); }
+      else if (look === 'page') { screen.map = v.pageTex; screen.color.setScalar(1.18); }
+      else if (look === 'dim') { screen.map = v.pageTex; screen.color.set('#c9c4ba'); }
+      else if (look === 'off') { screen.map = v.idleTex; screen.color.set('#2e2e33'); }
       else { screen.map = v.idleTex; screen.color.set('#ffffff'); }
       screen.needsUpdate = true;
-      if (this.seat.glow) { this.seat.glow.material.color.set(s === 'typing' ? '#2a5aa8' : '#8a8060'); this.seat.glow.visible = v.detailOn && on; }
+      // On phone low the glow is the screen's own flat colour and nothing more (spec Q9).
+      if (this.seat.glow) { this.seat.glow.material.color.set(look === 'code' ? '#2a5aa8' : '#8a8060'); this.seat.glow.visible = v.detailOn && !!pose?.glow; }
       this.showProgress();
     }
+    this.char.fast = !!pose?.fast;
+    this.showProp(pose?.prop || null);
     if (!this.seated) return;
-    this.char.setAnim(s === 'typing' || s === 'browsing' ? 'type' : s === 'thinking' || s === 'queued' ? 'think' : s === 'talking' ? 'talk' : 'sit');
+    this.char.setAnim(pose ? pose.anim : s === 'typing' || s === 'browsing' ? 'type' : s === 'thinking' || s === 'queued' ? 'think' : s === 'talking' ? 'talk' : 'sit');
+  }
+  /** r2-j42: the in-tray on the desk, one sheet per queued job (max 5; one flat sheet on phone low). An empty queue is an empty tray. */
+  showPile(queued) {
+    if (!this.seat.at || this.isBoss) return;
+    const n = this.view.roomCfg?.props === false ? 0 : pileSheets(queued, { low: this.view.low });
+    this.pileCount = n;
+    if (!this.pile) {
+      const g = this.pile = new THREE.Group(); g.name = 'pile';
+      const f = this.seatFace(), [sx, sz] = this.seat.at, side = -0.78;
+      g.position.set(sx + Math.sin(f) * 0.85 + Math.cos(f) * side, 0.99, sz + Math.cos(f) * 0.85 - Math.sin(f) * side); g.rotation.y = f;
+      const tray = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.4), new THREE.MeshLambertMaterial({ color: '#5b4636' })); tray.position.y = 0.02; g.add(tray);
+      this.view.root.add(g);
+    }
+    const sheets = this.pile.children.slice(1);
+    while (sheets.length < n) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.018, 0.32), new THREE.MeshLambertMaterial({ color: sheets.length % 2 ? '#f4ecd8' : '#fffdf4' }));
+      m.position.set((Math.random() - 0.5) * 0.04, 0.055 + sheets.length * 0.022, (Math.random() - 0.5) * 0.04); m.rotation.y = (Math.random() - 0.5) * 0.15;
+      this.pile.add(m); sheets.push(m);
+    }
+    sheets.forEach((m, i) => { m.visible = i < n; });
+  }
+  /** The desk prop for the work: papers spread beside the keyboard for research, a clipboard in hand for testing. Only while seated. */
+  showProp(prop) {
+    if (prop === 'papers' && !this.papers && this.seat.at) {
+      const g = this.papers = new THREE.Group(); g.name = 'papers';
+      const f = this.seatFace(), [sx, sz] = this.seat.at;
+      for (let i = 0; i < 3; i++) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.56), new THREE.MeshLambertMaterial({ color: i === 1 ? '#fffdf4' : '#f4ecd8' }));
+        m.rotation.x = -Math.PI / 2; m.rotation.z = f + (i - 1) * 0.35;
+        const side = (i - 1) * 0.5;
+        m.position.set(sx + Math.sin(f) * 0.95 + Math.cos(f) * side, 1.0 + i * 0.004, sz + Math.cos(f) * 0.95 - Math.sin(f) * side);
+        g.add(m);
+      }
+      this.view.root.add(g);
+    }
+    if (this.papers) this.papers.visible = prop === 'papers';
+    this.propNow = prop;
+    if (this.seated && !this.action) this.char.paper.visible = prop === 'clipboard';
   }
   // Real events can flip faster than the eye. Each visible state gets a moment on stage, and the ones behind it wait their
   // turn in a short queue. Paced on the wall clock, so a slow frame rate never swallows states that arrive at real-time speed.
@@ -661,7 +707,15 @@ export class Actor {
       this.idleTimer -= dt;
       if (this.idleTimer <= 0) { this.idleTimer = 20 + Math.random() * 40; this.idleErrand(); }
     }
-    if (this.seated) this.faceTo = this.seatFace();
+    if (this.seated) {
+      this.faceTo = this.seatFace();
+      // Waiting on boss: a free bean glances at the boss's door every 15 s (r2-j39), turned in the chair as far as it can.
+      const door = this.view.bossDoor;
+      if (door && !this.isBoss && !this.action && this.state === 'idle' && glancing(time, this.id, this.view.floorState)) {
+        let d = Math.atan2(door.x - g.position.x, door.z - g.position.z) - this.faceTo; d = Math.atan2(Math.sin(d), Math.cos(d));
+        this.faceTo += Math.max(-0.8, Math.min(0.8, d)); this.glanced = time;
+      }
+    }
     if (this.listening) {
       if (time > this.listening.until || this.listening.who.dead) { this.listening = null; if (!this.seated && !this.action && !this.path.length) this.char.setAnim('stand'); }
       else if (!moving) { const o = this.listening.who.group.position; this.faceTo = Math.atan2(o.x - g.position.x, o.z - g.position.z); }
@@ -694,6 +748,7 @@ export class OfficeView {
     this.labels = labels; this.onSelect = onSelect; this.host = host; this.pace = pace;
     this.bossView = !!state.viewer?.owner; this.colors = state.floor.colors; this.decor = state.floor.decor; this.logoUrl = state.floor.logoUrl || null; this.companyName = state.floor.name;
     this.plan = planFor(this.decor.layout);
+    this.bossDoor = this.plan.rooms.find((r) => r.id === 'boss')?.door || null;  // where a waiting floor's beans glance (r2-j39)
     this.staffCount = state.agents.filter((a) => a.role !== 'manager').length;
     this.scene = new THREE.Scene();
     // Linear fog with a long start: the room and the near city keep their full colour, only the far shore softens.
@@ -730,7 +785,15 @@ export class OfficeView {
     // In the tower, or built ahead for the lift, the people come a step after the room, so the build is two short pieces and not one long one.
     const staff = () => { if (!this.dead && !this.synced) { this.syncAgents(state); this.loadLooks(); } };
     if (host || pace) Promise.resolve(this.turn()).then(staff); else staff();
-    if (!host) this.bind();
+    if (!host) { this.bind(); this.initCamera(); }
+  }
+  /** r2-j46: a desktop follows the work; a phone drifts when left alone. Neither under reduce motion, on phone low, or with ROOM_CAMERA=0. */
+  initCamera() {
+    const still = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
+    const camOk = !still && this.roomCfg.camera !== false;
+    this.follow = new CameraFollow({ allowed: camOk && !stage.mobile });
+    this.driftOn = camOk && !!stage.mobile && !this.low;
+    this.lastInputAt = this.time;
   }
   /**
    * In the tower a floor is put together a step at a time, each step when the tower gives it a turn: one a frame, and none while the
@@ -904,7 +967,7 @@ export class OfficeView {
     // Art on the side wall, in the style the boss picked. The company's own logo goes in the first frame when it has one.
     if (d.art) this.hangArt(room, wallX);
     // The floor's real launches, framed over the art spots (r2-j32).
-    this.frameWall = { room, wallX }; this.setFrames(this.roomCfg.frames);
+    this.frameWall = { room, wallX }; this.setFrames(this.roomCfg.frames); this.setTrophies(this.roomCfg.milestones);
     // Bookshelf.
     const shelf = new THREE.Group(); shelf.position.set(L.shelf[0], 0, L.shelf[1]); legacy.add(shelf);
     piece(shelf, '#6f5136', 0.6, 3.1, 2.6, 0, 0, 0);
@@ -1170,7 +1233,35 @@ export class OfficeView {
   /** Phone "low" (spec Q9): fewer, smaller props. */
   get low() { return (stage.q?.density ?? 1) < 0.6; }
   /** The room's own data from the snapshot (server/room.js): frames now, more props later. */
-  setRoom(room) { if (!room) return; this.roomCfg = room; this.setFrames(room.frames); }
+  setRoom(room) { if (!room) return; this.roomCfg = room; this.setFrames(room.frames); this.setTrophies(room.milestones); this.boardKey = null; this.updateBoard(this.tasks); }
+  /**
+   * r2-j42: the trophy shelf on the reception wall, under the sign: one cup per milestone reached (a first launch, then 100, 1,000 and 10,000 real visits), at most
+   * 4, each bigger than the last. Real counts only (server/room.js roomMilestones); a floor with none has a bare shelf.
+   */
+  setTrophies(milestones) {
+    if (!this.frameWall || this.roomCfg?.props === false) return;
+    const list = trophiesFor(milestones);
+    const key = list.map((x) => x.id).join();
+    if (key === this.trophyKey) return;
+    this.trophyKey = key;
+    if (this.trophyGroup) { this.disposeTree(this.trophyGroup); this.trophyGroup.removeFromParent(); }
+    const g = this.trophyGroup = new THREE.Group(); g.name = 'trophies';
+    const L = this.plan; g.position.set(this.frameWall.wallX + 0.2, 1.55, L.console ?? L.signZ ?? -0.4);
+    this.frameWall.room.add(g);
+    if (list.length) { const plank = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 2.7), new THREE.MeshLambertMaterial({ color: '#6f5136' })); plank.position.set(0, -0.03, 0); plank.userData.keep = true; g.add(plank); }
+    const gold = new THREE.MeshStandardMaterial({ color: '#e2b23a', metalness: 0.6, roughness: 0.35 }), base = new THREE.MeshLambertMaterial({ color: '#3b2c22' });
+    list.forEach((t, i) => {
+      const k = 0.8 + i * 0.14, z = -0.9 + i * 0.6;
+      const cup = new THREE.Group(); cup.position.set(0.02, 0, z); cup.scale.setScalar(k); cup.userData.trophy = t.id; g.add(cup);
+      const add = (geo, mat, y) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.userData.keep = true; cup.add(m); return m; };
+      add(new THREE.BoxGeometry(0.3, 0.1, 0.3), base, 0.05);
+      add(new THREE.CylinderGeometry(0.035, 0.05, 0.16, 10), gold, 0.18);
+      add(new THREE.CylinderGeometry(0.15, 0.06, 0.24, 14), gold, 0.38);
+      if (i === 0) add(new THREE.OctahedronGeometry(0.07), gold, 0.56);  // the first launch's cup carries a star
+    });
+    this.trophies = list.map((x) => x.id);  // read by the tests
+    this.trophyCups = g.children.filter((c) => c.userData.trophy).length;
+  }
   /**
    * r2-j32: one frame per real launch, newest first, over the side wall's picture spots: big when there are one or two, a 2 by 2 cluster per spot
    * past that, at most 8 (3 small on phone low) and then a "+N" tag. Each frame is the launch's real photo; a launch with no photo yet hangs a
@@ -1544,6 +1635,28 @@ export class OfficeView {
       marker('#c8455a'); x.lineWidth = 3; x.beginPath(); x.arc(632, 262, 10, 0, 7); x.stroke();
     });
   }
+  /** r2-j41: the plan on the whiteboard: its goal, up to 5 jobs with a tick box each, ticked when done, and how many are done. */
+  planTexture(plan) {
+    const { primary, accent } = this.colors;
+    return canvasTex(704, 340, (x, w, h) => {
+      const g = x.createLinearGradient(0, 0, w, h); g.addColorStop(0, '#fdfcf8'); g.addColorStop(1, '#eeebe2'); x.fillStyle = g; x.fillRect(0, 0, w, h);
+      x.fillStyle = 'rgba(0,0,0,.05)'; x.fillRect(0, 0, w, 6); x.fillRect(0, 0, 6, h);
+      x.font = '600 32px Fraunces, Georgia, serif'; x.fillStyle = primary;
+      const title = String(plan.title); x.fillText(title.length > 34 ? `${title.slice(0, 33)}…` : title, 30, 48);
+      x.font = '700 21px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = '#5d6472'; x.textAlign = 'right'; x.fillText(`${plan.done} of ${plan.total} done`, w - 30, 46); x.textAlign = 'left';
+      plan.rows.forEach((r, i) => {
+        const y = 102 + i * 48;
+        x.lineCap = 'round'; x.lineJoin = 'round';
+        x.strokeStyle = r.tick ? '#3d8a55' : '#2f3340'; x.lineWidth = 3; x.strokeRect(32, y - 22, 28, 28);
+        if (r.tick) { x.lineWidth = 5; x.beginPath(); x.moveTo(36, y - 9); x.lineTo(46, y + 1); x.lineTo(66, y - 27); x.stroke(); }
+        else if (r.now) { x.fillStyle = accent; x.fillRect(38, y - 16, 16, 16); }
+        x.font = `${r.now ? 700 : 600} 25px ui-sans-serif, system-ui, sans-serif`; x.fillStyle = r.tick ? '#8a8e99' : '#1f2330';
+        const label = r.title.length > 40 ? `${r.title.slice(0, 39)}…` : r.title;
+        x.fillText(label, 78, y);
+        if (r.tick) { x.lineWidth = 2; x.strokeStyle = '#8a8e99'; x.beginPath(); x.moveTo(78, y - 8); x.lineTo(78 + x.measureText(label).width, y - 8); x.stroke(); }
+      });
+    });
+  }
   /** Whoever just finished a job does a little jump for joy, the moment the board says so. */
   celebrateFinished(tasks) {
     const was = (this.taskWas ||= new Map());
@@ -1557,14 +1670,22 @@ export class OfficeView {
     this.tasks = tasks;
     this.celebrateFinished(tasks);
     for (const a of this.actors.values()) if (a.state !== 'idle') a.renderBubble();
+    // A task starting or stopping changes what the desk shows, even before the person's own state does (r2-j39).
+    for (const a of this.actors.values()) { const r = a.running; if (r !== a.wasRunning) { a.wasRunning = r; if (!a.isBoss) a.applyStatePose(); } }
+    // r2-j42: each desk's in-tray holds one sheet per job waiting for its owner.
+    for (const a of this.actors.values()) if (!a.isBoss && !a.extra) a.showPile(queuedFor(tasks, a.id));
+    // r2-j41: the current plan's jobs from the server (this week's, or the newest plan's), ticked from the live tasks.
+    const plan = whiteboardRows(this.roomCfg?.whiteboard, tasks);
+    this.whiteboard = plan;  // read by the tests
     const shown = tasks.filter((t) => ['todo', 'doing', 'review', 'blocked', 'done'].includes(t.status));
     const open = shown.some((t) => t.status !== 'done');
     const list = open ? shown : [];
-    const key = JSON.stringify([list.map((t) => [t.title, t.status, t.agent_id ?? null]), [...this.actors.values()].map((a) => a.taskId ?? null)]);
+    const key = JSON.stringify([plan, list.map((t) => [t.title, t.status, t.agent_id ?? null]), [...this.actors.values()].map((a) => a.taskId ?? null)]);
     if (key === this.boardKey) return;
     this.boardKey = key;
+    if (!this.boardMat) return;
     this.boardMat.map?.dispose();
-    this.boardMat.map = this.boardTexture(list);
+    this.boardMat.map = plan ? this.planTexture(plan) : this.boardTexture(list);
     this.boardMat.needsUpdate = true;
   }
   /** The floor's state word from the server, on every snapshot: an Idle floor gets its idle rounds (r2-j31). */
@@ -1751,6 +1872,7 @@ export class OfficeView {
     if (old) { old.removeFromParent(); old.traverse((m) => { if (m.userData?.merged) m.geometry.dispose(); }); }
     this.officeLegacy?.removeFromParent();
     for (const a of this.actors.values()) if (a.seated) a.sitDown();
+    if (stage.view === this) this.fitBudget();  // the furniture counts toward a phone's budget too (r2-j44)
   }
   /** A name plate over every office door, all on one texture: the owner's name and what they do, so you can find anyone at a glance. */
   drawSigns() {
@@ -1850,13 +1972,33 @@ export class OfficeView {
     m.perform([{ anim: 'phone', hold: 3.2 }]);
   }
   /** Finished work is physically carried over, unless the words that go with it are already on their way. */
-  handoff(fromId, toId) { this.life.handoff(fromId, toId); }
+  handoff(fromId, toId, id = null) {
+    this.life.handoff(fromId, toId);
+    // r2-j46: the camera follows a real handoff, to where the paper lands. The event's id is its record.
+    const to = this.actors.get(toId);
+    if (to && id != null && this.follow?.ask(this.time, { record: { type: 'handoff', id }, at: [to.group.position.x, to.group.position.z] })) this.followed = [...(this.followed || []).slice(-10), { id, at: this.time }];
+  }
+  /** The "Follow the work" switch (r2-j46). */
+  setFollow(on) { this.follow?.set(on); window.dispatchEvent(new CustomEvent('office:follow', { detail: { on: !!this.follow?.on } })); }
   cheer() {
     for (const a of this.actors.values()) {
       if (a.action || a.extra) continue;
       a.standUp();
       a.perform([{ anim: 'cheer', hold: 1.8 }]);
     }
+  }
+  /**
+   * A result beat for a real event (r2-j40): one cheer for a real launch, a high five for a passed check, a slump for a failed one. Through the
+   * one gate (room-rules.js BeatGate): no record type and number, no animation; the same record never plays twice. Returns what played, or null.
+   */
+  beat(ev) {
+    const b = (this.beats ||= new BeatGate()).plan(ev);
+    if (!b) return null;
+    const step = { anim: b.anim, hold: b.hold, record: b.record };
+    const who = b.who === 'all' ? [...this.actors.values()].filter((a) => !a.extra && !a.scene) : [this.actors.get(b.who) || [...this.actors.values()].find((a) => String(a.id) === String(b.who))].filter(Boolean);
+    for (const a of who) { if (b.who === 'all') a.standUp(); a.perform([step]); }
+    this.played = [...(this.played || []).slice(-20), { ...b, who: who.map((a) => a.id), at: this.time }];  // read by the tests
+    return who.length ? b : null;
   }
   /**
    * Drag to turn the room, or to slide across it once zoomed in; pinch or scroll to zoom, toward the pointer; two fingers also slide. Shift-drag,
@@ -1873,13 +2015,14 @@ export class OfficeView {
       this.targetPan.x -= (dx * c + dy * sn * up) * per; this.targetPan.y -= (-dx * sn + dy * c * up) * per;
       clampPan(this.targetPan);
     };
-    this.onDown = (e) => { if (e.target !== el) return; this.pts.set(e.pointerId, [e.clientX, e.clientY]); this.moved = 0; this.turning = e.shiftKey || e.button === 2; el.setPointerCapture?.(e.pointerId); };
+    this.onDown = (e) => { if (e.target !== el) return; this.lastInputAt = this.time; this.pts.set(e.pointerId, [e.clientX, e.clientY]); this.moved = 0; this.turning = e.shiftKey || e.button === 2; el.setPointerCapture?.(e.pointerId); };
     this.onMove = (e) => {
       if (!this.pts.has(e.pointerId)) return;
       const [px, py] = this.pts.get(e.pointerId);
       const dx = e.clientX - px, dy = e.clientY - py;
       this.moved += Math.abs(dx) + Math.abs(dy);
-      if (this.moved > 8) this.touched = true;  // from here on the camera is theirs
+      if (this.moved > 8) { this.touched = true; if (this.follow?.on) this.setFollow(false); }  // from here on the camera is theirs, Follow off (r2-j46)
+      this.lastInputAt = this.time;
       if (this.pts.size === 1) {
         if (this.targetZoom > 1.12 && !this.turning) slide(dx, dy);
         else this.targetYaw -= dx * 0.006;  // all the way round: the walls facing the camera are cut away (cutaway.js)
@@ -1900,6 +2043,7 @@ export class OfficeView {
       if (a) el.dispatchEvent(new CustomEvent('office:agent-tap', { detail: { id: a.id }, bubbles: true }));
     };
     this.onWheel = (e) => {
+      this.lastInputAt = this.time;
       if (e.target !== el) return; e.preventDefault();
       this.touched = true;
       const before = this.targetZoom;
@@ -1930,10 +2074,36 @@ export class OfficeView {
     r.toneMappingExposure = this.roomLightsOn === false ? 0.74 : 0.92;
     const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WORLD_SCALE); w.group.position.set(0, this.worldLift, 0);
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
+    this.fitBudget();
+  }
+  /**
+   * r2-j44: on a phone the room stays under 60,000 triangles (spec Q9). Everything sheddable is put back first, then shed a part at a time until
+   * the room fits. The people and the room never go.
+   * Run on entering and again whenever furniture arrives. `this.budget` says what it found and what it shed (read by the tests).
+   */
+  fitBudget() {
+    if (this.host || !stage.mobile || this.roomCfg?.phoneBudget === false) { this.budget = null; return; }
+    const w = this.world, kids = w?.group?.children || [];
+    const [, water, shore, land, city, traffic, boats] = kids;
+    // In order: the city blocks with their traffic and boats, the land and far shore, the water and the stub of tower under the room, the small
+    // props, and last the offices' furniture models (the desks, the people and the room itself always stay).
+    const parts = { city: [city, traffic, boats], shore: [shore, land], under: [water, this.stub?.group], detail: [this.detail], decor: [this.officeModels] };
+    for (const k of Object.keys(parts)) parts[k] = parts[k].filter(Boolean);
+    for (const list of Object.values(parts)) for (const o of list) o.visible = true;
+    if (!this.detailOn && this.detail) this.detail.visible = false;
+    const total = trianglesOf(this.scene);
+    const steps = Object.entries(parts).map(([name, list]) => [name, list.reduce((n, o) => n + trianglesOf(o), 0)]);
+    const plan = shedPlan(total, steps, PHONE_BUDGET.triangles);
+    for (const name of plan.shed) for (const o of parts[name]) o.visible = false;
+    this.budget = { limit: PHONE_BUDGET.triangles, before: total, shed: plan.shed, after: trianglesOf(this.scene) };
   }
   /** Nothing moving but the people: the stage may draw every other frame. */
   idle() { return !this.host && this.intro >= 1 && !this.pts?.size && Math.abs(this.targetZoom - this.zoom) < 1e-3 && Math.abs(this.targetYaw - this.yaw) < 1e-3 && this.pan.distanceTo(this.targetPan) < 1e-3; }
-  leave() { const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; r.toneMappingExposure = 0.84; }
+  leave() {
+    const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; r.toneMappingExposure = 0.84;
+    // The city is shared with the tower: whatever a phone room shed comes back for whoever shows it next.
+    if (this.budget?.shed.length) for (const o of this.world?.group?.children || []) o.visible = true;
+  }
   /** Round 2 lane B, r2-j35: room lights and desk lamps on or off (off from 23:00 to 08:00 New York time), and the sun as strong as the hour's. */
   setRoomLights(on, look) {
     if (look) this.daylight = Math.min(1, look.sunI / 4.5);
@@ -1944,6 +2114,7 @@ export class OfficeView {
   }
   setTier(q) {
     this.detailOn = q.density >= 0.6;
+    if (this.driftOn && q.density < 0.6) this.driftOn = false;  // phone low: no drift (spec Q9)
     this.detail.visible = this.detailOn;
     if (this.officeDetail) this.officeDetail.visible = this.detailOn;
     for (const a of this.actors.values()) if (a.seat.glow) a.seat.glow.visible = this.detailOn && a.state !== 'idle';
@@ -1977,7 +2148,7 @@ export class OfficeView {
       this.insets = { ...pose.insets }; this.insetNow = { ...pose.insets };
       this.insetsHeldUntil = performance.now() + 600;  // whatever the page then asks for waits until the cross-fade is over
     }
-    this.buildWorld(); this.bind(); this.addBackdrop();
+    this.buildWorld(); this.bind(); this.initCamera(); this.addBackdrop();
     // The same light the tower gave it. Its materials are already the floor page's own, so nothing reloads or bakes again under the camera.
     this.pageLight();
   }
@@ -2038,9 +2209,9 @@ export class OfficeView {
   /** Zoomed well in, the camera comes down toward eye level, so faces show rather than the tops of heads. The usual views keep their angle. */
   tilt() { return this.tiltAt(this.zoom); }
   tiltAt(zoom) { const t = Math.min(1, Math.max(0, (zoom - 1.6) / (TILT_END - 1.6))); return this.pitch - (this.pitch - 0.6) * t * t * (3 - 2 * t); }
-  placeCamera(dist, px = 0, pz = 0, pitch = this.pitch) {
+  placeCamera(dist, px = 0, pz = 0, pitch = this.pitch, yaw = this.yaw) {
     const y = Math.sin(pitch) * dist, r = Math.cos(pitch) * dist;
-    this.camera.position.set(px + Math.sin(this.yaw) * r, y, pz + Math.cos(this.yaw) * r);
+    this.camera.position.set(px + Math.sin(yaw) * r, y, pz + Math.cos(yaw) * r);
     this.camera.lookAt(px, 0.8, pz + 0.3);
   }
   /** The closest camera distance at which every corner of the room lands inside the free area. Cached per angle. */
@@ -2129,9 +2300,15 @@ export class OfficeView {
       this.zoom += (this.targetZoom - this.zoom) * k;
       this.pan.lerp(this.targetPan, k);
       // Fit the room to the free area at any aspect ratio, and let the intro pull back from close up.
-      const dist = (this.fitDistance() / this.zoom) * (1.5 - 0.5 * e);
+      // r2-j46: following a real event (desktop) eases the camera over and back; an idle phone drifts gently. Neither moves the user's own pan.
+      const f = this.follow?.pose(this.time) || { k: 0 };
+      let px = this.pan.x, pz = this.pan.y, zoom = this.zoom;
+      if (f.k > 0) { px += (f.at[0] - px) * f.k; pz += (f.at[1] - pz) * f.k; zoom += (Math.max(zoom, 2.3) - zoom) * f.k; }
+      this.followK = f.k;
+      const sway = this.driftOn ? driftYaw(this.time - this.lastInputAt) : 0;
+      const dist = (this.fitDistance() / zoom) * (1.5 - 0.5 * e);
       this.camDist = dist;
-      this.placeCamera(dist, this.pan.x, this.pan.y, this.tilt());
+      this.placeCamera(dist, px, pz, this.tiltAt(zoom), this.yaw + sway);
       this.sun.position.set(SUN_DIR.x + drift * 0.05, SUN_DIR.y, SUN_DIR.z + Math.cos(this.time * 0.05) * 0.04).multiplyScalar(SUN_FAR);
       this.sun.intensity = (2.5 + drift * 0.25) * (this.daylight ?? 1);
     }

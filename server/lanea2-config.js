@@ -11,5 +11,16 @@ export function laneA2Settings(env = process.env) {
     idleLife: on(env.IDLE_LIFE),
     // r2-j32: one frame per real launch on the room's wall, with its launch photo (ROOM_FRAMES=0: the old art only).
     roomFrames: on(env.ROOM_FRAMES),
+    // r2-j40: a Tester's finished check sends the room a 'beat' event (high five or slump) (RESULT_BEATS=0: none sent).
+    resultBeats: on(env.RESULT_BEATS),
+    // r2-j41: the meeting room's whiteboard lists the current plan's jobs, up to 5, ticked as each is done (ROOM_WHITEBOARD=0: the old board).
+    roomWhiteboard: on(env.ROOM_WHITEBOARD),
+    // r2-j42: paper piles (one sheet per queued job, max 5) and the trophy shelf (first launch, 100, 1,000, 10,000 real visits) (ROOM_PROPS=0: none).
+    roomProps: on(env.ROOM_PROPS),
+    // r2-j44: a phone room keeps under 60,000 triangles by shedding the city around it, then the shore, then small props (PHONE_BUDGET=0: no shedding;
+    // the 30 fps cap and 1.5 pixel ratio live in the browser and lift with ?budget=0).
+    phoneBudget: on(env.PHONE_BUDGET),
+    // r2-j46: the desktop camera follows real handoffs (with a "Follow the work" switch) and an idle phone drifts (ROOM_CAMERA=0: neither).
+    roomCamera: on(env.ROOM_CAMERA),
   };
 }
