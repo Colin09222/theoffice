@@ -462,17 +462,18 @@ class FloorPage {
     const s = this.state;
     const tabs = [];
     if (this.canSeeChat) tabs.push(['chat', this.owner ? 'Manager' : 'Chat']);
-    if (businessActive(this)) tabs.push(['business', 'Business']);
+    // The boss's Business tab (docs/redesign, job 22): the journey, Numbers, Orders, Payments, Inbox and Launch under one tab (see bizSections).
+    if (!this.owner && businessActive(this)) tabs.push(['business', 'Business']);
     // The Timeline replaces Talk (docs/redesign, job 13). It keeps the tab's id, so every way into it still works. Without job cards from the server, the old Talk.
     tabs.push(['talk', this.timelineOn ? 'Timeline' : 'Talk'], ['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
     if (this.owner) {
       const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + serversPending(this) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length + mailPending(this) + payPending(this) + legalPending(this);
-      tabs.push(mailTab(this));  // email: the boss's own Inbox (mail-ui.js)
-      tabs.push(payTab(this));  // payments: connect Stripe, status, sales (pay-ui.js)
+      // One Business tab, its sections the panels that used to be tabs of their own. The count on it is the Inbox's.
+      const inbox = mailTab(this);
+      const unread = Number(inbox[1].match(/\d+$/)?.[0] || 0);
+      tabs.push(['biz', unread ? `Business ${unread}` : 'Business']);
       tabs.push(['requests', pending ? `Requests ${pending}` : 'Requests']);
-      tabs.push(['orders', 'Orders']);  // floors-plus: standing orders, after every existing tab
       const srv = serverTab(this); if (srv) tabs.push(srv);  // server slots (server-panel.js)
-      tabs.push(['numbers', 'Numbers']);  // the company dashboard: boss-only (numbers-ui.js)
     }
     if (isPhone()) tabs.push(['about', 'About']);  // on a phone the company card lives in the sheet
     return tabs;
@@ -486,7 +487,8 @@ class FloorPage {
     const tabEl = ([id, label], over) => {
       const m = (id === 'requests' || id === 'inbox') && label.match(/\d+/);
       if (id === 'requests' && this.pinEls?.requests) { this.pinEls.requests.badge.hidden = !m; this.pinEls.requests.badge.textContent = m ? m[0] : ''; }
-      return h(`button.tab${over ? '.overflow' : ''}${this.tab === id ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(this.tab === id), 'data-tab': id, onclick: () => this.setTab(id) }, tabIcon(id), m ? label.replace(/\s*\d+$/, '') : label, m ? h('i.tab-count', {}, ` ${m[0]}`) : null);
+      const on = this.tab === id || (id === 'biz' && this.inBiz);
+      return h(`button.tab${over ? '.overflow' : ''}${on ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(on), 'data-tab': id, onclick: () => this.setTab(id) }, tabIcon(id), m ? label.replace(/\s*\d+$/, '') : label, m ? h('i.tab-count', {}, ` ${m[0]}`) : null);
     };
     this.tabsEl.append(...shown.map((t) => tabEl(t, false)));
     this.moreBtn = null;
@@ -506,8 +508,17 @@ class FloorPage {
     this.tabsEl.classList.toggle('more-open', this.moreOpen);
     this.moreBtn?.setAttribute('aria-expanded', String(this.moreOpen));
   }
+  /** The Business tab's sections, in order: the journey while one runs, then Numbers, Orders, Payments, Inbox and Launch. */
+  bizSections() {
+    if (!this.owner) return [];
+    return [...(businessActive(this) ? [['business', 'Journey']] : []), ['numbers', 'Numbers'], ['orders', 'Orders'], ['pay', 'Payments'], mailTab(this), ['launch', 'Launch']];
+  }
+  get inBiz() { return this.bizSections().some(([id]) => id === this.tab); }
   setTab(id) {
-    if (!this.tabsFor().some(([t]) => t === id)) return;
+    // The Business tab opens on the section last looked at.
+    if (id === 'biz') id = this.bizSections().some(([t]) => t === this.bizLast) ? this.bizLast : this.bizSections()[0]?.[0];
+    if (!this.tabsFor().some(([t]) => t === id) && !this.bizSections().some(([t]) => t === id)) return;
+    if (this.bizSections().some(([t]) => t === id)) this.bizLast = id;
     this.setMore(false);
     this.tab = id;
     // First, so a list can scroll to its newest line.
@@ -524,6 +535,12 @@ class FloorPage {
     this.renderHead();
     this.bodyEl.ondragover = this.bodyEl.ondragleave = this.bodyEl.ondrop = null;
     this.bodyEl.dataset.surface = this.tab;
+    // The Business tab's sections, over whichever one is open.
+    this.bizBar?.remove(); this.bizBar = null;
+    if (this.inBiz) {
+      this.bizBar = h('nav.biz-sections', { role: 'tablist', 'aria-label': 'Business' }, ...this.bizSections().map(([id, label]) => h(`button.chip${this.tab === id ? '.on' : ''}`, { type: 'button', role: 'tab', 'aria-selected': String(this.tab === id), 'aria-checked': String(this.tab === id), 'data-biz': id, onclick: () => this.setTab(id) }, label)));
+      this.bodyEl.before(this.bizBar);
+    }
     if (this.tab === 'chat') this.renderChat();
     if (this.tab === 'about') this.bodyEl.append(this.cardEl);
     if (this.tab === 'talk') { if (this.timelineOn) renderTimeline(this); else this.renderTalk(); }
@@ -532,6 +549,7 @@ class FloorPage {
     if (this.tab === 'projects') this.renderProjects();
     if (this.tab === 'requests') this.renderRequests();
     if (this.tab === 'orders') this.renderOrders();
+    if (this.tab === 'launch') this.renderLaunch();
     if (this.tab === 'business') renderBusiness(this);
     if (this.tab === 'inbox') renderInbox(this);
     if (this.tab === 'servers') renderServers(this);
@@ -850,6 +868,14 @@ class FloorPage {
   }
 
   // ---- projects ----
+  /** The Business tab's Launch section: each project's launch checks, visits, sign-ups and payment link, as on its card, in one place. */
+  renderLaunch() {
+    const s = this.state;
+    const wrap = h('div.gallery.launch-list');
+    if (!s.projects.length) wrap.append(h('p.empty', {}, 'Nothing to launch yet. When the team publishes something, its checks show here.'));
+    for (const p of s.projects) wrap.append(h('article.project.launch-row', { 'data-launch': p.slug }, h('h3', {}, p.title), this.launchBits(p)));
+    this.bodyEl.append(wrap);
+  }
   renderProjects() {
     const s = this.state;
     const wrap = h('div.gallery');

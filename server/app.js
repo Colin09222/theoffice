@@ -1037,6 +1037,16 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     send(res, 200, req.method === 'HEAD' ? undefined : body, headers);
   }
 
+  // The page shell with its own link preview: the same file as every app page, plus og: tags from ext.shareMeta (server/building.js).
+  function serveSharePage(req, res, floorSlug) {
+    const file = statics.get(INDEX);
+    if (!file) return send(res, 404, 'Not found', { 'content-type': 'text/plain; charset=utf-8' });
+    const meta = ext.shareMeta?.(floorSlug, req);
+    if (!meta) return serveStatic(req, res, INDEX);
+    const html = file.body.toString('utf8').replace(/<title>[^<]*<\/title>/, `<title>${esc(meta.title)}</title>`).replace('</head>', `${meta.tags}\n</head>`);
+    send(res, 200, req.method === 'HEAD' ? undefined : html, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
+  }
+
   function refuseSiblings(req) {
     if (req.headers['sec-fetch-site'] === 'same-site') throw new HttpError(403, 'bad_origin', 'Cross-site request refused.');
     if (!cfg.appsBaseDomain) return;
@@ -1117,6 +1127,9 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       limit('read', ip);
       // App pages are all the one shell. Anything else must be an exact known asset.
       if (rest === '/' || /^\/admin\/?$/.test(rest) || /^\/floor\/[a-z0-9-]+\/?$/.test(rest)) return serveStatic(req, res, INDEX);
+      // redesign lane A (job 24): the Launched page and each floor's portfolio, with a link preview (title, screenshot) a chat app can read.
+      const shareMatch = rest.match(/^\/launched(?:\/([a-z0-9-]+))?\/?$/);
+      if (shareMatch) return serveSharePage(req, res, shareMatch[1] || null);
       return serveStatic(req, res, rest, url.searchParams.get('v'));
     } catch (e) {
       if (e instanceof HttpError && (e.status === 403 || e.status === 423)) deniedSignedIn(req, e);

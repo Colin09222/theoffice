@@ -24,6 +24,8 @@ let errors = 0;
 for (const [kind, w, h] of sizes) {
   for (const who of ['visitor', 'boss']) {
     const p = await b.newPage(kind === 'phone' ? { phone: { width: w, height: h } } : { width: w, height: h });
+    // One browser for every page, so its cookies are shared: a visitor's page starts with none.
+    if (who === 'visitor') await p.send('Network.clearBrowserCookies');
     if (who === 'boss') await p.send('Network.setCookie', { name: 'office_s', value: boss.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
     const snap = async (name) => {
       // The phone renders at 2x; the picture is kept at 1x, so a set of shots stays small.
@@ -43,18 +45,30 @@ for (const [kind, w, h] of sizes) {
         await p.until('document.querySelectorAll(".launched-page .lcard").length > 0', 'the launched page', 15000).catch(() => {});
         await sleep(1500);
         await snap('launched');
+        // A floor's own portfolio page (job 24 on), by its share link.
+        if ((await fetch(`${base}/launched/${boss.slug}`)).ok) await p.goto(`${base}/launched/${boss.slug}`);
+        if (p.ev && await p.until('!!document.querySelector(".floor-header:not([hidden])")', 'the portfolio', 15000).catch(() => false)) { await sleep(1200); await snap('portfolio'); }
       } else if (who === 'visitor' && await p.ev('!!document.querySelector("[data-wall=toggle]")')) {
         await p.ev('document.querySelector("[data-wall=toggle]").click(); true');
         await p.until('document.querySelectorAll(".wall .lcard").length > 0', 'the wall', 15000).catch(() => {});
         await sleep(1500);
         await snap('launched');
       }
+      // A software-rendered room on a busy machine can be very slow to draw its first frame: one reload before giving up.
+      // A phone opens the floor without its room from job 16 on (floor-lite); everything else is the full floor page.
+      const floorReady = '(document.body.dataset.page === "floor" || document.body.dataset.page === "floor-lite") && !document.querySelector("#boot")';
       await p.goto(`${base}/floor/${boss.slug}`);
-      await p.until('document.body.dataset.page === "floor" && !document.querySelector("#boot")', 'floor', 120000);
+      try { await p.until(floorReady, 'floor', 90000); } catch { console.log('slow floor, reloading', kind, who); await p.goto(`${base}/floor/${boss.slug}`); await p.until(floorReady, 'floor', 120000); }
       await sleep(WAIT + 2000);
       await p.ev('(() => { const v = window.__office?.view; if (v && v.intro < 1) v.intro = 0.999; return true; })()').catch(() => {});
       await sleep(800);
       await snap('floor');
+      // On a phone's light floor page, the timeline below the card, then the room once Watch the room is tapped.
+      if (await p.ev('document.body.dataset.page === "floor-lite"')) {
+        await p.ev('document.querySelector(".lite-tl")?.scrollIntoView(); true'); await sleep(600); await snap('floor-timeline');
+        await p.ev('document.querySelector("[data-watch-room]").click(); true');
+        try { await p.until('document.body.dataset.page === "floor" && !!window.__office', 'the room', 120000); await sleep(WAIT); await snap('room'); } catch { console.log('the room did not open', kind, who); errors++; }
+      }
       // The Timeline tab (job 13 on): the job cards, newest first.
       if (await p.ev('!!window.__office?.setTab && Array.isArray(window.__office.state?.jobs)')) {
         await p.ev("window.__office.setTab('talk'); true");

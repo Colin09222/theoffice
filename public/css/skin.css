@@ -376,3 +376,69 @@ a.now-text { color: var(--c-teal); font-weight: 600; }
   .launched-grid { grid-template-columns: 1fr; }
   .launched-page .home-brand p { display: none; }
 }
+
+/* ---- the status card (job 15): who, state, goal, now, last shipped, next, and the boss's question and message box ---- */
+.floor-top { width: 268px; gap: 10px; overflow-x: hidden; }
+.status-card { display: flex; flex-direction: column; gap: 10px; padding: 12px; background: var(--c-paper); border: 1px solid var(--c-line); border-radius: 12px; box-shadow: none; }
+.stc-who { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+.stc-lane { padding: 1px 9px; border-radius: 999px; border: 1px solid var(--c-line); background: var(--c-card); font: 500 12px/1.4 var(--f-body); color: var(--c-ink); }
+.stc-empty { margin: 0; font-weight: 500; }
+.stc-fields { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.stc-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: 0; }
+.stc-row dt { font: 500 12px var(--f-body); color: var(--c-slate); }
+.stc-row dd { margin: 0; min-width: 0; font-size: 14.5px; line-height: 1.35; overflow-wrap: anywhere; white-space: normal; }
+.stc-now[data-state="working"]::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--c-amber); vertical-align: 1px; }
+.stc-quiet { color: var(--c-slate); }
+.stc-shipped { display: flex; align-items: center; gap: 10px; color: var(--c-ink); font-weight: 400; text-decoration: none; }
+.stc-shipped img { width: 64px; height: 40px; object-fit: cover; object-position: top; border-radius: 6px; border: 1px solid var(--c-line); flex: none; background: var(--c-card); }
+.stc-shipped span { display: flex; flex-direction: column; min-width: 0; }
+.stc-shipped b { font-weight: 600; color: var(--c-teal); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stc-shipped small { font: 500 12px var(--f-body); color: var(--c-slate); }
+.stc-slot[hidden] { display: none; }
+.stc-boss { display: flex; flex-direction: column; gap: 8px; }
+.stc-question { padding: 10px; border: 1.5px solid var(--c-red); border-radius: 10px; background: var(--c-card); }
+.stc-question p { margin: 0 0 8px; font-size: 14.5px; }
+.stc-question .chip { min-height: 34px; padding: 4px 12px; border-radius: 999px; }
+.stc-message { display: flex; gap: 6px; }
+.stc-message input { flex: 1; min-width: 0; min-height: 40px; padding: 8px 10px; font-size: 15px; }
+.stc-message .btn { width: 44px; min-height: 40px; padding: 0; }
+.status-card .card-actions .btn { min-height: 38px; }
+@media (max-width: 760px) { .floor-top { width: auto; } }
+
+/* ---- a floor on a phone, before the room (job 16): status card, timeline, projects, then Watch the room ---- */
+html:has(body[data-page="floor-lite"]), body[data-page="floor-lite"] { background: var(--c-paper); }
+body[data-page="floor-lite"] #scene, body[data-page="floor-lite"] #labels { display: none; }
+#ui > .floor-lite { position: fixed; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; pointer-events: auto; }
+.lite-top { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: max(10px, env(safe-area-inset-top)) 16px 10px; background: var(--c-paper); border-bottom: 1px solid var(--c-line); }
+.lite-top .btn.back { min-height: 40px; padding: 4px 10px; }
+.lite-title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.lite-title b { font: 700 18px/1.15 var(--f-head); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lite-title small { font: 500 12px var(--f-body); color: var(--c-slate); }
+.lite-main { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px calc(28px + env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; }
+.lite-card { display: block; }
+.lite-card .status-card { background: var(--c-card); box-shadow: var(--card-shadow); padding: 16px; border-radius: var(--card-r); }
+.lite-tl h2, .lite-projects h2 { font: 700 20px var(--f-head); margin: 0 0 10px; }
+.lite-tl .timeline { padding: 0; background: none; overflow: visible; }
+.lite-projects { display: flex; flex-direction: column; }
+.lite-project { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid var(--c-line); text-decoration: none; }
+.lite-project:first-of-type { border-top: 0; }
+.lite-project small { font: 500 12px var(--f-body); color: var(--c-slate); text-transform: capitalize; white-space: nowrap; }
+.lite-none { margin: 0; color: var(--c-slate); }
+.watch-room { min-height: 50px; font-size: 17px; }
+.flat-face { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: #fff; font: 700 17px var(--f-head); }
+
+/* ---- the boss's Business tab (job 22): its sections in one row over the open one ---- */
+.biz-sections { display: flex; gap: 6px; padding: 0 2px 8px; overflow-x: auto; flex: none; scrollbar-width: none; }
+.biz-sections::-webkit-scrollbar { display: none; }
+.biz-sections .chip { flex: none; min-height: 34px; padding: 4px 12px; border-radius: 999px; font-size: 14px; }
+.biz-sections .chip.on { background: var(--c-ink); border-color: var(--c-ink); color: var(--c-card); }
+.launch-list .launch-row h3 { font: 700 18px var(--f-head); margin: 0 0 4px; }
+
+/* ---- a floor's portfolio (job 24): the floor header over its launches ---- */
+.floor-header { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.floor-header[hidden] { display: none; }
+.fh-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fh-num { font: 500 13px var(--f-body); color: var(--c-slate); }
+.fh-name { font: 700 28px/1.1 var(--f-head); margin: 0; }
+.fh-tag, .fh-boss { margin: 0; }
+.stc-all { float: right; font: 600 12px var(--f-body); }

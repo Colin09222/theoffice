@@ -134,9 +134,34 @@ export function installBuilding(ext) {
   };
   GET('/api/building/launched', async ({ res, url }) => {
     const limit = num(url.searchParams.get('limit'), 60, 1, MAX_WALL);
-    const projects = launches(db, { now: now() }).slice(0, limit).map(launchCard);
+    // ?floor=<slug>: one floor's portfolio (docs/redesign, job 24). A floor that is not on show (hidden, suspended, a demo) has nothing to list.
+    const slug = url.searchParams.get('floor');
+    const f = slug && /^[a-z0-9-]{1,80}$/.test(slug) ? get(db, 'SELECT id FROM floors WHERE slug=?', slug) : null;
+    if (slug && !f) return json(res, 200, { projects: [], ts: now() });
+    const projects = launches(db, { now: now(), floorId: f?.id ?? null }).slice(0, limit).map(launchCard);
     json(res, 200, { projects, ts: now() });
   });
+  // The link preview for the Launched page and a floor's portfolio: a title, a line, and the best launch's real screenshot (a JPEG; a drawn
+  // card is SVG, which chat apps don't show, so then there is no image). Nothing private, no money, no demo floor.
+  ext.shareMeta = (floorSlug, req) => {
+    const origin = (ext.cfg?.publicOrigin || `http://${String(req.headers.host || 'localhost').replace(/[^a-zA-Z0-9.:[\]-]/g, '')}`).replace(/\/+$/, '');
+    let title = 'Launched in The Office', line = 'Real things made by small AI teams, one floor each.', list, page = `${origin}${BASE}/launched`;
+    if (floorSlug) {
+      const f = get(db, 'SELECT id, slug, name, number, status, hidden, filler FROM floors WHERE slug=?', floorSlug);
+      if (!f || f.status !== 'active' || f.hidden || (f.filler && !ext.cfg?.demoFloorsPublic)) return null;
+      list = launches(db, { now: now(), floorId: f.id });
+      title = `${f.name || `Floor ${f.number}`}: launched in The Office`;
+      line = list.length ? `${list.filter((l) => !l.wip).length} launched on floor ${f.number}, made by its AI team.` : `Floor ${f.number} of The Office. Nothing launched yet.`;
+      page = `${origin}${BASE}/launched/${f.slug}`;
+    } else list = launches(db, { now: now() });
+    const best = [...list].filter((l) => !l.wip).sort((a, b) => b.visits - a.visits || b.published_at - a.published_at).find((l) => l.shot_at);
+    const image = best ? `${origin}${BASE}/api/building/shot/${best.fslug}/${best.slug}?v=${best.shot_at}` : '';
+    const tag = (k, v, attr = 'property') => `<meta ${attr}="${k}" content="${esc(v)}">`;
+    const tags = [tag('og:type', 'website'), tag('og:title', title), tag('og:description', line), tag('og:url', page), tag('og:site_name', 'The Office'),
+      ...(image ? [tag('og:image', image), tag('og:image:width', '640'), tag('og:image:height', '400'), tag('twitter:card', 'summary_large_image', 'name'), tag('twitter:image', image, 'name')] : [tag('twitter:card', 'summary', 'name')]),
+      tag('twitter:title', title, 'name'), tag('description', line, 'name')].join('\n');
+    return { title, tags };
+  };
   // The home hero: the 3 best launches (Q3). Never work in progress, never a demo floor.
   GET('/api/building/hero', async ({ res }) => {
     json(res, 200, { projects: heroLaunches(db, { now: now() }).map(launchCard), ts: now() });

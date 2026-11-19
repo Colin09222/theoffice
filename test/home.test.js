@@ -23,8 +23,8 @@ function staticClosure(start) {
   return [...seen].map((f) => f.slice(PUB.length));
 }
 
-test('the home page and the Launched page reach no 3D module before they draw', () => {
-  for (const entry of ['js/main.js', 'js/lobby-ui.js', 'js/launched-ui.js', 'js/launch-card.js', 'js/badge.js']) {
+test('the home page, the Launched page and a phone\'s floor reach no 3D module before they draw', () => {
+  for (const entry of ['js/main.js', 'js/lobby-ui.js', 'js/launched-ui.js', 'js/launch-card.js', 'js/badge.js', 'js/floor-lite.js', 'js/status-card.js', 'js/timeline-ui.js']) {
     const reach = staticClosure(join(PUB, entry));
     const bad = reach.filter((f) => THREE_D.test(f));
     assert.deepEqual(bad, [], `${entry} pulls in ${bad.join(', ')}`);
@@ -44,4 +44,13 @@ test('the tower is fetched only after the content, and never on a phone', () => 
   assert.match(src, /if \(!isPhone\(\)\) \{\s+contentIn\.then\(\(\) => requestAnimationFrame\(\(\) => setTimeout\(async \(\) => \{\s+try \{\s+const m = await import\('\.\/tower-nav\.js'\);/);
   const main = readFileSync(join(PUB, 'js/main.js'), 'utf8');
   assert.match(main, /&& !isPhone\(\)\) \{/, 'no background fetch of the floor code on a phone');
+});
+
+test('a phone opens a floor without its room until Watch the room is tapped', () => {
+  const main = readFileSync(join(PUB, 'js/main.js'), 'utf8');
+  assert.match(main, /if \(lite\.liteFloor\(floorMatch\[1\]\)\) \{ current = lite\.hideFloorLite; await lite\.showFloorLite/);
+  assert.match(main, /location\.pathname\.includes\('\/floor\/'\) && !window\.matchMedia\('\(max-width: 760px\)'\)\.matches/, 'no preload of the floor\'s 3D modules on a phone');
+  const lite = readFileSync(join(PUB, 'js/floor-lite.js'), 'utf8');
+  assert.match(lite, /export const liteFloor = \(slug\) => isPhone\(\) && !roomWanted\.has\(slug\);/);
+  assert.match(lite, /'Watch the room'/);
 });
