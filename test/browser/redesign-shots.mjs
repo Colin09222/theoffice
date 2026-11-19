@@ -55,13 +55,20 @@ for (const [kind, w, h] of sizes) {
         await snap('launched');
       }
       // A software-rendered room on a busy machine can be very slow to draw its first frame: one reload before giving up.
-      const floorReady = 'document.body.dataset.page === "floor" && !document.querySelector("#boot")';
+      // A phone opens the floor without its room from job 16 on (floor-lite); everything else is the full floor page.
+      const floorReady = '(document.body.dataset.page === "floor" || document.body.dataset.page === "floor-lite") && !document.querySelector("#boot")';
       await p.goto(`${base}/floor/${boss.slug}`);
       try { await p.until(floorReady, 'floor', 90000); } catch { console.log('slow floor, reloading', kind, who); await p.goto(`${base}/floor/${boss.slug}`); await p.until(floorReady, 'floor', 120000); }
       await sleep(WAIT + 2000);
       await p.ev('(() => { const v = window.__office?.view; if (v && v.intro < 1) v.intro = 0.999; return true; })()').catch(() => {});
       await sleep(800);
       await snap('floor');
+      // On a phone's light floor page, the timeline below the card, then the room once Watch the room is tapped.
+      if (await p.ev('document.body.dataset.page === "floor-lite"')) {
+        await p.ev('document.querySelector(".lite-tl")?.scrollIntoView(); true'); await sleep(600); await snap('floor-timeline');
+        await p.ev('document.querySelector("[data-watch-room]").click(); true');
+        try { await p.until('document.body.dataset.page === "floor" && !!window.__office', 'the room', 120000); await sleep(WAIT); await snap('room'); } catch { console.log('the room did not open', kind, who); errors++; }
+      }
       // The Timeline tab (job 13 on): the job cards, newest first.
       if (await p.ev('!!window.__office?.setTab && Array.isArray(window.__office.state?.jobs)')) {
         await p.ev("window.__office.setTab('talk'); true");
