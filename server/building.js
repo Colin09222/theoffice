@@ -4,6 +4,7 @@
 import { get, all } from './db.js';
 import { esc } from '../public/js/markdown.js';
 import { mimeOf } from './workspace.js';
+import { launches, heroLaunches } from './shots.js';
 
 const TICKER_TTL_MS = 5000;
 const TICKER_SCAN = 150;
@@ -123,17 +124,22 @@ export function installBuilding(ext) {
     thumbCache.set(k, make);
     return make(url);
   }
-  const wallRows = (limit) => all(db, `SELECT p.slug, p.title, p.description, p.kind, p.published_at, p.floor_id, f.id fid, f.number, f.slug fslug, f.name fname, f.colors
-    FROM projects p JOIN floors f ON f.id = p.floor_id
-    WHERE p.published_at IS NOT NULL AND p.private = 0 AND f.status = 'active' AND f.filler = 0 AND f.hidden = 0 ORDER BY p.published_at DESC, p.slug LIMIT ?`, limit);
+  // Each card: the real screenshot when there is one (server/shots.js), else the project's og:image, else the coloured initial card.
+  // Public numbers are visits and plays only (Q6): unique visitors over the last 7 days, as the Numbers tab counts them.
+  const launchCard = (r) => {
+    const f = { id: r.fid, number: r.number, slug: r.fslug, name: r.fname, colors: r.colors };
+    const liveUrl = engine.liveUrl(f, r.slug);
+    const thumb = r.shot_at ? `${BASE}/api/building/shot/${f.slug}/${r.slug}?v=${r.shot_at}` : thumbFor(f, { slug: r.slug, published_at: r.published_at }, liveUrl);
+    return { floor: floorInfo(f), slug: r.slug, title: r.title, description: r.description, kind: r.kind, publishedAt: r.published_at, url: liveUrl, thumb, shot: !!r.shot_at, visits: r.visits, wip: r.wip, madeDays: r.madeDays };
+  };
   GET('/api/building/launched', async ({ res, url }) => {
     const limit = num(url.searchParams.get('limit'), 60, 1, MAX_WALL);
-    const projects = wallRows(limit).map((r) => {
-      const f = { id: r.fid, number: r.number, slug: r.fslug, name: r.fname, colors: r.colors };
-      const liveUrl = engine.liveUrl(f, r.slug);
-      return { floor: floorInfo(f), slug: r.slug, title: r.title, description: r.description, kind: r.kind, publishedAt: r.published_at, url: liveUrl, thumb: thumbFor(f, { slug: r.slug, published_at: r.published_at }, liveUrl) };
-    });
+    const projects = launches(db, { now: now() }).slice(0, limit).map(launchCard);
     json(res, 200, { projects, ts: now() });
+  });
+  // The home hero: the 3 best launches (Q3). Never work in progress, never a demo floor.
+  GET('/api/building/hero', async ({ res }) => {
+    json(res, 200, { projects: heroLaunches(db, { now: now() }).map(launchCard), ts: now() });
   });
 
   // A little card drawn from the floor's colours. Every piece of text goes through esc, and a private, missing,

@@ -31,6 +31,7 @@ import { DomainRefused } from './domains.js';
 import { installOrders } from './orders.js';
 import { installFiller } from './filler.js';
 import { installLook } from './look.js';
+import { installShots } from './shots.js';
 import { installBuilding } from './building.js';
 import { installLife } from './life.js';
 import { installHelp } from './help.js';
@@ -730,7 +731,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext)].filter(Boolean);
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext), installShots(ext)].filter(Boolean);
   // The budget check, inside the server: a spend record every two hours (server/spendcheck.js, redesign job 5).
   const spendCheck = installSpendCheck({ db, cfg, log, now });
   extensions.push(spendCheck);
@@ -857,7 +858,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (lib) { res.writeHead(200, { ...SITE, 'content-type': lib.type, 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' }); return res.end(req.method === 'HEAD' ? undefined : lib.body); }
     const hit = publishedFile(f, pr, tail, req.url.split('?')[0].endsWith('/'));
     if (!hit) return miss();
-    if (/^text\/html/.test(hit.type) && req.method === 'GET' && !pr.private) visit(req, f, pr, tail.join('/'));
+    // The boss and the building manager looking at their own work are not visitors (Q14). Only here, on the office's own origin, are their cookies sent.
+    if (/^text\/html/.test(hit.type) && req.method === 'GET' && !pr.private && sessionOf(req)?.floor_id !== f.id && !adminOf(req)) visit(req, f, pr, tail.join('/'));
     // A sandboxed page has the origin "null", so its own module scripts, fonts and data files load through CORS. Only public files and signed links reach this point, and no credentials are honoured.
     const cors = /^text\/html/.test(hit.type) ? {} : { 'access-control-allow-origin': '*', 'cross-origin-resource-policy': 'cross-origin' };
     res.writeHead(200, { ...SITE, ...cors, 'content-type': hit.type });

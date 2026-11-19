@@ -7,6 +7,7 @@ import { icon } from './icons.js';
 import { muteButton, sfx } from './sfx.js';
 import { confetti, fanfare, mayParty } from './party.js';
 import { stateBadge, idleNote } from './badge.js';
+import { launchCard } from './launch-card.js';
 
 // The claim wizard and its character builder are only fetched when someone opens them.
 const claimModule = () => import('./claim.js');
@@ -54,18 +55,9 @@ function buildTicker() {
   return strip;
 }
 
-// ---- the launched wall: every public project in the building ----
+// ---- the launched wall: every public project in the building, each on a launch card with its real screenshot ----
 function wallCard(pr, onFloor) {
-  const floor = keepFloors.find((f) => f.slug === pr.floor.slug) || pr.floor;
-  return h('article.wall-card', { 'data-project': pr.slug, 'data-floor': pr.floor.slug, css: { '--brand': pr.floor.colors.primary } },
-    h('a.wall-thumb', { href: pr.url, target: '_blank', rel: 'noopener noreferrer', 'aria-label': `Open ${pr.title}` }, h('img', { src: pr.thumb, alt: '', loading: 'lazy', width: '480', height: '300' })),
-    h('div.wall-body', {},
-      h('div.wall-meta', {}, h('span.wall-floor', {}, h('b', {}, String(pr.floor.number)), pr.floor.name || 'New company'), h('span.wall-kind', {}, pr.kind)),
-      h('h4', {}, pr.title),
-      pr.description ? h('p', {}, pr.description) : null,
-      h('div.wall-acts', {},
-        h('a.btn.small.primary', { href: pr.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open'),
-        h('button.btn.small', { type: 'button', onclick: () => onFloor(floor) }, 'Visit floor'))));
+  return launchCard(pr, { onFloor: (fl) => onFloor(keepFloors.find((f) => f.slug === fl.slug) || fl) });
 }
 
 /** Where the directory folds away to its search row until it is wanted: a phone, or a phone on its side, where it would otherwise cover the tower. */
@@ -220,6 +212,15 @@ export async function showLobby(root) {
     h('p.dir-hint', {}, 'Anyone can walk in and watch'),
     h('p.dir-legal', {}, h('a', { href: `${BASE}/about` }, 'About'), ' · ', h('a', { href: `${BASE}/privacy` }, 'Privacy'), ' · ', h('a', { href: `${BASE}/terms` }, 'Terms')));
 
+  // The hero: the three best launches, with their real screenshots (docs/redesign, Q3). If they can't be fetched, the strip just isn't there.
+  const heroIntro = h('p', {}, 'Each floor belongs to one friend, with an office manager and a small staff of AI agents who plan, research, write and build while you watch. Spin the building, take the lift, and drop in on anyone.');
+  const heroStrip = h('div.hero-strip', { 'data-hero': '', 'aria-label': 'The best launches this week', hidden: true });
+  api('/building/hero').then(({ projects }) => {
+    if (!projects?.length) return;
+    heroStrip.replaceChildren(...projects.map((pr) => launchCard(pr, { hero: true, onFloor: (fl) => { const f = keepFloors.find((x) => x.slug === fl.slug); if (f) enterFloor(f); } })));
+    heroStrip.hidden = false; heroIntro.hidden = true;
+  }).catch(() => { /* no strip, and no error for a visitor */ });
+
   const account = session.floor
     ? h('button.btn.chrome', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, icon('elevator'), h('span', {}, 'My floor'))
     : h('button.btn.chrome', { type: 'button', onclick: () => openLogin() }, icon('sign-in'), h('span', {}, 'Sign in'));
@@ -228,7 +229,8 @@ export async function showLobby(root) {
     h('header.topbar', {}, h('div.topbar-right', {}, account, muteButton())),
     h('section.hero', {},
       h('h1', {}, 'The Office', h('span', {}, 'Clock in. Someone else does the work.')),
-      h('p', {}, 'Each floor belongs to one friend, with an office manager and a small staff of AI agents who plan, research, write and build while you watch. Spin the building, take the lift, and drop in on anyone.')),
+      heroIntro,
+      heroStrip),
     panel,
     h('button.open-pill', { type: 'button', onclick: () => openClaim() },
       h('span.pill-status', {}, data.vacant ? 'To let' : 'Full up', h('small', {}, data.vacant ? `Floor ${data.vacant} is empty` : 'Building full')),
