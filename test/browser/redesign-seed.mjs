@@ -1,6 +1,6 @@
 // A building with something to show, for the redesign look checks: launches with real screenshots and visits, one work in progress,
 // and a job under way. Straight into the database, so no model call (not even a mock one) is needed to have a launch on the wall.
-import { makeShooter } from '../../server/shooter.js';
+import { localShooter } from '../../scripts/chrome.mjs';
 import { takeDue } from '../../server/shots.js';
 
 const DAY = 864e5;
@@ -29,7 +29,7 @@ export async function seedShowcase(t, boss, { others = [] } = {}) {
     }
   }
   // Real screenshots, the way the server timer takes them.
-  const shooter = await makeShooter({});
+  const shooter = await localShooter({});
   if (shooter) { try { await takeDue(db, t.cfg, { shooter, origin: `http://127.0.0.1:${t.port}` }); } finally { shooter.close(); } }
   return { floorId: floorId(boss.slug) };
 }

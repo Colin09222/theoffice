@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client, adminClient, until } from './helpers.js';
 import { get, run } from '../server/db.js';
 import { launches, heroLaunches, dueShots, storeShot, takeDue, REFRESH_MS } from '../server/shots.js';
-import { findChrome, makeShooter } from '../server/shooter.js';
+import { findChrome, startChrome, localShooter } from '../scripts/chrome.mjs';
 
 const DAY = 86400000;
 const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -98,7 +98,7 @@ describe('the photos', () => {
         publish(t, f.id, title.toLowerCase().replace(/[^a-z]+/g, '-'), { title, bg, kind: i >= 4 ? 'game' : 'site', at: Date.now() - (i + 1) * 3600e3 });
         floors.push(f);
       }
-      const shooter = await makeShooter({});
+      const shooter = await localShooter({});
       assert.ok(shooter, 'a browser to drive');
       try {
         const r = await takeDue(t.db, t.cfg, { shooter, origin: `http://127.0.0.1:${t.port}` });
@@ -118,13 +118,14 @@ describe('the photos', () => {
       assert.equal(get(t.db, 'SELECT COALESCE(SUM(views),0) n FROM app_visits').n, 0);
     } finally { await t.close(); }
   });
-  test('the server timer takes what is due by itself when it has a browser', { skip: !findChrome() && 'no Chromium on this machine' }, async () => {
-    const t = await boot({ shotsEveryMs: 40 });
+  test('the server timer takes what is due by itself when it can reach a browser (SHOTS_CDP_URL)', { skip: !findChrome() && 'no Chromium on this machine' }, async () => {
+    const chrome = await startChrome();
+    const t = await boot({ shotsEveryMs: 40, shotsCdpUrl: chrome.cdpUrl });
     try {
       const f = floorOf(t, await claim(t, 'Timer Co'));
       publish(t, f.id, 'timed');
       await until(() => get(t.db, "SELECT 1 x FROM launch_shots WHERE project='timed' AND image IS NOT NULL"), { what: 'the timer to take a photo', timeout: 30000 });
-    } finally { await t.close(); }
+    } finally { await t.close(); chrome.stop(); }
   });
 });
 

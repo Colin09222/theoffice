@@ -10,9 +10,10 @@
 //     -e APPS_BASE_DOMAIN="$(sed -n 's/^APPS_BASE_DOMAIN=//p' .env)" -e PUBLIC_ORIGIN="$(sed -n 's/^PUBLIC_ORIGIN=//p' .env)" \
 //     -v "$PWD/data:/data" -v "$PWD:/app:ro" -w /app office-runner/browser:pw1.65.0 node scripts/launch-shots.mjs --all
 // (run from the folder holding docker-compose.yml). SHOTS_CHROME=/path/to/chrome picks a browser; SHOTS_CDP_URL=http://host:9222 uses a running one.
+// It finds the image's Chromium (/ms-playwright/chromium_headless_shell-*/chrome-linux/headless_shell) by itself.
 import { loadConfig } from '../server/config.js';
 import { openDb } from '../server/db.js';
-import { makeShooter } from '../server/shooter.js';
+import { localShooter } from './chrome.mjs';
 import { takeDue, dueShots, launches } from '../server/shots.js';
 
 const args = new Set(process.argv.slice(2));
@@ -23,7 +24,7 @@ if (args.has('--list')) {
   for (const l of launches(db, {})) console.log(`floor ${l.number}  ${l.slug.padEnd(28)} ${l.wip ? 'work in progress' : 'launched        '}  visits(7d) ${String(l.visits).padStart(5)}  ${l.shot_at ? `photo ${new Date(l.shot_at).toISOString().slice(0, 16)}` : 'no photo'}${due.has(`${l.floor_id}/${l.slug}`) ? '  (due)' : ''}`);
   db.close(); process.exit(0);
 }
-const shooter = await makeShooter({ chrome: cfg.shotsChrome, cdpUrl: cfg.shotsCdpUrl });
+const shooter = await localShooter({ chrome: cfg.shotsChrome, cdpUrl: cfg.shotsCdpUrl });
 if (!shooter) { console.error('No browser found. Set SHOTS_CHROME to a Chromium, or run this in the office-runner/browser image.'); db.close(); process.exit(2); }
 try {
   const r = await takeDue(db, cfg, { shooter, origin: cfg.shotsOrigin || cfg.publicOrigin || `http://127.0.0.1:${cfg.port}`, force: args.has('--all'), limit: 200, log: () => {} });

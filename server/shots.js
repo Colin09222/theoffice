@@ -3,8 +3,8 @@
 // 7 days by a server timer. The Launched wall shows the photo on every card; the home hero shows the 3 best: the most real visits or plays in
 // the last 7 days, ties to the newest, never work in progress, never a demo floor. A launch with no photo yet keeps the coloured initial card.
 //
-// Where it runs: a server timer (SHOTS_EVERY_MS, default hourly, a no-op unless a page is due) when the server can reach a Chromium: SHOTS_CHROME,
-// one found where Playwright keeps it, or SHOTS_CDP_URL (a browser container with remote debugging on). Without one, the same work is done by
+// Where it runs: a server timer (SHOTS_EVERY_MS, default hourly, a no-op unless a page is due) when the server can reach a running Chromium with
+// remote debugging on at SHOTS_CDP_URL (the server never starts a process itself). Without one, the same work is done by
 // `node scripts/launch-shots.mjs`, run where a browser is (the office-runner/browser image): see the command in the script's header.
 // SHOTS=0 turns the timer off.
 import { get, all, run } from './db.js';
@@ -121,8 +121,8 @@ export function installShots(ext) {
     busy = true;
     let shooter = null;
     try {
-      shooter = await (ext.makeShooter || makeShooter)({ chrome: cfg.shotsChrome || '', cdpUrl: cfg.shotsCdpUrl || '' });
-      if (!shooter) { if (!noBrowser) log('info', 'launch shots: no browser on this machine; run scripts/launch-shots.mjs where there is one'); noBrowser = true; return; }
+      shooter = await makeShooter({ cdpUrl: cfg.shotsCdpUrl || '' });
+      if (!shooter) { if (!noBrowser) log('info', 'launch shots: no browser reachable (SHOTS_CDP_URL); run scripts/launch-shots.mjs where there is one'); noBrowser = true; return; }
       noBrowser = false;
       const origin = cfg.shotsOrigin || `http://127.0.0.1:${cfg.port}`;
       const r = await takeDue(db, cfg, { shooter, origin, now, log });
