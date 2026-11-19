@@ -160,7 +160,7 @@ describe('staff and managers with no step limit', () => {
       run(h.t.db, "UPDATE tasks SET status='review' WHERE id=?", id);
       assert.match(h.e.reviewTask(h.f, h.mgr, id, 'revise', 'more'), /Sent #\d+ back/);
     }
-    const capped = await floor(scripted(), { maxRevisions: 1 });
+    const capped = await floor(scripted(), { maxRevisions: 1, loopMaxFixRounds: Infinity });
     const t = assign(capped); capped.e.setGlobalPause(true);
     run(capped.t.db, "UPDATE tasks SET status='review' WHERE id=?", t.id);
     assert.match(capped.e.reviewTask(capped.f, capped.mgr, t.id, 'revise', 'more'), /Sent #\d+ back/);
