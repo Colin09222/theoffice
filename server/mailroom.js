@@ -13,9 +13,10 @@
 //
 // The public feed carries only number, kind, floor, state and times. Item text, names and prices stay on the server (r2-j54 adds the boss's and
 // Colon's fuller views). Hidden floors and demo floors are left out. MAILROOM=0 takes the address away.
-import { all } from './db.js';
+import { all, get } from './db.js';
 import { robotState, signFor, trayView } from '../public/js/mailroom-state.js';
 import { beatReader } from './macbeat.js';
+import { stuckListing } from './sendout.js';
 
 export const RECENT_MS = 15 * 60000;   // a closed item stays in the feed for 15 minutes, so the page can stamp it; then it is gone
 export const KINDS = ['help', 'purchase', 'contractor'];
@@ -46,6 +47,23 @@ function item(kind, r, extra) {
 /** What anyone may see of an item: the public fields only. */
 export const publicItem = (i) => ({ kind: i.kind, type: i.type, number: i.number, floor: i.floor, state: i.state, times: { ...i.times } });
 
+// r2-j54: who sees what (section 3 "Who sees what"). A visitor: the public fields above and one line of kind. A floor's boss: all of that, plus
+// their OWN floor's items in full (question and answer, item and price, contractor status). Colon (the admin): everything, every floor, with the
+// stuck jobs he can Send out (the existing admin route). Nobody else's words ever reach a boss, and a visitor never sees words or money.
+/** The full record behind one item, for its own boss or for Colon. Only that floor's rows are read. */
+export function fullItem(db, i) {
+  if (i.kind === 'help') {
+    const r = get(db, 'SELECT question, tried, answer, status FROM help_requests WHERE id=? AND floor_id=?', i.number, i._floorId);
+    return r && { ...publicItem(i), question: r.question, tried: r.tried, answer: r.answer, outcome: r.status };
+  }
+  if (i.kind === 'purchase') {
+    const r = get(db, 'SELECT item, price, why, link, status, admin_note FROM purchases WHERE id=? AND floor_id=?', i.number, i._floorId);
+    return r && { ...publicItem(i), item: r.item, priceUsd: r.price, why: r.why, link: r.link, outcome: r.status, note: r.admin_note };
+  }
+  const r = get(db, 'SELECT j.title, j.role, j.status, j.summary, j.task_id FROM contractor_jobs j WHERE j.id=? AND j.floor_id=?', i.number, i._floorId);
+  return r && { ...publicItem(i), title: r.title, role: r.role, contractorStatus: r.status, summary: r.summary, task: r.task_id };
+}
+
 /** Counts by kind of the open items, for the robot's card. */
 export function counts(items) {
   const c = { help: 0, purchase: 0, contractor: 0 };
@@ -64,10 +82,24 @@ export function installMailroom(ext) {
   };
   // One pigeonhole per open floor (public floors only).
   const openFloors = () => all(db, "SELECT number FROM floors WHERE status='active' AND hidden=0 AND (filler=0 OR ?) AND number <= ? ORDER BY number", cfg.demoFloorsPublic ? 1 : 0, cfg.towerFloors ?? 10).map((r) => r.number);
-  GET('/api/mailroom', async ({ res }) => {
+  const isAdmin = (req) => { try { ext.requireAdmin(req); return true; } catch { return false; } };
+  GET('/api/mailroom', async ({ req, res }) => {
     if (cfg.mailroom === false) throw new HttpError(404, 'not_found');
     const items = mailroomItems(db, cfg, { now: now() });
-    json(res, 200, { items: items.map(publicItem), counts: counts(items), robot: robotOf(items), floors: openFloors(), ts: now() });
+    const out = { items: items.map(publicItem), counts: counts(items), robot: robotOf(items), floors: openFloors(), audience: 'visitor', ts: now() };
+    if (isAdmin(req)) {
+      // Colon: the whole queue, every floor (hidden ones too), in full, and the stuck jobs he can Send out from here.
+      const every = mailroomItems(db, cfg, { now: now(), all: true });
+      out.audience = 'admin';
+      out.queue = every.map((i) => fullItem(db, i)).filter(Boolean);
+      out.stuck = stuckListing(db, cfg, { now: now(), fenced: false });
+    } else {
+      // A floor's boss: their own floor's items in full. The session is checked floor by floor with the app's own viewer rule.
+      // Their own floor's items come from that floor alone (hidden or not: it is theirs), never from the public list.
+      const own = all(db, "SELECT * FROM floors WHERE status='active'").find((f) => ext.viewerFor(req, f).owner);
+      if (own) { out.audience = 'boss'; out.mine = mailroomItems(db, cfg, { now: now(), floorId: own.id, all: true }).map((i) => fullItem(db, i)).filter(Boolean); }
+    }
+    json(res, 200, out);
   });
   return null;
 }

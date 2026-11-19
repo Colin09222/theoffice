@@ -38,6 +38,27 @@ export function mailroomStrip(d) {
     h('b.mailroom-b', {}, 'B'), robotSvg(state, 22), h('span', {}, h('strong', {}, 'Mailroom'), ' · ', STATE_WORDS[state], n ? ` · ${n} in the tray` : ''));
 }
 
+// r2-j54: a boss reads their own floor's items in full; Colon sees the whole queue and can Send out a stuck job (the admin page's own route).
+const KIND_WORD = { help: 'Help question', purchase: 'Purchase request', contractor: 'Build job' };
+function fullRow(i, { floor = false } = {}) {
+  const head = `${KIND_WORD[i.kind]} #${i.number}${floor ? ` · floor ${i.floor}` : ''} · ${i.state}`;
+  const body = i.kind === 'help' ? [h('p', {}, h('b', {}, 'Question: '), i.question), i.answer ? h('p', {}, h('b', {}, 'Answer: '), i.answer) : null]
+    : i.kind === 'purchase' ? [h('p', {}, h('b', {}, 'Item: '), i.item), h('p', {}, h('b', {}, 'Price: '), `$${Number(i.priceUsd).toFixed(2)}`), h('p', {}, h('b', {}, 'Why: '), i.why)]
+    : [h('p', {}, h('b', {}, 'Job: '), i.title), h('p', {}, h('b', {}, 'Contractor: '), i.contractorStatus === 'held' ? 'waiting for the contractor' : i.contractorStatus === 'done' ? 'handed back' : i.contractorStatus), i.summary ? h('p', {}, i.summary) : null];
+  return h('details.mailroom-full', { 'data-record': `${i.type}:${i.number}` }, h('summary', {}, head), ...body);
+}
+function audienceBlock(d, onSendOut) {
+  if (d.audience === 'boss') {
+    return h('section.mailroom-mine.card-ui', { 'data-audience': 'boss' }, h('h2', {}, 'Your floor'), (d.mine || []).length ? h('div', {}, ...(d.mine || []).map((i) => fullRow(i))) : h('p', {}, 'Nothing from your floor in the mailroom.'));
+  }
+  if (d.audience === 'admin') {
+    return h('section.mailroom-queue.card-ui', { 'data-audience': 'admin' }, h('h2', {}, 'The whole queue'),
+      (d.queue || []).length ? h('div', {}, ...(d.queue || []).map((i) => fullRow(i, { floor: true }))) : h('p', {}, 'Nothing in the queue.'),
+      (d.stuck?.jobs || []).length ? h('div.mailroom-stuck', {}, h('h3', {}, 'Stuck jobs'), ...(d.stuck.jobs).map((j) => h('p', {}, `Task #${j.task ?? j.id} · floor ${j.floorNumber ?? j.number} · ${j.title || ''} `, h('button.btn.small', { type: 'button', onclick: () => onSendOut(j.task ?? j.id) }, 'Send out')))) : null);
+  }
+  return null;
+}
+
 function card(d) {
   const state = d.robot?.state || 'free';
   const c = d.counts || { help: 0, purchase: 0, contractor: 0 };
@@ -62,12 +83,14 @@ export async function showMailroom(root) {
   alive = true;
   const side = h('aside.mailroom-side');
   const lines = h('ul.mailroom-lines', { 'aria-label': 'In the mailroom' });
+  const audience = h('div.mailroom-audience');
   const roomBox = h('div.mailroom-room');
   let robotOpen = false;
   const robotBtn = h('button.btn.small.mailroom-robot-btn', { type: 'button', onclick: () => { robotOpen = !robotOpen; render(last); } }, 'buddehbot');
   put(root, h('div.mailroom-page', {},
     h('header.home-top', {}, h('div.home-brand', {}, h('button.btn.back', { type: 'button', onclick: () => window.officeGo('/') }, icon('arrow-left'), h('span', {}, 'Home')), h('div', {}, h('h1', {}, 'The mailroom'), h('p', {}, 'B, under the lobby. buddehbot reads what the floors send down.')))),
-    h('div.mailroom-main', {}, roomBox, h('div.mailroom-col', {}, robotBtn, side, lines))));
+    h('div.mailroom-main', {}, roomBox, h('div.mailroom-col', {}, robotBtn, side, lines, audience))));
+  const sendOut = async (id) => { try { await api(`/admin/tasks/${id}/send-out`, { method: 'POST', body: {}, admin: true }); await read(); } catch (e) { audience.prepend(h('p.mailroom-error', {}, e.message)); } };
   let last = null;
   const render = (d) => {
     if (!d) return;
@@ -75,6 +98,10 @@ export async function showMailroom(root) {
     // One line of kind with the floor number for each open item (Q20). Nothing else.
     lines.replaceChildren(...(d.items || []).filter((i) => i.state === 'open' || i.state === 'picked').map((i) => h('li', { 'data-record': `${i.type}:${i.number}` }, kindLine(i))));
     if (view) view.setData(d); else roomBox.replaceChildren(domRoom(d));
+    // Keep any open item open across a re-render.
+    const open = new Set([...audience.querySelectorAll('details[open]')].map((x) => x.dataset.record));
+    audience.replaceChildren(audienceBlock(d, sendOut) || '');
+    for (const x of audience.querySelectorAll('details')) if (open.has(x.dataset.record)) x.open = true;
   };
   // A desktop gets the room in 3D; a phone, or a browser with no 3D, the plain one.
   if (!isPhone()) {

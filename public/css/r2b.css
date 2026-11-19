@@ -61,3 +61,11 @@ body.mailroom-3d .mailroom-room { min-height: 60vh; pointer-events: none; }
 .mailroom-bubble { position: absolute; left: 50%; top: 110px; transform: translateX(-50%); padding: 8px 14px; background: #fff; color: var(--c-ink); border: 1.5px solid var(--c-ink); border-radius: 14px; font: 600 16px/1.2 var(--f-body, sans-serif); }
 @media (max-width: 760px) { .mailroom-overlay { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .mailroom-stamp.down { animation: none; } }
+
+/* r2-j54: a boss's own items in full, and Colon's whole queue. */
+.mailroom-mine, .mailroom-queue { padding: 12px 14px; }
+.mailroom-mine h2, .mailroom-queue h2 { margin: 0 0 8px; font: 700 17px/1.2 var(--f-head, sans-serif); }
+.mailroom-full { border-top: 1px solid var(--c-line); padding: 6px 0; font-size: 14px; }
+.mailroom-full summary { cursor: pointer; font-weight: 600; }
+.mailroom-full p { margin: 4px 0 0; overflow-wrap: anywhere; }
+.mailroom-stuck h3 { margin: 10px 0 4px; font-size: 14px; }
