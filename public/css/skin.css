@@ -426,3 +426,10 @@ body[data-page="floor-lite"] #scene, body[data-page="floor-lite"] #labels { disp
 .lite-none { margin: 0; color: var(--c-slate); }
 .watch-room { min-height: 50px; font-size: 17px; }
 .flat-face { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: #fff; font: 700 17px var(--f-head); }
+
+/* ---- the boss's Business tab (job 22): its sections in one row over the open one ---- */
+.biz-sections { display: flex; gap: 6px; padding: 0 2px 8px; overflow-x: auto; flex: none; scrollbar-width: none; }
+.biz-sections::-webkit-scrollbar { display: none; }
+.biz-sections .chip { flex: none; min-height: 34px; padding: 4px 12px; border-radius: 999px; font-size: 14px; }
+.biz-sections .chip.on { background: var(--c-ink); border-color: var(--c-ink); color: var(--c-card); }
+.launch-list .launch-row h3 { font: 700 18px var(--f-head); margin: 0 0 4px; }

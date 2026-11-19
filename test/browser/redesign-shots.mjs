@@ -24,6 +24,8 @@ let errors = 0;
 for (const [kind, w, h] of sizes) {
   for (const who of ['visitor', 'boss']) {
     const p = await b.newPage(kind === 'phone' ? { phone: { width: w, height: h } } : { width: w, height: h });
+    // One browser for every page, so its cookies are shared: a visitor's page starts with none.
+    if (who === 'visitor') await p.send('Network.clearBrowserCookies');
     if (who === 'boss') await p.send('Network.setCookie', { name: 'office_s', value: boss.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
     const snap = async (name) => {
       // The phone renders at 2x; the picture is kept at 1x, so a set of shots stays small.

@@ -7,7 +7,7 @@ import { portrait } from './portrait.js';
 import { lift, prefetchFloor } from './floorcache.js';
 import { renderStatusCard } from './status-card.js';
 
-const TAB_ICONS = { chat: 'phone-call', talk: 'chats-teardrop', work: 'notebook', tasks: 'push-pin', projects: 'archive', requests: 'receipt', inbox: 'envelope-simple', orders: 'calendar-check', numbers: 'chart-bar', about: 'identification-badge', business: 'briefcase', pay: 'credit-card', team: 'users-three', servers: 'wrench' };
+const TAB_ICONS = { biz: 'briefcase', launch: 'rocket-launch', chat: 'phone-call', talk: 'chats-teardrop', work: 'notebook', tasks: 'push-pin', projects: 'archive', requests: 'receipt', inbox: 'envelope-simple', orders: 'calendar-check', numbers: 'chart-bar', about: 'identification-badge', business: 'briefcase', pay: 'credit-card', team: 'users-three', servers: 'wrench' };
 export const tabIcon = (tab) => icon(TAB_ICONS[tab] || 'file-text');
 
 export { portrait };
