@@ -315,6 +315,13 @@ CREATE TABLE IF NOT EXISTS rank_log (
 );
 `;
 
+// redesign r2 lane B (docs/redesign/ROUND2.md): new tables only; each statement is safe to run on every start.
+const R2_LANE_B_SCHEMA = `
+-- r2-j61: what reached a boss by email, one row per event (question waiting, its 24 h reminder, launch ready, something shipped).
+CREATE TABLE IF NOT EXISTS boss_alerts (key TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, status TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS boss_alerts_floor_day ON boss_alerts(floor_id, day);
+`;
+
 export function openDb(dataDir) {
   let path = ':memory:';
   if (dataDir !== ':memory:') { mkdirSync(dataDir, { recursive: true }); path = join(dataDir, 'office.db'); }
@@ -331,6 +338,7 @@ export function openDb(dataDir) {
   db.exec('CREATE INDEX IF NOT EXISTS ledger_provider ON ledger(provider, cost_usd)');
   db.exec(LANE_B_SCHEMA);
   laneBFills(db);
+  db.exec(R2_LANE_B_SCHEMA);  // redesign r2 lane B
   // Rows from before the column existed. A bare claude- id went to the Claude API; an id with a slash is OpenRouter's naming, whoever made the model. Domains are paid from the registrar balance and count towards neither.
   if (db.prepare("SELECT 1 x FROM ledger WHERE provider='' AND kind!='domain' LIMIT 1").get()) {
     db.exec(`UPDATE ledger SET provider = CASE WHEN kind='search' THEN 'anthropic' WHEN kind IN ('image','review') THEN 'openrouter' WHEN model='managed-session' OR model LIKE 'claude-%' THEN 'anthropic' ELSE 'openrouter' END WHERE provider='' AND kind!='domain'`);
