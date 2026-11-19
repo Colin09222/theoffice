@@ -4,6 +4,7 @@
 // The weekly fuel gauge and Approve plan (jobs 20 and 21) are on hold: their places are marked and left empty.
 import { h, api, clear, put, toast, timeAgo, BASE } from './dom.js';
 import { icon } from './icons.js';
+import { emptyLine } from './timeline-ui.js';
 
 const QUICK = ['Yes', 'No', 'You decide'];
 const OPEN = new Set(['todo', 'working', 'review', 'waiting']);
@@ -27,7 +28,7 @@ export function renderStatusCard(page, el, { shareFloor }) {
   const nothingYet = !now && !shipped && !st.goal && !(s.jobs || []).length;
   put(el,
     h('p.stc-who', {}, 'Run by ', h('b', {}, s.floor.boss?.name || 'the boss'), st.lane ? h('span.stc-lane', { 'data-lane': st.lane.toLowerCase() }, st.lane) : null),
-    nothingYet ? h('p.stc-empty', {}, 'Just moved in. First job starts soon.') : h('dl.stc-fields', {},
+    nothingYet ? h('p.stc-empty', {}, emptyLine(st)) : h('dl.stc-fields', {},
       st.goal ? row('Goal', h('span.stc-goal', {}, st.goal)) : null,
       row('Now', now ? h('span.stc-now', { 'data-state': now.state }, now.line) : h('span.stc-quiet', {}, 'Nothing under way')),
       shipped ? row('Last shipped', h('a.stc-all', { href: `${BASE}/launched/${page.slug}`, 'data-portfolio': '', onclick: (e) => { e.preventDefault(); window.officeGo(`/launched/${page.slug}`); } }, 'All launches'), h('a.stc-shipped', { href: shipped.url || '#', target: '_blank', rel: 'noopener noreferrer', 'data-shipped': shipped.slug },

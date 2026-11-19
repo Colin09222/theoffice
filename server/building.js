@@ -5,7 +5,7 @@ import { get, all } from './db.js';
 import { esc } from '../public/js/markdown.js';
 import { mimeOf } from './workspace.js';
 import { launches, heroLaunches } from './shots.js';
-import { publicCard, NOW_HORIZON_MS } from './jobcards.js';
+import { publicCard, floorHistory, NOW_HORIZON_MS } from './jobcards.js';
 
 const TICKER_TTL_MS = 5000;
 const TICKER_SCAN = 150;
@@ -152,16 +152,9 @@ export function installBuilding(ext) {
       seen.add(k); items.push(l);
       if (items.length >= limit) break;
     }
-    // When the last job really finished: a finished job card, else a real "finished" line, else a launch. Pings never move it.
-    const ids = floors.filter((f) => !f.default_private).map((f) => f.id);
-    let lastFinished = null;
-    if (ids.length) {
-      const marks = ids.map(() => '?').join(',');
-      const done = get(db, `SELECT MAX(done_at) at FROM job_cards WHERE state='done' AND floor_id IN (${marks})`, ...ids)?.at || null;
-      const launched = get(db, `SELECT MAX(published_at) at FROM projects WHERE private=0 AND published_at IS NOT NULL AND floor_id IN (${marks})`, ...ids)?.at || null;
-      const finishedLine = cache.items.filter((i) => i.kind === 'feed' && /^finished "/.test(i._work || '') && ids.includes(i._floorId)).reduce((m, i) => Math.max(m, i.ts), 0) || null;
-      lastFinished = done || finishedLine || launched || null;
-    }
+    // When the last job really finished, from the same rows as a floor's own empty states (jobcards.js floorHistory, job 32): a finished job
+    // card or task, or a launch. Pings never move it.
+    const lastFinished = floors.reduce((m, f) => Math.max(m, floorHistory(db, f).lastFinished || 0), 0) || null;
     return { items, lastFinished };
   }
   ext.happeningNow = happeningNow;

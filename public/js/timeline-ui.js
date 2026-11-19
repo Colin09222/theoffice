@@ -33,12 +33,23 @@ function msgItem(F, m) {
       h('time.tl-time', {}, timeAgo(m.createdAt || Date.now()))));
 }
 
+/**
+ * What an empty timeline says (job 32). "Just moved in" only for a floor that is genuinely new: never launched, never finished a task. A floor
+ * with a past but no job cards yet (its work was done before cards existed) shows when its last job finished; with nothing to show at all,
+ * that the timeline is empty. The status card says the same.
+ */
+export function emptyLine(status) {
+  if (status?.isNew) return 'Just moved in. First job starts soon.';
+  if (status?.lastFinished) return `Last job finished ${timeAgo(status.lastFinished)}.`;
+  return 'Nothing on the timeline yet.';
+}
+
 /** Draw the whole timeline into the panel's body. */
 export function renderTimeline(F) {
   const list = h('ol.timeline', { role: 'log', 'aria-live': 'polite', 'aria-label': 'What the team is doing' });
   const items = [...(F.state.jobs || []).map((c) => ({ kind: 'job', at: c.updatedAt || 0, c })), ...talkWithBoss(F)]
     .sort((a, b) => b.at - a.at).slice(0, MAX_ITEMS);
-  if (!items.length) list.append(h('li.empty', {}, 'Just moved in. First job starts soon.'));
+  if (!items.length) list.append(h('li.empty', {}, emptyLine(F.state.status)));
   for (const it of items) list.append(it.kind === 'job' ? jobItem(F, it.c) : msgItem(F, it.m));
   F.timelineEl = list;
   F.bodyEl.append(list);

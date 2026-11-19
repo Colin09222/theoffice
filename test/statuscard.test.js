@@ -69,7 +69,7 @@ describe('the card on the page', () => {
   const src = readFileSync(new URL('../public/js/status-card.js', import.meta.url), 'utf8');
   test('the visitor\'s fields, the boss\'s extras, the empty state, and marked places for the gauge and Approve plan', () => {
     for (const label of ['Goal', 'Now', 'Last shipped', 'Next', 'Visit website', 'Share', 'Run by ']) assert.ok(src.includes(`'${label}'`), label);
-    assert.match(src, /Just moved in\. First job starts soon\./);
+    assert.match(src, /nothingYet \? h\('p\.stc-empty', \{\}, emptyLine\(st\)\)/);  // just moved in, or the floor's last job (job 32)
     assert.match(src, /page\.owner \? bossBits\(page\) : null/);
     assert.match(src, /data-slot': 'fuel-gauge'/); assert.match(src, /data-slot': 'approve-plan'/);
     assert.match(src, /const QUICK = \['Yes', 'No', 'You decide'\]/);
