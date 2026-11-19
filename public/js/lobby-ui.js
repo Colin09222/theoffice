@@ -8,6 +8,7 @@ import { icon } from './icons.js';
 import { muteButton, sfx } from './sfx.js';
 import { stateBadge, idleNote } from './badge.js';
 import { launchCard } from './launch-card.js';
+import { heroFrames, crossfade } from './hero-fade.js';
 
 // The claim wizard and its character builder are only fetched when someone opens them.
 const claimModule = () => import('./claim.js');
@@ -15,7 +16,7 @@ const openClaim = () => claimModule().then((m) => m.openClaim());
 const openLogin = () => claimModule().then((m) => m.openLogin());
 
 const NOW_LINES = 5;
-let floors = [], toLet = [], poll = null, nowPoll = null, tower = null, tip = null, alive = false;
+let floors = [], toLet = [], poll = null, nowPoll = null, tower = null, tip = null, alive = false, fades = [];
 
 /** One open floor, one line: number, name, what it does, and its state. */
 function floorRow(card, onEnter) {
@@ -67,7 +68,10 @@ function buildNow() {
 function buildHero(onFloor) {
   const strip = h('section.hero-strip', { 'data-hero': '', 'aria-label': 'The best launches this week', hidden: true });
   strip.ready = api('/building/hero').then(({ projects }) => {
-    const cards = (projects || []).map((pr) => launchCard(pr, { hero: true, onFloor }));
+    const list = projects || [];
+    const cards = list.map((pr) => launchCard(pr, { hero: true, onFloor }));
+    // Round 2, r2-j33: a card with more than one real screenshot fades between them while it is on screen.
+    fades.forEach((f) => f?.stop()); fades = cards.map((c, i) => crossfade(c, heroFrames(list[i])));
     if (cards.length < 3) cards.push(h('article.lcard.lcard-open', {}, h('div.lcard-body', {}, h('h3.lcard-title', {}, 'Your company could be here'), h('p.lcard-line', {}, 'A floor of your own, a team of AI staff, and a real thing on the web.'), h('button.btn.small.lcard-go', { type: 'button', onclick: () => openClaim() }, 'Open an office'))));
     strip.replaceChildren(...cards);
     strip.hidden = false;
@@ -161,5 +165,6 @@ function showTip(n, x, y) {
 export function hideLobby() {
   alive = false;
   clearInterval(poll); poll = null; clearInterval(nowPoll); nowPoll = null; tip = null;
+  fades.forEach((f) => f?.stop()); fades = [];
   tower?.leave?.(); tower = null;
 }

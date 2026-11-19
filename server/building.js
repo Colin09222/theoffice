@@ -4,7 +4,7 @@
 import { get, all } from './db.js';
 import { esc } from '../public/js/markdown.js';
 import { mimeOf } from './workspace.js';
-import { launches, heroLaunches } from './shots.js';
+import { launches, heroLaunches, heroShots } from './shots.js';
 import { publicCard, floorHistory, NOW_HORIZON_MS } from './jobcards.js';
 
 const TICKER_TTL_MS = 5000;
@@ -222,7 +222,8 @@ export function installBuilding(ext) {
   };
   // The home hero: the 3 best launches (Q3). Never work in progress, never a demo floor.
   GET('/api/building/hero', async ({ res }) => {
-    json(res, 200, { projects: heroLaunches(db, { now: now() }).map(launchCard), ts: now() });
+    // Each hero card also carries up to 3 real screenshots to fade between (round 2, r2-j33). HERO_FADE=0 sends none, and the card stands still.
+    json(res, 200, { projects: heroLaunches(db, { now: now() }).map((r) => ({ ...launchCard(r), shots: cfg.heroFade === false ? [] : heroShots(db, r, BASE) })), ts: now() });
   });
 
   // A little card drawn from the floor's colours. Every piece of text goes through esc, and a private, missing,
