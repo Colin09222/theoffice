@@ -286,6 +286,13 @@ CREATE TABLE IF NOT EXISTS job_shots (
   UNIQUE (card_id, step)
 );
 CREATE INDEX IF NOT EXISTS job_shots_pending ON job_shots(taken_at, failed_at);
+CREATE TABLE IF NOT EXISTS floor_marks (
+  floor_id INTEGER PRIMARY KEY, priority INTEGER NOT NULL DEFAULT 0, killed INTEGER NOT NULL DEFAULT 0, was_hidden INTEGER NOT NULL DEFAULT 0,
+  was_paused INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rank_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, floor_number INTEGER, action TEXT NOT NULL, who TEXT NOT NULL, created_at INTEGER NOT NULL
+);
 `;
 
 export function openDb(dataDir) {

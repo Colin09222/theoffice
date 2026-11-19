@@ -397,6 +397,7 @@ describe('every route, swept from the source', () => {
     const anon = new Client(t);
     const noCsrf = new Client(t); noCsrf.cookies = mine.cookies;
     const foreign = new Client(t, { origin: 'https://evil.example' }); foreign.cookies = mine.cookies; foreign.csrf = mine.csrf;
+    const ADMIN_403 = new Set(['/api/admin/ranked', '/api/admin/ranked/:id/:action']);
     const bad = [];
     const check = (who, method, path, r, allowed) => { if (!allowed.includes(r.status)) bad.push(`${who} ${method} ${path}: ${r.status}`); };
     for (const { method, pattern } of patterns) {
@@ -405,9 +406,11 @@ describe('every route, swept from the source', () => {
       if (method === 'POST' && OPEN_POST.has(pattern)) { check('foreign origin', method, pattern, await foreign.post(pattern, {}), [403]); continue; }
       const path = fill(pattern, mine.slug);
       const send = (c) => (method === 'GET' ? c.get(path) : c.post(path, {}));
-      check('nobody', method, pattern, await send(anon), method === 'GET' ? [401] : [401]);
-      check('another floor', method, pattern, await send(other), admin ? [401] : [403]);
-      if (admin) { check('a boss', method, pattern, await send(mine), [401]); continue; }
+      // Colon's ranked view says 403 to every non-admin, as its job asks (docs/redesign/ROUND1-REST.md, job 26); the rest of the admin says 401.
+      const no = ADMIN_403.has(pattern) ? [403] : [401];
+      check('nobody', method, pattern, await send(anon), admin ? no : [401]);
+      check('another floor', method, pattern, await send(other), admin ? no : [403]);
+      if (admin) { check('a boss', method, pattern, await send(mine), no); continue; }
       if (method === 'POST') {
         check('no csrf token', method, pattern, await send(noCsrf), [403]);
         check('another site', method, pattern, await send(foreign), [403]);
