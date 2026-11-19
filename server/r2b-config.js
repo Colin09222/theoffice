@@ -14,5 +14,7 @@ export function r2bSettings(env = process.env) {
     liveTower: on(env.LIVE_TOWER),
     // r2-j49: buddehbot's mailroom feed (/api/mailroom), read-only. MAILROOM=0 takes it (and the mailroom display) away.
     mailroom: on(env.MAILROOM),
+    // r2-j53: the Mac's heartbeat file, mounted read-only from /var/lib/macbeat (docker-compose.yml). Only its recv_ts is read.
+    macbeatFile: env.MACBEAT_FILE || '/run/macbeat/last',
   };
 }

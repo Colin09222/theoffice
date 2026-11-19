@@ -4,7 +4,14 @@ import { launch, sleep } from './cdp.mjs';
 import { boot, claim } from '../helpers.js';
 import { seedShowcase } from './redesign-seed.mjs';
 
-const t = await boot({ towerFloors: 30 });
+// A fresh Mac heartbeat (r2-j53), in a file of its own, as the server reads it from /run/macbeat/last.
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const beatFile = join(mkdtempSync(join(tmpdir(), 'r2beat-')), 'last');
+const beatAt = (ms) => writeFileSync(beatFile, `recv_ts=${Math.floor(ms / 1000)} v=1 mac_ts=1 gw=ok disk_gb=48 pc=ok\n`);
+beatAt(Date.now());
+const t = await boot({ towerFloors: 30, macbeatFile: beatFile });
 const base = `http://localhost:${t.port}/theoffice`;
 const boss = await claim(t, 'Tiny Arcade Works', { floor: 5 });
 const lab = await claim(t, 'LabStackr', { floor: 3 });
@@ -148,6 +155,18 @@ try {
   await sleep(6000);  // another reading: nothing more is said
   const said = await p.ev(`window.__mailroomSaid.filter((x) => x.record === 'purchases:${buy2}').map((x) => x.line)`);
   check(stamped === 'BOUGHT' && JSON.stringify(said) === '["Bought."]', `r2-j52: closing it as bought shows BOUGHT and says "Bought." once (${stamped}, ${JSON.stringify(said)})`);
+  p.close();
+  // r2-j53: the Mac goes quiet for 16 minutes: the robot's sign reads "Away" (within the next readings).
+  p = await page({ width: 1440, height: 900 }, { clock: nyAt(12, 0) });
+  await p.ev('window.officeGo("/mailroom")');
+  await p.until('!!document.querySelector(".mailroom-robot-btn")', 'the mailroom', 30000);
+  await p.click('.mailroom-robot-btn');
+  const freshSign = await p.until('document.querySelector("[data-robot-card]")?.dataset.robotCard || null', 'the robot card', 10000).catch(() => null);
+  beatAt(Date.now() - 16 * 60000);
+  const awayAt = Date.now();
+  const sign = await p.until('document.querySelector("[data-robot-card] .mailroom-sign")?.textContent || null', 'the Away sign', 30000).catch(() => null);
+  check(freshSign !== 'away' && sign === 'Away', `r2-j53: with no heartbeat for 15 minutes the sign reads "Away" (${freshSign} then ${sign}, ${Date.now() - awayAt} ms)`);
+  beatAt(Date.now());
   p.close();
   // r2-j38: a fresh browser (a first-time visitor): the fly-in plays once on the desktop, never on the second visit, never under reduce motion,
   // and a click skips it.

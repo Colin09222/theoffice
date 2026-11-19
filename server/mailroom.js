@@ -15,6 +15,7 @@
 // Colon's fuller views). Hidden floors and demo floors are left out. MAILROOM=0 takes the address away.
 import { all } from './db.js';
 import { robotState, signFor, trayView } from '../public/js/mailroom-state.js';
+import { beatReader } from './macbeat.js';
 
 export const RECENT_MS = 15 * 60000;   // a closed item stays in the feed for 15 minutes, so the page can stamp it; then it is gone
 export const KINDS = ['help', 'purchase', 'contractor'];
@@ -54,9 +55,11 @@ export function counts(items) {
 
 export function installMailroom(ext) {
   const { db, cfg, now, GET, json, HttpError } = ext;
-  // The robot: its state (section 3's order), its sign and the tray. The freeze is the engine's own night freeze; the heartbeat comes in r2-j53.
+  // The robot: its state (section 3's order), its sign and the tray. The freeze is the engine's own night freeze.
+  // r2-j53: the heartbeat (only its time) decides Away; the night freeze decides Asleep, which comes first.
+  const fresh = beatReader(cfg.macbeatFile);
   const robotOf = (items) => {
-    const state = robotState({ freeze: ext.engine?.nightFrozen?.() ?? false, heartbeatFresh: true, items });
+    const state = robotState({ freeze: ext.engine?.nightFrozen?.() ?? false, heartbeatFresh: fresh(now()), items });
     return { state, sign: signFor(state), tray: trayView(items) };
   };
   // One pigeonhole per open floor (public floors only).

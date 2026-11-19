@@ -3,7 +3,9 @@
 // wiring are read from the code. A browser run (npm run e2e:r2-building) opens the room itself.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import * as THREE from '../public/vendor/three/three.module.min.js';
 import { makeRobot, ROBOT_HEIGHT, BEAN_HEIGHT, MAX_TRIANGLES } from '../public/js/robot.js';
 import { robotState, signFor, trayView, eyeFor, COLORS, pigeonholes, STATES } from '../public/js/mailroom-state.js';
@@ -47,7 +49,9 @@ test('the room has every piece section 3 lists, with the robot at its desk', () 
   assert.match(s, /this\.robot = makeRobot\(\); this\.robot\.group\.position\.copy\(this\.deskSpot\);/);
 });
 test('the feed carries the robot (state, sign, tray) and the open floors for the pigeonholes', async () => {
-  const t = await boot();
+  // A fresh heartbeat (r2-j53): without one the robot would be Away.
+  const beat = join(mkdtempSync(join(tmpdir(), 'beat-')), 'last'); writeFileSync(beat, `recv_ts=${Math.floor(Date.now() / 1000)} v=1\n`);
+  const t = await boot({ macbeatFile: beat });
   try {
     const c = await claim(t, 'TheTireRx');
     const d = (await new Client(t).get('/api/mailroom')).data;
