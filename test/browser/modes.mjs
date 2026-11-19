@@ -1,5 +1,6 @@
-// Work modes in a real browser, against the real server in mock mode: the Hours tab under Customise sets the mode and the sign follows,
-// a visitor sees the sign but not the plan, set hours outside their time close the floor and send the staff home, and "work nonstop" in
+// Work modes in a real browser, against the real server in mock mode: the Hours tab under Customise sets the mode and the boss's sign follows,
+// hours are the boss's setting (docs/redesign, job 2): outside them the boss reads when the team is back and the staff go home in the boss's
+// room, while a visitor sees one of four states, never the hours, never "Closed", never the plan; and "work nonstop" in
 // the chat turns the floor 24/7 and fills the Work tab's goal and next-up list, and with no goal the team waits until the boss picks one
 // of the manager's in the chat. MODES_SHOTS=dir saves five pictures.
 import { mkdirSync } from 'node:fs';
@@ -17,6 +18,7 @@ const enter = async (p, c) => {
   await p.goto(base);
   if (c) await p.send('Network.setCookie', { name: 'office_s', value: c.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
   await p.goto(`${base}/floor/${c?.slug || visitorSlug}?q=low`);
+  await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
 };
 let visitorSlug = '';
@@ -61,29 +63,39 @@ try {
     if (!line) throw new Error('no line');
   });
 
-  await step('hours that are over for today close the floor: the pill says Closed, the banner says when they are back, and the staff go home', async () => {
+  await step('hours that are over for today: the boss reads that the floor is outside its hours and when the team is back, the staff go home in the boss\'s room, and the badge never says Closed', async () => {
     const h = nyHour();
     await c.post(`/api/floors/${c.slug}/work-mode`, { mode: 'hours', days: [0, 1, 2, 3, 4, 5, 6], start: hh(h + 2), end: hh(h + 3), tz: 'America/New_York' });
-    await p.until('document.querySelector(".status-pill")?.textContent === "Closed"', 'closed pill', 15000);
+    await p.until('/^Outside your set hours\\./.test(document.querySelector(".floor-banner")?.textContent || "")', 'the boss\'s line about the hours', 15000);
     const banner = await p.ev('document.querySelector(".floor-banner")?.textContent || ""');
-    if (!/^Closed for now: everyone has gone home\. Back (at|tomorrow at|[A-Z][a-z]+day at) .+\. You can still call your manager\.$/.test(banner)) throw new Error(banner);
+    if (!/^Outside your set hours\. Back (at|tomorrow at|[A-Z][a-z]+day at) .+\. You can still call your manager\.$/.test(banner)) throw new Error(banner);
+    const pill = await p.ev('document.querySelector(".status-pill")?.textContent');
+    if (!['Working', 'Waiting on boss', 'Idle', 'Paused'].includes(pill)) throw new Error(`the badge says ${pill}`);
     await p.until('window.__office.view.closed === true', 'room closed');
     // A software-rendered headless room runs slow frames, so this waits for the next ones rather than a fixed time.
     await p.until('[...window.__office.view.actors.values()].filter((a) => !a.isBoss).every((a) => !a.group.visible && a.tag.hidden && getComputedStyle(a.tag).display === "none")', 'everyone gone home, name tags too', 20000);
+    if (/gone home|Closed/.test(await p.ev('document.querySelector(".floor-top").textContent'))) throw new Error('"gone home" or "Closed" on the boss\'s card');
     if (OUT) { await sleep(500); await p.shot(join(OUT, 'modes-2-closed.jpg')); }
   });
 
-  await step('a visitor sees the sign and the closed floor, but never the plan', async () => {
+  await step('a visitor sees one of the four states, a working room and the goal on the status card, never the hours, "Closed" or the plan', async () => {
     // A browser of its own: a second tab would share the boss's cookie.
     const vb = await launch();
     const v = await vb.newPage({ width: 1280, height: 800 });
     await enter(v, null);
-    const s = await sign(v);
-    if (!/^Open \d+–\d+ \| Every day \| Closed$/.test(s)) throw new Error(s);
+    const s = await v.ev('({ pill: document.querySelector(".status-pill")?.textContent, hours: (() => { const e = document.querySelector(".hours-sign"); return !!e && !e.hidden && getComputedStyle(e).display !== "none"; })(), banner: document.querySelector(".floor-banner")?.hidden !== false, text: document.body.textContent })');
+    if (!['Working', 'Waiting on boss', 'Idle', 'Paused'].includes(s.pill)) throw new Error(`the badge says ${s.pill}`);
+    if (s.hours) throw new Error('a visitor sees the hours sign');
+    if (!s.banner) throw new Error('a visitor gets a banner');
+    if (/Closed|gone home|Open \d+–\d+|Every day/.test(s.text)) throw new Error('hours or "closed" on a visitor\'s page');
+    await v.until('window.__office.view.closed !== true && [...window.__office.view.actors.values()].filter((a) => !a.isBoss).some((a) => a.group.visible)', 'the staff at their desks for a visitor', 20000);
     await v.ev('document.querySelector(\'[data-tab="work"]\')?.click()');
     await sleep(200);
     if (await v.ev('!!document.querySelector(".work-plan")')) throw new Error('a visitor sees the plan');
-    if (await v.ev('/soup fans/.test(document.body.textContent)')) throw new Error('the goal leaked');
+    // The goal itself is public now: the status card shows it to everyone (docs/redesign, job 15, OFFICE-ANSWERS-1 Q4). The plan around it is not.
+    const g = await v.ev('(() => { const b = document.body.cloneNode(true); const card = b.querySelector(".status-card .stc-goal")?.textContent || ""; b.querySelectorAll(".status-card").forEach((e) => e.remove()); return { card, elsewhere: /soup fans/.test(b.textContent) }; })()');
+    if (!/soup fans/.test(g.card)) throw new Error(`the status card's goal: ${g.card}`);
+    if (g.elsewhere) throw new Error('the goal leaked outside the status card');
     vb.close();
   });
 

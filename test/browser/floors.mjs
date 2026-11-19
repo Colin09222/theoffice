@@ -1,6 +1,7 @@
 // Browser checks for the walk-in office: the view API the floor UI relies on, reachable meeting spots, render budgets at both
 // tiers, labels that sit above heads instead of over them, and a clean tier step-down. Runs against the mock server in headless Chrome.
 import { launch, sleep } from './cdp.mjs';
+import { BANTER_LINES } from '../../server/banter.js';
 import { boot, claim, until, floorState } from '../helpers.js';
 
 const ONLY = process.env.FLOORS_ONLY || '';  // 'basic' or 'living', to run one half
@@ -19,6 +20,7 @@ for (const [label, opts, q, budget] of ONLY === 'living' || ONLY === 'landscape'
   await p.send('Network.setCookie', { name: 'office_s', value: c.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
   await step(tag('floor renders with the view API the UI and tests use'), async () => {
     await p.goto(`${base}/floor/${c.slug}?q=${q}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
     await sleep(2500);
     const api = await p.ev(`(() => { const v = window.__office.view; const a = [...v.actors.values()][0];
@@ -100,6 +102,7 @@ const asOwner = async (p, c2, q = 'low') => {
   await p.goto(base);
   await p.send('Network.setCookie', { name: 'office_s', value: c2.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
   await p.goto(`${base}/floor/${c2.slug}?q=${q}`);
+  await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
   await p.until('window.__office.view.modelsOn === true', 'furniture', 45000);
 };
@@ -139,7 +142,8 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     if (box['.floor-scrubber'].l < 1340) throw new Error('the scrubber should sit on the right');
     for (const [x, y] of [['.floor-top', '.floor-panel'], ['.floor-top', '.controls'], ['.floor-panel', '.floor-scrubber'], ['.floor-panel', '.controls']]) if (hits(box[x], box[y])) throw new Error(`${x} over ${y}`);
     const card = await p.ev('document.querySelector(".floor-top").textContent');
-    if (!/Floor \d+/.test(card) || !/Living Floor/.test(card) || !/Run by/.test(card) || !/\d+ people/.test(card)) throw new Error(card.slice(0, 200));
+    // The status card (docs/redesign, job 15): who runs it, one of four states, and Now (or, on a floor with nothing yet, that it has just moved in).
+    if (!/Floor \d+/.test(card) || !/Living Floor/.test(card) || !/Run by/.test(card) || !/(Working|Waiting on boss|Idle|Paused)/.test(card) || !/(Just moved in\. First job starts soon\.|Now)/.test(card)) throw new Error(card.slice(0, 200));
     if (!(await p.ev('!!document.querySelector("[data-share]")'))) throw new Error('no Share button');
     if (/null|undefined|NaN/.test(card)) throw new Error(`a blank field on the card: ${card.slice(0, 200)}`);
   });
@@ -174,15 +178,16 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     if (!input['.chat-input']) throw new Error('no chat input showing');
   });
   await step(tag('the scrubber goes to the floor next door and comes back'), async () => {
+    // The lift ride is slow on a software renderer (30 to 90 seconds a floor on a loaded CI box), hence the long waits (job 29).
     await p.until('!document.querySelector("[data-scrub=up]").disabled || !document.querySelector("[data-scrub=down]").disabled', 'floor list', 8000);
     const dir = await p.ev('document.querySelector("[data-scrub=up]").disabled ? "down" : "up"');
     const back = dir === 'up' ? 'down' : 'up';
     const here = await p.ev('window.__office.slug');
     await p.click(`[data-scrub=${dir}]`);
-    await p.until(`window.__office?.slug && window.__office.slug !== ${JSON.stringify(here)} && !!window.__office.view`, 'next floor', 20000);
-    await p.until(`!document.querySelector('[data-scrub=${back}]').disabled`, 'list on the next floor', 8000);
+    await p.until(`window.__office?.slug && window.__office.slug !== ${JSON.stringify(here)} && !!window.__office.view`, 'next floor', 150000);
+    await p.until(`!document.querySelector('[data-scrub=${back}]').disabled`, 'list on the next floor', 30000);
     await p.click(`[data-scrub=${back}]`);
-    await p.until(`window.__office?.slug === ${JSON.stringify(here)} && !!window.__office.view`, 'back again', 20000);
+    await p.until(`window.__office?.slug === ${JSON.stringify(here)} && !!window.__office.view`, 'back again', 150000);
     await p.until('window.__office.view.modelsOn === true', 'furniture again', 45000);
   });
   await step(tag('people walk from their own rooms to the meeting room and back through the doors, with no teleporting, and say the real lines'), async () => {
@@ -201,17 +206,22 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     if (r.cut > r.steps * 0.02) throw new Error(`walked through furniture ${r.cut} of ${r.steps}`);
     const talk = await p.ev('window.__office.state.talk.map((l) => l.text)');
     if (!r.said.length) throw new Error('nobody spoke');
-    for (const s of r.said) if (!talk.includes(s)) throw new Error(`said out loud but not in Talk: ${s}`);
+    // Small talk is a bubble only, from the fixed list, and never stored (docs/redesign, job 2); every other line said is a real one.
+    for (const s of r.said) if (!talk.includes(s) && !BANTER_LINES.includes(s)) throw new Error(`said out loud but not on record: ${s}`);
     if (r.bubblesOverHeads) throw new Error(`${r.bubblesOverHeads} bubbles sat over a head`);
     if (!r.pills.length || !r.pills.every((x) => /^\d+\/4$/.test(x))) throw new Error(`task pills: ${r.pills}`);
     console.log(`  walked: ${r.steps} steps, biggest step ${r.jump.toFixed(2)}, ${r.said.length} lines said, pills ${r.pills.join(' ')}`);
   });
-  await step(tag('the Talk tab lists the same lines, as plain text'), async () => {
+  // The Timeline replaced Talk (docs/redesign, job 13): one card per job, its line built by code; the people's own words are bubbles in the room.
+  await step(tag('the Timeline shows one card per job, step by step, and the lines people said to each other stay in the room'), async () => {
     await p.click('[data-tab=talk]');
-    await p.until('document.querySelectorAll(".talk-line").length >= 8', 'talk lines', 5000);
-    const st = await p.ev(`({ shown: [...document.querySelectorAll('.talk-line p')].map((e) => e.textContent), real: window.__office.state.talk.map((l) => l.text), kinds: [...new Set([...document.querySelectorAll('.talk-line')].map((e) => e.dataset.beat || e.dataset.kind))] })`);
-    for (const s of st.real) if (!st.shown.includes(s)) throw new Error(`not listed: ${s}`);
-    for (const k of ['assign', 'handoff', 'review']) if (!st.kinds.includes(k)) throw new Error(`no ${k} line: ${st.kinds}`);
+    await p.until('document.querySelectorAll(".timeline .tl-job").length >= 1', 'job cards', 5000);
+    const st = await p.ev(`({ cards: [...document.querySelectorAll('.timeline .tl-job')].map((e) => [e.dataset.job, e.querySelector('.tl-line').textContent]), jobs: window.__office.state.jobs.map((j) => String(j.id)), label: document.querySelector('.tabs [data-tab="talk"]').textContent, talkLines: document.querySelectorAll('.talk-line').length, kinds: [...new Set(window.__office.state.talk.map((l) => l.beat || l.kind))] })`);
+    if (!/Timeline/.test(st.label)) throw new Error(`tab says ${st.label}`);
+    if (st.cards.map((c) => c[0]).sort().join() !== st.jobs.sort().join()) throw new Error(`cards ${JSON.stringify(st.cards)} for jobs ${st.jobs}`);
+    if (!st.cards.every((c) => /^(Step \d+ of \d+: |Done)/.test(c[1]))) throw new Error(`lines ${JSON.stringify(st.cards)}`);
+    if (st.talkLines) throw new Error('bean-to-bean lines listed');
+    for (const k of ['assign', 'handoff', 'review']) if (!st.kinds.includes(k)) throw new Error(`no ${k} line on record: ${st.kinds}`);
   });
   await step(tag('in every office layout, people walk between rooms through doors'), async () => {
     for (const layout of ['open', 'studio', 'garage', 'lounge', 'pods']) {
@@ -264,6 +274,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
   const b = await launch(); const v = await b.newPage({ width: 1440, height: 900 });
   const tag = (s) => `visitor: ${s}`;
   await v.goto(`${base}/floor/${hush.slug}?q=low`);
+  await v.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await v.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
   await step(tag('arrives to the room, not a panel, with no controls or chat'), async () => {
     const st = await v.ev('({ closed: document.querySelector(".floor-panel").classList.contains("closed"), pill: document.querySelector(".talk-pill").textContent, chat: !!document.querySelector(".chat-input"), pins: [...document.querySelectorAll(".pin")].map((e) => e.dataset.pin), tab: window.__office.tab, controls: document.querySelector(".controls").textContent })');
@@ -282,7 +293,8 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     const moved = Object.values(r.rooms).filter((q) => q.length >= 3).length;
     if (moved < 3) throw new Error(`only ${moved} people were seen walking between rooms`);
     await v.click('.talk-pill');
-    await v.until('document.querySelectorAll(".talk-line").length >= 4', 'talk tab', 5000);
+    await v.until('document.querySelectorAll(".timeline .tl-job").length >= 1', 'the Timeline', 5000);
+    if (!await v.ev('[...document.querySelectorAll(".timeline .tl-job .tl-line")].every((e) => e.textContent === "Working on something private")')) throw new Error('a private job card says more than that it is private');
     const body = await v.ev('document.body.textContent + JSON.stringify(window.__office.state.talk)');
     if (/secret|soup/i.test(body)) throw new Error('private words on the page');
     const real = owned.talk.map((l) => l.text).filter((x) => x.length > 12);
@@ -352,7 +364,7 @@ const readRec = (p) => p.ev('(() => { clearInterval(window.__ff); window.__unclo
     await p.click('[data-tab=about]');
     await p.until('!!document.querySelector(".tab-body [data-share]")', 'the card under About', 3000);
     const st = await p.ev('({ text: document.querySelector(".tab-body").textContent, panel: document.querySelector(".floor-panel").getBoundingClientRect().height, share: document.querySelector("[data-share]").getBoundingClientRect() })');
-    if (!/Run by/.test(st.text) || !/\d+ people/.test(st.text)) throw new Error(st.text.slice(0, 160));
+    if (!/Run by/.test(st.text) || !/(Just moved in\. First job starts soon\.|Now)/.test(st.text)) throw new Error(st.text.slice(0, 160));
     if (st.share.bottom > 845 || st.share.height < 36) throw new Error(JSON.stringify(st.share));
     await p.click('[data-tab=chat]');
   });

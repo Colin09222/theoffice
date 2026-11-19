@@ -17,6 +17,7 @@ const enter = async (p, c, slug) => {
   await p.goto(base);
   if (c) await p.send('Network.setCookie', { name: 'office_s', value: c.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
   await p.goto(`${base}/floor/${slug}?q=low`);
+  await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
 };
 const dayAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
@@ -33,8 +34,9 @@ run(t.db, 'INSERT INTO app_forms (floor_id,project,form,data,size,hash,created_a
 const b = await launch();
 const shown = (p) => p.ev('[...document.querySelectorAll(".num-tile")].map((x) => x.querySelector("span").textContent + ":" + x.querySelector("b").textContent).join("|")');
 const openNumbers = async (p) => {
-  await p.until('!!document.querySelector(\'[data-tab="numbers"]\')', 'tab');
-  await p.click('[data-tab="numbers"]');
+  // Numbers is a section of the boss's Business tab since the redesign (job 22).
+  await p.until('!!document.querySelector(\'[data-tab="biz"]\')', 'tab');
+  await p.tab('numbers');
   await p.until('!!document.querySelector(".num-tiles")', 'dashboard');
 };
 try {
@@ -125,7 +127,7 @@ try {
   await enter(visitor, null, c.slug);
   await step('a visitor sees no Numbers tab, and the route tells them nothing', async () => {
     await visitor.until('document.querySelectorAll(".tab").length > 0', 'tabs');
-    if (await visitor.ev('!!document.querySelector(\'[data-tab="numbers"]\')')) throw new Error('a visitor has the tab');
+    if (await visitor.ev('!!document.querySelector(\'[data-tab="numbers"], [data-tab="biz"], [data-biz]\')')) throw new Error('a visitor has the tab');
     const r = await new Client(t).get(`/api/floors/${c.slug}/numbers`);
     if (r.status !== 401 && r.status !== 403) throw new Error(`status ${r.status}`);
   });

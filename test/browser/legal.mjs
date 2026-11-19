@@ -30,6 +30,7 @@ try {
   run(db, 'INSERT INTO published_files (floor_id,project,path,content,size) VALUES (?,?,?,?,?)', floor.id, 'boats', 'index.html', html, html.length);
   app.engine.upsertProject(floor, 'boats', { title: 'Paper Boats', description: 'Folded boats.', kind: 'site', sources: [], published: true });
   await p.goto(`${ORIGIN}/theoffice/floor/${slug}`);
+  await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await p.until('!!window.__office && (window.__office.state.agents||[]).some(a=>a.role==="lawyer")', 'the floor with its Lawyer');
   await p.until('(window.__office.state.legal?.docs||[]).length > 0 || (window.__office.reload(), false)', 'the draft', 15000);
   await p.ev('window.__office.setTab("requests")');

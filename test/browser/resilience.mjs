@@ -1,5 +1,7 @@
 // What a struggling device does: the GPU context goes away and comes back, comes back never, or was never there. In real Chrome, on the
 // mock server. The page must never go black, the interface must keep working, and the 3D must come back with a live picture.
+// Since the redesign the home page draws without 3D and its small tower comes last on a desktop; a phone has no 3D on the home page at all,
+// and its floor's room loads on Watch the room (docs/redesign, jobs 14 and 16).
 import { launch, sleep } from './cdp.mjs';
 import { boot, claim } from '../helpers.js';
 
@@ -17,24 +19,31 @@ async function losing(label, opts, q) {
   const b = await launch();
   const p = await b.newPage(opts);
   const tag = (s) => `${label}: ${s}`;
-  await step(tag('the lobby paints a real picture before the curtain lifts'), async () => {
+  const phone = !!opts.mobile;
+  if (phone) await step(tag('the home page needs no GPU: no 3D starts, and the floor list is there'), async () => {
     await p.goto(`${base}/?q=${q}`);
-    await p.until('document.documentElement.classList.contains("ready")', 'ready', 60000);
+    await p.until('document.documentElement.classList.contains("ready") && !document.querySelector("#boot")', 'ready', 60000);
+    await sleep(800);
+    if (await p.ev('!!window.__stage')) throw new Error('3D started on a phone home page');
+    if ((await p.ev('document.querySelectorAll(".home-dir .dir-row").length')) < 1) throw new Error('no floor list');
+  });
+  if (!phone) await step(tag('the home page paints its tower a real picture'), async () => {
+    await p.goto(`${base}/?q=${q}`);
+    await p.until('document.documentElement.classList.contains("ready") && !document.querySelector("#boot")', 'ready', 60000);
+    await p.until('!!window.__stage && !!document.querySelector(".home-tower.ready")', 'the tower', 60000);
     if (q === 'mid') await p.until('!!__stage.post', 'post chain', 30000);
     await sleep(800);
     await usable(p, 'lobby');
-    await p.until('!document.querySelector("#boot")', 'the curtain to go', 5000);
   });
-  await step(tag('losing the GPU shows the painted city at once, and the interface stays usable'), async () => {
+  if (!phone) await step(tag('losing the GPU hides the tower at once, and the home page stays usable'), async () => {
     await p.ev('window.__ext = __stage.renderer.getContext().getExtension("WEBGL_lose_context"); __ext.loseContext(); true');
     await p.until('document.body.classList.contains("gl-lost")', 'the fallback', 5000);
-    if (!/gradient/.test(await p.ev(wallpaper))) throw new Error('no painted background');
     if (await p.ev('getComputedStyle(document.querySelector("#scene")).opacity') !== '0') throw new Error('canvas still showing');
-    await p.ev('document.querySelector(".dir-search input").value = "night"; document.querySelector(".dir-search input").dispatchEvent(new Event("input")); true');
-    await p.until('document.querySelectorAll(".dir-row").length === 1', 'search to work without a GPU', 3000);
-    await p.ev('document.querySelector(".dir-search input").value = ""; document.querySelector(".dir-search input").dispatchEvent(new Event("input")); true');
+    // The floor list is the way round without the tower: its rows still take you in.
+    if ((await p.ev('document.querySelectorAll(".home-dir .dir-row").length')) !== 1) throw new Error('floor list');
+    if (!(await p.ev('(() => { const r = document.querySelector(".home-dir .dir-row").getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!e && !!e.closest(".dir-row"); })()'))) throw new Error('the floor row is covered');
   });
-  await step(tag('it comes back with a live picture, a lighter tier and no errors'), async () => {
+  if (!phone) await step(tag('it comes back with a live picture, a lighter tier and no errors'), async () => {
     const before = await p.ev('__stage.frame');
     await p.ev('__ext.restoreContext(); true');
     await p.until('!document.body.classList.contains("gl-lost")', 'recovery', 8000);
@@ -48,6 +57,7 @@ async function losing(label, opts, q) {
   });
   await step(tag('it also survives on a floor, with the people and furniture back'), async () => {
     await p.goto(`${base}/floor/${c.slug}?q=${q}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.until('document.documentElement.classList.contains("ready") && !!window.__office && !!window.__office.view', 'floor', 60000);
     await p.ev('window.__office.ready');
     await sleep(600);
@@ -71,7 +81,8 @@ async function losing(label, opts, q) {
     if (!/gradient/.test(await p.ev(wallpaper))) throw new Error('no painted background');
     if (!(await p.ev('!!document.querySelector(".floor-panel")'))) throw new Error('panel gone');
     await p.ev('window.officeGo("/"); true');
-    await p.until('document.body.dataset.page === "lobby" && !!document.querySelector(".directory")', 'the lobby to open with no 3D', 8000);
+    await p.until('document.body.dataset.page === "lobby" && !!document.querySelector(".home-dir .dir-row")', 'the home page to open with no 3D', 8000);
+    if (!phone) await p.until('document.querySelector(".home-tower")?.hidden === true', 'the tower frame to go, the floor list stays', 8000);
   });
   await step(tag('no console errors from all of that'), async () => {
     const errs = p.errors.filter((e) => !/status of 40[0-9]|status of 429|CONTEXT_LOST|context lost|Context Lost/i.test(e));
@@ -87,22 +98,32 @@ await losing('phone', { mobile: true }, 'low');
 {
   const b = await launch({ args: ['--disable-3d-apis'], noAngle: true });
   const p = await b.newPage({ mobile: true });
-  await step('no WebGL at all: the lobby opens over the painted city', async () => {
+  // A phone's home page asks for no 3D, so it never needs to notice there is none.
+  await step('no WebGL at all: the home page opens with its floor list', async () => {
     await p.goto(`${base}/`);
     await p.until('document.documentElement.classList.contains("ready")', 'ready', 30000);
-    if (!(await p.ev('document.body.classList.contains("no-webgl")'))) throw new Error('did not notice');
-    if (!/gradient/.test(await p.ev(wallpaper))) throw new Error('no painted background');
-    if ((await p.ev('document.querySelectorAll(".dir-row").length')) < 1) throw new Error('directory empty');
+    if ((await p.ev('document.querySelectorAll(".home-dir .dir-row").length')) < 1) throw new Error('directory empty');
   });
-  await step('no WebGL at all: a floor opens and its feed works', async () => {
+  await step('no WebGL at all: a desktop home page drops the tower frame and keeps the floor list', async () => {
+    const d = await b.newPage({ width: 1440, height: 900 });
+    await d.goto(`${base}/`);
+    await d.until('document.documentElement.classList.contains("ready") && document.querySelectorAll(".home-dir .dir-row").length >= 1', 'home', 30000);
+    await d.until('document.querySelector(".home-tower")?.hidden === true', 'the tower frame gone', 15000);
+    d.close();
+  });
+  await step('no WebGL at all: a floor opens without its room, then with the room asked for its panel still works over the painted city', async () => {
     await p.goto(`${base}/floor/${c.slug}`);
+    await p.until('document.body.dataset.page === "floor-lite" && !!document.querySelector(".status-card")', 'the floor without its room', 15000);
+    await p.room();
     await p.until('document.body.dataset.page === "floor" && !!document.querySelector(".floor-panel")', 'floor', 15000);
     await p.until('!!window.__office', 'floor object', 5000);
+    if (!(await p.ev('document.body.classList.contains("no-webgl")'))) throw new Error('did not notice');
+    if (!/gradient/.test(await p.ev(wallpaper))) throw new Error('no painted background');
   });
   await step('no WebGL at all: the claim wizard opens with no 3D preview and no crash', async () => {
     await p.goto(`${base}/`);
     await p.until('document.documentElement.classList.contains("ready")', 'ready', 30000);
-    await p.ev('document.querySelector(".open-pill").click(); true');
+    await p.ev('document.querySelector(".open-office").click(); true');
     await p.until('!!document.querySelector(".modal")', 'the wizard', 8000);
   });
   await step('no WebGL at all: no uncaught exceptions', async () => {

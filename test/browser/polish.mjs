@@ -69,6 +69,7 @@ async function profile(kind) {
   await step(`${kind}: a tapped person's job title sits above their name, and only theirs`, async () => {
     await work(phone ? [15, 16, 18] : [10, 11, 12, 14]);
     await p.goto(`${base}/floor/${owners[12].slug}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.until(fullDetail, 'floor 12', 40000);
     await sleep(phone ? 3000 : 1500);
     // Everyone keeps a name, and the job shows for whoever is talking or has been tapped: tap one person and read the labels.
@@ -85,6 +86,7 @@ async function profile(kind) {
   await step(`${kind}: frame time holding still on a floor page`, async () => { r.floorStill = await sample(p, 4000); return JSON.stringify(r.floorStill); });
   await step(`${kind}: the lift goes floor to floor with no doors, warm under 300 ms`, async () => {
     await p.goto(`${base}/floor/${owners[12].slug}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.until(fullDetail, 'floor 12', 30000);
     // The neighbours are fetched while the floor is looked at, and built ahead in a quiet spell: what that costs the main thread.
     await p.ev('window.__lt = []; window.__po = new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push(Math.round(e.duration)); }); try { window.__po.observe({ type: "longtask" }); } catch {}');
@@ -106,6 +108,7 @@ async function profile(kind) {
     const warm = times.slice(1).map((x) => x.ms);
     // And pressed the moment a floor opens, before anything has been built ahead: the slow case, reported as it is.
     await p.goto(`${base}/floor/${owners[8].slug}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.until(`(${fullDetail}) && !!document.querySelector('[data-scrub=up]:not([disabled])')`, 'floor 8', 30000);
     await p.ev(`(() => { window.__t0 = performance.now(); window.__t1 = 0; const w = () => { if (window.__office?.state?.floor?.number === 10 && (${fullDetail})) { if (window.__d0 === undefined) window.__d0 = window.__stage.drawn; else if (window.__stage.drawn > window.__d0) { window.__t1 = performance.now(); return; } } requestAnimationFrame(w); }; delete window.__d0; requestAnimationFrame(w); })()`);
     if (phone) { const at = await p.ev(`(() => { const q = document.querySelector('[data-scrub=up]').getBoundingClientRect(); return [q.left + q.width / 2, q.top + q.height / 2]; })()`); await tapAt(p, at[0], at[1], true); } else await click(p, '[data-scrub=up]');
@@ -140,6 +143,7 @@ async function profile(kind) {
       await p.send('Network.clearBrowserCache'); await p.send('Network.setCacheDisabled', { cacheDisabled: true });
       await p.goto('about:blank');
       await p.goto(`${base}/floor/${owners[14].slug}`);
+      await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
       await p.until('window.__ff > 0', `first frame, ${label}`, 40000);
       const ff = Math.round(await p.ev('window.__ff'));
       await p.until(fullDetail, `full detail, ${label}`, 40000);
@@ -158,6 +162,7 @@ async function profile(kind) {
   });
   await step(`${kind}: left alone, the stage draws every other frame; a touch brings it back`, async () => {
     await p.goto(`${base}/floor/${owners[12].slug}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.until(fullDetail, 'floor', 30000);
     await sleep(8500);
     const measure = () => p.ev(`new Promise((res) => { const s = window.__stage; const d0 = s.drawn, t0 = performance.now(); let n = 0; const f = () => { n++; if (performance.now() - t0 < 1500) requestAnimationFrame(f); else res({ idle: s.idle, ticks: Math.round(n / 1.5), drawn: Math.round((s.drawn - d0) / 1.5) }); }; requestAnimationFrame(f); })`);
@@ -183,6 +188,7 @@ async function governor() {
   const p = await b.newPage({ width: 1280, height: 800 });
   await step('governor: a throttled device steps down by itself within a few seconds', async () => {
     await p.goto(`${base}/floor/${owners[12].slug}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.until(fullDetail, 'floor', 40000);
     await sleep(2500);
     const before = await p.ev('({ tier: window.__stage.tier, steps: [...window.__stage.steps] })');

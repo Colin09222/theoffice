@@ -23,6 +23,7 @@ const enter = async (p, who) => {
   await p.goto(base);
   await p.send('Network.setCookie', { name: 'office_s', value: who.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
   await p.goto(`${base}/floor/${who.slug}?q=low`);
+  await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
 };
 const openInbox = async (p) => { await p.ev('window.__office.setTab("inbox")'); await p.until('!!document.querySelector("[data-mail-address]")', 'inbox'); };
@@ -120,6 +121,7 @@ try {
     const v = await b.newPage({ width: 1280, height: 800 });
     await v.send('Network.clearBrowserCookies');
     await v.goto(`${base}/floor/${c1.slug}?q=low`);
+    await v.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await v.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
     await sleep(300);
     if (await v.ev('!!document.querySelector("[data-mail-domains]") || document.body.textContent.includes("sundaysoup.com")')) throw new Error('visitor sees it');

@@ -48,7 +48,9 @@ test('the tower is fetched only after the content, and never on a phone', () => 
 
 test('a phone opens a floor without its room until Watch the room is tapped', () => {
   const main = readFileSync(join(PUB, 'js/main.js'), 'utf8');
-  assert.match(main, /if \(lite\.liteFloor\(floorMatch\[1\]\)\) \{ current = lite\.hideFloorLite; await lite\.showFloorLite/);
+  assert.match(main, /if \(lite\.liteFloor\(floorMatch\[1\]\)\) \{ current = lite\.hideFloorLite; if \(await lite\.showFloorLite\(ui, floorMatch\[1\], \{ onRoom: \(\) => route\(\) \}\) !== 'room'\) return;/);
+  assert.match(main, /if \(fromRoom\) lite\.roomWanted\.add\(floorMatch\[1\]\);/, 'the lift from inside a room keeps the room');
+  assert.match(readFileSync(join(PUB, 'js/floor-lite.js'), 'utf8'), /if \(state\.viewer\?\.owner && state\.floor\?\.setup\) \{ roomWanted\.add\(slug\); return 'room'; \}/, 'a boss still setting up goes to the full page');
   assert.match(main, /location\.pathname\.includes\('\/floor\/'\) && !window\.matchMedia\('\(max-width: 760px\)'\)\.matches/, 'no preload of the floor\'s 3D modules on a phone');
   const lite = readFileSync(join(PUB, 'js/floor-lite.js'), 'utf8');
   assert.match(lite, /export const liteFloor = \(slug\) => isPhone\(\) && !roomWanted\.has\(slug\);/);

@@ -30,6 +30,7 @@ try {
     const slug = claimed.slug; const csrf = JSON.stringify(claimed.csrf);
     const say = (text) => p.ev(`fetch('/theoffice/api/floors/${slug}/chat',{method:'POST',headers:{'content-type':'application/json','x-office-csrf':${csrf}},body:JSON.stringify({text:${JSON.stringify(text)}})}).then(r=>r.status)`);
     await p.goto(`${ORIGIN}/theoffice/floor/${slug}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.until('!!window.__office && !!document.querySelector(".chat-input textarea")', 'floor page');
     await say('go build a teacups site [img]');
     await p.until('window.__office.state.projects.some(p=>!/research|brief/.test(p.slug))', 'a published site', 60000);

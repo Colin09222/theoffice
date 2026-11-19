@@ -56,6 +56,7 @@ try {
       await p.goto(`${base}/robots.txt`);
       await p.send('Network.setCookie', { name: 'office_s', value: c.cookies.office_s, url: `${main}/theoffice/`, path: '/theoffice', httpOnly: true, secure: false, sameSite: 'Lax' });
       await p.goto(`${base}/floor/${c.slug}?q=low`);
+      await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
       await p.until('document.querySelectorAll("[data-launcher] [data-type]").length === 4', 'the four types', 20000);
       const types = await p.ev('[...document.querySelectorAll("[data-launcher] [data-type] b")].map((x) => x.textContent).join("|")');
       check(`${label}: What are we making? offers Game, App / SaaS, Website and Business`, types === 'Game|App / SaaS|Website|Business', types);

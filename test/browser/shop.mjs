@@ -71,9 +71,11 @@ try {
   await boss.goto(t.base);
   await boss.send('Network.setCookie', { name: 'office_s', value: c.cookies.office_s, url: `${main}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
   await boss.goto(`${t.base}/floor/${c.slug}?q=low`);
+  await boss.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await boss.until('document.body?.dataset.page === "floor" && !!window.__office?.view', 'floor');
-  await boss.until('!!document.querySelector(\'[data-tab="pay"]\')', 'the Payments tab');
-  await tap(boss, '[data-tab="pay"]');
+  // Payments is a section of the boss's Business tab since the redesign (job 22).
+  await boss.until('!!document.querySelector(\'[data-tab="biz"]\')', 'the Business tab');
+  await boss.tab('pay');
   await boss.until('!!document.querySelector("[data-pay-connect]")', 'the connect button');
   await boss.ev('document.querySelector("[data-pay-connect]").click()');
   await boss.until('!!document.querySelector("#finish")', 'Stripe\'s hosted onboarding');
@@ -81,6 +83,7 @@ try {
   await boss.until('document.body?.dataset.page === "floor" && !!window.__office?.view', 'back on the floor');
   await until(() => !!get(t.db, 'SELECT 1 x FROM pay_accounts WHERE floor_id=? AND charges_enabled=1', floor.id), { what: 'Stripe to say the account can charge' });
   await boss.goto(`${t.base}/floor/${c.slug}?q=low`);
+  await boss.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await boss.until('document.body?.dataset.page === "floor" && !!window.__office?.view', 'floor again');
   await boss.ev('window.__office.setTab("requests")');
   await boss.until('!!document.querySelector("[data-pay-approve-all-yes]")', 'approve all');
@@ -125,13 +128,14 @@ try {
 
   // ---- the boss sees the sale ----
   await boss.goto(`${t.base}/floor/${c.slug}?q=low`);
+  await boss.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await boss.until('document.body?.dataset.page === "floor" && !!window.__office?.view', 'floor');
-  await tap(boss, '[data-tab="pay"]');
+  await boss.tab('pay');
   await boss.until('document.querySelectorAll("[data-pay-order]").length === 2', 'the orders');
   const panel = await boss.ev('document.querySelector("[data-pay-panel]").innerText');
   check('the boss sees each order: what was bought, who by, where to send it', /2 x Lavender candle, 1 x Cedar candle/.test(panel) && /phone@example\.com/.test(panel) && /Send to: Test Buyer, 12 Test Lane/.test(panel) && /\$38\.50/.test(panel), panel.slice(0, 400));
   await boss.ev('document.querySelector("[data-pay-sent]").click()');
-  await boss.until('/· sent/.test(document.querySelector("[data-pay-panel]")?.innerText || "")', 'marked as sent');
+  await boss.until('/· sent/.test(document.querySelector("[data-pay-panel]")?.innerText || "")', 'marked as sent', 120000);  // a reload of the whole floor: slow on a loaded software-rendered box (job 29)
   check('the boss can mark an order as sent', true);
   check('each order is also in the company inbox', all(t.db, "SELECT 1 x FROM mail_messages WHERE floor_id=? AND direction='in' AND subject LIKE 'New order %'", floor.id).length === 2);
   await boss.shot(`${OUT}/shop-boss-orders.jpg`);
