@@ -16,7 +16,7 @@ DONE MEANS: "Lobby and floor use the same 8 colours, 2 fonts and 1 card style."
   - The phone sheet's own palette (mobile.css --m-*) is pointed at the same 8 colours. The about/privacy/terms pages (page.css) use the
     same palette and faces.
   - Proof: test/skin.test.js (5 tests): the 8 hex values as variables; no colour in skin.css outside the palette (+ white text on the red
-    button); 15 text/background pairs the skin uses all at least 4.5:1 (lowest: Slate on Paper 5.6:1, white on Red 5.3:1); exactly two
+    button); 15 text/background pairs the skin uses all at least 4.5:1 (lowest: Teal on Paper 4.84:1; white on Red 5.10:1, Slate on Paper 5.45:1); exactly two
     self-hosted woff2 families, no googleapis/gstatic anywhere in public/css or index.html, skin.css loaded last; one card / one button /
     four badge states. test/statics.test.js updated for the new font file names (the old test named lilita-one-400.woff2).
   - Screenshots (mock mode, 0 console errors): docs/redesign/jobs/j01/shots/{home,floor}-{visitor,boss}-{desktop 1440x900,phone 390x844}.jpg
