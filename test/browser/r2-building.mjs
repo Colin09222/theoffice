@@ -98,6 +98,24 @@ try {
   const twice = await p.ev('(() => { const n = performance.now() + 10000; return [window.__officeSound.eventSound("stamp", n), window.__officeSound.eventSound("paper", n + 1500), window.__officeSound.eventSound("paper", n + 2000)]; })()');
   check(JSON.stringify(twice) === '[true,false,true]', `r2-j43: no two event sounds within 2 s (${JSON.stringify(twice)})`);
   p.close();
+  // r2-j50: the basement shows at the foot of the tower panel and at B on the lift, with the robot at its desk.
+  p = await page({ width: 1440, height: 900 }, { clock: nyAt(12, 0) });
+  await p.until('!!document.querySelector(".home-tower .mailroom-strip") && !!document.querySelector(".lift-btn.lift-b")', 'the basement on the home page', 20000).catch(() => null);
+  check(await p.ev('!!document.querySelector(".home-tower .tower-foot .mailroom-strip") && document.querySelector(".lift-btn.lift-b")?.textContent === "B"'), 'r2-j50: the basement at the foot of the tower panel, and B on the lift');
+  await p.click('.lift-btn.lift-b');
+  await p.until('document.body.dataset.page === "mailroom" && window.__mailroomDebug?.holeCount !== undefined', 'the mailroom', 30000).catch(() => null);
+  const room = await p.ev('(() => { const v = window.__mailroomDebug; if (!v) return null; return { atDesk: v.robot.group.position.distanceTo(v.deskSpot) < 1e-6, tris: v.robot.triangles, plate: v.robot.plate.userData.text, holes: v.holeCount }; })()');
+  check(room?.atDesk && room.tris < 1500 && room.plate === 'buddehbot' && room.holes >= 2, `r2-j50: B opens the mailroom with buddehbot at its desk (${JSON.stringify(room)})`);
+  await sleep(1500);
+  await p.shot?.('/tmp/claude-0/-home-user-theoffice/ba670692-e452-55d2-8e03-8f74c9fdfb92/scratchpad/mailroom-desktop.jpg');
+  check(!p.errors.length, `r2-j50: no console errors in the mailroom ${p.errors.slice(0, 2).join(' | ')}`);
+  p.close();
+  p = await page({ phone: { width: 390, height: 844 } });
+  await p.click('.lift-btn.lift-b');
+  await p.until('document.body.dataset.page === "mailroom" && !!document.querySelector(".dom-room .robot-svg")', 'the plain mailroom', 20000).catch(() => null);
+  check(await p.ev('!!document.querySelector(".dom-room .robot-svg") && !window.__mailroomDebug && !performance.getEntriesByType("resource").some((e) => ["three.module", "mailroom-scene", "/js/stage.js"].some((k) => e.name.includes(k)))'),'r2-j50: on a phone, the plain mailroom with the robot and no 3D code');
+  await p.shot?.('/tmp/claude-0/-home-user-theoffice/ba670692-e452-55d2-8e03-8f74c9fdfb92/scratchpad/mailroom-phone.jpg');
+  p.close();
   // r2-j38: a fresh browser (a first-time visitor): the fly-in plays once on the desktop, never on the second visit, never under reduce motion,
   // and a click skips it.
   const b2 = await launch({});

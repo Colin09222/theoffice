@@ -20,3 +20,34 @@
 @media (max-width: 760px) { .dir-row[data-live="work"] .dir-num::after { display: block; animation: r2-pulse 1.4s ease-in-out infinite; } }
 .home:has(.home-tower[hidden]) .dir-row[data-live="work"] .dir-num::after { display: block; animation: r2-pulse 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .dir-row[data-live="work"] .dir-num::after { animation: none !important; } }
+
+/* r2-j50: the basement. B on the lift, the strip at the foot of the tower panel, and the mailroom page. */
+.lift-btn.lift-b { background: var(--c-ink); color: #F6F1E7; border: 1.5px solid var(--c-ink); }
+.tower-foot { position: absolute; left: 10px; right: 10px; bottom: 10px; z-index: 3; pointer-events: auto; display: flex; justify-content: center; }
+.tower-foot:empty { display: none; }
+.mailroom-strip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border-radius: 999px; background: var(--c-card, #fff); color: var(--c-ink); border: 1px solid var(--c-line); font: 500 13px/1.2 var(--f-body, sans-serif); cursor: pointer; box-shadow: 0 2px 8px rgba(31, 36, 48, .12); }
+.mailroom-strip .mailroom-b { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--c-ink); color: #F6F1E7; font: 700 13px/1 var(--f-body, sans-serif); }
+.mailroom-page { position: relative; z-index: 2; min-height: 100vh; min-height: 100dvh; padding: 16px 24px; pointer-events: none; }
+.mailroom-page > *, .mailroom-col > * { pointer-events: auto; }
+.mailroom-main { display: grid; grid-template-columns: 1fr minmax(260px, 340px); gap: 20px; margin-top: 12px; }
+body.mailroom-3d .mailroom-room { min-height: 60vh; pointer-events: none; }
+.mailroom-col { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+.mailroom-card { padding: 14px 16px; }
+.mailroom-card h2 { margin: 0 0 6px; font: 700 20px/1.1 var(--f-head, sans-serif); }
+.mailroom-state { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; }
+.robot-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 2px rgba(31, 36, 48, .15); }
+.mailroom-sign { margin: 6px 0 0; padding: 4px 8px; display: inline-block; background: #F6F1E7; border: 1.5px solid var(--c-ink); border-radius: 4px; font-weight: 600; }
+.mailroom-counts { margin: 8px 0 0; padding-left: 18px; color: var(--c-slate); }
+.mailroom-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mailroom-lines li { padding: 8px 12px; background: var(--c-card, #fff); border: 1px solid var(--c-line); border-radius: 8px; font-size: 14px; }
+.dom-room { padding: 18px; background: #6f4a3e; background-image: repeating-linear-gradient(0deg, transparent 0 14px, rgba(0, 0, 0, .18) 14px 16px); border-radius: var(--card-r, 12px); color: #F6F1E7; }
+.dom-desk { display: flex; align-items: flex-end; gap: 16px; padding: 12px; background: #7b5a3c; border-radius: 8px; }
+.dom-tray { position: relative; display: flex; flex-direction: column-reverse; gap: 2px; min-width: 64px; min-height: 40px; padding: 4px; background: #b9b2a6; border-radius: 4px; }
+.dom-folder { display: block; height: 6px; background: #d9b779; border-radius: 1px; }
+.dom-more { position: absolute; top: -18px; right: 0; font-size: 12px; }
+.dom-tray-label { margin: 8px 0 0; font-size: 14px; }
+.mailroom-page .robot-eye { transition: fill .3s; }
+@media (max-width: 760px) {
+  .mailroom-page { padding: 12px 16px; }
+  .mailroom-main { grid-template-columns: 1fr; }
+}

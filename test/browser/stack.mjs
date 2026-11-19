@@ -35,7 +35,7 @@ try {
     if (await p.ev('!!window.__stage && window.__stage.ok')) throw new Error('a 3D stage with no WebGL');
   });
   await step('the floor list shows every open floor, hidden ones left out, one still setting up as moving in', async () => {
-    const o = await p.ev(`({ rows: [...document.querySelectorAll('.home-dir .dir-row')].map((r) => [r.dataset.floor, r.querySelector('b').textContent]), lift: [...document.querySelectorAll('.home-dir .lift-btn')].map((b) => b.dataset.lift), toLet: document.querySelector('.to-let').textContent })`);
+    const o = await p.ev(`({ rows: [...document.querySelectorAll('.home-dir .dir-row')].map((r) => [r.dataset.floor, r.querySelector('b').textContent]), lift: [...document.querySelectorAll('.home-dir .lift-btn:not(.lift-b)')].map((b) => b.dataset.lift), toLet: document.querySelector('.to-let').textContent })`);
     const rows = Object.fromEntries(o.rows);
     if (rows['7'] !== 'Beta Bakes' || rows['3'] !== 'Alpha Soup' || rows['12'] !== 'Moving in' || rows['5']) throw new Error(JSON.stringify(o));
     if (o.lift.sort().join() !== '12,3,7') throw new Error(`lift ${o.lift}`);
@@ -67,7 +67,7 @@ try {
     await p.click('.floor-top .back');
     await p.until('document.body.dataset.page === "lobby" && document.querySelectorAll(".home-dir .dir-row").length === 3', 'home again');
     await p.until('!document.querySelector("#fade.in")', 'doors open');
-    if ((await p.ev('document.querySelectorAll(".home-dir .lift-btn").length')) !== 3) throw new Error('lift');
+    if ((await p.ev('document.querySelectorAll(".home-dir .lift-btn:not(.lift-b)").length')) !== 3) throw new Error('lift');
   });
 
   const m = await b.newPage({ mobile: true, width: 390, height: 844 });

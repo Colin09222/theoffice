@@ -11,6 +11,7 @@ import { launchCard } from './launch-card.js';
 import { heroFrames, crossfade } from './hero-fade.js';
 import { billboardImages } from './billboard.js';
 import { shouldFlyIn, FLYIN_KEY, SKIP_EVENTS } from './flyin.js';
+import { mailroomStrip } from './mailroom-ui.js';
 
 // The claim wizard and its character builder are only fetched when someone opens them.
 const claimModule = () => import('./claim.js');
@@ -113,16 +114,23 @@ export async function showLobby(root) {
     clear(list); clear(lift);
     if (!floors.length) list.append(h('p.dir-empty', {}, 'The building is brand new, and every floor is empty. Someone has to go first.'));
     for (const c of floors) list.append(floorRow(c, enterFloor));
+    // Round 2, r2-j50: B, the basement mailroom, at the bottom of the lift.
+    if (mailroomOn) lift.append(h('button.lift-btn.lift-b', { type: 'button', 'data-lift': 'B', 'aria-label': 'B, the mailroom', onclick: () => window.officeGo('/mailroom') }, 'B'));
     for (const c of [...floors].sort((a, b) => b.number - a.number)) lift.append(h('button.lift-btn.lit', { type: 'button', 'data-lift': c.number, css: { '--brand': c.colors.primary }, 'aria-label': `Floor ${c.number}, ${c.name || 'moving in'}`, onclick: () => enterFloor(c), onpointerenter: () => tower?.setHover?.(c.number) }, String(c.number)));
     const n = toLet.length;
     letLine.replaceChildren(n ? `${n} ${n === 1 ? 'floor' : 'floors'} to let` : 'Every floor is taken');
   };
+  // Round 2, r2-j50: the basement shows at the foot of the tower panel: buddehbot's state and the tray, one tap from the mailroom.
+  const footStrip = h('div.tower-foot');
+  let mailroomOn = false;
+  const readMailroom = async () => { try { const d = await api('/mailroom'); if (!mailroomOn) { mailroomOn = true; renderFloors(); } footStrip.replaceChildren(mailroomStrip(d)); } catch { /* no mailroom: no B */ } };
   renderFloors();
+  readMailroom();
 
   const account = session.floor
     ? h('button.btn', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, icon('elevator'), h('span', {}, 'My floor'))
     : h('button.btn', { type: 'button', onclick: () => openLogin() }, icon('sign-in'), h('span', {}, 'Sign in'));
-  const towerFrame = h('aside.home-tower', { 'aria-label': 'The building', hidden: isPhone() }, h('p.tower-wait', {}, 'The building is on its way…'));
+  const towerFrame = h('aside.home-tower', { 'aria-label': 'The building', hidden: isPhone() }, h('p.tower-wait', {}, 'The building is on its way…'), footStrip);
   tip = h('div.floor-tip', { hidden: true });
 
   const hero = buildHero(onFloor), now = buildNow();
@@ -160,7 +168,7 @@ export async function showLobby(root) {
     tower?.setLive?.(live.floors);
   };
   readLive();
-  livePoll = setInterval(() => { if (!document.hidden) readLive(); }, LIVE_MS);
+  livePoll = setInterval(() => { if (!document.hidden) { readLive(); readMailroom(); } }, LIVE_MS);
 
   poll = setInterval(async () => {
     if (document.hidden) return;  // a tab nobody is looking at asks for nothing

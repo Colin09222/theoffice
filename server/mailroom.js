@@ -14,6 +14,7 @@
 // The public feed carries only number, kind, floor, state and times. Item text, names and prices stay on the server (r2-j54 adds the boss's and
 // Colon's fuller views). Hidden floors and demo floors are left out. MAILROOM=0 takes the address away.
 import { all } from './db.js';
+import { robotState, signFor, trayView } from '../public/js/mailroom-state.js';
 
 export const RECENT_MS = 15 * 60000;   // a closed item stays in the feed for 15 minutes, so the page can stamp it; then it is gone
 export const KINDS = ['help', 'purchase', 'contractor'];
@@ -53,10 +54,17 @@ export function counts(items) {
 
 export function installMailroom(ext) {
   const { db, cfg, now, GET, json, HttpError } = ext;
+  // The robot: its state (section 3's order), its sign and the tray. The freeze is the engine's own night freeze; the heartbeat comes in r2-j53.
+  const robotOf = (items) => {
+    const state = robotState({ freeze: ext.engine?.nightFrozen?.() ?? false, heartbeatFresh: true, items });
+    return { state, sign: signFor(state), tray: trayView(items) };
+  };
+  // One pigeonhole per open floor (public floors only).
+  const openFloors = () => all(db, "SELECT number FROM floors WHERE status='active' AND hidden=0 AND (filler=0 OR ?) AND number <= ? ORDER BY number", cfg.demoFloorsPublic ? 1 : 0, cfg.towerFloors ?? 10).map((r) => r.number);
   GET('/api/mailroom', async ({ res }) => {
     if (cfg.mailroom === false) throw new HttpError(404, 'not_found');
     const items = mailroomItems(db, cfg, { now: now() });
-    json(res, 200, { items: items.map(publicItem), counts: counts(items), ts: now() });
+    json(res, 200, { items: items.map(publicItem), counts: counts(items), robot: robotOf(items), floors: openFloors(), ts: now() });
   });
   return null;
 }

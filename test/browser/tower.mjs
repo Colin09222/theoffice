@@ -99,7 +99,7 @@ async function profile(kind) {
     });
   }
   await step(`${kind}: the empty floors show To Let on the tower, the lift lists the open floors only, and the counts are right`, async () => {
-    const s = await p.ev(`(() => ({ boards: window.__lobbyDebug?.tower.boards.count ?? null, lifts: [...document.querySelectorAll('.home-dir .lift-btn')].map((b) => b.dataset.lift), lit: document.querySelectorAll('.home-dir .lift-btn.lit').length,
+    const s = await p.ev(`(() => ({ boards: window.__lobbyDebug?.tower.boards.count ?? null, lifts: [...document.querySelectorAll('.home-dir .lift-btn:not(.lift-b)')].map((b) => b.dataset.lift), lit: document.querySelectorAll('.home-dir .lift-btn.lit').length,
       toLet: document.querySelector('.to-let')?.textContent, open: document.querySelector('.open-office')?.textContent }))()`);
     if (!phone && s.boards !== 7 * 4) throw new Error(`boards: ${JSON.stringify(s)}`);
     if (s.lifts.sort().join() !== '1,2' || s.lit !== 2) throw new Error(`lift buttons: ${JSON.stringify(s)}`);
@@ -177,7 +177,7 @@ async function profile(kind) {
     await p.click('.floor-top .back');
     await p.until(phone ? 'document.body.dataset.page === "lobby" && !!document.querySelector(".home-dir .dir-row")' : 'document.body.dataset.page === "lobby" && window.__stage.view === window.__lobbyDebug && document.body.classList.contains("stage-boxed")', 'lobby', 20000);
     await sleep(800);
-    const s = await p.ev('({ fading: document.querySelector("#fade").classList.contains("in"), tower: typeof window.__tower, lifts: document.querySelectorAll(".home-dir .lift-btn").length, flying: document.body.classList.contains("flying") })');
+    const s = await p.ev('({ fading: document.querySelector("#fade").classList.contains("in"), tower: typeof window.__tower, lifts: document.querySelectorAll(".home-dir .lift-btn:not(.lift-b)").length, flying: document.body.classList.contains("flying") })');
     if (s.fading || s.tower !== 'undefined' || s.lifts !== 2 || s.flying) throw new Error(JSON.stringify(s));
     return phone ? 'the home page again' : 'the home page and its tower again';
   });

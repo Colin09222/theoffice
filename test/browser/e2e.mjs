@@ -44,7 +44,7 @@ async function run(label, opts, t, adminCode) {
     await shot('01-lobby');
   });
   await step(tag('the directory lists the open floors with their state, and the lift is the open floors plus how many are to let'), async () => {
-    const d = await p.ev(`({ rows: [...document.querySelectorAll(".home-dir .dir-row")].map((r) => [r.querySelector("b").textContent, r.querySelector(".badge")?.dataset.state]), lifts: [...document.querySelectorAll(".home-dir .lift-btn")].map((b) => b.dataset.lift), toLet: document.querySelector(".to-let").textContent })`);
+    const d = await p.ev(`({ rows: [...document.querySelectorAll(".home-dir .dir-row")].map((r) => [r.querySelector("b").textContent, r.querySelector(".badge")?.dataset.state]), lifts: [...document.querySelectorAll(".home-dir .lift-btn:not(.lift-b)")].map((b) => b.dataset.lift), toLet: document.querySelector(".to-let").textContent })`);
     const names = d.rows.map((r) => r[0]).sort().join();
     if (names !== 'Hat Museum,Soup Finder') throw new Error(`rows ${names}`);
     if (!d.rows.every((r) => ['working', 'waiting', 'idle', 'paused'].includes(r[1]))) throw new Error(`states ${JSON.stringify(d.rows)}`);

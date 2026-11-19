@@ -46,7 +46,7 @@ try {
   check(seen['.hero-strip:not([hidden])'] < first3d && seen['.home-now:not([hidden])'] < first3d && seen['.home-dir .dir-row'] < first3d, 'desktop: hero, Happening now and the floor list are in the page before any 3D code is requested');
   const frame = await p.ev('(() => { const r = document.querySelector(".home-tower").getBoundingClientRect(); const c = document.querySelector("#scene").getBoundingClientRect(); return { share: r.width / innerWidth, canvas: Math.abs(c.width - r.width) < 2 && Math.abs(c.left - r.left) < 2 }; })()');
   check(frame.share > 0.28 && frame.share < 0.36 && frame.canvas, `desktop: the tower frame is about a third of the width (${frame.share.toFixed(2)}), and the canvas sits in it`);
-  check(await p.ev('document.querySelectorAll(".home-dir .lift-btn").length === 2 && /floors to let/.test(document.querySelector(".to-let").textContent)'), 'the lift: open floors only, plus N floors to let');
+  check(await p.ev('document.querySelectorAll(".home-dir .lift-btn:not(.lift-b)").length === 2 && /floors to let/.test(document.querySelector(".to-let").textContent)'), 'the lift: open floors only, plus N floors to let');
   check(!p.errors.length, `desktop: no console errors ${p.errors.slice(0, 2).join(' | ')}`);
   p.close();
   // 2. Phone.
