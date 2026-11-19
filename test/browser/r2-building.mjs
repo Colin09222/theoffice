@@ -156,6 +156,20 @@ try {
   const said = await p.ev(`window.__mailroomSaid.filter((x) => x.record === 'purchases:${buy2}').map((x) => x.line)`);
   check(stamped === 'BOUGHT' && JSON.stringify(said) === '["Bought."]', `r2-j52: closing it as bought shows BOUGHT and says "Bought." once (${stamped}, ${JSON.stringify(said)})`);
   p.close();
+  // r2-j55: a job Colon sent out arrives with the small COLON APPROVED stamp; handed back, the robot makes one lift ride.
+  p = await page({ width: 1440, height: 900 }, { clock: nyAt(12, 0) });
+  await p.ev('window.officeGo("/mailroom")');
+  await p.until('window.__mailroomDebug?.trayCount !== undefined', 'the mailroom', 30000);
+  await sleep(5500);
+  const sentTask = Number(t.db.prepare("INSERT INTO tasks (floor_id,title,status,contractor,sent_out_at,created_at,updated_at) VALUES (?,'Sent out','blocked',1,?,1,1)").run(bossFloor.id, Date.now()).lastInsertRowid);
+  const cjob = Number(t.db.prepare("INSERT INTO contractor_jobs (floor_id,task_id,title,created_at) VALUES (?,?,'Sent out',?)").run(bossFloor.id, sentTask, Date.now()).lastInsertRowid);
+  const approved = await p.until(`(() => { const s = document.querySelector('.mailroom-stamp.small'); return s && s.dataset.record === 'contractor_jobs:${cjob}' ? s.textContent : null; })()`, 'the approval stamp', 15000).catch(() => null);
+  t.db.prepare("UPDATE contractor_jobs SET status='done', done_at=? WHERE id=?").run(Date.now(), cjob);
+  await p.until('(window.__mailroomDebug.rides || 0) >= 1', 'the lift ride', 20000).catch(() => null);
+  await sleep(10000);  // more readings, and the 8 s ride itself: still one ride
+  const rides = await p.ev('window.__mailroomDebug.rides || 0');
+  check(approved === 'COLON APPROVED' && rides === 1, `r2-j55: COLON APPROVED on the job Colon sent out, and one lift ride when it is handed back (${approved}, ${rides} ride)`);
+  p.close();
   // r2-j53: the Mac goes quiet for 16 minutes: the robot's sign reads "Away" (within the next readings).
   p = await page({ width: 1440, height: 900 }, { clock: nyAt(12, 0) });
   await p.ev('window.officeGo("/mailroom")');

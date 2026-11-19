@@ -5,7 +5,7 @@
 import { h, api, isPhone, put } from './dom.js';
 import { icon } from './icons.js';
 import { kindLine, trayView, signFor, COLORS, eyeFor } from './mailroom-state.js';
-import { diffFeed, EventPlayer, stampFor, lineFor, STAMP_S, BUBBLE_S } from './mailroom-events.js';
+import { diffFeed, EventPlayer, stampFor, lineFor, approvedStampFor, STAMP_S, BUBBLE_S } from './mailroom-events.js';
 import { eventSound } from './sfx.js';
 
 export const STATE_WORDS = { asleep: 'Asleep', away: 'Away', busy: 'Busy', waiting: 'Inbox waiting', free: 'Free' };
@@ -116,8 +116,9 @@ export async function showMailroom(root) {
   roomBox.parentNode.prepend(h('div.mailroom-overlay', {}, stampEl, bubble));
   let bubbleTimer = null, stampTimer = null;
   const said = window.__mailroomSaid = [];
-  const onStamp = (word, ev) => {
+  const onStamp = (word, ev, { small = false } = {}) => {
     if (!word) return;
+    stampEl.classList.toggle('small', small);
     eventSound('stamp');
     stampEl.textContent = word; stampEl.dataset.record = `${ev.type}:${ev.number}`; stampEl.hidden = false; stampEl.classList.remove('down'); void stampEl.offsetWidth; stampEl.classList.add('down');
     clearTimeout(stampTimer); stampTimer = setTimeout(() => { stampEl.hidden = true; }, STAMP_S * 1000 + 1400);
@@ -130,7 +131,7 @@ export async function showMailroom(root) {
   // A phone has no 3D room: its own player says and stamps the same events, with no tube.
   let domPlayer = null, domTick = null;
   if (view) { view.onStamp = onStamp; view.onSay = onSay; } else {
-    domPlayer = new EventPlayer((ev) => { if (ev.event === 'close') { onStamp(stampFor(ev), ev); const l = lineFor(ev); if (l) onSay(l, ev); return l ? BUBBLE_S : STAMP_S; } if (ev.event === 'pickup') { const l = lineFor(ev); if (l) onSay(l, ev); return l ? BUBBLE_S : 0; } return 0; });
+    domPlayer = new EventPlayer((ev) => { if (ev.event === 'arrive') { const ok = approvedStampFor(ev); if (ok) { onStamp(ok, ev, { small: true }); onSay(lineFor(ev), ev); return BUBBLE_S; } return 0; } if (ev.event === 'close') { onStamp(stampFor(ev), ev); const l = lineFor(ev); if (l) onSay(l, ev); return l ? BUBBLE_S : STAMP_S; } if (ev.event === 'pickup') { const l = lineFor(ev); if (l) onSay(l, ev); return l ? BUBBLE_S : 0; } return 0; });
     window.__mailroomDomPlayer = domPlayer;
     domTick = setInterval(() => domPlayer.update(0.1), 100);
   }

@@ -76,6 +76,6 @@ test('the mailroom page plays arrivals down the tube on a desktop, and a phone j
   const ui = src('mailroom-ui.js'), scene = src('mailroom-scene.js');
   assert.match(ui, /const events = diffFeed\(prev, last\); prev = last;/);
   assert.match(ui, /\(view \? view\.player : domPlayer\)\.push\(ev\);/);
-  assert.match(scene, /if \(ev\.event === 'arrive'\) \{ this\.drop = \{ t: 0, ev \}; this\.inFlight\.visible = true; return TUBE_S; \}/);
+  assert.match(scene, /if \(ev\.event === 'arrive'\) \{\s*this\.drop = \{ t: 0, ev \}; this\.inFlight\.visible = true;[\s\S]{0,400}return TUBE_S;/);
   assert.match(src('office-scene.js'), /if \(!this\.host\) \(this\.mailFolders \|\|= mailroomFloor\(this\)\)\.tick\(\);/);
 });

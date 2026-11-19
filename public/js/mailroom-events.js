@@ -17,11 +17,12 @@ export function diffFeed(prev, next) {
   const out = [];
   for (const i of next.items || []) {
     const was = before.get(key(i));
-    const base = { type: i.type, number: i.number, kind: i.kind, floor: i.floor };
+    // r2-j55: an approval record exists only where Colon pressed Send out on the job (tasks.sent_out_at). Nothing else is ever "approved".
+    const base = { type: i.type, number: i.number, kind: i.kind, floor: i.floor, approved: i.kind === 'contractor' && !!i.times?.sentOut };
     if (!was && i.state === 'open') out.push({ ...base, event: 'arrive', state: i.state });
     else if (was && !CLOSED.has(was.state) && was.state !== 'picked' && i.state === 'picked') out.push({ ...base, event: 'pickup', state: i.state });
     else if (was && !CLOSED.has(was.state) && CLOSED.has(i.state)) {
-      out.push({ ...base, event: 'close', state: i.state, approved: !!i.approved });
+      out.push({ ...base, event: 'close', state: i.state });
       if (i.kind === 'contractor' && i.state === 'done') out.push({ ...base, event: 'handback', state: i.state });
     }
   }
@@ -58,6 +59,8 @@ export const APPROVED_STAMP = 'COLON APPROVED';
 export const VOICE_LINES = ['Answered.', 'Not this one.', 'Bought.', 'Approved.', 'On it.', 'Done.'];
 /** The stamp an event brings down, or '' for none. */
 export const stampFor = (ev) => (ev?.event === 'close' ? STAMPS[ev.state] || '' : '');
+/** The small COLON APPROVED stamp: only on an item with an approval record (Colon's Send out), when it arrives. */
+export const approvedStampFor = (ev) => (ev?.event === 'arrive' && ev.approved === true ? APPROVED_STAMP : '');
 /** The one line an event may say, or '' (help expired: stamp only). */
 export function lineFor(ev) {
   if (!ev) return '';
@@ -67,5 +70,6 @@ export function lineFor(ev) {
     if (ev.kind === 'contractor') return ev.state === 'done' ? 'Done.' : '';
   }
   if (ev.event === 'pickup' && ev.kind === 'contractor') return 'On it.';
+  if (ev.event === 'arrive' && ev.approved === true) return 'Approved.';
   return '';
 }

@@ -69,3 +69,6 @@ body.mailroom-3d .mailroom-room { min-height: 60vh; pointer-events: none; }
 .mailroom-full summary { cursor: pointer; font-weight: 600; }
 .mailroom-full p { margin: 4px 0 0; overflow-wrap: anywhere; }
 .mailroom-stuck h3 { margin: 10px 0 4px; font-size: 14px; }
+
+/* r2-j55: the second, small COLON APPROVED stamp. */
+.mailroom-stamp.small { font-size: 15px; border-width: 3px; padding: 4px 9px; top: 52px; }

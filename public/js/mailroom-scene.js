@@ -6,7 +6,7 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import { makeRobot, COLORS } from './robot.js';
 import { pigeonholes, trayView, signFor, TRAY_MAX } from './mailroom-state.js';
 import { stage } from './stage.js';
-import { EventPlayer, TUBE_S, STAMP_S, BUBBLE_S, stampFor, lineFor } from './mailroom-events.js';
+import { EventPlayer, TUBE_S, STAMP_S, BUBBLE_S, LIFT_S, stampFor, lineFor, approvedStampFor } from './mailroom-events.js';
 
 const ROOM_W = 7, ROOM_D = 5, ROOM_H = 3.2;
 
@@ -86,10 +86,21 @@ export class MailroomView {
     // r2-j51: folders come down the tube. One folder in flight at a time, each from a real record (the player refuses anything else).
     this.inFlight = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.02, 0.22), new THREE.MeshStandardMaterial({ color: '#d9b779', roughness: 0.8 })); this.inFlight.visible = false; s.add(this.inFlight);
     this.player = new EventPlayer((ev) => this.playEvent(ev));
+    // r2-j55: the box it carries up in the lift, and the lift door it leaves by (the right-hand wall).
+    this.box = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.26, 0.3), new THREE.MeshStandardMaterial({ color: '#b98a55', roughness: 0.9 })); this.box.visible = false; this.robot.group.add(this.box); this.box.position.set(0, 0.95, 0.28);
+    const liftDoor = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 2.1), new THREE.MeshStandardMaterial({ color: '#8a8f99', metalness: 0.6, roughness: 0.35 })); liftDoor.position.set(ROOM_W / 2 - 0.01, 1.05, 0.8); liftDoor.rotation.y = -Math.PI / 2; s.add(liftDoor);
+    this.liftSpot = new THREE.Vector3(ROOM_W / 2 - 0.4, 0, 0.8);
   }
   /** One event from a real record. Returns how long it takes, in seconds. */
   playEvent(ev) {
-    if (ev.event === 'arrive') { this.drop = { t: 0, ev }; this.inFlight.visible = true; return TUBE_S; }
+    if (ev.event === 'arrive') {
+      this.drop = { t: 0, ev }; this.inFlight.visible = true;
+      // r2-j55: a job Colon sent out comes down with its small COLON APPROVED stamp, and the one line "Approved.". Nothing else is ever approved.
+      const ok = approvedStampFor(ev); if (ok) { this.onStamp?.(ok, ev, { small: true }); this.onSay?.(lineFor(ev), ev); return Math.max(TUBE_S, BUBBLE_S); }
+      return TUBE_S;
+    }
+    // r2-j55: a contractor job handed back: the robot rides the lift up with a box, sets it at the Builder's desk and rides back (8 s). One ride.
+    if (ev.event === 'handback') { this.ride = { t: 0, ev }; this.rides = (this.rides || 0) + 1; this.box.visible = true; return LIFT_S; }
     // r2-j52: the stamp comes down (0.6 s), one voice line, and the folder goes up the tube.
     if (ev.event === 'close') {
       const word = stampFor(ev), line = lineFor(ev);
@@ -144,6 +155,13 @@ export class MailroomView {
   update(dt) {
     this.time += dt;
     this.player.update(dt);
+    if (this.ride) {  // to the lift (2 s), away up the tower (4 s), back to the desk (2 s): 8 s
+      const r = this.ride; r.t += dt; const g = this.robot.group;
+      if (r.t < 2) g.position.lerpVectors(this.deskSpot, this.liftSpot, r.t / 2);
+      else if (r.t < 6) { g.visible = false; this.box.visible = false; }
+      else { g.visible = true; g.position.lerpVectors(this.liftSpot, this.deskSpot, Math.min(1, (r.t - 6) / 2)); }
+      if (r.t >= LIFT_S) { g.visible = true; g.position.copy(this.deskSpot); this.ride = null; }
+    }
     if (this.stamping) {  // the arm brings the stamp down and up again in 0.6 s
       const st = this.stamping; st.t += dt; const k = Math.min(1, st.t / STAMP_S);
       this.robot.arm.rotation.x = -Math.sin(k * Math.PI) * 0.9;
