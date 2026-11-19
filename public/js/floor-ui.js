@@ -1334,6 +1334,7 @@ class FloorPage {
       if (rebuild && stage.ok) this.rebuildScene();
       else { if (hired) this.view?.syncAgents(this.viewState()); for (const a of next.agents) this.view?.agentEvent(a); }
       this.view?.updateBoard(next.tasks);
+      this.view?.setRoom?.(next.room);
       this.renderJourney(); this.renderHeader(); this.renderControls(); this.renderStaff(); this.renderTabs(); this.renderBody(); renderCard(this);
       if (this.tab === 'business' && !businessActive(this)) this.setTab(this.canSeeChat ? 'chat' : 'talk');
       const again = this.bodyEl.querySelector('textarea, input');

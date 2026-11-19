@@ -42,3 +42,32 @@ export class IdleRounds {
     return { who, move, hold: lo + this.rand() * (hi - lo) };
   }
 }
+
+// ---- r2-j32: framed launches (Q5a) ----
+/** One frame per real launch, newest first, at most 8 on the wall, then a "+N" tag. On phone low: at most 3, small. */
+export const FRAMES = { MAX: 8, MAX_LOW: 3, PER_SPOT: 4, BIG: [1.8, 1.125], SMALL: [0.86, 0.54], GAP: 0.14 };
+
+/**
+ * Where each frame hangs. `spots` are the wall's picture spots (z along the wall, y the middle height), in the order they fill. With two launches
+ * or fewer each gets a spot and hangs big; with more, each spot holds a 2 by 2 cluster of small ones. Returns { frames: [{ spot, dz, dy, w, h,
+ * launch }], more } where `more` is how many real launches are not on the wall (shown as a "+N" tag), or 0.
+ */
+export function frameLayout(launches, { spots = 2, low = false } = {}) {
+  const list = (launches || []).filter((l) => l && l.slug);
+  const max = Math.min(low ? FRAMES.MAX_LOW : FRAMES.MAX, spots * FRAMES.PER_SPOT);
+  const shown = list.slice(0, max);
+  const out = [];
+  if (!low && shown.length <= spots) {
+    const [w, h] = FRAMES.BIG;
+    shown.forEach((launch, i) => out.push({ spot: i, dz: 0, dy: 0, w, h, launch }));
+  } else {
+    const [w, h] = FRAMES.SMALL, g = FRAMES.GAP;
+    shown.forEach((launch, i) => {
+      const k = i % FRAMES.PER_SPOT, col = k % 2, row = Math.floor(k / 2);
+      out.push({ spot: Math.floor(i / FRAMES.PER_SPOT), dz: (col - 0.5) * (w + g), dy: (0.5 - row) * (h + g), w, h, launch });
+    });
+    // A spot with a single small frame hangs it in the middle.
+    for (const f of out) if (out.filter((o) => o.spot === f.spot).length === 1) { f.dz = 0; f.dy = 0; }
+  }
+  return { frames: out, more: Math.max(0, list.length - shown.length) };
+}

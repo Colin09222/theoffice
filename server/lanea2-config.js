@@ -9,5 +9,7 @@ export function laneA2Settings(env = process.env) {
   return {
     // r2-j31: an Idle floor's beans leave their desks for four idle moves and its screens go dark (IDLE_LIFE=0: the old breaks and errands).
     idleLife: on(env.IDLE_LIFE),
+    // r2-j32: one frame per real launch on the room's wall, with its launch photo (ROOM_FRAMES=0: the old art only).
+    roomFrames: on(env.ROOM_FRAMES),
   };
 }

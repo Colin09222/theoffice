@@ -2,6 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
+import { frameLayout } from './room-rules.js';
 import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
@@ -901,6 +902,8 @@ export class OfficeView {
     }
     // Art on the side wall, in the style the boss picked. The company's own logo goes in the first frame when it has one.
     if (d.art) this.hangArt(room, wallX);
+    // The floor's real launches, framed over the art spots (r2-j32).
+    this.frameWall = { room, wallX }; this.setFrames(this.roomCfg.frames);
     // Bookshelf.
     const shelf = new THREE.Group(); shelf.position.set(L.shelf[0], 0, L.shelf[1]); legacy.add(shelf);
     piece(shelf, '#6f5136', 0.6, 3.1, 2.6, 0, 0, 0);
@@ -1162,6 +1165,75 @@ export class OfficeView {
       };
       img.src = this.logoUrl;
     }
+  }
+  /** Phone "low" (spec Q9): fewer, smaller props. */
+  get low() { return (stage.q?.density ?? 1) < 0.6; }
+  /** The room's own data from the snapshot (server/room.js): frames now, more props later. */
+  setRoom(room) { if (!room) return; this.roomCfg = room; this.setFrames(room.frames); }
+  /**
+   * r2-j32: one frame per real launch, newest first, over the side wall's picture spots: big when there are one or two, a 2 by 2 cluster per spot
+   * past that, at most 8 (3 small on phone low) and then a "+N" tag. Each frame is the launch's real photo; a launch with no photo yet hangs a
+   * plain card with its title. A board behind each cluster covers the art that was there.
+   */
+  setFrames(frames) {
+    if (!this.frameWall) return;
+    const list = frames?.list || [];
+    const key = JSON.stringify([list.map((f) => [f.slug, f.shot]), frames?.total ?? 0, this.low]);
+    if (key === this.framesKey) return;
+    this.framesKey = key;
+    if (this.framesGroup) { this.disposeTree(this.framesGroup); this.framesGroup.removeFromParent(); }
+    const g = this.framesGroup = new THREE.Group(); g.name = 'launch-frames';
+    this.frameWall.room.add(g);
+    this.frameMeshes = [];
+    const { wallX } = this.frameWall; const spots = this.plan.art || [];
+    const lay = frameLayout(list, { spots: spots.length, low: this.low });
+    const hidden = Math.max(0, (frames?.total ?? list.length) - lay.frames.length);
+    const flat = (color) => new THREE.MeshBasicMaterial({ color });
+    const plane = (w, h, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); m.position.set(x, y, z); m.rotation.y = Math.PI / 2; m.userData.keep = true; g.add(m); return m; };
+    for (const [i, [z, y]] of spots.entries()) {
+      const mine = lay.frames.filter((f) => f.spot === i);
+      if (!mine.length) continue;
+      // The board behind fits the frames it holds, and covers the art spot's picture.
+      const z0 = Math.min(...mine.map((f) => f.dz - f.w / 2)), z1 = Math.max(...mine.map((f) => f.dz + f.w / 2));
+      const y0 = Math.min(...mine.map((f) => f.dy - f.h / 2)), y1 = Math.max(...mine.map((f) => f.dy + f.h / 2));
+      const bw = Math.max(1.7, z1 - z0 + 0.24), bh = Math.max(1.35, y1 - y0 + 0.24);
+      plane(bw, bh, flat('#2c2a31'), wallX + 0.1, y + (y0 + y1) / 2, z + (z0 + z1) / 2);
+    }
+    for (const f of lay.frames) {
+      const [z, y] = spots[f.spot];
+      plane(f.w + 0.08, f.h + 0.08, flat('#f2ead8'), wallX + 0.115, y + f.dy, z + f.dz);
+      const mat = new THREE.MeshBasicMaterial({ map: this.frameCard(f.launch), toneMapped: false });
+      const m = plane(f.w, f.h, mat, wallX + 0.125, y + f.dy, z + f.dz);
+      m.userData.launch = f.launch.slug; this.frameMeshes.push(m);
+      if (f.launch.shot) this.framePhoto(m, f.launch.shot);
+    }
+    if (hidden && spots.length) {
+      const [z, y] = spots[Math.min(spots.length - 1, lay.frames.at(-1)?.spot ?? 0)];
+      const tag = canvasTex(128, 64, (x, w, h) => { x.fillStyle = '#2c2a31'; x.fillRect(0, 0, w, h); x.fillStyle = '#fff8e8'; x.font = '600 34px Inter, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(`+${hidden}`, w / 2, h / 2 + 2); });
+      this.frameMore = plane(0.5, 0.25, new THREE.MeshBasicMaterial({ map: tag, toneMapped: false }), wallX + 0.12, y - 0.86, z + 0.82);
+      this.frameMore.userData.more = hidden;
+    } else this.frameMore = null;
+  }
+  /** A plain card for a launch with no photo yet: the floor's colour and the title, never anything made up. */
+  frameCard(launch) {
+    const { primary } = this.colors;
+    return canvasTex(256, 160, (x, w, h) => {
+      x.fillStyle = primary; x.fillRect(0, 0, w, h);
+      x.fillStyle = '#fff8e8'; x.font = '600 26px Fraunces, Georgia, serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      const t = String(launch.title || ''); x.fillText(t.length > 18 ? `${t.slice(0, 17)}…` : t, w / 2, h / 2);
+    });
+  }
+  /** The launch's real photo, cropped to the frame. Small pictures on phone low. */
+  framePhoto(mesh, url) {
+    const img = new Image();
+    img.onload = () => {
+      if (this.dead || !mesh.parent) return;
+      const [w, h] = this.low ? [256, 160] : [512, 320];
+      const tex = canvasTex(w, h, (x) => { const k = Math.max(w / img.width, h / img.height), iw = img.width * k; x.drawImage(img, (w - iw) / 2, 0, iw, img.height * k); });
+      mesh.material.map?.dispose(); mesh.material.map = tex; mesh.material.needsUpdate = true;
+      mesh.userData.photo = url;  // read by the browser test
+    };
+    img.src = url;
   }
   /** What makes each plan itself: easels, a roller door, a pegboard, string lights, carpet islands and partitions. All baked, so they add no draw calls. */
   buildPlanExtras(room, detail, wallX, wallZ) {

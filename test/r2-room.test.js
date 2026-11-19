@@ -5,7 +5,11 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle } from '../public/js/room-rules.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES } from '../public/js/room-rules.js';
+import { get } from '../server/db.js';
+import { REAL_JPEG, publish } from './r2-fixtures.js';
+import { storeShot } from '../server/shots.js';
+import { roomFrames } from '../server/room.js';
 
 /** A room with stand-ins for its people, enough for life.js to run. Every step they're given is kept, and walks finish at once. */
 export function fakeRoom(ids, { floorState = 'idle', coffee = true } = {}) {
@@ -122,5 +126,71 @@ describe('the room in the snapshot', () => {
     t.cfg.idleLife = false;
     assert.equal((await visitor.get(`/api/floors/${boss.slug}`)).data.room.idleLife, false);
     t.cfg.idleLife = true;
+  });
+});
+
+describe('r2-j32 framed launches', () => {
+  const L = (n) => Array.from({ length: n }, (_, i) => ({ slug: `p${i}`, title: `P${i}` }));
+  test('one or two launches hang big, one a spot; three to eight hang in 2 by 2 clusters; past eight a +N tag', () => {
+    assert.deepEqual(frameLayout([], {}).frames, []);
+    const one = frameLayout(L(1));
+    assert.equal(one.frames.length, 1); assert.deepEqual([one.frames[0].w, one.frames[0].h], FRAMES.BIG); assert.equal(one.more, 0);
+    assert.deepEqual(frameLayout(L(2)).frames.map((f) => f.spot), [0, 1]);
+    const five = frameLayout(L(5));
+    assert.deepEqual(five.frames.map((f) => f.spot), [0, 0, 0, 0, 1]);
+    assert.ok(five.frames.every((f) => f.w === FRAMES.SMALL[0]));
+    assert.equal(new Set(five.frames.slice(0, 4).map((f) => `${f.dz},${f.dy}`)).size, 4, 'four places in a cluster');
+    const many = frameLayout(L(12));
+    assert.equal(many.frames.length, 8); assert.equal(many.more, 4);
+    assert.deepEqual(many.frames.map((f) => f.launch.slug), L(8).map((l) => l.slug), 'newest first, as given');
+  });
+  test('phone low: at most 3, small; a wall with one spot holds 4', () => {
+    const low = frameLayout(L(5), { low: true });
+    assert.equal(low.frames.length, 3); assert.equal(low.more, 2);
+    assert.ok(low.frames.every((f) => f.w === FRAMES.SMALL[0]));
+    assert.equal(frameLayout(L(1), { low: true }).frames[0].w, FRAMES.SMALL[0]);
+    assert.equal(frameLayout(L(9), { spots: 1 }).frames.length, 4);
+  });
+
+  let t, six, visitor;
+  before(async () => {
+    t = await boot();
+    six = await claim(t, 'TheTireRx', { floor: 6 });
+    visitor = new Client(t, { origin: null });
+  });
+  after(async () => { await t.close(); });
+
+  test('DONE MEANS: floor 6\'s wall shows one frame with the real TheTireRx photo', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', six.slug);
+    publish(t.db, f.id, 'thetirerx', 'TheTireRx', Date.now() - 3600000);
+    storeShot(t.db, { floorId: f.id, project: 'thetirerx', image: REAL_JPEG, url: 'https://thetirerx.com/' });
+    const s = (await visitor.get(`/api/floors/${six.slug}`)).data;
+    assert.equal(s.floor.number, 6);
+    assert.equal(s.room.frames.total, 1);
+    assert.equal(s.room.frames.list.length, 1);
+    const [fr] = s.room.frames.list;
+    assert.equal(fr.title, 'TheTireRx');
+    assert.match(fr.shot, new RegExp(`^/theoffice/api/building/shot/${six.slug}/thetirerx\\?v=\\d+$`));
+    const photo = await fetch(`http://${t.host}${fr.shot}`);
+    assert.equal(photo.status, 200); assert.equal(photo.headers.get('content-type'), 'image/jpeg');
+    assert.deepEqual(Buffer.from(await photo.arrayBuffer()), REAL_JPEG, 'the frame is the real photo');
+    const lay = frameLayout(s.room.frames.list, { spots: 2 });
+    assert.equal(lay.frames.length, 1, 'one frame on the wall');
+  });
+  test('newest first, private work and demo floors never hang, a launch with no photo hangs a card, ROOM_FRAMES=0 hangs none', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', six.slug);
+    publish(t.db, f.id, 'newer', 'Newer', Date.now());
+    publish(t.db, f.id, 'secret', 'Secret', Date.now() + 5, { priv: 1 });
+    const s = (await visitor.get(`/api/floors/${six.slug}`)).data;
+    assert.deepEqual(s.room.frames.list.map((x) => x.slug), ['newer', 'thetirerx']);
+    assert.equal(s.room.frames.list[0].shot, null, 'no photo yet: the room paints a card');
+    assert.ok(!JSON.stringify(s.room).includes('Secret'));
+    assert.deepEqual(roomFrames(t.db, { ...f, filler: 1 }), { list: [], total: 0 });
+    for (let i = 0; i < 9; i++) publish(t.db, f.id, `more-${i}`, `More ${i}`, Date.now() - 7200000 - i);
+    const many = (await visitor.get(`/api/floors/${six.slug}`)).data.room.frames;
+    assert.equal(many.list.length, 8); assert.equal(many.total, 11);
+    t.cfg.roomFrames = false;
+    assert.equal((await visitor.get(`/api/floors/${six.slug}`)).data.room.frames, null);
+    t.cfg.roomFrames = true;
   });
 });
