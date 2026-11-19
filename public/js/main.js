@@ -46,7 +46,8 @@ async function route() {
       return;
     }
     // Everything the building has launched, on one page (docs/redesign, jobs 14 and 24).
-    if (path === '/launched') { const { showLaunched, hideLaunched } = await import('./launched-ui.js'); current = hideLaunched; await showLaunched(ui); return; }
+    const launched = path.match(/^\/launched(?:\/([a-z0-9-]+))?$/);
+    if (launched) { const { showLaunched, hideLaunched } = await import('./launched-ui.js'); current = hideLaunched; await showLaunched(ui, { floor: launched[1] || null }); return; }
     current = hideLobby;
     await showLobby(ui);
   } finally {

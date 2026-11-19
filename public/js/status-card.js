@@ -28,7 +28,7 @@ export function renderStatusCard(page, el, { shareFloor }) {
     nothingYet ? h('p.stc-empty', {}, 'Just moved in. First job starts soon.') : h('dl.stc-fields', {},
       st.goal ? row('Goal', h('span.stc-goal', {}, st.goal)) : null,
       row('Now', now ? h('span.stc-now', { 'data-state': now.state }, now.line) : h('span.stc-quiet', {}, 'Nothing under way')),
-      shipped ? row('Last shipped', h('a.stc-shipped', { href: shipped.url || '#', target: '_blank', rel: 'noopener noreferrer', 'data-shipped': shipped.slug },
+      shipped ? row('Last shipped', h('a.stc-all', { href: `${BASE}/launched/${page.slug}`, 'data-portfolio': '', onclick: (e) => { e.preventDefault(); window.officeGo(`/launched/${page.slug}`); } }, 'All launches'), h('a.stc-shipped', { href: shipped.url || '#', target: '_blank', rel: 'noopener noreferrer', 'data-shipped': shipped.slug },
         h('img', { src: shipped.thumb, alt: '', width: '64', height: '40', loading: 'lazy' }), h('span', {}, h('b', {}, shipped.title), h('small', {}, timeAgo(shipped.publishedAt))))) : null,
       st.next ? row('Next', h('span.stc-next', {}, st.next)) : null),
     // Jobs 20 and 21, on hold: the weekly fuel gauge and Approve plan go here, for the boss only. Nothing is drawn until they are built.

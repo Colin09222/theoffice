@@ -45,6 +45,9 @@ for (const [kind, w, h] of sizes) {
         await p.until('document.querySelectorAll(".launched-page .lcard").length > 0', 'the launched page', 15000).catch(() => {});
         await sleep(1500);
         await snap('launched');
+        // A floor's own portfolio page (job 24 on), by its share link.
+        await p.goto(`${base}/launched/${boss.slug}`);
+        if (await p.until('!!document.querySelector(".floor-header:not([hidden])")', 'the portfolio', 15000).catch(() => false)) { await sleep(1200); await snap('portfolio'); }
       } else if (who === 'visitor' && await p.ev('!!document.querySelector("[data-wall=toggle]")')) {
         await p.ev('document.querySelector("[data-wall=toggle]").click(); true');
         await p.until('document.querySelectorAll(".wall .lcard").length > 0', 'the wall', 15000).catch(() => {});
