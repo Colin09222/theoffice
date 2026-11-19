@@ -13,7 +13,8 @@ const FLOOR_STOP = { anthropic: 'claudeStopUsd', openrouter: 'openrouterStopUsd'
 const floorKey = (floorId) => `floor_limit_${floorId}`;
 // Less than this left and a provider counts as used up. It is also the least a computer is worth starting for.
 export const MIN_ROOM_USD = 0.1;
-const FLAGS = [[100, '100%'], [80, '80%'], [50, '50%']];
+// The 50% flag is retired (docs/redesign, job 6): it repeated every day with nothing new. 80% and 100% stay.
+const FLAGS = [[100, '100%'], [80, '80%']];
 const money = (n) => Math.round(n * 1e4) / 1e4;
 
 export const providerForRole = (role) => (role?.provider === 'anthropic' ? 'anthropic' : 'openrouter');
@@ -97,7 +98,7 @@ export function budgetReport(db, cfg, { fenced = true, now = Date.now } = {}) {
     row.totalUsd = money(row.totalUsd + r.usd);
     byFloor.set(r.id, row);
   }
-  const order = ['none', '50%', '80%', '100%'];
+  const order = ['none', '80%', '100%'];
   return {
     ...(fence ? { notice: fence.notice, fence: fence.nonce } : {}),
     generatedAt: new Date(now()).toISOString(),

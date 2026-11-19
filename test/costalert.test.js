@@ -29,7 +29,8 @@ async function fakeGateway(replies = []) {
 }
 const scripted = () => ({ chat: async (a) => { a.onToken?.('Done.'); return { content: 'Done.', toolCalls: [], finish: 'stop', usage: { prompt: 10, completion: 5, cost: 0.001, real: true } }; } });
 async function floor(overrides = {}, deps = {}) {
-  const t = await boot({ peopleTalk: false, hookToken: 'test-hook-token', hookRetryMs: 1, ...overrides }, { llm: scripted(), ...deps });
+  // ownerAlerts off: this file tests the silent log on its own, with its old word to the owner past $20 (the owner's own alerts replace that: owneralerts.test.js).
+  const t = await boot({ peopleTalk: false, hookToken: 'test-hook-token', hookRetryMs: 1, ownerAlerts: false, ...overrides }, { llm: scripted(), ...deps });
   open.push(t);
   const c = await claim(t, `Alerted ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);

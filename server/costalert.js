@@ -25,7 +25,8 @@ export const alertKey = (key) => `theoffice-cost-alert-${key}`;
 export function alertMessage(a, cfg = {}) {
   const fence = newFence();
   const when = `${new Date(a.at).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-  const tell = a.kind === 'task-cost' && a.usd > (cfg.costAlertTellUsd ?? 20);
+  // With the owner's own alerts on (server/owneralerts.js), this log is silent: only those five reach him (docs/redesign, job 6).
+  const tell = cfg.ownerAlerts === false && a.kind === 'task-cost' && a.usd > (cfg.costAlertTellUsd ?? 20);
   const title = String(a.title ?? '').split(/\r?\n/)[0].slice(0, TITLE_MAX);
   return [
     fence.notice,

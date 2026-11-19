@@ -26,6 +26,7 @@ import { seedStarter } from './makers.js';
 import { CONTRACTOR_ROLES, contractorOn, heldNow, jobFor } from './contractor.js';
 import { pingContractor } from './contractorping.js';
 import { testerFailed, testedBy, refuseHold, firstPing } from './handback.js';
+import { createOwnerAlerts, nightFrozen } from './owneralerts.js';
 import { briefWithChecks, briefWithoutChecks, checksInBrief, readChecks, selfCheckAsk, selfCheckNudge, selfChecked, readSelfCheck, selfCheckWords, estimateUsd, SELF_CHECK_MARK } from './brain.js';
 
 const today = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -62,6 +63,8 @@ export class Engine {
     this.costAlerts = createCostAlerts({ db, cfg, now, log, httpFetch: this.hookFetch });
     this.Halt = Halt;
     this.budget = createBudget(db, cfg, now, models?.floorLimits);
+    // The five alerts that reach the owner, and his daily digest (server/owneralerts.js, redesign job 6).
+    this.ownerAlerts = createOwnerAlerts({ db, cfg, budget: this.budget, now, log, httpFetch: this.hookFetch });
     this.computer = sessions ? new Computer(this, sessions) : null;
     this.limiter = new Limiter(cfg.maxCallsFloor, cfg.maxCallsGlobal);
     this.tools = createTools({ db, cfg, engine: this, fetcher, httpFetch });
@@ -123,6 +126,8 @@ export class Engine {
   }
 
   globalPaused() { return get(this.db, "SELECT value FROM settings WHERE key='global_pause'")?.value === '1'; }
+  /** The night freeze, 23:00 to 08:00 New York time: no new floor work starts. Work already running finishes. See server/owneralerts.js. */
+  nightFrozen() { return nightFrozen(this.db, this.cfg, this.now()); }
   setGlobalPause(on) {
     run(this.db, "INSERT INTO settings (key,value) VALUES ('global_pause',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", on ? '1' : '0');
     if (on) for (const r of this.runs.values()) r.ctl.abort(new Halt('pause'));
@@ -134,6 +139,7 @@ export class Engine {
   tick() {
     if (this.stopped || this.globalPaused()) return;
     this.settleContractorJobs();
+    if (this.nightFrozen()) return;
     // A filler company is a scripted scene: nothing on it ever reaches a model, whatever its rows say.
     const floors = all(this.db, `SELECT f.* FROM floors f WHERE f.status='active' AND f.paused=0 AND f.filler=0
       AND (f.manager_wake=1 OR f.budget_out!='' OR EXISTS (SELECT 1 FROM tasks t WHERE t.floor_id=f.id AND t.status='todo'))`);
@@ -421,6 +427,7 @@ export class Engine {
     run(this.db, 'INSERT INTO ledger (floor_id,day,agent_id,model,prompt_tokens,completion_tokens,cost_usd,created_at,kind,provider) VALUES (?,?,?,?,?,?,?,?,?,?)', floorId, today(this.now()), agent.id, model, prompt, completion, cost, this.now(), ctx?.kind || 'model', ctx?.provider || providerOf(model, ctx?.kind));
     if (ctx?.taskId) run(this.db, 'UPDATE tasks SET cost_usd=cost_usd+? WHERE id=?', cost, ctx.taskId);
     this.costAlerts.charged(floorId, ctx?.taskId);
+    this.ownerAlerts.charged(floorId);
   }
 
   // ---- manager ----
@@ -1095,6 +1102,8 @@ export class Engine {
   filePurchase(floor, agent, { item, price, why, link }) {
     const r = run(this.db, 'INSERT INTO purchases (floor_id,agent_id,item,price,why,link,created_at) VALUES (?,?,?,?,?,?,?)', floor.id, agent.id, item, price, why, link, this.now());
     this.emit(floor.id, 'purchase', get(this.db, 'SELECT * FROM purchases WHERE id=?', Number(r.lastInsertRowid)), { ownerOnly: true });
+    // One of the five things that reach the owner at once (server/owneralerts.js).
+    this.ownerAlerts.purchase({ floorId: floor.id, id: Number(r.lastInsertRowid), item, price });
     return Number(r.lastInsertRowid);
   }
 

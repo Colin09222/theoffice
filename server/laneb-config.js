@@ -14,5 +14,16 @@ export function laneBSettings(env = process.env) {
     // j05, the budget check inside the server (server/spendcheck.js): a spend record every SPEND_CHECK_EVERY_MIN minutes (default 120). SPEND_CHECK=0 stops it.
     spendCheck: on(env.SPEND_CHECK),
     spendCheckEveryMs: Math.max(1, Number(env.SPEND_CHECK_EVERY_MIN) || 120) * 60000,
+    // j06, alerts to the owner (server/owneralerts.js): only the five immediate alerts (OWNER_ALERTS=0 stops them) and one digest a day at DIGEST_AT
+    // New York time (OWNER_DIGEST=0 stops it). Both go through the OpenClaw hook (OPENCLAW_HOOK_URL, OPENCLAW_HOOK_TOKEN), delivered to the owner.
+    ownerAlerts: on(env.OWNER_ALERTS),
+    ownerDigest: on(env.OWNER_DIGEST),
+    digestAt: /^\d{2}:\d{2}$/.test(env.DIGEST_AT || '') ? env.DIGEST_AT : '08:05',
+    // The night freeze: no new floor work starts from NIGHT_FREEZE_FROM to NIGHT_FREEZE_TO in NIGHT_FREEZE_TZ. NIGHT_FREEZE=0 turns it off;
+    // admin.mjs freeze on|off|auto overrides it from the database without a restart.
+    nightFreeze: on(env.NIGHT_FREEZE),
+    nightFreezeFrom: /^\d{2}:\d{2}$/.test(env.NIGHT_FREEZE_FROM || '') ? env.NIGHT_FREEZE_FROM : '23:00',
+    nightFreezeTo: /^\d{2}:\d{2}$/.test(env.NIGHT_FREEZE_TO || '') ? env.NIGHT_FREEZE_TO : '08:00',
+    nightFreezeTz: env.NIGHT_FREEZE_TZ || 'America/New_York',
   };
 }

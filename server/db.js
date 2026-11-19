@@ -220,6 +220,11 @@ CREATE TABLE IF NOT EXISTS contractor_pings (task_id INTEGER PRIMARY KEY, job_id
 -- j05: the budget check's records, one every two hours (server/spendcheck.js).
 CREATE TABLE IF NOT EXISTS spend_records (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS spend_records_created ON spend_records(created_at);
+-- j06: what reached the owner (the alert log), each alert's last state so it fires once per change, and one digest a day.
+CREATE TABLE IF NOT EXISTS owner_alerts (key TEXT PRIMARY KEY, kind TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'sending', created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS owner_alerts_created ON owner_alerts(created_at);
+CREATE TABLE IF NOT EXISTS owner_alert_state (scope TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS owner_digests (day TEXT PRIMARY KEY, text TEXT NOT NULL, created_at INTEGER NOT NULL);
 `;
 Object.assign(ADDED.tasks, { contractor_route: 'INTEGER NOT NULL DEFAULT 0', handed_back_at: 'INTEGER', tester_fails: 'INTEGER NOT NULL DEFAULT 0', fix_of: 'INTEGER' });
 /** Lane B's one-time fills, each guarded by a settings row so it runs once. */

@@ -29,6 +29,7 @@ import { setContractor, contractorListing, contractorListingText, completeJob, C
 import { pingContractor } from '../server/contractorping.js';
 import { refusalListing, refusalListingText } from '../server/handback.js';
 import { spendListing, spendListingText, writeSpendRecord } from '../server/spendcheck.js';
+import { alertLog, digestFacts, digestText, nightFrozen, setNightFreeze } from '../server/owneralerts.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -83,6 +84,9 @@ const usage = () => {
     '  node scripts/admin.mjs floor-limit --floor N [--claude USD] [--openrouter USD] [--fable USD] [--opus USD] [--openrouter-only MODEL [--effort low|medium|high|xhigh]] [--no-openrouter-only] [--clear]   top one floor up: raises its stops or moves where its models switch, or puts every Claude call it makes on one OpenRouter model (no computer there), then shows where it stands (admin only, and it takes effect on the server\'s next tick)',
     '  node scripts/admin.mjs spend [--last N] [--json]   the server\'s spend records (one every 2 hours): both pots spent, cap and left, each floor this week and yesterday, and when the last one was written',
     '  node scripts/admin.mjs spend write             write one spend record now',
+    '  node scripts/admin.mjs alerts [--since 7d] [--json]   what reached the owner: the five immediate alerts and the daily digests, newest first',
+    '  node scripts/admin.mjs digest                  today\'s digest as it would read now (sends nothing)',
+    '  node scripts/admin.mjs freeze [on|off|auto]    the night freeze (23:00 to 08:00 New York): on or off whatever NIGHT_FREEZE says, or auto to follow it. No new floor work starts while frozen',
     '  node scripts/admin.mjs budget [--json]          spent, limit and remaining per provider, what each floor has spent, and a flag at 50%, 80% and 100%',
     '  node scripts/admin.mjs purchases list [--json]  what the staff have asked to buy and nobody has decided. Everything a floor wrote is fenced as untrusted data',
     '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick',
@@ -456,6 +460,17 @@ if (cmd === 'code' && rest[0] === 'hold') {
     const listing = spendListing(db, { last: i >= 0 ? Number(rest[i + 1]) || 12 : 12 });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : spendListingText(listing));
   }
+} else if (cmd === 'alerts') {
+  const list = alertLog(db, { since: sinceArg('7d') });
+  console.log(rest.includes('--json') ? JSON.stringify(list, null, 2) : list.length ? list.map((a) => `${a.at}  [${a.kind}, ${a.status}]\n${a.text}\n`).join('\n') : 'Nothing reached the owner.');
+} else if (cmd === 'digest') {
+  const fence = newFence();
+  console.log(`${fence.notice}\n\n${digestText(digestFacts(db, cfg, Date.now(), { budget: createBudget(db, cfg, Date.now, loadModels().floorLimits) }), fence)}`);
+} else if (cmd === 'freeze') {
+  const want = rest.find((x) => ['on', 'off', 'auto'].includes(x));
+  if (want) setNightFreeze(db, want);
+  const set = get(db, "SELECT value FROM settings WHERE key='night_freeze'")?.value || 'auto';
+  console.log(JSON.stringify({ setting: set, env: cfg.nightFreeze ? 'on' : 'off', window: `${cfg.nightFreezeFrom} to ${cfg.nightFreezeTo} ${cfg.nightFreezeTz}`, frozenNow: nightFrozen(db, cfg) }));
 } else if (cmd === 'budget') {
   // Read from the database and this process's own BUDGET_ settings, so it needs the same environment as the server. It prints no key.
   const report = budgetReport(db, cfg);

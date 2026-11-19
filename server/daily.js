@@ -346,7 +346,7 @@ export function installDaily(ext) {
   async function tickOnce() {
     try {
       for (const r of all(db, "SELECT * FROM daily_runs WHERE status='running'")) watch(r);
-      if (dailyPaused(db) || engine.globalPaused()) return;
+      if (dailyPaused(db) || engine.globalPaused() || engine.nightFrozen?.()) return;
       const t = now();
       for (const row of all(db, 'SELECT * FROM daily_settings WHERE (enabled=1 AND next_at<=?) OR force_at>0 ORDER BY force_at DESC, next_at', t)) await consider(row);
     } catch (e) { log('error', 'daily', { err: String(e?.message || e).slice(0, 200) }); }
