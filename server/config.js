@@ -92,8 +92,9 @@ export function loadConfig(env = process.env, overrides = {}) {
     maxTasksPerDay: workCap(env.MAX_TASKS_PER_DAY),
     maxRevisions: workCap(env.MAX_REVISIONS),
     // Loop caps (server/rounds.js), on by default: how many times one project may fail its test and go back, and be planned again, before the manager stops and asks the boss. "off" turns one off.
-    loopMaxRetests: onCap(env.LOOP_MAX_RETESTS, 2),
-    loopMaxReplans: onCap(env.LOOP_MAX_REPLANS, 3),
+    // Tightened by the redesign (job 10): one fix round and one plan rewrite per project (they were 2 and 3).
+    loopMaxRetests: onCap(env.LOOP_MAX_RETESTS, 1),
+    loopMaxReplans: onCap(env.LOOP_MAX_REPLANS, 1),
     towerFloors: num(env.TOWER_FLOORS, 10),
     quotaBytes: num(env.FLOOR_QUOTA_MB, 100) * 1024 * 1024,
     mockDelayMs: num(env.MOCK_DELAY_MS, 400),

@@ -654,7 +654,8 @@ export class Engine {
     const call = { floorId, agent, signal, project: task.project, taskId: task.id, autonomous: !!task.auto, tier: this.taskTier(task) };
     const allBoss = all(this.db, "SELECT text FROM messages WHERE floor_id=? AND role='boss' ORDER BY id DESC LIMIT 12", floorId).map((m) => m.text).join(' ');
     const answers = () => all(this.db, 'SELECT answer FROM questions WHERE task_id=? AND answer IS NOT NULL', task.id).map((q) => q.answer);
-    const maxSteps = this.cfg.maxStaffSteps;
+    // An edit gets 15 steps, a build 40 (redesign job 10).
+    const maxSteps = task.size === 'small' ? Math.min(this.cfg.maxStaffSteps, this.cfg.maxEditSteps ?? Infinity) : this.cfg.maxStaffSteps;
     const window = this.trimWindow(agent, floorId, call);
     try {
       // Step index for scripted mocks counts assistant turns already in the saved transcript.
@@ -1065,7 +1066,8 @@ export class Engine {
     if (t.status !== 'review') throw new ToolError(`task #${taskId} is ${t.status}, not waiting for review`);
     const staff = get(this.db, 'SELECT * FROM agents WHERE id=?', t.agent_id);
     // A task holding the Expo vault ran on the boss's click. Going round again would take another click.
-    if (verdict === 'revise' && t.revisions < this.cfg.maxRevisions && !t.vault) {
+    // One fix round per job (redesign job 10): LOOP_MAX_FIX_ROUNDS, under MAX_REVISIONS when that is set lower.
+    if (verdict === 'revise' && t.revisions < Math.min(this.cfg.maxRevisions, this.cfg.loopMaxFixRounds ?? Infinity) && !t.vault) {
       const msgs = t.transcript ? JSON.parse(t.transcript) : null;
       if (msgs) msgs.push({ role: 'user', content: `The Office Manager sent this back with notes:\n${notes || 'Please improve it.'}` });
       // A computer's turn has ended and its files are back on the drive, so this round is free to start on a fresh one if the old one has grown too big to be worth going back to.
@@ -1081,8 +1083,23 @@ export class Engine {
     this.talk(floor.id, mgr, staff, notes || `Approved "${t.title}".`, { kind: 'review', project: t.project });
     this.emitTask(t.id);
     // Fix rounds end. The model has to know this was not the send-back it asked for, or it will tell the boss a fix is coming.
+    if (verdict === 'revise' && Number.isFinite(this.cfg.loopMaxFixRounds)) {
+      // Ship the best honest version: what failed is listed under "Not done yet", and the boss is asked one plain question (redesign job 10).
+      const missing = this.notDoneYet(t, notes);
+      run(this.db, 'UPDATE tasks SET wip=1, not_done=? WHERE id=?', JSON.stringify(missing), t.id);
+      return `#${t.id} has had its one fix round, so it ships as it stands, marked Work in progress. Not done yet: ${missing.join('; ')}. Publish it as it is, tell the boss in a line what is still missing, and ask them one plain question with ask_boss about the one thing that matters most. Don't send it back or plan it again.`;
+    }
     if (verdict === 'revise') return `#${t.id} can't go round again, so it stands as it is. Ship what works and tell the boss what is still rough.`;
     return `Approved #${t.id}.`;
+  }
+  /** What is still missing from a job: its done-means lines a Tester (or the doer) didn't pass, else the manager's own notes. */
+  notDoneYet(t, notes = '') {
+    const lines = readChecks(t);
+    const test = get(this.db, "SELECT x.test_lines FROM tasks x JOIN agents a ON a.id=x.agent_id WHERE x.floor_id=? AND a.role='tester' AND x.test_lines!='' AND (x.depends_on LIKE ? OR x.project=?) ORDER BY x.id DESC LIMIT 1", t.floor_id, `%${t.id}%`, t.project)?.test_lines;
+    let marks = []; try { marks = JSON.parse(test || t.selfcheck || '[]'); } catch { /* none */ }
+    const passed = new Set(marks.filter((m) => m.verdict === 'pass').map((m) => m.n));
+    const missing = lines.filter((_, i) => !passed.has(i + 1));
+    return missing.length ? missing : [String(notes || 'what the last review asked for').replace(/\s+/g, ' ').trim().slice(0, 300)];
   }
   cancelTask(floor, taskId) {
     const t = get(this.db, 'SELECT * FROM tasks WHERE id=? AND floor_id=?', taskId, floor.id);
