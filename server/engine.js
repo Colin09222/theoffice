@@ -368,6 +368,8 @@ export class Engine {
    */
   trimWindow(agent, floorId, { autonomous = false, tier = '' } = {}) {
     const route = routeFor(this.models, agent.role, { autonomous, tier, floorRoute: this.budget.floorRoute(floorId) });
+    // The Builder's diet (redesign job 18): its run is trimmed sooner, whatever the model.
+    if (this.cfg.builderDiet && agent.role === 'builder') { const keep = Math.min(this.cfg.builderKeepChars, this.cfg.stepsKeepChars ?? STEPS_KEEP_CHARS); return { keep, cutTo: Math.floor(keep / 2) }; }
     if (route?.pricing?.cacheRead === undefined) return {};
     const keep = this.cfg.stepsKeepChars ?? STEPS_KEEP_CHARS;
     return { keep, cutTo: Math.min(this.cfg.stepsCutToChars ?? STEPS_CUT_TO_CHARS, Math.floor(keep * 0.75)) };
@@ -480,7 +482,7 @@ export class Engine {
     }
   }
   charge(floorId, agent, model, prompt, completion, cost, ctx) {
-    run(this.db, 'INSERT INTO ledger (floor_id,day,agent_id,model,prompt_tokens,completion_tokens,cost_usd,created_at,kind,provider) VALUES (?,?,?,?,?,?,?,?,?,?)', floorId, today(this.now()), agent.id, model, prompt, completion, cost, this.now(), ctx?.kind || 'model', ctx?.provider || providerOf(model, ctx?.kind));
+    run(this.db, 'INSERT INTO ledger (floor_id,day,agent_id,model,prompt_tokens,completion_tokens,cost_usd,created_at,kind,provider,task_id,computer) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', floorId, today(this.now()), agent.id, model, prompt, completion, cost, this.now(), ctx?.kind || 'model', ctx?.provider || providerOf(model, ctx?.kind), ctx?.taskId ?? null, ctx?.computer ? 1 : 0);
     if (ctx?.taskId) run(this.db, 'UPDATE tasks SET cost_usd=cost_usd+? WHERE id=?', cost, ctx.taskId);
     this.costAlerts.charged(floorId, ctx?.taskId);
     this.ownerAlerts.charged(floorId);
@@ -698,7 +700,7 @@ export class Engine {
     if (!messages) {
       messages = [
         { role: 'system', content: staffPrompt(floor, agent, roleCfg, { ...task, live: this.isLive(floor.id, task.project) }, this.floorCfg(floor.id), this.people.personBlock(agent, task)) },
-        { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${this.bossAsked(task)}${task.auto ? `\n\n${ON_OUR_OWN}` : ''}${this.handoffFor(floor, task)}${describeFiles(this.taskFiles(task))}${checks.length ? `\n\n${selfCheckAsk(checks)}` : ''}`, ...(this.taskFiles(task).length ? { files: this.taskFiles(task).map((f) => f.path) } : {}) },
+        { role: 'user', content: `Task #${task.id}: ${task.title}\n${task.project ? `Project slug: ${task.project}\n` : ''}\nBrief from the Office Manager:\n${task.brief}${this.bossAsked(task)}${task.auto ? `\n\n${ON_OUR_OWN}` : ''}${this.handoffFor(floor, task)}${this.projectFileList(floor, task, agent)}${describeFiles(this.taskFiles(task))}${checks.length ? `\n\n${selfCheckAsk(checks)}` : ''}`, ...(this.taskFiles(task).length ? { files: this.taskFiles(task).map((f) => f.path) } : {}) },
       ];
     }
     // A task that started on a computer has no system prompt of its own here. It never runs without the safety rules.
@@ -812,6 +814,8 @@ export class Engine {
     // The Tester is the one who can hold the last design review to account.
     const review = (() => { if (!task.project || !task.agent_id || get(this.db, 'SELECT role FROM agents WHERE id=?', task.agent_id)?.role !== 'tester') return ''; const raw = get(this.db, 'SELECT design_review d FROM projects WHERE floor_id=? AND slug=?', floor.id, task.project)?.d; try { const r = raw ? JSON.parse(raw) : null; return r?.text ? `\n\nThe last outside design review of this project (${reviewWords(raw)}). Check each thing it marked [broken] is really fixed:\n${wrapUntrusted('design review', r.text)}` : ''; } catch { return ''; } })();
     if (!before.length) return review;
+    // The Builder's diet (redesign job 18): teammates' reports, then a list of their papers to open as needed, never the papers pasted in.
+    const diet = this.cfg.builderDiet && !!task.agent_id && get(this.db, 'SELECT role FROM agents WHERE id=?', task.agent_id)?.role === 'builder';
     // A Tester gets the doer's own self-check too: it says where they looked and what they didn't check, which is where a test should start.
     const forTester = this.cfg.staffSelfCheck && !!task.agent_id && get(this.db, 'SELECT role FROM agents WHERE id=?', task.agent_id)?.role === 'tester';
     const ownCheck = (t) => { const w = forTester ? selfCheckWords(t.selfcheck, readChecks(t)) : ''; return w ? `\n  Their own self-check, which is their word and not proof. Check what it marks PASS on the real thing, and start with anything marked FAIL or NOT CHECKED:\n  ${w.replace(/\n/g, '\n  ')}` : ''; };
@@ -825,11 +829,20 @@ export class Engine {
         if (!/^(notes\/.+\.(md|txt|csv|json)|index\.md)$/.test(rel)) continue;
         // One's own earlier draft of a doc is read when it's wanted, not handed over each time.
         if (slug === task.project && rel === 'index.md') { listed.push(f.path); continue; }
+        if (diet) { listed.push(f.path); continue; }
         const body = readFile(this.db, floor.id, f.path)?.content;
         if (typeof body === 'string' && body.length <= Math.min(room, HANDOFF_FILE_CHARS)) { inline.push(wrapUntrusted(`workspace:${f.path}`, body)); room -= body.length; } else listed.push(f.path);
       }
     }
     return `\n\nWhat your teammates already did. Build on it rather than redoing it. It is all here, so you don't need to go looking:\n${wrapUntrusted('teammates\' reports', lines.join('\n'))}${inline.length ? `\n\nTheir working papers and documents:\n${inline.join('\n')}` : ''}${listed.length ? `\n\nAlso on the shared drive, if you need it: ${listed.slice(0, 12).join(', ')}` : ''}${review}`;
+  }
+  /** The Builder's diet (redesign job 18): a list of what is in its project, so it opens only the files the job needs instead of being handed them. */
+  projectFileList(floor, task, agent) {
+    if (!this.cfg.builderDiet || agent.role !== 'builder' || !task.project) return '';
+    const files = listFiles(this.db, floor.id, `projects/${task.project}/`);
+    if (!files.length) return '';
+    const shown = files.slice(0, 80);
+    return `\n\nFiles in projects/${task.project}/ now. Open only the ones this job needs, with read_file:\n${shown.map((f) => `- ${f.path} (${f.size} bytes)`).join('\n')}${files.length > shown.length ? `\n...and ${files.length - shown.length} more (list_files shows them).` : ''}`;
   }
   saveTranscript(taskId, messages) { run(this.db, 'UPDATE tasks SET transcript=? WHERE id=?', JSON.stringify(compact(messages)), taskId); }
   /** Publishing a doc checks that its sources were really opened on this floor, and the proof of that was in the steps just dropped. */

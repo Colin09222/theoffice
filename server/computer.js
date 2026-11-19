@@ -229,7 +229,7 @@ export class Computer {
     }
   }
   charge(st, model, prompt, completion, cost) {
-    this.engine.charge(st.floorId, st.agent, model, prompt, completion, cost, { taskId: st.taskId, provider: 'anthropic' });
+    this.engine.charge(st.floorId, st.agent, model, prompt, completion, cost, { taskId: st.taskId, provider: 'anthropic', computer: true });
     st.charged += cost;
     run(this.engine.db, 'UPDATE tasks SET session_charged=? WHERE id=?', st.charged, st.taskId);
     const back = Math.min(cost, st.hold);
@@ -393,7 +393,9 @@ export class Computer {
       // Only a send-back sets this, and only this start may act on it: a pause or a wait for room later in the round goes back to the computer it was on.
       const sentBack = !!task.session_fresh;
       if (sentBack) run(e.db, 'UPDATE tasks SET session_fresh=0 WHERE id=?', task.id);
-      if (sentBack && live?.status === 'idle' && task.session_ctx >= e.cfg.sessionFreshOverTokens && this.freshStart(task)) {
+      // The Builder's diet (redesign job 18): its fix round starts on a fresh computer much sooner.
+      const freshOver = e.cfg.builderDiet && agent.role === 'builder' ? Math.min(e.cfg.sessionFreshOverTokens, e.cfg.builderFreshOverTokens) : e.cfg.sessionFreshOverTokens;
+      if (sentBack && live?.status === 'idle' && task.session_ctx >= freshOver && this.freshStart(task)) {
         e.log('info', 'fix round on a fresh computer', { floorId: floor.id, taskId: task.id, tokens: task.session_ctx });
         st.id = ''; st.charged = 0; live = null;
         task = get(e.db, 'SELECT * FROM tasks WHERE id=?', task.id);
