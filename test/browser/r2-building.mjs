@@ -80,6 +80,24 @@ try {
   const pulse = await p.until('(() => { const b = document.querySelector(".dir-row .badge[data-state=working]"); return b ? getComputedStyle(b, "::before").animationName : null; })()', 'a Working badge', 20000).catch(() => null);
   check(pulse === 'r2-pulse', `r2-j33: on a phone a Working floor's badge pulses (${pulse})`);
   p.close();
+  // r2-j43: with sound on, a launch rings one bell, and no two event sounds play within 2 s.
+  p = await b.newPage({ width: 1440, height: 900 });
+  await p.send('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('office.muted', '0'); } catch {}" });
+  await p.goto(`${base}/`);
+  await p.until('document.body.dataset.page === "lobby" && !document.querySelector("#boot")', 'home', 60000);
+  await p.click('.home-brand');  // the first touch lets the page make sound at all
+  await p.until('!!window.__officeSound', 'sound', 10000);
+  await sleep(6000);  // the live tower's first reading: what is launched already rings nothing
+  const before = await p.ev('window.__officeSound.log.length');
+  const at = Date.now();
+  t.db.prepare("UPDATE projects SET published_at=? WHERE slug='loopling'").run(at);
+  await p.until('window.__officeSound.log.some((s) => s.kind === "launch")', 'the bell', 12000).catch(() => null);
+  await sleep(6000);  // another reading or so: still one bell
+  const log = await p.ev('window.__officeSound.log');
+  check(log.slice(before).filter((s) => s.kind === 'launch').length === 1, `r2-j43: a launch rings one bell (${JSON.stringify(log)})`);
+  const twice = await p.ev('(() => { const n = performance.now() + 10000; return [window.__officeSound.eventSound("stamp", n), window.__officeSound.eventSound("paper", n + 1500), window.__officeSound.eventSound("paper", n + 2000)]; })()');
+  check(JSON.stringify(twice) === '[true,false,true]', `r2-j43: no two event sounds within 2 s (${JSON.stringify(twice)})`);
+  p.close();
   // r2-j38: a fresh browser (a first-time visitor): the fly-in plays once on the desktop, never on the second visit, never under reduce motion,
   // and a click skips it.
   const b2 = await launch({});
