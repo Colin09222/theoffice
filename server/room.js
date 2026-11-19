@@ -91,7 +91,7 @@ export function roomView(db, cfg, f, viewer) {
     milestones: roomMilestones(db, f),
     people: cfg.realCounts === false ? null : roomPeople(db, f),
     props: cfg.roomProps !== false,
-    phoneLimits: cfg.phoneLimits !== false,
+    phoneFit: cfg.phoneBudget !== false,
     camera: cfg.roomCamera !== false,
   };
 }

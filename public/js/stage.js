@@ -5,7 +5,7 @@
 // then the pixels, then the tier, for the rest of the visit, and tells the current view.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { loadAddons } from './addons.js';
-import { PHONE_LIMITS, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY } from './room-rules.js';
+import { PHONE_BUDGET, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY } from './room-rules.js';
 
 const TIERS = {
   high: { dpr: 2, shadow: 4096, soft: true, post: true, ao: 'full', bloom: 1, density: 1 },
@@ -173,10 +173,10 @@ class Stage {
     this.q.shadow = Math.min(this.q.shadow, this.renderer.capabilities.maxTextureSize);
     // A phone starts with half-resolution occlusion; the frame-time watchdog below turns it off if the phone can't keep up.
     if (mobile && this.q.ao === 'full') this.q.ao = 'half';
-    // The phone's hard limits (r2-j44, spec Q9): at most 30 frames a second and a pixel ratio of 1.5. ?limits=0 lifts it, for comparing.
-    this.phoneLimits = mobile && new URLSearchParams(location.search).get('limits') !== '0';
-    this.fpsCap = this.phoneLimits ? PHONE_LIMITS.fps : 0;
-    this.q.dpr = phoneDpr(this.q.dpr, this.phoneLimits);
+    // The phone's hard budget (r2-j44, spec Q9): at most 30 frames a second and a pixel ratio of 1.5. ?budget=0 lifts it, for comparing.
+    this.phoneBudget = mobile && new URLSearchParams(location.search).get('budget') !== '0';
+    this.fpsCap = this.phoneBudget ? PHONE_BUDGET.fps : 0;
+    this.q.dpr = phoneDpr(this.q.dpr, this.phoneBudget);
     this.dprCap = this.q.dpr;
   }
   get dpr() { return Math.min(window.devicePixelRatio || 1, this.dprCap); }
@@ -208,7 +208,7 @@ class Stage {
     this.graceUntil = performance.now() + 2000;  // the first frames of a new view compile shaders, which says nothing about the device
     // A phone's room starts with a 2 s frame test, uncapped, once the shaders are built (r2-j45, spec Q9); then the watch takes over.
     this.clearStill();
-    if (this.phoneLimits && view && this.quality === undefined) this.qtest = { start: this.graceUntil, end: this.graceUntil + QUALITY.TEST_MS, frames: 0 };
+    if (this.phoneBudget && view && this.quality === undefined) this.qtest = { start: this.graceUntil, end: this.graceUntil + QUALITY.TEST_MS, frames: 0 };
     this.applyPost();
     if (view) { view.enter?.(); view.resize?.(this.w ?? window.innerWidth, this.h ?? window.innerHeight); }
   }
@@ -271,7 +271,7 @@ class Stage {
       this.adapt(Math.min(gap / 1000, 0.1), now);
       this.renderOnce(dt);
       this.drawn = (this.drawn || 0) + 1;  // frames really drawn, as against ticks of the loop
-      if (this.phoneLimits) this.judge(now);
+      if (this.phoneBudget) this.judge(now);
     };
     requestAnimationFrame(tick);
   }
@@ -315,7 +315,7 @@ class Stage {
   // nothing flickers between looks. It goes by time, not frames: at 8fps, counting frames would mean twenty seconds of slideshow per step.
   adapt(dt, now) {
     if (this.forced || now < this.graceUntil) return;  // ?q= means someone wants to see exactly that tier
-    if (this.phoneLimits) return;  // a phone goes by its frame test and its one drop instead (judge, r2-j45)
+    if (this.phoneBudget) return;  // a phone goes by its frame test and its one drop instead (judge, r2-j45)
     // A desktop should hold well above 30. A phone is fine at 30: 37ms, not 33, because an iPhone in Low Power Mode caps at a steady 30fps, and that should cost it nothing.
     if (this.frameMs > (this.mobile ? 36 : 24)) this.slowFor += dt; else this.slowFor = Math.max(0, this.slowFor - dt);
     // Far too slow to bother stepping: the lightest look straight away.
@@ -334,7 +334,7 @@ class Stage {
     this.post?.setAO(level);
   }
   setTier(tier) {
-    this.tier = tier; this.q = { ...TIERS[tier] }; this.q.dpr = phoneDpr(this.q.dpr, this.phoneLimits); this.dprCap = Math.min(this.dprCap, this.q.dpr);
+    this.tier = tier; this.q = { ...TIERS[tier] }; this.q.dpr = phoneDpr(this.q.dpr, this.phoneBudget); this.dprCap = Math.min(this.dprCap, this.q.dpr);
     if (this.mobile && this.q.ao === 'full') this.q.ao = 'half';
     this.applyPost();
     this.resize(true);

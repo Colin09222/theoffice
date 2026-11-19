@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client, waitDone } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_LIMITS, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY, CameraFollow, driftYaw, CAMERA, replayTimeline, replayLabel, REPLAY } from '../public/js/room-rules.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY, CameraFollow, driftYaw, CAMERA, replayTimeline, replayLabel, REPLAY } from '../public/js/room-rules.js';
 import { weekOf } from '../server/weekplan.js';
 import { get, all, run as sql } from '../server/db.js';
 import { REAL_JPEG, publish } from './r2-fixtures.js';
@@ -359,7 +359,7 @@ describe('r2-j42 paper piles and trophies', () => {
 
 describe('r2-j44 phone hard limits', () => {
   test('the numbers are the spec\'s: 30 fps, pixel ratio 1.5, one shadow light, 60,000 triangles, 2 MB', () => {
-    assert.deepEqual(PHONE_LIMITS, { fps: 30, dpr: 1.5, shadowLights: 1, triangles: 60000, bytes: 2 * 1024 * 1024 });
+    assert.deepEqual(PHONE_BUDGET, { fps: 30, dpr: 1.5, shadowLights: 1, triangles: 60000, bytes: 2 * 1024 * 1024 });
   });
   test('the frame cap holds a 60 Hz and a 120 Hz screen to 30 frames a second, and lets every frame through with no cap', () => {
     for (const hz of [60, 120]) {
