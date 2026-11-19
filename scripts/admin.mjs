@@ -29,6 +29,7 @@ import { chatAdminCommand } from '../server/cloud/chat.js';
 import { setContractor, contractorListing, contractorListingText, completeJob, ContractorError, SUMMARY_MAX } from '../server/contractor.js';
 import { pingContractor } from '../server/contractorping.js';
 import { refusalListing, refusalListingText } from '../server/handback.js';
+import { sendOut, stuckListing, SendOutError } from '../server/sendout.js';
 import { spendListing, spendListingText, writeSpendRecord } from '../server/spendcheck.js';
 import { alertLog, digestFacts, digestText, nightFrozen, setNightFreeze } from '../server/owneralerts.js';
 
@@ -83,6 +84,8 @@ const usage = () => {
     '  node scripts/admin.mjs help answer --id N --decline          decline one',
     '  node scripts/admin.mjs contractor --floor N on|off   send floor N\'s Builder, Designer and Researcher jobs to the building\'s outside contractor instead of a model, or stop (off hands anything still held back to the floor\'s own staff). No model is called for a held job',
     '  node scripts/admin.mjs contractor list [--json] [--all]   jobs held for the contractor: floor, task, project, brief and the files on its drive. Everything a floor wrote is fenced as untrusted data',
+    '  node scripts/admin.mjs contractor stuck [--json]   stuck jobs (open and not moved for 6 hours, or failed in the last two days), and how many have gone out this week',
+    '  node scripts/admin.mjs contractor send-out --task N   Send out: the only way a job reaches the outside contractor now, at most CONTRACTOR_SENDOUT_PER_WEEK (2) a week. The server holds it on its next tick',
     '  node scripts/admin.mjs contractor refusals [--since 24h|7d|90m] [--json]   tries to hold work the contractor already handed back, which the server refused and logged',
     '  node scripts/admin.mjs contractor ping --task N   send buddehbot the contractor ping again for a job still held (OPENCLAW_HOOK_URL and OPENCLAW_HOOK_TOKEN)',
     '  node scripts/admin.mjs contractor done --task N --summary-file PATH   hand a held job back with what was done: the task finishes with that report on the server\'s next tick, and the floor carries on. Upload files to the floor\'s drive first, the usual way',
@@ -406,6 +409,12 @@ if (cmd === 'code' && rest[0] === 'hold') {
   if (sub === 'list') {
     const listing = contractorListing(db, { status: rest.includes('--all') ? 'all' : 'held' });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : contractorListingText(listing));
+  } else if (sub === 'stuck') {
+    const l = stuckListing(db, cfg);
+    console.log(rest.includes('--json') ? JSON.stringify(l, null, 2) : [l.notice, '', `Sent out this week: ${l.sentOutThisWeek} of ${l.mostAWeek}.`, '', ...(l.jobs.length ? l.jobs.map((j) => `Task #${j.task} [${j.status}] floor ${j.floorNumber}, ${j.role || '-'}, since ${j.since}${j.canSendOut ? '' : ' (can\'t be sent out)'}\n  title: ${j.title}`) : ['Nothing is stuck.'])].join('\n'));
+  } else if (sub === 'send-out') {
+    const id = Number(valueOf('--task'));
+    try { const r = sendOut(db, cfg, id); console.log(`Sent task #${id} out. The server holds it for the contractor on its next tick and pings once. ${r.left} more may go out this week.`); } catch (e) { if (e instanceof SendOutError) die(e.message); throw e; }
   } else if (sub === 'refusals') {
     const listing = refusalListing(db, { since: sinceArg() });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : refusalListingText(listing));
@@ -434,6 +443,7 @@ if (cmd === 'code' && rest[0] === 'hold') {
     const want = rest.find((x) => x === 'on' || x === 'off');
     if (want) setContractor(db, floor.id, want === 'on');
     const on = want ? want === 'on' : floor.contractor === 1;
+    if (cfg.contractorManual) console.error('Note: the contractor is by hand only now (CONTRACTOR_MANUAL). This switch does nothing until that is turned off; use "contractor send-out --task N".');
     const held = get(db, "SELECT COUNT(*) n FROM contractor_jobs WHERE floor_id=? AND status='held'", floor.id).n;
     console.log(JSON.stringify({ floor: floor.number, contractor: on ? 'on' : 'off', held, note: want === 'off' && held ? 'held jobs go back to the floor\'s own staff on the server\'s next tick' : undefined }));
   } else usage();

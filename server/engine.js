@@ -163,7 +163,7 @@ export class Engine {
       this.launch(floor, mgr, (ctl) => this.runManager(floor.id, mgr.id, ctl));
     }
     // Named columns: this runs every second, and any number of queued tasks can be holding a transcript.
-    const todo = all(this.db, "SELECT id,floor_id,agent_id,depends_on,project,lane,contractor_route,handed_back_at FROM tasks WHERE floor_id=? AND status='todo' ORDER BY id", floor.id);
+    const todo = all(this.db, "SELECT id,floor_id,agent_id,depends_on,project,lane,contractor_route,handed_back_at,sent_out_at FROM tasks WHERE floor_id=? AND status='todo' ORDER BY id", floor.id);
     const held = [];
     for (const t of todo) {
       if (this.runs.has(t.agent_id)) continue;
@@ -179,7 +179,9 @@ export class Engine {
       if (!agent) continue;
       // On a contractor floor this job goes to the building's outside contractor. No model is called for it, here or anywhere.
       // The routing was decided once, when the task was made (Rule 1). Handed-back work is never held again (Rule 2): holdForContractor refuses it.
-      if (floor.contractor && CONTRACTOR_ROLES.has(agent.role) && (!this.cfg.contractorRouteOnce || t.contractor_route || t.handed_back_at)) {
+      // From job 19 only the owner's Send out puts a task there; before it, the floor's switch did.
+      const toContractor = this.cfg.contractorManual ? !!t.sent_out_at : floor.contractor && (!this.cfg.contractorRouteOnce || t.contractor_route || t.handed_back_at);
+      if (CONTRACTOR_ROLES.has(agent.role) && toContractor) {
         const h = this.holdForContractor(floor, agent, t.id);
         if (h) { held.push(h); continue; }
       }
@@ -217,7 +219,7 @@ export class Engine {
       return Number(run(this.db, 'INSERT INTO contractor_jobs (floor_id,task_id,project,role,title,brief,files,created_at) VALUES (?,?,?,?,?,?,?,?)', floor.id, taskId, task.project, agent.role, task.title, job.brief, JSON.stringify(job.files), this.now()).lastInsertRowid);
     });
     // buddehbot hears at once, in the background: the floor never waits on it. One ping per task, ever (Rule 4).
-    if (firstPing(this.db, taskId, jobId, this.now())) this.contractorPing = pingContractor(this.cfg, { id: jobId, floorNumber: floor.number, floorName: floor.name, taskId, role: agent.role, title: task.title }, { httpFetch: this.hookFetch, log: this.log }).catch((e) => this.fail('contractor ping', e));
+    if (firstPing(this.db, taskId, jobId, this.now())) this.contractorPing = pingContractor(this.cfg, { id: jobId, floorNumber: floor.number, floorName: floor.name, taskId, role: agent.role, title: task.title, sentOut: !!task.sent_out_at }, { httpFetch: this.hookFetch, log: this.log }).catch((e) => this.fail('contractor ping', e));
     // A job sent back after it ran on a computer: that computer stops now rather than sit there while someone else does the work.
     if (task.session_id) this.computer?.settleOrphan(task);
     this.emitTask(taskId);
@@ -244,7 +246,7 @@ export class Engine {
         close('closed');
         run(this.db, 'UPDATE tasks SET contractor=0, contractor_route=0, handed_back_at=? WHERE id=?', this.now(), j.task_id);
         this.finishTask(floor, agent, j.task_id, 'review', `The building's outside contractor did this job. Their report: ${this.keepSelfCheck(j.task_id, j.summary)}`);
-      } else if (!j.fc) {
+      } else if (!j.fc && !this.cfg.contractorManual) {
         close('released');
         run(this.db, "UPDATE tasks SET status='todo', contractor=0, contractor_route=0, updated_at=? WHERE id=? AND status='blocked'", this.now(), j.task_id);
         this.emitTask(j.task_id);
@@ -1056,7 +1058,7 @@ export class Engine {
     const target = this.staffFor(floor, to);
     // Work already with the outside contractor is never handed out a second time: that would only queue it for them again.
     const project0 = wanted || (priv || floor.default_private ? 'private-work' : '');
-    if (CONTRACTOR_ROLES.has(target.role) && contractorOn(this.db, floor.id)) {
+    if (CONTRACTOR_ROLES.has(target.role) && (this.cfg.contractorManual || contractorOn(this.db, floor.id))) {
       const held = get(this.db, "SELECT t.id FROM contractor_jobs j JOIN tasks t ON t.id=j.task_id WHERE j.floor_id=? AND j.project=? AND j.role=? AND j.status='held' AND t.status='blocked' AND t.contractor=1 ORDER BY t.id LIMIT 1", floor.id, project0, target.role);
       if (held) throw new ToolError(`that work is already with the building's outside contractor (task #${held.id}). Don't assign it again, redo it or plan around it: it comes back as a finished report. Tell the boss plainly the work is with the contractor.`);
     }
@@ -1083,7 +1085,7 @@ export class Engine {
     const r = run(this.db, 'INSERT INTO tasks (floor_id,plan,title,brief,agent_id,project,depends_on,created_at,updated_at,lane,files,auto,size,intent,checks,est_usd) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', floor.id, plan, title, brief, target.id, project, JSON.stringify([...new Set(deps)]), t, t, lane, JSON.stringify(files.map((f) => f.id)), auto ? 1 : 0, size, intent, checks.length ? JSON.stringify(checks) : '', estUsd);
     const id = Number(r.lastInsertRowid);
     // Rule 1: whether the contractor takes this task is decided here, once, and never on a status change.
-    if (!noHold && CONTRACTOR_ROLES.has(target.role) && contractorOn(this.db, floor.id)) run(this.db, 'UPDATE tasks SET contractor_route=1 WHERE id=?', id);
+    if (!noHold && !this.cfg.contractorManual && CONTRACTOR_ROLES.has(target.role) && contractorOn(this.db, floor.id)) run(this.db, 'UPDATE tasks SET contractor_route=1 WHERE id=?', id);
     if (hard) run(this.db, 'UPDATE tasks SET hard=1 WHERE id=?', id);  // tagged a hard build: Tier 3 when it starts (job 17)
     this.emitTask(id);
     this.feed(floor.id, mgr, `gave ${target.name} a task: "${title}"`, project);

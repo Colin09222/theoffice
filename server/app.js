@@ -46,6 +46,7 @@ import { installDaily } from './daily.js';
 import { installSpendCheck, spendListing, freshnessLine } from './spendcheck.js';
 import { alertLog, nightFrozen, setNightFreeze } from './owneralerts.js';
 import { logDenied, deniedListing } from './denied.js';
+import { sendOut, stuckListing, SendOutError } from './sendout.js';
 import { absoluteMeta } from './metaabs.js';
 
 const BASE = '/theoffice';
@@ -738,6 +739,17 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     start() { engine.ownerAlerts.digestTick(); timer = setInterval(() => engine.ownerAlerts.digestTick(), cfg.digestTickMs ?? 60000); timer.unref?.(); },
     stop() { clearInterval(timer); timer = null; },
   }; })());
+  // Send out (redesign job 19): the stuck jobs, and the owner's one way to the outside contractor.
+  GET('/api/admin/stuck', async ({ req, res }) => {
+    requireAdmin(req);
+    json(res, 200, stuckListing(db, cfg, { now: now(), fenced: false }));
+  });
+  POST('/api/admin/tasks/:id/send-out', async ({ req, res, p, ip }) => {
+    requireAdmin(req); limit('mutate', ip);
+    let r; try { r = sendOut(db, cfg, Number(p.id), now()); } catch (e) { if (e instanceof SendOutError) throw new HttpError(409, 'cannot_send_out', e.message); throw e; }
+    engine.kick();
+    json(res, 200, { ok: true, ...r });
+  });
   GET('/api/admin/denied', async ({ req, res, url }) => {
     requireAdmin(req);
     const hours = Math.min(24 * 90, Math.max(1, Number(url.searchParams.get('hours')) || 24 * 7));

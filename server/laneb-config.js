@@ -59,5 +59,9 @@ export function laneBSettings(env = process.env) {
     builderDiet: on(env.BUILDER_DIET),
     builderKeepChars: Math.max(60000, Number(env.BUILDER_KEEP_CHARS) || 240000),
     builderFreshOverTokens: Math.max(20000, Number(env.BUILDER_FRESH_OVER_TOKENS) || 80000),
+    // j19, the contractor by hand only (server/sendout.js): no automatic routing anywhere; the owner's Send out, at most CONTRACTOR_SENDOUT_PER_WEEK (2) a week.
+    // CONTRACTOR_MANUAL=0 brings back the floor switch (admin.mjs contractor --floor N on).
+    contractorManual: on(env.CONTRACTOR_MANUAL),
+    contractorSendOutPerWeek: Math.max(0, Number.isFinite(Number(env.CONTRACTOR_SENDOUT_PER_WEEK)) && String(env.CONTRACTOR_SENDOUT_PER_WEEK ?? '').trim() !== '' ? Number(env.CONTRACTOR_SENDOUT_PER_WEEK) : 2),
   };
 }

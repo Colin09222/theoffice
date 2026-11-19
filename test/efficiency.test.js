@@ -21,7 +21,7 @@ after(async () => { for (const t of open) await t.close(); });
 // A frozen clock the test moves by hand, as in modes.test.js.
 async function mk(over = {}, deps = {}) {
   const clock = { t: MON_NY_10 };
-  const t = await boot({ modesTickMs: 15, ordersTickMs: 60000, mockDelayMs: 1, peopleTalk: false, ...over }, { now: () => clock.t, ...deps });
+  const t = await boot({ modesTickMs: 15, ordersTickMs: 60000, mockDelayMs: 1, peopleTalk: false, contractorManual: false, ...over }, { now: () => clock.t, ...deps });
   open.push(t);
   return Object.assign(t, { clock });
 }

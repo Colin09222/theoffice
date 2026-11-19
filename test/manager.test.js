@@ -37,7 +37,7 @@ function scripted({ manager, staff } = {}) {
 /** A floor whose manager the test drives by hand, through the manager's own tools. */
 async function floor(llm, overrides = {}, deps = {}) {
   // These suites test the manager's earlier rules with their own check counts; done-means lines (3 to 5, redesign job 9) are tested in donemeans.test.js.
-  const t = await boot({ peopleTalk: false, doneMeans: false, loopOnePlan: false, ...overrides }, { ...(llm ? { llm } : {}), ...deps });
+  const t = await boot({ peopleTalk: false, doneMeans: false, loopOnePlan: false, contractorManual: false, ...overrides }, { ...(llm ? { llm } : {}), ...deps });
   open.push(t);
   const c = await claim(t, `Brain ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
@@ -445,7 +445,7 @@ describe('the self-check before handing in', () => {
 describe('plain reporting: a quiet round says so once', () => {
   async function quietFloor(over = {}, llm) {
     const clock = { t: MON_NY_10 };
-    const t = await boot({ modesTickMs: 15, ordersTickMs: 60000, mockDelayMs: 1, peopleTalk: false, autopilotGapMin: 5, doneMeans: false, ...over }, { now: () => clock.t, ...(llm ? { llm } : {}) });
+    const t = await boot({ modesTickMs: 15, ordersTickMs: 60000, mockDelayMs: 1, peopleTalk: false, autopilotGapMin: 5, doneMeans: false, contractorManual: false, ...over }, { now: () => clock.t, ...(llm ? { llm } : {}) });
     open.push(t);
     const c = await claim(t);
     const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
