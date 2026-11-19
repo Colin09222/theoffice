@@ -12,7 +12,8 @@ const open = [];
 async function start(script = {}, overrides = {}) {
   const sessions = createMockSessions({}, script);
   // These count the ledger row by row, so the people's own chatter (people.test.js) stays out.
-  const t = await boot({ computerEnabled: true, outputLagMs: 0, peopleTalk: false, ...overrides }, { sessions });
+  // A Tester gets a computer here whatever it tests; from job 11 it gets one only for games and shops (smoke.test.js).
+  const t = await boot({ computerEnabled: true, outputLagMs: 0, peopleTalk: false, testerComputerGamesShops: false, ...overrides }, { sessions });
   open.push(t);
   // The manager would approve finished work straight away. These tests look at the staff's side of it.
   t.app.engine.runManager = async () => {};

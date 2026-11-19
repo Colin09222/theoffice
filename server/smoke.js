@@ -10,6 +10,8 @@ import { writeBinaryFile } from './workspace.js';
 
 const TIMEOUT_MS = 15000, ASSETS_MAX = 12, ERRORS_KEPT = 8;
 export const SHOT = { width: 1280, height: 800 };  // 16:10, like the launch cards
+// A check is not a visitor: this says bot, so the site's visit counts leave it out (server/launch.js). Headless Chrome says so by itself.
+const UA = { 'user-agent': 'TheOffice-smoke-check/1.0 (bot)' };
 
 /** Playwright, if this machine has it (the runner's browser image does; a global install does). null otherwise. */
 export async function loadPlaywright() {
@@ -23,14 +25,14 @@ const clip = (s, n = 200) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0
 async function httpCheck(url, { httpFetch = fetch } = {}) {
   const errors = [];
   let res, html = '';
-  try { res = await httpFetch(url, { redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) }); html = await res.text(); } catch (e) { return { ok: false, status: 0, errors: [`the page didn't load: ${clip(e?.message || e, 120)}`] }; }
+  try { res = await httpFetch(url, { redirect: 'follow', headers: UA, signal: AbortSignal.timeout(TIMEOUT_MS) }); html = await res.text(); } catch (e) { return { ok: false, status: 0, errors: [`the page didn't load: ${clip(e?.message || e, 120)}`] }; }
   if (res.status !== 200) return { ok: false, status: res.status, errors: [`the page answered ${res.status}`] };
   if (!/<(html|body|head|div|main|canvas|script)\b/i.test(html)) errors.push('the page has no HTML in it');
   const base = res.url || url;
   const refs = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>|<link\b[^>]*\brel=["']?stylesheet["']?[^>]*\bhref=["']([^"']+)["']|<link\b[^>]*\bhref=["']([^"']+)["'][^>]*\brel=["']?stylesheet/gi)]
     .map((m) => m[1] || m[2] || m[3]).filter((u) => u && !/^(https?:)?\/\//i.test(u) && !/^data:/i.test(u)).slice(0, ASSETS_MAX);
   for (const ref of refs) {
-    try { const r = await httpFetch(new URL(ref, base), { signal: AbortSignal.timeout(TIMEOUT_MS) }); await r.arrayBuffer(); if (r.status !== 200) errors.push(`${clip(ref, 80)} answered ${r.status}`); } catch { errors.push(`${clip(ref, 80)} didn't load`); }
+    try { const r = await httpFetch(new URL(ref, base), { headers: UA, signal: AbortSignal.timeout(TIMEOUT_MS) }); await r.arrayBuffer(); if (r.status !== 200) errors.push(`${clip(ref, 80)} answered ${r.status}`); } catch { errors.push(`${clip(ref, 80)} didn't load`); }
   }
   for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
     if (/\bsrc=/i.test(m[1]) || /type=["']?(module|application\/(ld\+)?json|text\/(template|x-[a-z-]+))/i.test(m[1]) || !m[2].trim()) continue;

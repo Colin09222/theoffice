@@ -307,7 +307,7 @@ describe('across a restart', () => {
 describe('computer sessions', () => {
   async function computer(script = {}, over = {}) {
     const sessions = createMockSessions({}, script);
-    const t = await start({ computerEnabled: true, outputLagMs: 0, floorDailyUsd: Infinity, globalDailyUsd: Infinity, taskMaxUsd: Infinity, ...over }, { sessions });
+    const t = await start({ computerEnabled: true, outputLagMs: 0, floorDailyUsd: Infinity, globalDailyUsd: Infinity, taskMaxUsd: Infinity, testerComputerGamesShops: false, ...over }, { sessions });
     t.app.engine.runManager = async () => {};
     const c = await claim(t, `Computer ${open.length}`); const floor = floorOf(t, c);
     return { t, c, floor, sessions };
