@@ -57,6 +57,7 @@ import { logDenied, deniedListing } from './denied.js';
 import { sendOut, stuckListing, SendOutError } from './sendout.js';
 import { absoluteMeta } from './metaabs.js';
 import { createTaps, injectTaps, TAP_JS } from './taps.js';
+import { installRoom } from './room.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any main-site cookie, page or API.
@@ -748,6 +749,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
   const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext), installShots(ext), installJobCards(ext), installEstimates(ext), installWeekPlans(ext), installOnboarding(ext), installOwnSpend(ext), installRanked(ext)].filter(Boolean);  // estimates after job cards: they add to the boss's cards
+  // Round 2, lane A: the floor room's own data (server/room.js).
+  extensions.push(...[installRoom(ext)].filter(Boolean));
   // The budget check, inside the server: a spend record every two hours (server/spendcheck.js, redesign job 5).
   const spendCheck = installSpendCheck({ db, cfg, log, now });
   extensions.push(spendCheck);

@@ -374,6 +374,7 @@ class FloorPage {
     this.hoursEl.dataset.mode = w.mode; this.hoursEl.classList.toggle('closed', this.closedNow);
     this.hoursEl.firstChild.textContent = w.label; this.hoursEl.lastChild.textContent = w.days || (w.mode === 'nonstop' ? 'Every day' : 'When the boss calls');
     this.view?.setClosed?.(this.closedNow);
+    this.view?.setFloorState?.(f.state || 'idle');
   }
   renderControls() {
     clear(this.controlsEl);

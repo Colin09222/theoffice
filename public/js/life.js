@@ -2,6 +2,7 @@
 // through the doors, says the real line in a bubble, and goes back to their own room. Idle people take breaks in the kitchen and the lounge.
 // No three.js in here, so the rules can be run in plain Node with stand-ins for the people.
 import { roomOfKind, roomAt } from './layouts.js';
+import { IdleRounds, floorIsIdle } from './room-rules.js';
 
 const READ_MIN = 2.6, READ_MAX = 8, CHARS_PER_SEC = 15;   // long enough to read, short enough to keep up with a busy floor
 const QUEUE_MAX = 3;    // lines someone can have waiting to act out; beyond that the oldest stays in the Talk tab only
@@ -41,6 +42,13 @@ export class FloorLife {
     this.held = []; this.holdUntil = 0;
     this.queues = new Map();  // speaker -> events waiting to be acted out
     this.seen = new Set();    // pairs that spoke a moment ago, so a paper handoff doesn't play a second time
+    this.idleRounds = new IdleRounds();
+  }
+  /** The floor is Idle (r2-j31): nobody types, screens are dark, and the team drifts off to the lounge and the kettle. */
+  get floorIdle() {
+    const v = this.view;
+    if (v.idleLife === false) return false;
+    return floorIsIdle(v.floorState || 'working', [...this.people.values()].filter((a) => !a.isBoss && !a.extra));
   }
   get people() { return this.view.actors; }
 
@@ -65,6 +73,7 @@ export class FloorLife {
   /** Someone finished a scene or a step list and is free for the next line. */
   release(actor) { this.view.claims.delete(actor); }
   update() {
+    this.idleTick();
     if (this.held.length && this.view.time >= this.holdUntil) { for (const ev of this.held) if (ev.to || beatOf(ev) === 'plan') this.enqueue(ev); this.held = []; }
     for (const [id, q] of this.queues) {
       if (!q.length) { this.queues.delete(id); continue; }
@@ -154,6 +163,36 @@ export class FloorLife {
       const face = Math.atan2(stand[0] - sp[0], stand[1] - sp[1]);
       a.perform([{ walk: sp }, { anim: 'listen', hold: 30 + talkTime, until: () => over, face }], { scene: true });
     }
+  }
+
+  // ---- idle floors (r2-j31) ----
+  /** One bean every 10 to 20 s gets one of the four idle moves. Someone resting after a move counts as free; someone in a scene does not. */
+  idleTick() {
+    const idle = this.floorIdle;
+    if (idle !== this.wasIdle) { this.wasIdle = idle; for (const a of this.people.values()) a.applyStatePose?.(); }
+    const free = idle ? [...this.people.values()].filter((a) => !a.isBoss && !a.extra && !a.dead && !a.scene && !a.path.length && (!a.action || a.action.idleRest)) : [];
+    const turn = this.idleRounds.tick(this.view.time, idle, free, { kitchen: !!this.view.decor.coffee && !!roomOfKind(this.view.plan, 'kitchen') });
+    if (turn) this.idleMove(turn.who, turn.move, turn.hold);
+    return turn;
+  }
+  /**
+   * The move itself. Afterwards they stay where they are, standing easy, until they're picked again or the floor gets work: an idle floor's
+   * beans leave their desks. Nothing here says a word or touches a keyboard.
+   */
+  idleMove(a, move, hold) {
+    const v = this.view, L = v.plan;
+    const rest = (face) => ({ anim: 'stand', hold: 1e9, until: () => !this.floorIdle, idleRest: true, face, paper: false });
+    if (move === 'stretch') { a.perform([{ anim: 'stretch', hold, idleMove: 'stretch' }], { offDuty: true }); return; }
+    if (move === 'read') {
+      const at = [L.shelf[0] + 1.0, L.shelf[1] + (Math.random() - 0.5) * 1.5];
+      v.claims.set(a, at);
+      a.perform([{ walk: at }, { anim: 'listen', hold, face: -Math.PI / 2, paper: true, idleMove: 'read' }, rest(-Math.PI / 2)], { offDuty: true });
+      return;
+    }
+    const spot = this.openSpot(move === 'kettle' ? 'kitchen' : 'lounge', a);
+    if (!spot) { a.perform([{ anim: 'stretch', hold, idleMove: 'stretch' }], { offDuty: true }); return; }
+    v.claims.set(a, [spot[0], spot[1]]);
+    a.perform([{ walk: [spot[0], spot[1]] }, { anim: move === 'kettle' ? 'sip' : 'phone', hold, face: spot[2] ?? 0, idleMove: move }, rest(spot[2] ?? 0)], { offDuty: true });
   }
 
   // ---- breaks ----

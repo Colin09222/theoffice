@@ -25,7 +25,8 @@
     "validate-models": "node scripts/validate-models.mjs",
     "e2e:home": "node test/browser/home.mjs",
     "e2e:phone": "node test/browser/phone.mjs",
-    "e2e:biztab": "node test/browser/biztab.mjs"
+    "e2e:biztab": "node test/browser/biztab.mjs",
+    "e2e:room2": "node test/browser/room-r2.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.6.0"

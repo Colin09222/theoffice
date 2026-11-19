@@ -551,6 +551,7 @@ export class Actor {
       if (s === 'typing') { screen.map = v.codeTex; screen.color.setScalar(1.3); }
       else if (s === 'browsing' || s === 'reading') { screen.map = v.pageTex; screen.color.setScalar(1.18); }
       else if (on) { screen.map = v.pageTex; screen.color.set('#c9c4ba'); }
+      else if (v.life?.wasIdle) { screen.map = v.idleTex; screen.color.set('#2e2e33'); }  // an Idle floor's screens are off: no glow at all (r2-j31)
       else { screen.map = v.idleTex; screen.color.set('#ffffff'); }
       screen.needsUpdate = true;
       if (this.seat.glow) { this.seat.glow.material.color.set(s === 'typing' ? '#2a5aa8' : '#8a8060'); this.seat.glow.visible = v.detailOn && on; }
@@ -654,7 +655,7 @@ export class Actor {
       }
     } else if (this.action && !this.action.walk && (time > this.holdUntil || this.action.until?.())) {
       this.next();
-    } else if (!this.action && this.seated && this.state === 'idle' && !this.isBossAway) {
+    } else if (!this.action && this.seated && this.state === 'idle' && !this.isBossAway && !(this.view.life?.wasIdle && !this.isBoss)) {  // an Idle floor has its own rounds (r2-j31)
       this.idleTimer -= dt;
       if (this.idleTimer <= 0) { this.idleTimer = 20 + Math.random() * 40; this.idleErrand(); }
     }
@@ -702,6 +703,8 @@ export class OfficeView {
     this.ao = { radius: 1.05, intensity: 1.45, color: '#5a3424', falloff: 1 };
     this.bloom = 0.18;
     this.floorNumber = state.floor.number;
+    // What the server says the floor is doing (Working, Waiting on boss, Idle, Paused), and the round 2 room switches (server/room.js).
+    this.floorState = state.floor.state || null; this.roomCfg = state.room || {}; this.idleLife = this.roomCfg.idleLife !== false;
     this.camera = host ? host.camera : new THREE.PerspectiveCamera(24, 1, 1, 3800);
     this.tagsOn = true;
     this.time = 0; this.yaw = 0.5; this.targetYaw = 0.5; this.pitch = 0.86; this.zoom = 1; this.targetZoom = 1; this.intro = 0;
@@ -1491,6 +1494,8 @@ export class OfficeView {
     this.boardMat.map = this.boardTexture(list);
     this.boardMat.needsUpdate = true;
   }
+  /** The floor's state word from the server, on every snapshot: an Idle floor gets its idle rounds (r2-j31). */
+  setFloorState(st) { if (st) this.floorState = st; }
   setFloorName(name) {
     this.floorName = name;
     if (!this.signTex) return;
