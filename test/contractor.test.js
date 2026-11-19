@@ -205,7 +205,7 @@ describe('the contractor ping', () => {
     for (const r of gw.seen) {
       assert.equal(r.method, 'POST'); assert.equal(r.url, '/hooks/agent');
       assert.equal(r.headers.authorization, 'Bearer test-hook-token');
-      assert.equal(r.headers['idempotency-key'], pingKey(j.id));
+      assert.equal(r.headers['idempotency-key'], pingKey(b.id), 'keyed by the task: one ping per task, ever');
     }
     assert.deepEqual(a.body, c.body, 'the retry is the same request');
     assert.equal(a.body.agentId, 'main'); assert.equal(a.body.deliver, true); assert.equal(a.body.channel, 'telegram'); assert.equal(a.body.to, '8032772165');

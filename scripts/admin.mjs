@@ -27,6 +27,7 @@ import { dailyStatus, dailyStatusText, requestDailyRun, setDailyPaused, ensureDa
 import { chatAdminCommand } from '../server/cloud/chat.js';
 import { setContractor, contractorListing, contractorListingText, completeJob, ContractorError, SUMMARY_MAX } from '../server/contractor.js';
 import { pingContractor } from '../server/contractorping.js';
+import { refusalListing, refusalListingText } from '../server/handback.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -75,6 +76,7 @@ const usage = () => {
     '  node scripts/admin.mjs help answer --id N --decline          decline one',
     '  node scripts/admin.mjs contractor --floor N on|off   send floor N\'s Builder, Designer and Researcher jobs to the building\'s outside contractor instead of a model, or stop (off hands anything still held back to the floor\'s own staff). No model is called for a held job',
     '  node scripts/admin.mjs contractor list [--json] [--all]   jobs held for the contractor: floor, task, project, brief and the files on its drive. Everything a floor wrote is fenced as untrusted data',
+    '  node scripts/admin.mjs contractor refusals [--since 24h|7d|90m] [--json]   tries to hold work the contractor already handed back, which the server refused and logged',
     '  node scripts/admin.mjs contractor ping --task N   send buddehbot the contractor ping again for a job still held (OPENCLAW_HOOK_URL and OPENCLAW_HOOK_TOKEN)',
     '  node scripts/admin.mjs contractor done --task N --summary-file PATH   hand a held job back with what was done: the task finishes with that report on the server\'s next tick, and the floor carries on. Upload files to the floor\'s drive first, the usual way',
     '  node scripts/admin.mjs floor-limit --floor N [--claude USD] [--openrouter USD] [--fable USD] [--opus USD] [--openrouter-only MODEL [--effort low|medium|high|xhigh]] [--no-openrouter-only] [--clear]   top one floor up: raises its stops or moves where its models switch, or puts every Claude call it makes on one OpenRouter model (no computer there), then shows where it stands (admin only, and it takes effect on the server\'s next tick)',
@@ -98,6 +100,14 @@ const floorArg = ({ inBuilding = false } = {}) => {
   return n;
 };
 const die = (text) => { console.error(text); process.exit(1); };
+/** --since 24h, 7d or 90m: the moment that far back, in ms. Nothing given is the last 7 days. */
+const sinceArg = (dflt = '7d') => {
+  const i = rest.indexOf('--since');
+  const v = i >= 0 ? rest[i + 1] : dflt;
+  const m = /^(\d+)([mhd])$/.exec(String(v || ''));
+  if (!m) die('--since takes a number and m, h or d, such as 24h.');
+  return Date.now() - Number(m[1]) * { m: 60000, h: 3600000, d: 86400000 }[m[2]];
+};
 const db = openDb(cfg.dataDir);
 if (cmd === 'code' && rest[0] === 'hold') {
   // The code is known only by when it was issued. Neither it nor its hash is printed.
@@ -384,6 +394,9 @@ if (cmd === 'code' && rest[0] === 'hold') {
   if (sub === 'list') {
     const listing = contractorListing(db, { status: rest.includes('--all') ? 'all' : 'held' });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : contractorListingText(listing));
+  } else if (sub === 'refusals') {
+    const listing = refusalListing(db, { since: sinceArg() });
+    console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : refusalListingText(listing));
   } else if (sub === 'ping') {
     // Sends buddehbot the ping again for a job that is still held, such as one held before the ping existed. Same job, same idempotency key.
     const id = Number(valueOf('--task'));

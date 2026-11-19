@@ -90,7 +90,7 @@ export function createCostAlerts({ db, cfg, now = Date.now, log = () => {}, http
     flying.add(p);
   }
   const floorOf = (id) => get(db, 'SELECT id,number,name,filler FROM floors WHERE id=?', id);
-  const taskOf = (id) => get(db, 'SELECT t.id,t.floor_id,t.title,t.project,t.revisions,t.cost_usd,a.role FROM tasks t LEFT JOIN agents a ON a.id=t.agent_id WHERE t.id=?', id);
+  const taskOf = (id) => get(db, 'SELECT t.id,t.floor_id,t.title,t.project,t.revisions,t.tester_fails,t.cost_usd,a.role FROM tasks t LEFT JOIN agents a ON a.id=t.agent_id WHERE t.id=?', id);
   const about = (floor, task) => ({ floorId: floor.id, floorNumber: floor.number, floorName: floor.name, ...(task ? { taskId: task.id, role: task.role || '', title: task.title } : {}) });
   // An alert is never a reason for a charge, a review or a job to fail.
   const quietly = (what, fn) => { if (!on) return; try { fn(); } catch (e) { log('warn', 'cost alert check failed', { what, err: String(e?.message || e) }); } };
@@ -113,13 +113,13 @@ export function createCostAlerts({ db, cfg, now = Date.now, log = () => {}, http
         if (dayLine) raise(`floor:${floorId}:${day}:${dayLine}`, () => ({ kind: 'floor-day', ...about(floor), usd: spent, amount: usd(spent), what: `this floor's spend today (${day}, UTC) has passed ${usd(dayLine)}. It is ${usd(spent)} so far.` }));
       });
     },
-    /** After the manager sends a task back. */
+    /** After a Tester fails a task. "Sent back" counts only Tester failures, never a hold or a manager's own send-back (docs/redesign, re-hold rule 5). */
     sentBack(taskId) {
       quietly('sentBack', () => {
         const task = taskOf(taskId), floor = task && floorOf(task.floor_id);
         const times = cfg.costAlertSentBack ?? 3;
-        if (!floor || floor.filler || !(times > 0) || task.revisions < times) return;
-        raise(`sentback:${task.id}`, () => ({ kind: 'sent-back', ...about(floor, task), usd: task.cost_usd, amount: `${task.revisions} times, ${usd(task.cost_usd)}`, what: `one task has been sent back ${task.revisions} times. It has cost ${usd(task.cost_usd)} so far.` }));
+        if (!floor || floor.filler || !(times > 0) || task.tester_fails < times) return;
+        raise(`sentback:${task.id}`, () => ({ kind: 'sent-back', ...about(floor, task), usd: task.cost_usd, amount: `${task.tester_fails} times, ${usd(task.cost_usd)}`, what: `a Tester has failed one task ${task.tester_fails} times. It has cost ${usd(task.cost_usd)} so far.` }));
       });
     },
     /** When a Builder's job starts: the first build of a project that has never been live is where most of a project's money goes. */
