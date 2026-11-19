@@ -195,12 +195,14 @@ describe('building: ticker and launched wall', () => {
     assert.ok((await wall()).projects.length > 0);
   });
 
-  test('filler floors are chatter in the ticker but never on the wall', async () => {
+  // Since the redesign (docs/redesign, job 2) a demo floor never reaches the ticker either; DEMO_FLOORS_PUBLIC=1 brings its chatter back (test/look.test.js).
+  test('filler floors are never on the ticker or the wall', async () => {
     const fid = get(t.db, 'SELECT id FROM floors WHERE slug=?', pub.slug).id;
+    const before = (await ticker('?limit=60')).items.filter((i) => i.floor.slug === pub.slug).length;
+    assert.ok(before > 0);
     run(t.db, 'UPDATE floors SET filler=1 WHERE id=?', fid);
     const items = (await ticker('?limit=60')).items;
-    assert.ok(items.length > 0);
-    assert.ok(items.every((i) => i.filler === true));
+    assert.ok(!items.some((i) => i.floor.slug === pub.slug));
     assert.equal((await wall()).projects.length, 0);
     assert.equal((await visitor.raw('GET', `/api/building/thumb/${pub.slug}/midnight-rolls`)).status, 404);
     run(t.db, 'UPDATE floors SET filler=0 WHERE id=?', fid);

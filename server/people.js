@@ -416,6 +416,8 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
   // No model call, nothing stored, never in Talk: the stream carries it live to whoever is watching the room, and that is all.
   const recentBanter = new Map();
   async function bubbles(floorId) {
+    // A floor that can't work has nothing to chat about: the building's money stop quiets the room too, though a bubble costs nothing.
+    if (engine.budget.out(engine.agentProvider({ role: 'manager' }, floorId), floorId)) return false;
     const everyone = shuffle(all(db, 'SELECT id,name FROM agents WHERE floor_id=? ORDER BY id', floorId));
     if (everyone.length < 2) return false;
     const pair = everyone.slice(0, 2);

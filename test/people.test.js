@@ -326,8 +326,9 @@ describe('what people say to each other', () => {
     assert.ok(ledgerKinds(t, row(t, c.slug).id).some((l) => l.kind === 'talk-meeting' && l.provider === 'anthropic'));
   });
 
+  // The model-written kettle, behind BANTER_LINES=0 since the redesign (docs/redesign, job 2; the default is in test/look.test.js).
   test('banter needs real work behind it, only happens when someone is watching, and doesn\'t repeat', async () => {
-    const t2 = await boot({ banterEveryMs: 5, banterTickMs: 5 });
+    const t2 = await boot({ banterLines: false, banterEveryMs: 5, banterTickMs: 5 });
     try {
       const c = await claim(t2, 'Coffee Machine');
       const f = row(t2, c.slug);
@@ -509,8 +510,11 @@ describe('filler floors', () => {
       const st = sse(v, f.slug);
       const s = await until(async () => {
         const x = await floorState(v, f.slug);
-        return ['work', 'ask', 'answer', 'meeting', 'banter'].every((k) => x.talk.some((l) => l.kind === k)) ? x : null;
+        return ['work', 'ask', 'answer', 'meeting'].every((k) => x.talk.some((l) => l.kind === k)) ? x : null;
       }, { what: 'every kind of line', timeout: 12000 });
+      // Its scripted small talk is said, but since the redesign small talk never shows in Talk (docs/redesign, job 2).
+      await until(() => get(t.db, "SELECT 1 x FROM events WHERE floor_id=? AND type='talk' AND data LIKE '%\"kind\":\"banter\"%'", f.id), { what: 'scripted small talk', timeout: 12000 });
+      assert.ok(!(await floorState(v, f.slug)).talk.some((l) => l.kind === 'banter'));
       assert.equal(new Set(s.agents.map((a) => a.persona)).size, s.agents.length);
       for (const a of s.agents) assert.ok(a.persona && a.bio && a.quirk && a.office);
       assert.equal(seen.length, 0, 'no model call');

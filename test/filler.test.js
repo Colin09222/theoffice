@@ -37,7 +37,13 @@ describe('filler companies', () => {
     assert.equal((await new Client(t).get('/api/floors')).data.vacant, 3);
     const real = await claim(t, 'Real Co');
     assert.equal(real.number, 3);
+    // Since the redesign (docs/redesign, job 2) the demo floors stay out of the public directory; DEMO_FLOORS_PUBLIC=1 lists them, marked.
+    const hidden = await new Client(t).get('/api/floors');
+    assert.equal(hidden.data.floors.filter((c) => c.filler === true).length, 0);
+    assert.equal(hidden.data.vacant, 4);
+    t.cfg.demoFloorsPublic = true;
     const r = await new Client(t).get('/api/floors');
+    t.cfg.demoFloorsPublic = false;
     assert.equal(r.status, 200);
     const cards = r.data.floors.filter((c) => c.filler === true);
     assert.equal(cards.length, DEMOS);
