@@ -36,7 +36,7 @@ export async function showFloorLite(root, slug, { onRoom }) {
     renderQuestions() {},
   };
   const badge = h('span.badge');
-  const cardEl = h('div.card-more');
+  const cardEl = h('div.lite-status');  // not .card-more: the full page's phone rules hide that one
   const drawCard = () => {
     const s = stateOf(state.floor);
     badge.dataset.state = s; badge.textContent = STATE_WORDS[s]; badge.title = idleNote(state.floor);
@@ -54,7 +54,7 @@ export async function showFloorLite(root, slug, { onRoom }) {
       h('div.lite-title', {}, h('b', {}, state.floor.name || 'Moving in'), h('small', {}, `Floor ${state.floor.number}`)),
       badge),
     h('main.lite-main', {},
-      h('section.floor-top.lite-card', {}, cardEl),
+      h('section.lite-card', {}, cardEl),
       h('section.lite-tl.card-ui', {}, h('h2', {}, 'Timeline'), p.bodyEl),
       projects,
       watch)));

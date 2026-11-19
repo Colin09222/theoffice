@@ -415,7 +415,7 @@ body[data-page="floor-lite"] #scene, body[data-page="floor-lite"] #labels { disp
 .lite-title b { font: 700 18px/1.15 var(--f-head); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lite-title small { font: 500 12px var(--f-body); color: var(--c-slate); }
 .lite-main { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px calc(28px + env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; }
-.floor-top.lite-card { position: static; width: auto; max-height: none; padding: 0; background: none; border: 0; box-shadow: none; overflow: visible; }
+.lite-card { display: block; }
 .lite-card .status-card { background: var(--c-card); box-shadow: var(--card-shadow); padding: 16px; border-radius: var(--card-r); }
 .lite-tl h2, .lite-projects h2 { font: 700 20px var(--f-head); margin: 0 0 10px; }
 .lite-tl .timeline { padding: 0; background: none; overflow: visible; }
