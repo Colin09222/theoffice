@@ -298,6 +298,24 @@ try {
     if (shots) await w.shot(`${shots}/r2-j58-card.jpg`);
     check(!p.errors.length && !w.errors.length, `j58 no page errors ${[...p.errors, ...w.errors].slice(0, 2).join(' | ')}`);
   }
+  if (want('j60')) {
+    // r2-j60: pasting a floor link into a chat app shows a 1,200 by 630 picture of that floor. Here this browser is the shots browser.
+    const { imageSize } = await import('../../server/sharecards.js');
+    const boss = await claim(t, 'Card Tyres');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    publish(t.db, f.id, 'tyres', 'Tyres', Date.now() - 3600000);
+    storeShot(t.db, { floorId: f.id, project: 'tyres', image: REAL_JPEG, url: 'https://tyres.example/' });
+    t.cfg.shotsCdpUrl = `http://127.0.0.1:${b.port}`; t.cfg.shotsOrigin = `http://localhost:${t.port}`;
+    const row = await t.app.ext.shareCard(f, 'launch');
+    const link = await (await fetch(`${base}/floor/${boss.slug}`)).text();
+    const image = link.match(/<meta property="og:image" content="([^"]+)">/)?.[1] || '';
+    const got = Buffer.from(await (await fetch(image)).arrayBuffer());
+    const size = imageSize(got);
+    check(row.type === 'image/jpeg' && size?.width === 1200 && size?.height === 630 && got.length < 200 * 1024, `j60 the floor link's preview picture is a real ${size?.width}x${size?.height} JPEG of the floor, ${Math.round(got.length / 1024)} KB`);
+    check(/og:image:width" content="1200"/.test(link) && /og:title" content="Card Tyres: floor/.test(link), 'j60 the link carries the og tags a chat app reads');
+    if (shots) { const { writeFileSync } = await import('node:fs'); writeFileSync(`${shots}/r2-j60-sharecard.jpg`, got); }
+    t.cfg.shotsCdpUrl = ''; t.cfg.shotsOrigin = '';
+  }
 } finally {
   b.close(); await t.close();
 }

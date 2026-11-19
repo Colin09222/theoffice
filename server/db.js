@@ -327,6 +327,7 @@ CREATE TABLE IF NOT EXISTS fresh_eyes (
   id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, launch_key TEXT NOT NULL, score INTEGER, notes TEXT NOT NULL DEFAULT '',
   model TEXT NOT NULL DEFAULT '', fix_task_id INTEGER, created_at INTEGER NOT NULL, UNIQUE (floor_id, project, launch_key)
 );
+CREATE TABLE IF NOT EXISTS share_cards (floor_id INTEGER PRIMARY KEY, image BLOB NOT NULL, type TEXT NOT NULL, bytes INTEGER NOT NULL, made_at INTEGER NOT NULL, why TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS launch_checklists (floor_id INTEGER NOT NULL, project TEXT NOT NULL, result TEXT NOT NULL, checked_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project));
 `;
 

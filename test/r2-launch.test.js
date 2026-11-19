@@ -200,3 +200,58 @@ describe('r2-j59 fresh eyes', () => {
     t.cfg.freshEyes = true;
   });
 });
+
+describe('r2-j60 share cards', () => {
+  /** A JPEG header of the given size: enough for imageSize, and for a chat app's preview sniff. */
+  const jpegOf = (w, h, pad = 5000) => { const sof = Buffer.from([0xff, 0xc0, 0, 17, 8, h >> 8, h & 255, w >> 8, w & 255, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]); return Buffer.concat([Buffer.from([0xff, 0xd8]), sof, Buffer.alloc(pad, 0x55), Buffer.from([0xff, 0xd9])]); };
+  let t, c, shots;
+  before(async () => {
+    shots = [];
+    t = await boot({ shareCardShoot: async (url, size) => { shots.push({ url, size }); return jpegOf(size.width, size.height, size.quality > 70 ? 260 * 1024 : 9000); } });
+    c = await claim(t, 'Share Floor', { floor: 6 });
+  });
+  after(() => t.close());
+  test('DONE MEANS: a floor link carries a 1,200 by 630 picture of that floor as its preview', async () => {
+    const page = await (await fetch(`${t.base}/floor/${c.slug}`)).text();
+    const image = page.match(/<meta property="og:image" content="([^"]+)">/)?.[1];
+    assert.ok(image, 'the floor link has an og:image');
+    assert.match(page, /<meta property="og:image:width" content="1200">/); assert.match(page, /<meta property="og:image:height" content="630">/);
+    assert.match(page, /<meta property="og:title" content="Share Floor: floor 6 of The Office">/);
+    assert.match(page, /twitter:card" content="summary_large_image"/);
+    const { imageSize, CARD } = await import('../server/sharecards.js');
+    // Before the first card is taken, a plain one in the floor's colours stands in.
+    const plain = await fetch(image.replace(/^https?:\/\/[^/]+/, `http://${t.host}`));
+    const pb = Buffer.from(await plain.arrayBuffer());
+    assert.equal(plain.headers.get('content-type'), 'image/png');
+    assert.deepEqual(imageSize(pb), { type: 'image/png', width: 1200, height: 630 }); assert.ok(pb.length < CARD.maxBytes, `${pb.length} bytes`);
+    // A launch makes the real card: the card page photographed at 1,200 by 630, a little lower in quality until under 200 KB.
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    run(t.db, 'INSERT INTO projects (floor_id,slug,title,kind,private,published_at,created_at) VALUES (?,?,?,?,0,?,?)', f.id, 'tyres', 'Tyres', 'site', Date.now(), Date.now() - 1000);
+    t.app.engine.emitProject(f.id, 'tyres');
+    const row = await until(() => get(t.db, "SELECT * FROM share_cards WHERE floor_id=? AND why='launch'", f.id) || null, { what: 'the card', timeout: 5000 });
+    assert.ok(shots.every((s) => s.url.endsWith(`/api/floors/${c.slug}/sharecard.html`) && s.size.width === 1200 && s.size.height === 630));
+    assert.equal(shots.length, 2, 'the first try was over 200 KB, the second fit');
+    const card = await fetch(`${t.base}/api/floors/${c.slug}/sharecard`);
+    const cb = Buffer.from(await card.arrayBuffer());
+    assert.equal(card.headers.get('content-type'), 'image/jpeg');
+    assert.deepEqual(imageSize(cb), { type: 'image/jpeg', width: 1200, height: 630 }); assert.ok(cb.length < 200 * 1024 && row.bytes === cb.length);
+    const again = await (await fetch(`${t.base}/floor/${c.slug}`)).text();
+    assert.ok(again.includes(`sharecard?v=${row.made_at}`), 'the link points at the new card');
+  });
+  test('the card page holds public facts only; remade weekly; a demo or hidden floor has none; SHARE_CARDS=0', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const html = await (await fetch(`${t.base}/api/floors/${c.slug}/sharecard.html`)).text();
+    assert.match(html, /Share Floor/); assert.match(html, /Floor 6/); assert.match(html, /1 launched · 0 real visits/);
+    assert.ok(!/\$\d|usd|cost/i.test(html), 'no money');
+    run(t.db, 'UPDATE share_cards SET made_at=? WHERE floor_id=?', Date.now() - 8 * 86400000, f.id);
+    await t.app.ext.shareCardTick();
+    assert.equal(get(t.db, 'SELECT why FROM share_cards WHERE floor_id=?', f.id).why, 'weekly');
+    run(t.db, 'UPDATE floors SET hidden=1 WHERE id=?', f.id);
+    assert.equal((await fetch(`${t.base}/api/floors/${c.slug}/sharecard`)).status, 404);
+    assert.ok(!(await (await fetch(`${t.base}/floor/${c.slug}`)).text()).includes('og:image'), 'a hidden floor gets no preview');
+    run(t.db, 'UPDATE floors SET hidden=0 WHERE id=?', f.id);
+    t.cfg.shareCards = false;
+    assert.ok(!(await (await fetch(`${t.base}/floor/${c.slug}`)).text()).includes('og:image'));
+    t.cfg.shareCards = true;
+  });
+});

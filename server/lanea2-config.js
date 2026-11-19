@@ -33,5 +33,7 @@ export function laneA2Settings(env = process.env) {
     // r2-j59: after a Launch, one fresh-eyes look on the review model (desktop and phone pictures, done-means lines), score 1 to 5 for the boss only,
     // under 3 makes one fix job (FRESH_EYES=0: no look).
     freshEyes: on(env.FRESH_EYES),
+    // r2-j60: share cards, 1,200 by 630 under 200 KB, remade on each launch and weekly, the floor link's preview picture (SHARE_CARDS=0: none).
+    shareCards: on(env.SHARE_CARDS),
   };
 }

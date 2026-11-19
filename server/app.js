@@ -61,6 +61,7 @@ import { installRoom } from './room.js';
 import { installEventLog } from './eventlog.js';
 import { installChecklist } from './checklist.js';
 import { installFreshEyes } from './fresheyes.js';
+import { installShareCards } from './sharecards.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any main-site cookie, page or API.
@@ -753,7 +754,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
   const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext), installShots(ext), installJobCards(ext), installEstimates(ext), installWeekPlans(ext), installOnboarding(ext), installOwnSpend(ext), installRanked(ext)].filter(Boolean);  // estimates after job cards: they add to the boss's cards
   // Round 2, lane A: the floor room's own data (server/room.js).
-  extensions.push(...[installRoom(ext), installEventLog(ext), installChecklist(ext), installFreshEyes(ext)].filter(Boolean));
+  extensions.push(...[installRoom(ext), installEventLog(ext), installChecklist(ext), installFreshEyes(ext), installShareCards(ext)].filter(Boolean));
   // The budget check, inside the server: a spend record every two hours (server/spendcheck.js, redesign job 5).
   const spendCheck = installSpendCheck({ db, cfg, log, now });
   extensions.push(spendCheck);
@@ -1089,10 +1090,10 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   }
 
   // The page shell with its own link preview: the same file as every app page, plus og: tags from ext.shareMeta (server/building.js).
-  function serveSharePage(req, res, floorSlug) {
+  function serveSharePage(req, res, floorSlug, metaOf = ext.shareMeta) {
     const file = statics.get(INDEX);
     if (!file) return send(res, 404, 'Not found', { 'content-type': 'text/plain; charset=utf-8' });
-    const meta = ext.shareMeta?.(floorSlug, req);
+    const meta = metaOf?.(floorSlug, req);
     if (!meta) return serveStatic(req, res, INDEX);
     const html = file.body.toString('utf8').replace(/<title>[^<]*<\/title>/, `<title>${esc(meta.title)}</title>`).replace('</head>', `${meta.tags}\n</head>`);
     send(res, 200, req.method === 'HEAD' ? undefined : html, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
@@ -1177,7 +1178,10 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' });
       limit('read', ip);
       // App pages are all the one shell. Anything else must be an exact known asset.
-      if (rest === '/' || /^\/admin\/?$/.test(rest) || /^\/floor\/[a-z0-9-]+\/?$/.test(rest)) return serveStatic(req, res, INDEX);
+      // Round 2 lane A (r2-j60): a floor's own link carries its share card, so a chat app shows a picture of that floor.
+      const floorLink = rest.match(/^\/floor\/([a-z0-9-]+)\/?$/);
+      if (floorLink) return serveSharePage(req, res, floorLink[1], ext.floorShareMeta);
+      if (rest === '/' || /^\/admin\/?$/.test(rest)) return serveStatic(req, res, INDEX);
       // redesign lane A (job 24): the Launched page and each floor's portfolio, with a link preview (title, screenshot) a chat app can read.
       const shareMatch = rest.match(/^\/launched(?:\/([a-z0-9-]+))?\/?$/);
       if (shareMatch) return serveSharePage(req, res, shareMatch[1] || null);
