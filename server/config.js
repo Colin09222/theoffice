@@ -236,6 +236,8 @@ export function loadConfig(env = process.env, overrides = {}) {
     jobCards: env.JOB_CARDS !== '0', statusFromCode: env.STATUS_FROM_CODE !== '0',
     // A boss's own floor's dollars behind a tap on the status card (redesign job 34). OWN_SPEND=0 takes the link and its route away.
     ownSpend: env.OWN_SPEND !== '0',
+    // Tapped calls on published pages' tel: links (redesign job 33). TAP_COUNT=0 stops adding the beacon and counting.
+    tapCount: env.TAP_COUNT !== '0',
     shots: env.SHOTS !== '0', shotsEveryMs: num(env.SHOTS_EVERY_MS, 3600000), shotsNudgeMs: num(env.SHOTS_NUDGE_MS, 3000), shotsChrome: env.SHOTS_CHROME || '', shotsCdpUrl: env.SHOTS_CDP_URL || '', shotsOrigin: (env.SHOTS_ORIGIN || '').replace(/\/+$/, ''), banterUsdPerFloorDay: num(env.BANTER_USD_PER_FLOOR_DAY, 2), banterPace: env.BANTER_PACE !== '0',
     asksPerTask: num(env.ASKS_PER_TASK, 4), asksPerFloorDay: num(env.ASKS_PER_FLOOR_DAY, 80),
     // The help line: a manager can ask the owner's assistant for guidance. No credential is involved: the assistant answers through scripts/admin.mjs or the admin view.

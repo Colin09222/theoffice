@@ -10,7 +10,7 @@ import { newFence } from './help.js';
 import { PROVIDERS } from './budget.js';
 import { wallClock } from './modes.js';
 import { wallToUtc } from './orders.js';
-import { OWNER_TZ, dayStart } from './spendcheck.js';
+import { OWNER_TZ, dayStart, weekStart } from './spendcheck.js';
 
 const RETRY = new Set([408, 425, 429, 500, 502, 503, 504]);
 const POT_LINES = [95, 80];
@@ -75,7 +75,13 @@ export function digestFacts(db, cfg, at, { budget = null } = {}) {
   const stopped = budget ? all(db, "SELECT id, number, name FROM floors WHERE status='active' AND filler=0").filter((f) => PROVIDERS.some((p) => { const s = budget.floorStatus(f.id); const spent = p === 'anthropic' ? s.claudeUsd : s.openrouterUsd; return spent >= s[STOP[p]]; })) : [];
   // Floors the owner doubled down on in the ranked view (job 26): named first, so he sees them every morning. A mark only, no cap.
   const priority = get(db, "SELECT 1 x FROM sqlite_master WHERE type='table' AND name='floor_marks'") ? all(db, "SELECT f.number, f.name FROM floor_marks m JOIN floors f ON f.id=m.floor_id WHERE m.priority=1 AND f.status!='killed' ORDER BY f.number") : [];
-  return { yesterday, floors, pots, launches, stuck, priority, decisions: { purchases, help, contractorHeld: held, floorsStopped: stopped } };
+  // Tapped calls this week (job 33), one figure for each business floor: a floor running a business journey or business work, or with a tap.
+  const hasTable = (t) => !!get(db, "SELECT 1 x FROM sqlite_master WHERE type='table' AND name=?", t);
+  const calls = hasTable('tel_taps') ? all(db, `SELECT f.id, f.number, f.name, (SELECT COUNT(*) FROM tel_taps x WHERE x.floor_id=f.id AND x.created_at>=? AND x.created_at<?) n FROM floors f
+    WHERE f.status='active' AND f.filler=0 ORDER BY f.number`, weekStart(at), at).filter((f) => f.n > 0
+      || (hasTable('business_journeys') && get(db, "SELECT 1 x FROM business_journeys WHERE floor_id=? AND status='active'", f.id))
+      || get(db, "SELECT lane FROM tasks WHERE floor_id=? AND lane!='' ORDER BY id DESC LIMIT 1", f.id)?.lane === 'business').map(({ number, name, n }) => ({ number, name, n })) : [];
+  return { yesterday, floors, pots, launches, stuck, priority, calls, decisions: { purchases, help, contractorHeld: held, floorsStopped: stopped } };
 }
 
 const runway = (w) => (w === null ? 'no cap' : w === Infinity ? 'nothing spent in the last 7 days' : `${w.toFixed(1)} weeks at the last 7 days' pace`);
@@ -91,6 +97,7 @@ export function digestText(facts, fence) {
   lines.push('', 'Pots:');
   for (const p of facts.pots) lines.push(`- ${POT_NAME[p.provider]}: ${p.left === null ? 'no cap' : `${usd(p.left)} left of ${usd(p.cap)}`}, ${runway(p.runwayWeeks)}.`);
   lines.push('', facts.launches.length ? `Went live yesterday: ${facts.launches.map((l) => `floor ${l.number} ${fence.wrap('title', l.title)}`).join(', ')}.` : 'Nothing went live yesterday.');
+  if (facts.calls?.length) lines.push(`Calls tapped this week: ${facts.calls.map((f) => `floor ${f.number} ${name(f.name)} ${f.n}`).join('; ')}.`);
   lines.push(facts.stuck.length ? `Stuck jobs (${facts.stuck.length}):` : 'No stuck jobs.');
   for (const t of facts.stuck) lines.push(`- Floor ${t.number} task #${t.id} [${t.contractor && t.status === 'blocked' ? 'with the contractor' : t.status}] ${fence.wrap('task title', t.title)}`);
   const d = facts.decisions;
