@@ -18,11 +18,11 @@ describe('the last look: its shape', () => {
     assert.equal(v.ship, false); assert.deepEqual(v.scores, { works: 8, as_asked: 4, phone: 7 }); assert.equal(v.fix.length, 5);
     for (const bad of ['', 'no json here', '{"ship": "yes"}', '{broken']) assert.equal(parseVerdict(bad), null);
   });
-  test('it runs on Fable 5.2 as that model wants: thinking left adaptive, no forced tool choice, the default fallback, priced', () => {
+  test('it runs on Opus 5.5 since the redesign (Fable is off for floors), as that model wants: thinking left adaptive, no forced tool choice, the default fallback, priced', () => {
     const models = loadModels();
     const s = models.tools.ship;
-    assert.equal(s.model, 'claude-fable-5-2'); assert.equal(s.provider, 'anthropic'); assert.equal(s.rounds, 2);
-    assert.deepEqual(s.pricing, { prompt: 8, completion: 40, cacheRead: 0.2 });
+    assert.equal(s.model, 'claude-opus-5-5'); assert.equal(s.provider, 'anthropic'); assert.equal(s.rounds, 2);
+    assert.deepEqual(s.pricing, { prompt: 4, completion: 20, cacheRead: 0.2 });
     assert.deepEqual(modelShape(s.model), { fallbacks: 'default', thinkingOff: null, forcedToolChoice: false });
     const body = buildRequest({ model: s.model, effort: s.effort, maxTokens: s.maxTokens, system: SHIP_SYSTEM, messages: [{ role: 'user', content: 'x' }], thinking: 'off', tools: [{ name: 't', input_schema: { type: 'object' } }], toolChoice: { type: 'any' } });
     assert.deepEqual(body.thinking, { type: 'adaptive' }, 'never "disabled": that is a 400 on this model');

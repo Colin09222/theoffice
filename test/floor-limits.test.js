@@ -13,7 +13,7 @@ const APPS = 'apps.localhost';
 // The boundary tests pin their own numbers, so what floors get in config/models.json can change without rewriting them.
 // These test the floor allowance's own moves between models. The redesign's model tiers (job 17, tiers.test.js) replace them by default, so they are off here.
 const pinnedModels = () => { const m = loadModels(); return { ...m, tiers: null, floorLimits: { ...m.floorLimits, fableUntilUsd: 20, opusUntilUsd: 50, claudeStopUsd: 85 } }; };
-test("what floors get today: Fable to \$35, Opus to \$125, then stop", () => { const l = loadModels().floorLimits; assert.deepEqual([l.fableUntilUsd, l.opusUntilUsd, l.claudeStopUsd], [35, 125, 125]); });
+test("what floors get today: no Fable (off for floors since the redesign), Opus to \$125, then stop", () => { const l = loadModels().floorLimits; assert.deepEqual([l.fableUntilUsd, l.opusUntilUsd, l.claudeStopUsd], [0, 125, 125]); });
 const open = [];
 after(async () => { for (const t of open) await t.close(); });
 const NO_OTHER_LIMITS = { floorDailyUsd: Infinity, globalDailyUsd: Infinity, taskMaxUsd: Infinity, budgetAnthropicUsd: 100000, budgetOpenrouterUsd: 100000 };
