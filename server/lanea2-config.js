@@ -30,5 +30,8 @@ export function laneA2Settings(env = process.env) {
     // r2-j57: the launch checklist, 8 checks by code; no HTTPS, a broken form or a broken link on the main page holds the boss's Launch tap
     // (LAUNCH_CHECKLIST=0: the checks still run and show, nothing is held).
     launchChecklist: on(env.LAUNCH_CHECKLIST),
+    // r2-j59: after a Launch, one fresh-eyes look on the review model (desktop and phone pictures, done-means lines), score 1 to 5 for the boss only,
+    // under 3 makes one fix job (FRESH_EYES=0: no look).
+    freshEyes: on(env.FRESH_EYES),
   };
 }

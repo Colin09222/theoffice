@@ -1260,6 +1260,7 @@ class FloorPage {
     on('work_mode', () => this.reload());
     on('work_plan', () => { if (this.owner) this.reload(); });
     on('business', () => this.reload());
+    on('fresh_eyes', () => { if (this.owner) this.reload(); });  // r2-j59: the boss's fresh-eyes score arrived
     on('ad_spend', () => { if (this.owner) this.reload(); });
     on('help_state', (d) => {
       this.state.helpWaiting = d.waiting;

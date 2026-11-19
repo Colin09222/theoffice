@@ -129,3 +129,74 @@ describe('r2-j58 CHECKED mark', () => {
     assert.ok(!JSON.stringify(wall).toLowerCase().includes('buddehbot'), 'no buddehbot stamp on a launch');
   });
 });
+
+/** A real maker job (mock mode) built and passed by the Tester, ready for the Launch tap. */
+async function readyJob(t, c) {
+  const ideas = await c.get(`/api/floors/${c.slug}/makers/ideas?type=game`);
+  const card = ideas.data.cards.find((x) => x.starter === 'game-2d') || ideas.data.cards[0];
+  await c.post(`/api/floors/${c.slug}/makers/start`, { type: 'game', idea: card.id, name: card.name, pitch: card.pitch, goal: card.goal, plan: card.plan, starter: 'game-2d' });
+  await until(async () => ((await floorState(c)).makers?.job?.stage === 'ready' ? true : null), { what: 'job ready', timeout: 30000 });
+  return get(t.db, 'SELECT * FROM maker_jobs WHERE floor_id=(SELECT id FROM floors WHERE slug=?) ORDER BY id DESC LIMIT 1', c.slug);
+}
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(300, 9), Buffer.from([0xff, 0xd9])]);
+
+describe('r2-j59 fresh eyes', () => {
+  let t, calls, reply;
+  before(async () => {
+    t = await boot({ maxRevisions: 2, checklistFetch: async () => ({ ok: true }), mediaMock: true, freshEyesShots: async () => ({ desktop: JPEG, phone: JPEG }) });
+    calls = [];
+    const media = t.app.engine.media;
+    const real = media.freshEyes.bind(media);
+    media.freshEyes = async (a) => { calls.push({ desktop: !!a.desktop, phone: !!a.phone, lines: a.lines }); const r = await real(a); return reply ? { ...r, text: reply } : r; };
+  });
+  after(() => t.close());
+  test('DONE MEANS: a launch gets exactly one score, on the review model, with desktop and phone pictures and the done-means lines; boss only', async () => {
+    const c = await claim(t, 'Fresh One');
+    const j = await readyJob(t, c);
+    assert.equal((await c.post(`/api/floors/${c.slug}/makers/launch`, {})).status, 200);
+    const row = await until(() => get(t.db, 'SELECT * FROM fresh_eyes WHERE project=? AND score IS NOT NULL', j.project) || null, { what: 'the score', timeout: 10000 });
+    assert.equal(row.score, 4);
+    assert.equal(calls.length, 1);
+    assert.deepEqual([calls[0].desktop, calls[0].phone], [true, true]);
+    assert.ok(Array.isArray(calls[0].lines));
+    assert.equal(row.model, t.app.engine.media.review?.model || 'mock-review', 'the review model');
+    assert.ok(!/fable/i.test(row.model), 'never Fable');
+    assert.equal(get(t.db, 'SELECT COUNT(*) n FROM tasks WHERE title LIKE ?', 'Fix what a fresh look found%').n, 0, 'a 4 makes no fix job');
+    const boss = (await c.get(`/api/floors/${c.slug}`)).data;
+    assert.equal(boss.freshEyes[0].score, 4);
+    const { Client } = await import('./helpers.js');
+    const visitor = await new Client(t, { origin: null }).get(`/api/floors/${c.slug}`);
+    assert.equal(visitor.data.freshEyes, undefined, 'a visitor never sees it');
+    assert.ok(!JSON.stringify(visitor.data).includes('fresh look'));
+    // The Launch tapped again on the same launch: still one score, no second call.
+    await c.post(`/api/floors/${c.slug}/makers/launch`, {});
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(calls.length, 1, 'never a second score');
+    assert.equal(get(t.db, 'SELECT COUNT(*) n FROM fresh_eyes WHERE project=?', j.project).n, 1);
+    assert.ok(get(t.db, "SELECT 1 x FROM ledger WHERE kind='review' AND floor_id=(SELECT id FROM floors WHERE slug=?)", c.slug), 'its cost is on the ledger');
+  });
+  test('a score under 3 makes exactly one fix job; asking again for the same launch makes neither a call nor a job', async () => {
+    reply = 'SCORE: 2\n1. The start button is hidden under the title on a phone. Move it.';
+    const c = await claim(t, 'Fresh Two');
+    const j = await readyJob(t, c);
+    const before = calls.length;
+    assert.equal((await c.post(`/api/floors/${c.slug}/makers/launch`, {})).status, 200);
+    const row = await until(() => get(t.db, 'SELECT * FROM fresh_eyes WHERE project=? AND score IS NOT NULL', j.project) || null, { what: 'the score', timeout: 10000 });
+    assert.equal(row.score, 2);
+    const fixes = all(t.db, 'SELECT * FROM tasks WHERE floor_id=(SELECT id FROM floors WHERE slug=?) AND title LIKE ?', c.slug, 'Fix what a fresh look found%');
+    assert.equal(fixes.length, 1, t.logs.filter((l) => l.includes('fresh eyes')).join(' ')); assert.equal(row.fix_task_id, fixes[0].id); assert.match(fixes[0].brief, /start button is hidden/);
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    assert.equal(await t.app.ext.freshEyes(f, j.project, `launch:${get(t.db, 'SELECT launched_at FROM maker_jobs WHERE id=?', j.id).launched_at}`), null);
+    assert.equal(calls.length, before + 1, 'one call for this launch, ever');
+    assert.equal(all(t.db, 'SELECT * FROM tasks WHERE floor_id=? AND title LIKE ?', f.id, 'Fix what a fresh look found%').length, 1);
+    reply = null;
+  });
+  test('the score is read from the first line; FRESH_EYES=0 makes no call', async () => {
+    const { readScore } = await import('../server/fresheyes.js');
+    assert.deepEqual(['SCORE: 4\nfine', 'score = 1', 'It is 3/5 overall', 'no score here', 'SCORE: 9'].map(readScore), [4, 1, 3, null, null]);
+    t.cfg.freshEyes = false;
+    const f = get(t.db, "SELECT * FROM floors WHERE slug=(SELECT slug FROM floors ORDER BY id LIMIT 1)");
+    assert.equal(await t.app.ext.freshEyes(f, 'anything', 'launch:1'), null);
+    t.cfg.freshEyes = true;
+  });
+});

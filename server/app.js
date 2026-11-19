@@ -60,6 +60,7 @@ import { createTaps, injectTaps, TAP_JS } from './taps.js';
 import { installRoom } from './room.js';
 import { installEventLog } from './eventlog.js';
 import { installChecklist } from './checklist.js';
+import { installFreshEyes } from './fresheyes.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any main-site cookie, page or API.
@@ -752,7 +753,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
   const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext), installShots(ext), installJobCards(ext), installEstimates(ext), installWeekPlans(ext), installOnboarding(ext), installOwnSpend(ext), installRanked(ext)].filter(Boolean);  // estimates after job cards: they add to the boss's cards
   // Round 2, lane A: the floor room's own data (server/room.js).
-  extensions.push(...[installRoom(ext), installEventLog(ext), installChecklist(ext)].filter(Boolean));
+  extensions.push(...[installRoom(ext), installEventLog(ext), installChecklist(ext), installFreshEyes(ext)].filter(Boolean));
   // The budget check, inside the server: a spend record every two hours (server/spendcheck.js, redesign job 5).
   const spendCheck = installSpendCheck({ db, cfg, log, now });
   extensions.push(spendCheck);
@@ -1231,7 +1232,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   engine.selfOrigin = () => { const a = server.address(); return cfg.publicOrigin ? new URL(cfg.publicOrigin).origin : `http://127.0.0.1:${a?.port ?? cfg.port}`; };
   server.requestTimeout = Math.max(cfg.requestTimeoutMs, cfg.uploadTimeoutMs); server.headersTimeout = 15000; server.keepAliveTimeout = 5000; server.maxConnections = 1200;
   return {
-    server, engine, bus, rates, cloud,
+    server, engine, bus, rates, cloud, ext,  // ext: read by the tests (round 2 lane A hooks hang off it)
     /** Brotli every asset ahead of the first visitor. Called by the real entry point only, so tests don't pay for it. */
     warmStatics: () => warmBrotli(statics),
     async close() {

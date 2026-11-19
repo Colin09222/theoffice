@@ -20,6 +20,9 @@ export function sniffImage(b) {
   if (b.length > 12 && b.toString('latin1', 0, 4) === 'RIFF' && b.toString('latin1', 8, 12) === 'WEBP') return { mime: 'image/webp', ext: 'webp' };
   return null;
 }
+/** r2-j59: what the fresh-eyes reviewer is asked. One score, 1 to 5, on the first line; under 3 means it isn't right yet. */
+export const freshEyesPrompt = (lines = []) => `A small team has just launched this page or game. You are seeing it for the first time: first the desktop view, then the phone view. Judge whether it works and looks right for a real visitor${lines.length ? ', and whether it does what the team said it would:\n' + lines.map((l, i) => `${i + 1}. ${String(l).slice(0, 200)}`).join('\n') : '.'}
+Reply in under 200 words. First line exactly "SCORE: n", n from 1 to 5 (5 ready and good, 3 acceptable, under 3 something looks wrong or broken). Then at most three numbered problems, each with the fix. Nothing else.`;
 const REVIEW_PROMPT = `You are a blunt senior product designer reviewing screenshots of a page or game that is about to be published: first the desktop view, then the phone view if there are two. Be specific and unsentimental. Say so if it looks like a generic AI-made template that could be about anything. Reply in under 300 words:
 1. The three biggest visual problems across the views, each with the fix (hierarchy, spacing, type, colour, contrast, alignment, anything that looks broken, cramped, empty or generic). Start each one with [broken] if a person would get stuck, misread it or take it for unfinished, or [better] if it would just look better. Too small to read, or a phone screen that is mostly empty, is [broken].
 2. Anything on the page that looks invented: customer reviews, testimonials, ratings, customer counts, press logos, phone numbers, addresses, or claims a brand-new company could not honestly make. Name each one. If there are none, say "None seen".
@@ -107,6 +110,14 @@ export function createMedia({ cfg, tools, httpFetch = fetch }) {
       if (bytes.length > MAX_IMAGE_BYTES) throw new ProviderError('The picture came back too large.');
       return { bytes, ...type, usage: usageOf(j, tools.image.estimateUsd || 0.2) };
     },
+    // r2-j59, fresh eyes: one look at a launch on the review model, desktop and phone pictures and the job's done-means lines; a score of 1 to 5.
+    async freshEyes({ desktop, phone, lines, signal }) {
+      const img = (b) => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b.toString('base64')}` } });
+      const j = await post({ model: tools.review.model, max_tokens: 1200, messages: [{ role: 'user', content: [{ type: 'text', text: freshEyesPrompt(lines) }, img(desktop), ...(phone ? [img(phone)] : [])] }] }, signal);
+      const text = String(j.choices?.[0]?.message?.content ?? '').trim();
+      if (!text) throw new ProviderError('The reviewer had nothing to say.');
+      return { text, model: tools.review.model, usage: usageOf(j, tools.review.estimateUsd || 0.05) };
+    },
     async reviewDesign({ bytes, mime, phone, context, signal }) {
       const j = await post({ model: tools.review.model, max_tokens: tools.review.maxTokens || 4000, messages: [{ role: 'user', content: [
         { type: 'text', text: `${REVIEW_PROMPT}${context ? `\n\nWhat this page is meant to be: ${String(context).slice(0, 500)}` : ''}` },
@@ -156,4 +167,5 @@ export const createMockMedia = (tools) => ({
   },
   async generateImage() { return { bytes: TINY, mime: 'image/png', ext: 'png', usage: { prompt: 10, completion: 10, cost: 0.04 } }; },
   async reviewDesign() { return { text: '1. The heading is timid. Make it larger.\n2. None seen.\n3. FIX FIRST.', usage: { prompt: 100, completion: 40, cost: 0.01 } }; },
+  async freshEyes({ lines }) { return { text: `SCORE: 4\n1. Looks finished on both screens.\n2. ${lines?.length ? 'Done-means lines met.' : 'No done-means lines given.'}`, model: tools.review?.model || 'mock-review', usage: { prompt: 120, completion: 30, cost: 0.01 } }; },
 });

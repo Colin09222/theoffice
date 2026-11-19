@@ -323,6 +323,10 @@ CREATE TABLE IF NOT EXISTS job_events (
 );
 CREATE INDEX IF NOT EXISTS job_events_card ON job_events(card_id, created_at);
 CREATE INDEX IF NOT EXISTS job_events_floor ON job_events(floor_id, created_at);
+CREATE TABLE IF NOT EXISTS fresh_eyes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, launch_key TEXT NOT NULL, score INTEGER, notes TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '', fix_task_id INTEGER, created_at INTEGER NOT NULL, UNIQUE (floor_id, project, launch_key)
+);
 CREATE TABLE IF NOT EXISTS launch_checklists (floor_id INTEGER NOT NULL, project TEXT NOT NULL, result TEXT NOT NULL, checked_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project));
 `;
 

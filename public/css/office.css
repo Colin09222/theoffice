@@ -73,3 +73,6 @@
 .replay-card .tl-title { font-size: 15px; }
 .replay-card .tl-state { font-size: 12px; color: #5d6472; white-space: nowrap; }
 .replay-card .tl-line { margin: 4px 0 0; font-size: 14px; line-height: 1.35; }
+/* r2-j59: the fresh-eyes score on the boss's Launch tab. */
+.maker-fresh { margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: #f4efe4; }
+.maker-fresh p { margin: 4px 0 0; font-size: 14px; white-space: pre-line; }

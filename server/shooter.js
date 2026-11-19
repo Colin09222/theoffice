@@ -6,6 +6,8 @@
 import { lookup } from 'node:dns/promises';
 
 export const SHOT = { width: 1280, height: 800, scale: 0.5, quality: 72 };
+/** A phone-sized picture (r2-j59's fresh-eyes review): 390 by 844, as a phone sees it. */
+export const PHONE_SHOT = { width: 390, height: 844, scale: 1, quality: 72, mobile: true };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -24,7 +26,7 @@ export async function makeShooter({ cdpUrl = '', timeoutMs = 20000, settleMs = 1
   for (let i = 0; i < 50 && !up; i++) { try { up = (await fetch(`${base}/json/version`)).ok; } catch { await sleep(100); } }
   if (!up) { onClose?.(); return null; }
 
-  async function shoot(url) {
+  async function shoot(url, size = SHOT) {
     const made = await (await fetch(`${base}/json/new?about:blank`, { method: 'PUT' })).json();
     const ws = new WebSocket(made.webSocketDebuggerUrl.replace(/^ws:\/\/[^/]+/, base.replace(/^http/, 'ws')));
     await new Promise((resolve, reject) => { ws.addEventListener('open', resolve, { once: true }); ws.addEventListener('error', reject, { once: true }); });
@@ -39,12 +41,12 @@ export async function makeShooter({ cdpUrl = '', timeoutMs = 20000, settleMs = 1
     try {
       const work = (async () => {
         await send('Page.enable');
-        await send('Emulation.setDeviceMetricsOverride', { width: SHOT.width, height: SHOT.height, deviceScaleFactor: 1, mobile: false });
+        await send('Emulation.setDeviceMetricsOverride', { width: size.width, height: size.height, deviceScaleFactor: 1, mobile: !!size.mobile });
         // Sound off and no prompts: a page is looked at, never interacted with.
         await send('Page.navigate', { url });
         await Promise.race([loadedP, sleep(timeoutMs - settleMs - 500)]);
         await sleep(settleMs);
-        const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: SHOT.quality, clip: { x: 0, y: 0, width: SHOT.width, height: SHOT.height, scale: SHOT.scale } });
+        const r = await send('Page.captureScreenshot', { format: 'jpeg', quality: size.quality, clip: { x: 0, y: 0, width: size.width, height: size.height, scale: size.scale } });
         return Buffer.from(r.data, 'base64');
       })();
       work.catch(() => {});  // a page that loses the race may still fail later, quietly
