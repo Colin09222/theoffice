@@ -10,6 +10,7 @@
 import { createHash } from 'node:crypto';
 import { get, all, run } from './db.js';
 import { redactor } from './engine.js';
+import { queueJobShot } from './shots.js';
 
 const GONE = new Set(['cancelled']);
 const DONE = new Set(['done']);
@@ -79,22 +80,31 @@ export function refreshCard(db, taskId, now = Date.now()) {
 /** A manager's words after a round it ran on its own: kept for its memory, never shown in the chat (STATUS_FROM_CODE=0 shows them again). */
 export function markQuiet(db, floorId, messageId) { run(db, 'INSERT OR IGNORE INTO quiet_messages (message_id, floor_id) VALUES (?,?)', messageId, floorId); }
 
-/** A card as the boss reads it. */
-export const cardView = (r) => ({ id: r.id, project: r.project, title: r.title, state: r.state, step: r.step, steps: r.steps, agentId: r.agent_id, who: r.who, line: r.line, thumb: r.thumb || null, createdAt: r.created_at, updatedAt: r.updated_at, doneAt: r.done_at });
+/** A card as the boss reads it. `base` is the office's path, for the thumbnail's address. */
+export const cardView = (r, floor = null, base = '/theoffice') => ({ id: r.id, project: r.project, title: r.title, state: r.state, step: r.step, steps: r.steps, agentId: r.agent_id, who: r.who, line: r.line,
+  thumb: r.thumb && floor?.slug ? `${base}/api/floors/${floor.slug}/jobshot/${r.thumb}` : null, createdAt: r.created_at, updatedAt: r.updated_at, doneAt: r.done_at });
+const isPrivateCard = (db, floor, r) => (r.project ? !!get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', floor.id, r.project)?.private : !!floor.default_private);
 /** A card as a visitor reads it: private work says only that it is private; names of private things are taken out of the rest. */
-export function publicCard(db, floor, r) {
-  const priv = r.project ? !!get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', floor.id, r.project)?.private : !!floor.default_private;
-  if (priv) return { ...cardView(r), project: '', title: PRIVATE_JOB, line: PRIVATE_JOB, thumb: null };
+export function publicCard(db, floor, r, base) {
+  if (isPrivateCard(db, floor, r)) return { ...cardView(r, floor, base), project: '', title: PRIVATE_JOB, line: PRIVATE_JOB, thumb: null };
   const hide = redactor(db, floor.id);
-  return { ...cardView(r), title: hide(r.title), line: hide(r.line) };
+  return { ...cardView(r, floor, base), title: hide(r.title), line: hide(r.line) };
 }
 /** The floor's newest cards, newest first. */
-export function floorCards(db, floor, { owner = false, limit = 30 } = {}) {
-  return all(db, 'SELECT * FROM job_cards WHERE floor_id=? ORDER BY updated_at DESC, id DESC LIMIT ?', floor.id, limit).map((r) => (owner ? cardView(r) : publicCard(db, floor, r)));
+export function floorCards(db, floor, { owner = false, limit = 30, base } = {}) {
+  return all(db, 'SELECT * FROM job_cards WHERE floor_id=? ORDER BY updated_at DESC, id DESC LIMIT ?', floor.id, limit).map((r) => (owner ? cardView(r, floor, base) : publicCard(db, floor, r, base)));
 }
 
 export function installJobCards(ext) {
-  const { db, cfg, engine, hooks, now } = ext;
+  const { db, cfg, engine, hooks, now, GET, send, floorBySlug, viewerFor, HttpError, BASE } = ext;
+  const sendCard = (r) => {
+    const floor = get(db, 'SELECT id, slug, default_private FROM floors WHERE id=?', r.floor_id);
+    engine.emit(r.floor_id, 'jobcard', cardView(r, floor, BASE), { persist: false, ownerOnly: true, project: r.project });
+    engine.emit(r.floor_id, 'jobcard_public', publicCard(db, floor, r, BASE), { persist: false });
+  };
+  // A step photo arrived (server/shots.js): the card goes out again with its thumbnail.
+  ext.cardChanged = (cardId) => { const r = get(db, 'SELECT * FROM job_cards WHERE id=?', cardId); if (r) sendCard(r); };
+  const askShot = (r, step) => { if (r && queueJobShot(db, { floorId: r.floor_id, cardId: r.id, step, project: r.project, now: now() })) ext.shotsNudge?.(); };
   // Every task change already goes out through emitTask; the card for its job follows it, and goes out too: whole to the boss, as a visitor
   // may read it to everyone else.
   const emitTask = engine.emitTask.bind(engine);
@@ -104,13 +114,33 @@ export function installJobCards(ext) {
     try {
       const r = refreshCard(db, id, now());
       if (!r) return;
-      const floor = get(db, 'SELECT id, default_private FROM floors WHERE id=?', r.floor_id);
-      engine.emit(r.floor_id, 'jobcard', cardView(r), { persist: false, ownerOnly: true, project: r.project });
-      engine.emit(r.floor_id, 'jobcard_public', publicCard(db, floor, r), { persist: false });
+      sendCard(r);
+      // A step handed in or finished on a project that is up: one photo of it for the timeline (four a job at most).
+      const t = get(db, 'SELECT status, project FROM tasks WHERE id=?', id);
+      if (t && ['done', 'review'].includes(t.status) && t.project) askShot(r, `task:${id}`);
     } catch (e) { ext.log?.('warn', 'job card', { err: String(e?.message || e).slice(0, 160) }); }
   };
+  // Going live is a step everyone wants to see: the newest card for that project gets a photo of the live page.
+  const emitProject = engine.emitProject.bind(engine);
+  engine.emitProject = (floorId, slug) => {
+    emitProject(floorId, slug);
+    if (cfg.jobCards === false) return;
+    try {
+      const at = get(db, 'SELECT published_at FROM projects WHERE floor_id=? AND slug=?', floorId, slug)?.published_at;
+      if (at) askShot(get(db, 'SELECT * FROM job_cards WHERE floor_id=? AND project=? ORDER BY updated_at DESC, id DESC LIMIT 1', floorId, slug), `publish:${at}`);
+    } catch (e) { ext.log?.('warn', 'job card shot', { err: String(e?.message || e).slice(0, 160) }); }
+  };
+  // A step photo. The boss sees every one of their floor's; a visitor only one of public work.
+  GET('/api/floors/:slug/jobshot/:id', async ({ req, res, p }) => {
+    const f = floorBySlug(p.slug);
+    const shot = /^\d{1,12}$/.test(p.id) ? get(db, 'SELECT s.image, c.project, c.floor_id FROM job_shots s JOIN job_cards c ON c.id = s.card_id WHERE s.id=? AND s.floor_id=? AND s.image IS NOT NULL', Number(p.id), f.id) : null;
+    if (!shot) throw new HttpError(404, 'not_found');
+    const viewer = viewerFor(req, f);
+    if (!viewer.owner && (f.filler && !cfg.demoFloorsPublic ? false : isPrivateCard(db, f, shot))) throw new HttpError(404, 'not_found');
+    send(res, 200, Buffer.from(shot.image), { 'content-type': 'image/jpeg', 'cache-control': viewer.owner ? 'private, max-age=3600' : 'public, max-age=3600' });
+  });
   hooks.snapshot.push((f, viewer, out) => {
-    if (cfg.jobCards !== false) out.jobs = floorCards(db, f, { owner: viewer.owner });
+    if (cfg.jobCards !== false) out.jobs = floorCards(db, f, { owner: viewer.owner, base: BASE });
     if (Array.isArray(out.messages)) {
       const quiet = new Set(all(db, 'SELECT message_id id FROM quiet_messages WHERE floor_id=?', f.id).map((r) => r.id));
       if (quiet.size) out.messages = out.messages.filter((m) => !quiet.has(m.id));

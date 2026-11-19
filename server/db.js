@@ -222,6 +222,12 @@ CREATE TABLE IF NOT EXISTS job_cards (
 );
 CREATE INDEX IF NOT EXISTS job_cards_floor ON job_cards(floor_id, updated_at);
 CREATE TABLE IF NOT EXISTS quiet_messages (message_id INTEGER PRIMARY KEY, floor_id INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS job_shots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, card_id INTEGER NOT NULL, step TEXT NOT NULL, project TEXT NOT NULL,
+  image BLOB, bytes INTEGER NOT NULL DEFAULT 0, url TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, taken_at INTEGER, failed_at INTEGER, tries INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (card_id, step)
+);
+CREATE INDEX IF NOT EXISTS job_shots_pending ON job_shots(taken_at, failed_at);
 `;
 
 export function openDb(dataDir) {

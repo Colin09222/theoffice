@@ -273,3 +273,26 @@ body[data-page="admin"] { background: var(--c-paper); }
   .hero-strip .lcard { flex: 0 0 62%; scroll-snap-align: start; }
 }
 .hero > p[hidden] { display: none; }
+
+/* ---- the Timeline: one card per job, a small bean face, one line, the time, a photo of the step ---- */
+.timeline { list-style: none; margin: 0; padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1 1 auto; min-height: 0; background: var(--c-paper); }
+.tl-item { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: start; padding: 12px; background: var(--c-card); border: 1px solid var(--c-line); border-radius: var(--card-r); }
+.tl-face .portrait { width: 40px; height: 44px; border-radius: 10px; }
+.tl-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tl-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.tl-title { font: 600 15px/1.25 var(--f-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tl-state { flex: none; font: 500 12px/1.3 var(--f-body); color: var(--c-slate); }
+.tl-state[data-state="working"]::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: var(--c-amber); vertical-align: 1px; }
+.tl-state[data-state="done"] { color: var(--c-teal); }
+.tl-state[data-state="failed"], .tl-state[data-state="waiting"] { color: var(--c-red); }
+.tl-line { margin: 0; font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
+.tl-time { font: 500 12px var(--f-body); color: var(--c-slate); }
+.tl-thumb { display: block; width: 96px; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; border: 1px solid var(--c-line); background: var(--c-paper); }
+.tl-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+.tl-msg.boss { background: var(--c-paper); border-color: var(--c-slate); }
+.timeline .empty { background: var(--c-card); border: 1px solid var(--c-line); border-radius: var(--card-r); padding: 16px; font-weight: 500; }
+/* A new card slides in. Nothing else on the timeline moves. */
+.tl-new { animation: tl-in .32s cubic-bezier(.2, .8, .2, 1); }
+@keyframes tl-in { from { opacity: 0; transform: translateY(-10px); } }
+@media (prefers-reduced-motion: reduce) { .tl-new { animation: none; } }
+@media (max-width: 760px) { .tl-thumb { width: 80px; } }

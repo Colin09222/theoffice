@@ -231,7 +231,7 @@ export function loadConfig(env = process.env, overrides = {}) {
     // Launch card photos (server/shots.js): taken every 7 days by a timer that checks hourly, when a browser is reachable. SHOTS=0 stops the timer.
     // Status from code (server/jobcards.js): one card per job built from task rows; no model writes a status or round-report line (STATUS_FROM_CODE=0 for the old way).
     jobCards: env.JOB_CARDS !== '0', statusFromCode: env.STATUS_FROM_CODE !== '0',
-    shots: env.SHOTS !== '0', shotsEveryMs: num(env.SHOTS_EVERY_MS, 3600000), shotsChrome: env.SHOTS_CHROME || '', shotsCdpUrl: env.SHOTS_CDP_URL || '', shotsOrigin: (env.SHOTS_ORIGIN || '').replace(/\/+$/, ''), banterUsdPerFloorDay: num(env.BANTER_USD_PER_FLOOR_DAY, 2), banterPace: env.BANTER_PACE !== '0',
+    shots: env.SHOTS !== '0', shotsEveryMs: num(env.SHOTS_EVERY_MS, 3600000), shotsNudgeMs: num(env.SHOTS_NUDGE_MS, 3000), shotsChrome: env.SHOTS_CHROME || '', shotsCdpUrl: env.SHOTS_CDP_URL || '', shotsOrigin: (env.SHOTS_ORIGIN || '').replace(/\/+$/, ''), banterUsdPerFloorDay: num(env.BANTER_USD_PER_FLOOR_DAY, 2), banterPace: env.BANTER_PACE !== '0',
     asksPerTask: num(env.ASKS_PER_TASK, 4), asksPerFloorDay: num(env.ASKS_PER_FLOOR_DAY, 80),
     // The help line: a manager can ask the owner's assistant for guidance. No credential is involved: the assistant answers through scripts/admin.mjs or the admin view.
     helpEnabled: env.HELP_ENABLED !== '0',

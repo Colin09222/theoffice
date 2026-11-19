@@ -50,6 +50,12 @@ for (const [kind, w, h] of sizes) {
       await p.ev('(() => { const v = window.__office?.view; if (v && v.intro < 1) v.intro = 0.999; return true; })()').catch(() => {});
       await sleep(800);
       await snap('floor');
+      // The Timeline tab (job 13 on): the job cards, newest first.
+      if (await p.ev('!!window.__office?.setTab && Array.isArray(window.__office.state?.jobs)')) {
+        await p.ev("window.__office.setTab('talk'); true");
+        await sleep(1500);
+        await snap('timeline');
+      }
     } catch (e) { console.log('FAILED', kind, who, e.message); errors++; }
     // Not every failed request is a page error (a sound that never loads in a headless box, say); console errors are.
     if (p.errors.length) { console.log('console errors', kind, who, p.errors.slice(0, 6)); errors += p.errors.length; }
