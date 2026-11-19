@@ -28,6 +28,7 @@ import { chatAdminCommand } from '../server/cloud/chat.js';
 import { setContractor, contractorListing, contractorListingText, completeJob, ContractorError, SUMMARY_MAX } from '../server/contractor.js';
 import { pingContractor } from '../server/contractorping.js';
 import { refusalListing, refusalListingText } from '../server/handback.js';
+import { spendListing, spendListingText, writeSpendRecord } from '../server/spendcheck.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -80,6 +81,8 @@ const usage = () => {
     '  node scripts/admin.mjs contractor ping --task N   send buddehbot the contractor ping again for a job still held (OPENCLAW_HOOK_URL and OPENCLAW_HOOK_TOKEN)',
     '  node scripts/admin.mjs contractor done --task N --summary-file PATH   hand a held job back with what was done: the task finishes with that report on the server\'s next tick, and the floor carries on. Upload files to the floor\'s drive first, the usual way',
     '  node scripts/admin.mjs floor-limit --floor N [--claude USD] [--openrouter USD] [--fable USD] [--opus USD] [--openrouter-only MODEL [--effort low|medium|high|xhigh]] [--no-openrouter-only] [--clear]   top one floor up: raises its stops or moves where its models switch, or puts every Claude call it makes on one OpenRouter model (no computer there), then shows where it stands (admin only, and it takes effect on the server\'s next tick)',
+    '  node scripts/admin.mjs spend [--last N] [--json]   the server\'s spend records (one every 2 hours): both pots spent, cap and left, each floor this week and yesterday, and when the last one was written',
+    '  node scripts/admin.mjs spend write             write one spend record now',
     '  node scripts/admin.mjs budget [--json]          spent, limit and remaining per provider, what each floor has spent, and a flag at 50%, 80% and 100%',
     '  node scripts/admin.mjs purchases list [--json]  what the staff have asked to buy and nobody has decided. Everything a floor wrote is fenced as untrusted data',
     '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick',
@@ -445,6 +448,14 @@ if (cmd === 'code' && rest[0] === 'hold') {
     if (Object.keys(over).length) budget.setFloorOverride(floor.id, over);
   }
   console.log(JSON.stringify({ floor: floor.number, ...budget.floorStatus(floor.id) }));
+} else if (cmd === 'spend') {
+  // Reads the records the server writes every two hours. Needs the same BUDGET_ settings as the server only for "spend write".
+  if (rest[0] === 'write') { const r = writeSpendRecord(db, cfg); console.log(JSON.stringify({ written: r.id, at: new Date(r.at).toISOString() })); }
+  else {
+    const i = rest.indexOf('--last');
+    const listing = spendListing(db, { last: i >= 0 ? Number(rest[i + 1]) || 12 : 12 });
+    console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : spendListingText(listing));
+  }
 } else if (cmd === 'budget') {
   // Read from the database and this process's own BUDGET_ settings, so it needs the same environment as the server. It prints no key.
   const report = budgetReport(db, cfg);

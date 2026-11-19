@@ -11,5 +11,8 @@ export function laneBSettings(env = process.env) {
     // original is closed as shipped (HANDBACK_FIX=0 leaves it to the manager, as before). Refusing to hold handed-back work again has no switch.
     contractorRouteOnce: on(env.CONTRACTOR_ROUTE_ONCE),
     handbackFix: on(env.HANDBACK_FIX),
+    // j05, the budget check inside the server (server/spendcheck.js): a spend record every SPEND_CHECK_EVERY_MIN minutes (default 120). SPEND_CHECK=0 stops it.
+    spendCheck: on(env.SPEND_CHECK),
+    spendCheckEveryMs: Math.max(1, Number(env.SPEND_CHECK_EVERY_MIN) || 120) * 60000,
   };
 }

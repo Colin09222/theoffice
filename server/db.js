@@ -217,6 +217,9 @@ CREATE TABLE IF NOT EXISTS hold_refusals (
 );
 CREATE INDEX IF NOT EXISTS hold_refusals_created ON hold_refusals(created_at);
 CREATE TABLE IF NOT EXISTS contractor_pings (task_id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, created_at INTEGER NOT NULL);
+-- j05: the budget check's records, one every two hours (server/spendcheck.js).
+CREATE TABLE IF NOT EXISTS spend_records (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, data TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS spend_records_created ON spend_records(created_at);
 `;
 Object.assign(ADDED.tasks, { contractor_route: 'INTEGER NOT NULL DEFAULT 0', handed_back_at: 'INTEGER', tester_fails: 'INTEGER NOT NULL DEFAULT 0', fix_of: 'INTEGER' });
 /** Lane B's one-time fills, each guarded by a settings row so it runs once. */
