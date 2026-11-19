@@ -1269,7 +1269,7 @@ export class OfficeView {
   setFrames(frames) {
     if (!this.frameWall) return;
     const list = frames?.list || [];
-    const key = JSON.stringify([list.map((f) => [f.slug, f.shot]), frames?.total ?? 0, this.low]);
+    const key = JSON.stringify([list.map((f) => [f.slug, f.shot, !!f.checked]), frames?.total ?? 0, this.low]);
     if (key === this.framesKey) return;
     this.framesKey = key;
     if (this.framesGroup) { this.disposeTree(this.framesGroup); this.framesGroup.removeFromParent(); }
@@ -1297,6 +1297,13 @@ export class OfficeView {
       const m = plane(f.w, f.h, mat, wallX + 0.125, y + f.dy, z + f.dz);
       m.userData.launch = f.launch.slug; this.frameMeshes.push(m);
       if (f.launch.shot) this.framePhoto(m, f.launch.shot);
+      // r2-j58: the launch checklist's stamp on a small plaque under the frame, when all eight checks passed.
+      if (f.launch.checked) {
+        const tag = canvasTex(256, 64, (x, w, h) => { x.fillStyle = '#f7f1e4'; x.fillRect(0, 0, w, h); x.strokeStyle = '#2f7a4a'; x.lineWidth = 6; x.strokeRect(8, 8, w - 16, h - 16); x.fillStyle = '#2f7a4a'; x.font = '700 28px Inter, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(`CHECKED ${f.launch.checked.passed} of ${f.launch.checked.of}`, w / 2, h / 2 + 1); });
+        const pw = Math.min(f.w * 0.8, 0.9);
+        const plaque = plane(pw, pw / 4, new THREE.MeshBasicMaterial({ map: tag, toneMapped: false }), wallX + 0.13, y + f.dy - f.h / 2 - pw / 8 - 0.06, z + f.dz);
+        plaque.userData.checked = `${f.launch.checked.passed}/${f.launch.checked.of}`; m.userData.plaque = plaque;
+      }
     }
     if (hidden && spots.length) {
       const [z, y] = spots[Math.min(spots.length - 1, lay.frames.at(-1)?.spot ?? 0)];

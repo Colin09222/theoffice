@@ -5,6 +5,7 @@
 import { all, get } from './db.js';
 import { redactor } from './engine.js';
 import { weekOf } from './weekplan.js';
+import { checkedMark } from './checklist.js';
 
 const BASE = '/theoffice';
 const FRAMES_MAX = 8;
@@ -16,12 +17,14 @@ const FRAMES_MAX = 8;
  */
 export function roomFrames(db, f) {
   if (f.filler) return { list: [], total: 0 };
-  const rows = all(db, `SELECT p.slug, p.title, p.published_at, s.taken_at shot_at FROM projects p
+  const rows = all(db, `SELECT p.slug, p.title, p.published_at, s.taken_at shot_at,
+    (SELECT lc.result FROM launch_checklists lc WHERE lc.floor_id = p.floor_id AND lc.project = p.slug) checklist FROM projects p
     LEFT JOIN launch_shots s ON s.floor_id = p.floor_id AND s.project = p.slug AND s.image IS NOT NULL
     WHERE p.floor_id = ? AND p.published_at IS NOT NULL AND p.private = 0 ORDER BY p.published_at DESC, p.slug`, f.id);
   const list = rows.slice(0, FRAMES_MAX).map((r) => ({
     slug: r.slug, title: r.title || r.slug, at: r.published_at,
     shot: r.shot_at && !f.hidden && f.status === 'active' ? `${BASE}/api/building/shot/${f.slug}/${r.slug}?v=${r.shot_at}` : null,
+    ...(checkedMark(r.checklist) ? { checked: checkedMark(r.checklist) } : {}),  // r2-j58: the CHECKED 8 of 8 plaque under its frame
   }));
   return { list, total: rows.length };
 }

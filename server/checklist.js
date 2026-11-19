@@ -132,6 +132,16 @@ export function formTester(db, floorId, project, now = Date.now()) {
   };
 }
 
+/**
+ * r2-j58: the CHECKED mark, from a kept checklist: { passed: 8, of: 8 } when all eight passed, otherwise null. It is the code checklist's own
+ * stamp, never anyone's signature (spec Q23: no buddehbot stamp on a launch).
+ */
+export function checkedMark(result) {
+  let r = result;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch { return null; } }
+  const n = r?.checks?.length || 0;
+  return n === CHECKS.length && r.passed === n ? { passed: n, of: n } : null;
+}
 /** The last checklist of each project, as JSON; the boss's Launch tab and the CHECKED mark (r2-j58) read it. */
 export function savedChecklist(db, floorId, project) {
   const r = get(db, 'SELECT result, checked_at FROM launch_checklists WHERE floor_id=? AND project=?', floorId, project);

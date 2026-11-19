@@ -275,6 +275,29 @@ try {
     check(mode === 'cards', `j48 on phone low it is cards and photos only (${mode})`);
     if (shots) await ph.shot(`${shots}/r2-j48-phone-low.jpg`);
   }
+  if (want('j58')) {
+    // r2-j58: a launch that passes shows "CHECKED 8 of 8" on its plaque and card.
+    const boss = await claim(t, 'Checked Tyres');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    publish(t.db, f.id, 'tyres', 'Tyres', Date.now() - 3600000);
+    storeShot(t.db, { floorId: f.id, project: 'tyres', image: REAL_JPEG, url: 'https://tyres.example/' });
+    const checks = ['speed', 'fits', 'links', 'form', 'preview', 'icon', 'notfound', 'https'].map((id) => ({ id, ok: true }));
+    run(t.db, 'INSERT INTO launch_checklists (floor_id, project, result, checked_at) VALUES (?,?,?,?)', f.id, 'tyres', JSON.stringify({ checks, passed: 8, blocked: [], warnings: [] }), Date.now());
+    const p = await openRoom(boss.slug);
+    const plaque = await p.ev('window.__office.view.frameMeshes?.[0]?.userData.plaque?.userData.checked || null');
+    check(plaque === '8/8', `j58 the frame in the room has its CHECKED 8 of 8 plaque (${plaque})`);
+    if (shots) {
+      await p.ev('(() => { const v = window.__office.view; const m = v.frameMeshes[0]; v.targetYaw = v.yaw = 1.3; v.targetZoom = v.zoom = 3.4; v.targetPan.set(m.position.x + 3, m.position.z); v.pan.copy(v.targetPan); })()');
+      await sleep(2500); await p.shot(`${shots}/r2-j58-plaque.jpg`);
+    }
+    const w = await b.newPage({});
+    await w.goto(`${base}/launched/${boss.slug}`);
+    await w.until('!!document.querySelector(".lcard[data-project=tyres]")', 'the card', 60000);
+    const stamp = await w.ev('document.querySelector(".lcard[data-project=tyres] .lcard-checked")?.textContent || null');
+    check(stamp === 'CHECKED 8 of 8', `j58 the launch card reads "${stamp}"`);
+    if (shots) await w.shot(`${shots}/r2-j58-card.jpg`);
+    check(!p.errors.length && !w.errors.length, `j58 no page errors ${[...p.errors, ...w.errors].slice(0, 2).join(' | ')}`);
+  }
 } finally {
   b.close(); await t.close();
 }

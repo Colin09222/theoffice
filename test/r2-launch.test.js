@@ -101,3 +101,31 @@ describe('r2-j57 launch checklist', () => {
     void check;
   });
 });
+
+describe('r2-j58 CHECKED mark', () => {
+  let t, c, visitor;
+  before(async () => { t = await boot(); c = await claim(t, 'Checked Floor'); const { Client } = await import('./helpers.js'); visitor = new Client(t, { origin: null }); });
+  after(() => t.close());
+  const pass8 = { checks: CHECKS.map(([id, label, blocks]) => ({ id, label, blocks, ok: true })), passed: 8, blocked: [], warnings: [] };
+  test('DONE MEANS: a launch that passes shows "CHECKED 8 of 8" on its card and its plaque; 7 of 8 shows nothing', async () => {
+    const { checkedMark } = await import('../server/checklist.js');
+    assert.deepEqual(checkedMark(pass8), { passed: 8, of: 8 });
+    assert.equal(checkedMark({ ...pass8, passed: 7 }), null);
+    assert.equal(checkedMark(null), null); assert.equal(checkedMark('not json'), null);
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const at = Date.now();
+    for (const [slug, r] of [['passed', pass8], ['warned', { ...pass8, passed: 7, warnings: ['icon'] }]]) {
+      run(t.db, 'INSERT INTO projects (floor_id,slug,title,kind,private,published_at,created_at) VALUES (?,?,?,?,0,?,?)', f.id, slug, slug, 'site', at, at - 1000);
+      run(t.db, 'INSERT INTO launch_checklists (floor_id, project, result, checked_at) VALUES (?,?,?,?)', f.id, slug, JSON.stringify(r), at);
+    }
+    run(t.db, 'INSERT INTO projects (floor_id,slug,title,kind,private,published_at,created_at) VALUES (?,?,?,?,0,?,?)', f.id, 'never', 'never', 'site', at, at - 1000);
+    const wall = (await visitor.get(`/api/building/launched?floor=${c.slug}`)).data;
+    const cards = Object.fromEntries(wall.projects.map((x) => [x.slug, x]));
+    assert.deepEqual(cards.passed.checked, { passed: 8, of: 8 }, 'on the card');
+    assert.equal(cards.warned.checked, undefined); assert.equal(cards.never.checked, undefined);
+    const frames = (await visitor.get(`/api/floors/${c.slug}`)).data.room.frames.list;
+    assert.deepEqual(frames.find((x) => x.slug === 'passed').checked, { passed: 8, of: 8 }, 'on the plaque under its frame');
+    assert.equal(frames.find((x) => x.slug === 'warned').checked, undefined);
+    assert.ok(!JSON.stringify(wall).toLowerCase().includes('buddehbot'), 'no buddehbot stamp on a launch');
+  });
+});

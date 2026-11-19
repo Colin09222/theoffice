@@ -14,6 +14,8 @@ export function launchCard(pr, { onFloor, hero = false } = {}) {
       h('img', { src: pr.thumb, alt: '', loading: hero ? 'eager' : 'lazy', width: '640', height: '400', decoding: 'async' })),
     h('div.lcard-body', {},
       pr.wip ? h('span.lcard-wip', {}, 'Work in progress') : null,
+      // r2-j58: the launch checklist's own stamp, when all eight code checks passed. Never anyone's signature.
+      pr.checked ? h('span.lcard-checked', { title: `Passed all ${pr.checked.of} launch checks: speed, phone, links, forms, preview, icon, 404 page, HTTPS` }, `CHECKED ${pr.checked.passed} of ${pr.checked.of}`) : null,
       h('h3.lcard-title', {}, pr.title),
       pr.description ? h('p.lcard-line', {}, pr.description) : null,
       h('p.lcard-use', {}, usage(pr)),
