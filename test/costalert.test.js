@@ -29,7 +29,8 @@ async function fakeGateway(replies = []) {
 }
 const scripted = () => ({ chat: async (a) => { a.onToken?.('Done.'); return { content: 'Done.', toolCalls: [], finish: 'stop', usage: { prompt: 10, completion: 5, cost: 0.001, real: true } }; } });
 async function floor(overrides = {}, deps = {}) {
-  const t = await boot({ peopleTalk: false, hookToken: 'test-hook-token', hookRetryMs: 1, ...overrides }, { llm: scripted(), ...deps });
+  // ownerAlerts off: this file tests the silent log on its own, with its old word to the owner past $20 (the owner's own alerts replace that: owneralerts.test.js).
+  const t = await boot({ peopleTalk: false, hookToken: 'test-hook-token', hookRetryMs: 1, ownerAlerts: false, ...overrides }, { llm: scripted(), ...deps });
   open.push(t);
   const c = await claim(t, `Alerted ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
@@ -107,20 +108,28 @@ describe('the cost alert', () => {
     assert.doesNotMatch(gw.seen[1].body.message, /tell Colon/);
   });
 
-  test('a task sent back three times is told once', async () => {
+  test('a task a Tester fails three times is told once; the manager\'s own send-backs don\'t count (re-hold rule 5)', async () => {
     const gw = await fakeGateway();
-    const h = await floor({ hookUrl: gw.url });
+    const llm = { chat: async (a) => { const c = a.meta?.role === 'tester' ? 'FAIL - the words are still too long.' : 'Done.'; a.onToken?.(c); return { content: c, toolCalls: [], finish: 'stop', usage: { prompt: 10, completion: 5, cost: 0.001, real: true } }; } };
+    const h = await floor({ hookUrl: gw.url }, { llm });
     const w = h.assign('writer', { project: 'words' });
-    for (let round = 1; round <= 4; round++) {
+    for (let round = 1; round <= 3; round++) {
       await until(() => h.task(w.id).status === 'review', { what: `round ${round} to come back` });
-      await h.settled();
-      assert.equal(gw.seen.length, round <= 3 ? 0 : 1, `before send-back ${round}`);
       h.e.reviewTask(h.f, h.mgr, w.id, 'revise', 'Shorter.');
     }
+    await until(() => h.task(w.id).status === 'review', { what: 'the last round' });
     await h.settled();
+    assert.equal(gw.seen.length, 0, 'three send-backs by the manager are not "sent back"');
+    for (let n = 1; n <= 4; n++) {
+      const test = h.assign('tester', { project: 'words', dependsOn: [w.id] });
+      await until(() => h.task(test.id).status === 'review', { what: `test ${n}` });
+      await h.settled();
+      assert.equal(h.task(w.id).tester_fails, n);
+      assert.equal(gw.seen.length, n < 3 ? 0 : 1, `after Tester failure ${n}`);
+    }
     assert.deepEqual(kinds(gw), ['sent-back']);
     assert.equal(gw.seen[0].headers['idempotency-key'], alertKey(`sentback:${w.id}`));
-    assert.match(gw.seen[0].body.message, /What: one task has been sent back 3 times\./);
+    assert.match(gw.seen[0].body.message, /What: a Tester has failed one task 3 times\./);
     assert.match(gw.seen[0].body.message, new RegExp(`Task #${w.id}, role writer`));
   });
 

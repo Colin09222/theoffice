@@ -733,9 +733,10 @@ describe('the admin CLI', () => {
       assert.deepEqual(r.providers.anthropic, { spentUsd: 0, heldUsd: 0, limitUsd: 100, remainingUsd: 100, percent: 0, flag: 'none', stopped: false });
       assert.equal(r.flag, 'none'); assert.deepEqual(r.floors, []);
       spend(db, 'anthropic', 49.9, a); assert.equal(report().providers.anthropic.flag, 'none');
-      spend(db, 'anthropic', 0.1, a); r = report(); assert.equal(r.providers.anthropic.flag, '50%'); assert.equal(r.flag, '50%'); assert.equal(r.providers.anthropic.remainingUsd, 50);
+      // The 50% flag is retired (docs/redesign, job 6): it repeated every day with nothing new.
+      spend(db, 'anthropic', 0.1, a); r = report(); assert.equal(r.providers.anthropic.flag, 'none'); assert.equal(r.flag, 'none'); assert.equal(r.providers.anthropic.remainingUsd, 50);
       spend(db, 'anthropic', 30, a); assert.equal(report().providers.anthropic.flag, '80%');
-      spend(db, 'openrouter', 6, a); r = report(); assert.equal(r.providers.openrouter.flag, '50%'); assert.equal(r.flag, '80%', 'the top-level flag is the highest');
+      spend(db, 'openrouter', 6, a); r = report(); assert.equal(r.providers.openrouter.flag, 'none'); assert.equal(r.flag, '80%', 'the top-level flag is the highest');
       spend(db, 'anthropic', 19.95, a); r = report(); assert.equal(r.providers.anthropic.flag, '100%', 'work has stopped, so the top flag shows'); assert.equal(r.providers.anthropic.stopped, true);
       spend(db, 'anthropic', 1, a); r = report(); assert.equal(r.providers.anthropic.remainingUsd, 0, 'an overrun reads as nothing left'); assert.ok(r.providers.anthropic.percent > 100);
       assert.equal(r.floors[0].floorNumber, 4); assert.equal(r.floors[0].totalUsd, 106.95); assert.equal(r.floors[0].anthropicUsd, 100.95); assert.equal(r.floors[0].openrouterUsd, 6);

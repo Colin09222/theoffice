@@ -182,6 +182,7 @@ export function installOrders(ext) {
     if (floor.status !== 'active') return 'the floor is closed by the building manager';
     if (floor.filler) return 'this is a scripted floor';
     if (engine.globalPaused()) return 'the building is paused';
+    if (engine.nightFrozen?.()) return 'the building is resting for the night';
     if (floor.paused) return 'the floor is paused';
     if (engine.floorState(floor.id).budgetStopped) return 'everyone has gone home for today';
     if (engine.budget.out(engine.agentProvider({ role: 'manager' }, floor.id), floor.id)) return 'work has stopped for now';

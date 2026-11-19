@@ -8,7 +8,8 @@ const TITLE_MAX = 160;
 // Floors Colon has pre-approved: LabStackr (3), TheTireRx (6), Cailyn (7). Every other floor's job waits for his yes.
 const PRE_APPROVED = new Set([3, 6, 7]);
 
-export const pingKey = (jobId) => `theoffice-contractor-job-${jobId}`;
+// Keyed by task, not by job: one task is one ping, ever, however many times something tries to hold it (docs/redesign, re-hold rule 4).
+export const pingKey = (taskId) => `theoffice-contractor-task-${taskId}`;
 
 /** What buddehbot reads. Only the office's own numbers sit outside the fence; the floor's name and the job title are fenced as untrusted data. */
 export function pingMessage({ floorNumber, floorName, taskId, role, title }) {
@@ -40,7 +41,7 @@ export async function pingContractor(cfg, job, { httpFetch = fetch, log = () => 
     message: pingMessage(job), name: `The Office contractor job ${job.id}`, agentId: cfg.hookAgentId, sessionMode: 'isolated',
     deliver: true, channel: cfg.hookChannel, to: cfg.hookTo,
   });
-  const headers = { authorization: `Bearer ${cfg.hookToken}`, 'content-type': 'application/json', 'idempotency-key': pingKey(job.id) };
+  const headers = { authorization: `Bearer ${cfg.hookToken}`, 'content-type': 'application/json', 'idempotency-key': pingKey(job.taskId) };
   const tries = cfg.hookTries ?? 5;
   let status = 0;
   for (let i = 0; i < tries; i++) {

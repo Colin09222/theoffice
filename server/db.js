@@ -208,6 +208,38 @@ Object.assign(ADDED, {
   chat_conversations: { kind: "TEXT NOT NULL DEFAULT 'chat'", visitor: "TEXT NOT NULL DEFAULT ''", cost_usd: 'REAL NOT NULL DEFAULT 0', screened: 'INTEGER NOT NULL DEFAULT 0', off_topic: 'INTEGER NOT NULL DEFAULT 0', flags: "TEXT NOT NULL DEFAULT ''" },
 });
 
+// redesign lane B (docs/redesign/LANE-B.md). Every lane B table and column is here, so the two lanes merge cleanly. Additive only.
+// j04: whether the contractor takes a task, decided once when it is made; when the contractor handed it back (it is never held again after that);
+// how many times a Tester failed it; the handed-back task a fix task fixes; refused re-holds for the admin; and the one ping each task ever gets.
+const LANE_B_SCHEMA = `
+CREATE TABLE IF NOT EXISTS hold_refusals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, task_id INTEGER NOT NULL, why TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS hold_refusals_created ON hold_refusals(created_at);
+CREATE TABLE IF NOT EXISTS contractor_pings (task_id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL, created_at INTEGER NOT NULL);
+-- j05: the budget check's records, one every two hours (server/spendcheck.js).
+CREATE TABLE IF NOT EXISTS spend_records (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at INTEGER NOT NULL, data TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS spend_records_created ON spend_records(created_at);
+-- j06: what reached the owner (the alert log), each alert's last state so it fires once per change, and one digest a day.
+CREATE TABLE IF NOT EXISTS owner_alerts (key TEXT PRIMARY KEY, kind TEXT NOT NULL, text TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'sending', created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS owner_alerts_created ON owner_alerts(created_at);
+CREATE TABLE IF NOT EXISTS owner_alert_state (scope TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS owner_digests (day TEXT PRIMARY KEY, text TEXT NOT NULL, created_at INTEGER NOT NULL);
+`;
+Object.assign(ADDED.tasks, { contractor_route: 'INTEGER NOT NULL DEFAULT 0', handed_back_at: 'INTEGER', tester_fails: 'INTEGER NOT NULL DEFAULT 0', fix_of: 'INTEGER' });
+/** Lane B's one-time fills, each guarded by a settings row so it runs once. */
+function laneBFills(db) {
+  // A database from long before these columns (one with no agent_id on its tasks, say) has nothing to fill, and is never kept from booting by it.
+  const once = (key, fn) => { if (db.prepare('SELECT 1 x FROM settings WHERE key=?').get(key)) return; try { fn(); } catch { /* nothing to fill */ } db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run(key, String(Date.now())); };
+  once('laneb_j04_route_v1', () => {
+    // Work the contractor already handed back is never held again, and work waiting on a contractor floor keeps the routing it would have had.
+    db.exec("UPDATE tasks SET handed_back_at=(SELECT MAX(COALESCE(j.done_at,j.closed_at)) FROM contractor_jobs j WHERE j.task_id=tasks.id AND j.status='closed') WHERE handed_back_at IS NULL AND id IN (SELECT task_id FROM contractor_jobs WHERE status='closed')");
+    db.exec("UPDATE tasks SET contractor_route=1 WHERE handed_back_at IS NULL AND (contractor=1 OR (status='todo' AND floor_id IN (SELECT id FROM floors WHERE contractor=1) AND agent_id IN (SELECT id FROM agents WHERE role IN ('builder','designer','researcher'))))");
+    // One ping per task, ever: the tasks already pinged count.
+    db.exec('INSERT OR IGNORE INTO contractor_pings (task_id,job_id,created_at) SELECT task_id, MIN(id), MIN(created_at) FROM contractor_jobs GROUP BY task_id');
+  });
+}
+
 export function openDb(dataDir) {
   let path = ':memory:';
   if (dataDir !== ':memory:') { mkdirSync(dataDir, { recursive: true }); path = join(dataDir, 'office.db'); }
@@ -221,6 +253,8 @@ export function openDb(dataDir) {
     for (const [name, def] of Object.entries(cols)) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
   }
   db.exec('CREATE INDEX IF NOT EXISTS ledger_provider ON ledger(provider, cost_usd)');
+  db.exec(LANE_B_SCHEMA);
+  laneBFills(db);
   // Rows from before the column existed. A bare claude- id went to the Claude API; an id with a slash is OpenRouter's naming, whoever made the model. Domains are paid from the registrar balance and count towards neither.
   if (db.prepare("SELECT 1 x FROM ledger WHERE provider='' AND kind!='domain' LIMIT 1").get()) {
     db.exec(`UPDATE ledger SET provider = CASE WHEN kind='search' THEN 'anthropic' WHEN kind IN ('image','review') THEN 'openrouter' WHEN model='managed-session' OR model LIKE 'claude-%' THEN 'anthropic' ELSE 'openrouter' END WHERE provider='' AND kind!='domain'`);

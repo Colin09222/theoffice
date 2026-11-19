@@ -196,7 +196,7 @@ export function installModes(ext) {
   /** Why a job can't start on this floor now, or null. Each clears by itself, or by a hand the boss or the building manager already has. */
   function blocker(floor) {
     if (floor.status !== 'active' || floor.filler || !floor.name) return 'closed';
-    if (engine.globalPaused() || floor.paused) return 'paused';
+    if (engine.globalPaused() || floor.paused || engine.nightFrozen?.()) return 'paused';  // the night freeze too (server/owneralerts.js)
     const state = engine.floorState(floor.id);
     if (state.budgetStopped) return 'gone home for today';
     if (engine.budget.out(engine.agentProvider({ role: 'manager' }, floor.id), floor.id)) return 'work has stopped for now';

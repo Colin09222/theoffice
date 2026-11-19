@@ -27,6 +27,9 @@ import { dailyStatus, dailyStatusText, requestDailyRun, setDailyPaused, ensureDa
 import { chatAdminCommand } from '../server/cloud/chat.js';
 import { setContractor, contractorListing, contractorListingText, completeJob, ContractorError, SUMMARY_MAX } from '../server/contractor.js';
 import { pingContractor } from '../server/contractorping.js';
+import { refusalListing, refusalListingText } from '../server/handback.js';
+import { spendListing, spendListingText, writeSpendRecord } from '../server/spendcheck.js';
+import { alertLog, digestFacts, digestText, nightFrozen, setNightFreeze } from '../server/owneralerts.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -75,9 +78,15 @@ const usage = () => {
     '  node scripts/admin.mjs help answer --id N --decline          decline one',
     '  node scripts/admin.mjs contractor --floor N on|off   send floor N\'s Builder, Designer and Researcher jobs to the building\'s outside contractor instead of a model, or stop (off hands anything still held back to the floor\'s own staff). No model is called for a held job',
     '  node scripts/admin.mjs contractor list [--json] [--all]   jobs held for the contractor: floor, task, project, brief and the files on its drive. Everything a floor wrote is fenced as untrusted data',
+    '  node scripts/admin.mjs contractor refusals [--since 24h|7d|90m] [--json]   tries to hold work the contractor already handed back, which the server refused and logged',
     '  node scripts/admin.mjs contractor ping --task N   send buddehbot the contractor ping again for a job still held (OPENCLAW_HOOK_URL and OPENCLAW_HOOK_TOKEN)',
     '  node scripts/admin.mjs contractor done --task N --summary-file PATH   hand a held job back with what was done: the task finishes with that report on the server\'s next tick, and the floor carries on. Upload files to the floor\'s drive first, the usual way',
     '  node scripts/admin.mjs floor-limit --floor N [--claude USD] [--openrouter USD] [--fable USD] [--opus USD] [--openrouter-only MODEL [--effort low|medium|high|xhigh]] [--no-openrouter-only] [--clear]   top one floor up: raises its stops or moves where its models switch, or puts every Claude call it makes on one OpenRouter model (no computer there), then shows where it stands (admin only, and it takes effect on the server\'s next tick)',
+    '  node scripts/admin.mjs spend [--last N] [--json]   the server\'s spend records (one every 2 hours): both pots spent, cap and left, each floor this week and yesterday, and when the last one was written',
+    '  node scripts/admin.mjs spend write             write one spend record now',
+    '  node scripts/admin.mjs alerts [--since 7d] [--json]   what reached the owner: the five immediate alerts and the daily digests, newest first',
+    '  node scripts/admin.mjs digest                  today\'s digest as it would read now (sends nothing)',
+    '  node scripts/admin.mjs freeze [on|off|auto]    the night freeze (23:00 to 08:00 New York): on or off whatever NIGHT_FREEZE says, or auto to follow it. No new floor work starts while frozen',
     '  node scripts/admin.mjs budget [--json]          spent, limit and remaining per provider, what each floor has spent, and a flag at 50%, 80% and 100%',
     '  node scripts/admin.mjs purchases list [--json]  what the staff have asked to buy and nobody has decided. Everything a floor wrote is fenced as untrusted data',
     '  node scripts/admin.mjs purchases mark --id N --status bought|rejected [--note TEXT]   decide one. The floor hears on the server\'s next tick',
@@ -98,6 +107,14 @@ const floorArg = ({ inBuilding = false } = {}) => {
   return n;
 };
 const die = (text) => { console.error(text); process.exit(1); };
+/** --since 24h, 7d or 90m: the moment that far back, in ms. Nothing given is the last 7 days. */
+const sinceArg = (dflt = '7d') => {
+  const i = rest.indexOf('--since');
+  const v = i >= 0 ? rest[i + 1] : dflt;
+  const m = /^(\d+)([mhd])$/.exec(String(v || ''));
+  if (!m) die('--since takes a number and m, h or d, such as 24h.');
+  return Date.now() - Number(m[1]) * { m: 60000, h: 3600000, d: 86400000 }[m[2]];
+};
 const db = openDb(cfg.dataDir);
 if (cmd === 'code' && rest[0] === 'hold') {
   // The code is known only by when it was issued. Neither it nor its hash is printed.
@@ -384,6 +401,9 @@ if (cmd === 'code' && rest[0] === 'hold') {
   if (sub === 'list') {
     const listing = contractorListing(db, { status: rest.includes('--all') ? 'all' : 'held' });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : contractorListingText(listing));
+  } else if (sub === 'refusals') {
+    const listing = refusalListing(db, { since: sinceArg() });
+    console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : refusalListingText(listing));
   } else if (sub === 'ping') {
     // Sends buddehbot the ping again for a job that is still held, such as one held before the ping existed. Same job, same idempotency key.
     const id = Number(valueOf('--task'));
@@ -432,6 +452,25 @@ if (cmd === 'code' && rest[0] === 'hold') {
     if (Object.keys(over).length) budget.setFloorOverride(floor.id, over);
   }
   console.log(JSON.stringify({ floor: floor.number, ...budget.floorStatus(floor.id) }));
+} else if (cmd === 'spend') {
+  // Reads the records the server writes every two hours. Needs the same BUDGET_ settings as the server only for "spend write".
+  if (rest[0] === 'write') { const r = writeSpendRecord(db, cfg); console.log(JSON.stringify({ written: r.id, at: new Date(r.at).toISOString() })); }
+  else {
+    const i = rest.indexOf('--last');
+    const listing = spendListing(db, { last: i >= 0 ? Number(rest[i + 1]) || 12 : 12 });
+    console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : spendListingText(listing));
+  }
+} else if (cmd === 'alerts') {
+  const list = alertLog(db, { since: sinceArg('7d') });
+  console.log(rest.includes('--json') ? JSON.stringify(list, null, 2) : list.length ? list.map((a) => `${a.at}  [${a.kind}, ${a.status}]\n${a.text}\n`).join('\n') : 'Nothing reached the owner.');
+} else if (cmd === 'digest') {
+  const fence = newFence();
+  console.log(`${fence.notice}\n\n${digestText(digestFacts(db, cfg, Date.now(), { budget: createBudget(db, cfg, Date.now, loadModels().floorLimits) }), fence)}`);
+} else if (cmd === 'freeze') {
+  const want = rest.find((x) => ['on', 'off', 'auto'].includes(x));
+  if (want) setNightFreeze(db, want);
+  const set = get(db, "SELECT value FROM settings WHERE key='night_freeze'")?.value || 'auto';
+  console.log(JSON.stringify({ setting: set, env: cfg.nightFreeze ? 'on' : 'off', window: `${cfg.nightFreezeFrom} to ${cfg.nightFreezeTo} ${cfg.nightFreezeTz}`, frozenNow: nightFrozen(db, cfg) }));
 } else if (cmd === 'budget') {
   // Read from the database and this process's own BUDGET_ settings, so it needs the same environment as the server. It prints no key.
   const report = budgetReport(db, cfg);

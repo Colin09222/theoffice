@@ -44,6 +44,8 @@ import { installMakers } from './makers.js';
 import { installServers, CLOUD_PATH } from './servers.js';
 import { installNumbers } from './numbers.js';
 import { installDaily } from './daily.js';
+import { installSpendCheck, spendListing, freshnessLine } from './spendcheck.js';
+import { alertLog, nightFrozen, setNightFreeze } from './owneralerts.js';
 import { absoluteMeta } from './metaabs.js';
 
 const BASE = '/theoffice';
@@ -729,6 +731,32 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
   const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext)].filter(Boolean);
+  // The budget check, inside the server: a spend record every two hours (server/spendcheck.js, redesign job 5).
+  const spendCheck = installSpendCheck({ db, cfg, log, now });
+  extensions.push(spendCheck);
+  // The owner's digest at 08:05 New York time (server/owneralerts.js, job 6). The five immediate alerts are checked where they happen, in the engine.
+  extensions.push((() => { let timer = null; return {
+    start() { engine.ownerAlerts.digestTick(); timer = setInterval(() => engine.ownerAlerts.digestTick(), cfg.digestTickMs ?? 60000); timer.unref?.(); },
+    stop() { clearInterval(timer); timer = null; },
+  }; })());
+  GET('/api/admin/alerts', async ({ req, res }) => {
+    requireAdmin(req);
+    const digest = get(db, 'SELECT day, text, created_at FROM owner_digests ORDER BY day DESC LIMIT 1');
+    const spend = spendListing(db, { last: 1, now: now(), fenced: false });
+    json(res, 200, { alerts: alertLog(db, { since: now() - 7 * 86400000 }), digest: digest ? { day: digest.day, text: digest.text } : null, nightFreeze: { now: nightFrozen(db, cfg, now()), from: cfg.nightFreezeFrom, to: cfg.nightFreezeTo }, costs: { stale: spend.stale, line: freshnessLine(spend) } });
+  });
+  POST('/api/admin/freeze', async ({ req, res, ip }) => {
+    requireAdmin(req); limit('mutate', ip);
+    const b = await readJson(req, 256);
+    if (!['on', 'off', 'auto'].includes(b.mode)) throw new HttpError(400, 'bad_mode');
+    setNightFreeze(db, b.mode);
+    engine.kick();
+    json(res, 200, { ok: true, mode: b.mode, frozenNow: nightFrozen(db, cfg, now()) });
+  });
+  GET('/api/admin/spend', async ({ req, res, url }) => {
+    requireAdmin(req);
+    json(res, 200, spendListing(db, { last: Number(url.searchParams.get('last')) || 12, now: now() }));
+  });
   // Email: every company's own address. See docs/MAIL.md.
   const mail = installMail(ext);
   extensions.push(mail);
