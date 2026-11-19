@@ -63,7 +63,7 @@ describe('six working roles', () => {
       return get(h.db, "SELECT COUNT(*) n FROM ledger WHERE floor_id=? AND kind='talk-meeting'", h.f.id).n;
     };
     assert.equal(await meetings({}), 0);
-    assert.ok(await meetings({ teamMeetings: true }) > 0, 'switched back on, the huddle happens');
+    assert.ok(await meetings({ teamMeetings: true, statusFromCode: false }) > 0, 'switched back on, the huddle happens');  // the huddle in the model's words also needs STATUS_FROM_CODE=0 since job 12
   });
 
   test('the Business Development bean is off unless BIZ_DEV_BEAN=1', async () => {
