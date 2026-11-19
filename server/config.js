@@ -76,9 +76,9 @@ export function loadConfig(env = process.env, overrides = {}) {
     // Off unless set: what stops the money is the building's lifetime limit below. Each of these would stop a job long before that.
     floorDailyUsd: cap(env.FLOOR_DAILY_USD, Infinity),
     globalDailyUsd: cap(env.GLOBAL_DAILY_USD, Infinity),
-    // The hard stop on one task (docs/redesign, job 7): $5 unless TASK_MAX_USD says otherwise, or the task carries its own cap (tasks.cap_usd, Tier 3's $6).
-    // A task that reaches it is ended: what it saved ships as Work in progress, or it closes. No bot is told it exists. "off" turns it off.
-    taskMaxUsd: cap(env.TASK_MAX_USD, 5),
+    // The exception, a safety net and not a budget: one task can't eat the building if it gets stuck. Normal work never reaches it, no bot is told it exists, and the boss hears plainly if it ever bites. "off" turns it off.
+    // Back at $40 by the owner's ruling of 2026-11-19 (no budget rules: the redesign's job 7 $5 stop is dropped). A task can still carry its own cap (tasks.cap_usd) when one is set.
+    taskMaxUsd: cap(env.TASK_MAX_USD, 40),
     // What the whole building may ever spend with each provider. Counted over the whole ledger, for the admin's eyes only. Raising one and restarting starts the work again.
     budgetAnthropicUsd: lifetime(env.BUDGET_ANTHROPIC_USD, 120),
     budgetOpenrouterUsd: lifetime(env.BUDGET_OPENROUTER_USD, 120),

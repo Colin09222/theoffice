@@ -53,7 +53,7 @@ describe('the settings', () => {
     const c = loadConfig({});
     for (const k of ['floorDailyUsd', 'globalDailyUsd', 'sessionMaxUsd', 'maxStaff', 'maxManagerSteps', 'maxOpenTasks', 'maxTasksPerDay', 'maxRevisions', 'sessionMaxSteps', 'sessionMaxMinutes', 'maxSessionsFloor', 'maxSessionsGlobal', 'maxFixTurns', 'imagesPerFloorDay', 'imagesPerTask', 'reviewsPerFloorDay', 'searchesPerFloorDay', 'ordersPerFloor', 'ordersMaxFails']) assert.equal(c[k], Infinity, k);
     assert.equal(c.sessionWrapUp, undefined, 'nothing can tell a job to stop polishing any more');
-    assert.equal(c.taskMaxUsd, 5, 'the hard stop per task is the one money limit left on by default ($5 since the redesign, job 7)');
+    assert.equal(c.taskMaxUsd, 40, 'the safety net is the one money limit left on by default');
     // Since 11-10, a staff job's steps and a project's rounds are capped unless set to off (test/rounds.test.js).
     assert.deepEqual([c.maxStaffSteps, c.loopMaxRetests, c.loopMaxReplans], [40, 1, 1], 'one re-test and one re-plan since the redesign (job 10)');
   });
@@ -392,8 +392,7 @@ describe('computers with no limits of their own', () => {
   const usageFor = (usd) => ({ input_tokens: Math.round(usd * 250000), output_tokens: 0 });
   async function computerFloor(script = {}, overrides = {}) {
     const sessions = createMockSessions({}, script);
-    // These sessions run past $5 on purpose: they test the slices, not the hard stop per task (job 7, hardcap.test.js).
-    const h = await floor(null, { computerEnabled: true, outputLagMs: 0, taskMaxUsd: Infinity, ...overrides }, { sessions });
+    const h = await floor(null, { computerEnabled: true, outputLagMs: 0, ...overrides }, { sessions });
     h.e.runManager = async () => {};
     h.sessions = sessions;
     h.settle = (id, statuses = ['review', 'failed', 'blocked', 'done', 'cancelled']) => until(() => { const r = get(h.t.db, 'SELECT * FROM tasks WHERE id=?', id); return statuses.includes(r.status) && !h.e.runs.size ? r : null; }, { timeout: 30000, what: 'the computer to finish' });

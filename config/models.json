@@ -48,7 +48,7 @@
     ]
   },
   "tiers": {
-    "_comment": "Model tiers (docs/redesign/OFFICE-ANSWERS-1.md, Q9; job 17). Each task records its tier when it starts: 1 Haiku for small text edits and summaries, 2 Sonnet 5.5 medium for plans, research, first builds and code edits, 3 Opus for a first build tagged hard or a bug that failed its one fix round (at most 2 a floor a week, $6 cap each). Fable only on the owner's word for one named job (admin.mjs fable). Only the roles listed move; the Tester keeps its own model. MODEL_TIERS=0 goes back to floorLimits' tiers.",
+    "_comment": "Model tiers (docs/redesign/OFFICE-ANSWERS-1.md, Q9; job 17). Each task records its tier when it starts: 1 Haiku for small text edits and summaries, 2 Sonnet 5.5 medium for plans, research, first builds and code edits, 3 Opus for a first build tagged hard or a bug that failed its one fix round (at most 2 a floor a week; no dollar cap of their own unless TIER3_CAP_USD sets one, owner's ruling 2026-11-19). Fable only on the owner's word for one named job (admin.mjs fable). Only the roles listed move; the Tester keeps its own model. MODEL_TIERS=0 goes back to floorLimits' tiers.",
     "roles": ["builder", "designer", "manager", "researcher", "writer"],
     "haiku": { "model": "claude-haiku-5-5", "effort": "low" },
     "sonnet": { "model": "claude-sonnet-5-5", "effort": "medium" },

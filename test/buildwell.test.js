@@ -236,39 +236,37 @@ describe('the one limit left: a ceiling on one task, for a stuck loop', () => {
     h.e = h.t.app.engine; h.sessions = sessions; h.e.stopped = false; h.e.runManager = async () => {};
     h.go = () => { const r = h.e.assignTask(h.f, h.mgr, { to: 'builder', title: 'Build the thing', brief: 'b', plan: '', project: 'stuck', dependsOn: [], afterPrevious: false }); h.e.kick(); return r; };
     h.settle = (id) => until(() => { const r = get(h.t.db, 'SELECT * FROM tasks WHERE id=?', id); return ['review', 'failed', 'blocked', 'done', 'cancelled'].includes(r.status) && !h.e.runs.size ? r : null; }, { timeout: 30000, what: 'the computer to finish' });
-    // The hard cap (docs/redesign, job 7): the manager tells the boss in one plain line, written by code.
-    h.boss = () => get(h.t.db, "SELECT text FROM messages WHERE floor_id=? AND role='manager' ORDER BY id DESC LIMIT 1", h.f.id)?.text || '';
+    h.boss = () => get(h.t.db, "SELECT text FROM messages WHERE floor_id=? AND role='budget' ORDER BY id DESC LIMIT 1", h.f.id)?.text || '';
     return h;
   }
   test('it is on by default, and no prompt ever mentions it', () => {
-    assert.equal(loadConfig({}).taskMaxUsd, 5, 'the hard stop per task is $5 (docs/redesign, job 7)');
-    for (const p of everyPrompt({ ...FULL, taskMaxUsd: 5 })) assert.doesNotMatch(p, /\$5\b|\b5 (dollars|usd)|task ?max|ceiling/i);
+    assert.equal(loadConfig({}).taskMaxUsd, 40);
+    for (const p of everyPrompt({ ...FULL, taskMaxUsd: 40 })) assert.doesNotMatch(p, /\b40\b.*(dollar|usd)|\$40|task ?max|ceiling/i);
   });
-  test('a stuck job stops there, gets one last save, ships it as Work in progress, and the boss is told plainly, without a figure', async () => {
+  test('a stuck job stops there, gets one last save, and the boss is told plainly, without a figure', async () => {
     let saved = false;
     const h = await floorWith({ stepUsd: 0.3, usage: usageFor(0.3), async onTurn(api) { for (let i = 0; i < 500; i++) { await api.step(); await sleep(1); if (api.session.queue.length && /Save your work now/.test(api.session.queue[0])) { api.save([{ path: 'index.html', data: Buffer.from('<h1>all of it</h1>') }]); saved = true; api.message('Saved what I had.'); return; } } } }, { taskMaxUsd: 1.2 });
     const row = await h.settle(h.go().id);
-    assert.equal(row.status, 'done', 'ended and shipped, not failed'); assert.ok(saved, 'it was asked to save, and did');
-    assert.equal(row.wip, 1); assert.ok(row.capped_at);
+    assert.equal(row.status, 'failed'); assert.ok(saved, 'it was asked to save, and did');
     assert.match(String(fileIn(h, 'stuck', 'index.html')), /all of it/, 'and that work came back');
-    assert.match(row.result, /Ended by the building and shipped as it stands, marked Work in progress/); assert.match(row.result, /Not done yet:/); assert.match(row.result, /don't start this job again unless the boss says to/);
+    assert.match(row.result, /Stopped by the building/); assert.match(row.result, /Don't start it again unless the boss says to/);
     assert.doesNotMatch(row.result, /\$|\bspen[dt]\b|\bbudget\b|\blimit\b|\bceiling\b/i);
     const notice = h.boss();
-    assert.match(notice, /I stopped "Build the thing" where it was: it ships as it stands, marked Work in progress\. Not done yet:/); assert.doesNotMatch(notice, /\$|\d|\bbudget\b/i);
+    assert.match(notice, /I stopped "Build the thing"/); assert.match(notice, /is on the drive/); assert.doesNotMatch(notice, /\$|\d|\bbudget\b/i);
     assert.ok(row.cost_usd <= 2.1, `it stopped near the ceiling: ${row.cost_usd}`);
   });
-  test('one that never saves is still stopped and closed, and the boss hears nothing usable was saved', async () => {
+  test('one that never saves is still stopped, and the boss hears the newest work may be missing', async () => {
     const h = await floorWith({ stepUsd: 0.3, usage: usageFor(0.3), async onTurn(api) { for (let i = 0; i < 500; i++) { await api.step(); await sleep(1); } } }, { taskMaxUsd: 1.2 });
     const row = await h.settle(h.go().id);
     assert.equal(row.status, 'failed'); assert.ok(row.cost_usd <= 2.1, `${row.cost_usd}`);
-    assert.match(h.boss(), /nothing usable was saved, so I closed it/); assert.match(row.result, /Ended by the building, with nothing usable saved, so it is closed/);
+    assert.match(h.boss(), /couldn't bring back its last save/);
   });
   test('the ceiling coming up while a job waited in line still lets it save', async () => {
     // Usage that says next to nothing, so it is the platform that stops it at the end of the slice and sends it back in line.
     let saved = false;
     const h = await floorWith({ stepUsd: 0.5, usage: { input_tokens: 10, output_tokens: 0 }, async onTurn(api) { for (let i = 0; i < 500; i++) { await api.step(); await sleep(1); if (api.session.queue.length && /Save your work now/.test(api.session.queue[0])) { api.save([{ path: 'index.html', data: Buffer.from('<h1>from the queue</h1>') }]); saved = true; return; } } } }, { taskMaxUsd: 2.05 });
     const row = await h.settle(h.go().id);
-    assert.equal(row.status, 'done'); assert.ok(saved); assert.match(String(fileIn(h, 'stuck', 'index.html')), /from the queue/);
-    assert.match(row.result, /Ended by the building and shipped as it stands/);
+    assert.equal(row.status, 'failed'); assert.ok(saved); assert.match(String(fileIn(h, 'stuck', 'index.html')), /from the queue/);
+    assert.match(row.result, /Stopped by the building/);
   });
 });

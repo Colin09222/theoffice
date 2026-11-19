@@ -1,3 +1,4 @@
+// OPT-IN ONLY (HARD_CAP_ENDS=1, TASK_MAX_USD=5): the owner dropped job 7 on 2026-11-19; the defaults are the old $40 safety net and its old stop.
 // The hard cap per task (docs/redesign/OFFICE-ANSWERS-1.md, Q8; job 7): a task that reaches $5 (TASK_MAX_USD) is ended, not just flagged. What it saved
 // ships as it stands, marked Work in progress, with a "Not done yet" list; with nothing saved it closes. The manager tells the boss one plain line and the
 // owner gets one alert. A task can carry its own cap (Tier 3's $6). The costs here are fake: each model call says what it cost.
@@ -5,6 +6,8 @@ import { describe, test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { boot, claim, until } from './helpers.js';
 import { get, all, run } from '../server/db.js';
+import { loadConfig } from '../server/config.js';
+import { laneBSettings } from '../server/laneb-config.js';
 
 const open = [];
 after(async () => { for (const t of open) await t.close(); });
@@ -20,7 +23,8 @@ function costly({ usd = 2, save = true } = {}) {
 }
 async function floor(llm, overrides = {}) {
   const seen = [];
-  const t = await boot({ peopleTalk: false, staffSelfCheck: true, hookUrl: 'http://gw/hooks/agent', hookToken: 'tok', hookRetryMs: 1, ...overrides }, { llm, httpFetch: async (u, o) => { seen.push(JSON.parse(o.body)); return new Response('{}'); } });
+  // Off by default since the owner's ruling of 2026-11-19 (no budget rules): these tests turn job 7 on, at $5, to keep the opt-in working.
+  const t = await boot({ taskMaxUsd: 5, hardCapEnds: true, peopleTalk: false, staffSelfCheck: true, hookUrl: 'http://gw/hooks/agent', hookToken: 'tok', hookRetryMs: 1, ...overrides }, { llm, httpFetch: async (u, o) => { seen.push(JSON.parse(o.body)); return new Response('{}'); } });
   open.push(t);
   const c = await claim(t, `Capped ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
@@ -32,6 +36,17 @@ async function floor(llm, overrides = {}) {
   const said = () => all(t.db, "SELECT text FROM messages WHERE floor_id=? AND role='manager' ORDER BY id", f.id).map((m) => m.text);
   return { t, f, e, go, settle, said, seen };
 }
+
+describe('the owner\'s ruling of 2026-11-19: no budget rules', () => {
+  test('by default the per-task net is the old $40, a task that reaches it gets the old stop, and Tier 3 carries no dollar cap of its own', () => {
+    const c = loadConfig({});
+    assert.equal(c.taskMaxUsd, 40); assert.equal(c.hardCapEnds, false); assert.equal(c.tier3CapUsd, 0);
+    assert.equal(laneBSettings({ HARD_CAP_ENDS: '1' }).hardCapEnds, true, 'job 7 is opt-in only');
+    assert.equal(laneBSettings({ HARD_CAP_ENDS: '0' }).hardCapEnds, false);
+    assert.equal(laneBSettings({ TIER3_CAP_USD: '6' }).tier3CapUsd, 6, 'a Tier 3 cap is opt-in only');
+    assert.equal(loadConfig({ TASK_MAX_USD: '5' }).taskMaxUsd, 5);
+  });
+});
 
 describe('the hard cap per task', () => {
   test('a task that reaches $5 with work saved is ended and ships as Work in progress; the boss hears one plain line; the owner one alert', async () => {

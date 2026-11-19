@@ -921,7 +921,7 @@ export class Engine {
     }
   }
 
-  /** The most one task may cost: its own cap if it has one (Tier 3's $6), else the building's TASK_MAX_USD ($5). */
+  /** The most one task may cost: its own cap if it has one (TIER3_CAP_USD, off by default), else the building's TASK_MAX_USD safety net ($40). */
   taskCap(task) { return task?.cap_usd > 0 ? task.cap_usd : this.cfg.taskMaxUsd; }
   /**
    * The hard stop on one task (docs/redesign, job 7). The task is ended, not just flagged: if it saved something usable, it ships as it stands, marked

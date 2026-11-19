@@ -56,7 +56,7 @@ describe('model tiers', () => {
     assert.equal(routeFor(loadModels(), 'builder', { tier: 'sonnet' }).effort, 'medium', 'Tier 2 is Sonnet at medium');
   });
 
-  test('only a build tagged hard uses Tier 3, capped at $6, at most two a floor a week', async () => {
+  test('only a build tagged hard uses Tier 3, at most two a floor a week, with no dollar cap of its own unless TIER3_CAP_USD sets one', async () => {
     const h = await floor();
     run(h.db, 'UPDATE floors SET paused=1 WHERE id=?', h.f.id);
     const ids = [];
@@ -65,7 +65,7 @@ describe('model tiers', () => {
     run(h.db, 'UPDATE floors SET paused=0 WHERE id=?', h.f.id);
     for (const id of ids) await h.done(id);
     assert.deepEqual(ids.map((id) => h.task(id).tier), [3, 3, 2]);
-    assert.equal(h.modelOf(ids[0]), 'claude-opus-5-5'); assert.equal(h.task(ids[0]).cap_usd, 6); assert.equal(h.e.taskCap(h.task(ids[0])), 6);
+    assert.equal(h.modelOf(ids[0]), 'claude-opus-5-5'); assert.equal(h.task(ids[0]).cap_usd, 0); assert.equal(h.e.taskCap(h.task(ids[0])), h.e.cfg.taskMaxUsd, 'the building safety net, not a Tier 3 cap');
     assert.match(h.task(ids[2]).tier_why, /has had its 2 this week/); assert.equal(h.modelOf(ids[2]), 'claude-sonnet-5-5');
   });
 
