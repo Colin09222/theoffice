@@ -49,6 +49,7 @@ export function onJobCard(F, card) {
   F.state.jobs ||= [];
   const i = F.state.jobs.findIndex((c) => c.id === card.id);
   if (i >= 0) F.state.jobs[i] = card; else F.state.jobs.unshift(card);
+  F.cardSoon?.();  // the status card's Now follows the newest job
   const list = F.timelineEl;
   if (!list?.isConnected) return;
   const el = jobItem(F, card);

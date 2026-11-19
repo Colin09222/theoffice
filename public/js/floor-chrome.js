@@ -5,32 +5,18 @@ import { h, api, clear, put, toast, BASE } from './dom.js';
 import { icon } from './icons.js';
 import { portrait } from './portrait.js';
 import { lift, prefetchFloor } from './floorcache.js';
+import { renderStatusCard } from './status-card.js';
 
 const TAB_ICONS = { chat: 'phone-call', talk: 'chats-teardrop', work: 'notebook', tasks: 'push-pin', projects: 'archive', requests: 'receipt', inbox: 'envelope-simple', orders: 'calendar-check', numbers: 'chart-bar', about: 'identification-badge', business: 'briefcase', pay: 'credit-card', team: 'users-three', servers: 'wrench' };
 export const tabIcon = (tab) => icon(TAB_ICONS[tab] || 'file-text');
 
 export { portrait };
 
-/** What's on the company card below the name, redrawn as the floor changes: who is here, what they are at, what they've made. */
+/** The status card below the name (public/js/status-card.js), redrawn as the floor changes. */
 export function renderCard(page) {
-  const { state: s } = page;
   const el = page.cardEl; if (!el) return;
-  const crew = s.agents.length + 1;  // the boss counts
-  const busy = s.agents.filter((a) => a.state !== 'idle');
-  const latest = s.feed.at(-1);
-  const line = busy.length ? `${busy.length} at work now` : 'Quiet right now';
-  const made = s.projects.filter((p) => !p.private).slice(0, 3);
-  const site = s.projects.find((p) => !p.private && ['site', 'app', 'game', 'simulation'].includes(p.kind));
-  clear(el);
-  put(el,
-    h('p.card-boss', {}, 'Run by ', h('b', {}, s.floor.boss.name)),
-    h('p.card-crew', {}, h('i.card-dot', { class: busy.length ? 'on' : '' }), `${crew} people · ${line}`),
-    latest ? h('p.card-activity', {}, h('b', {}, latest.name), ` ${latest.text}`) : null,
-    made.length ? h('div.card-made', {}, h('h3', {}, 'Made here'), ...made.map((p) => h('button.card-project', { type: 'button', 'data-card-project': p.slug, onclick: () => page.openProject(p) }, h('span', {}, p.title), h('small', {}, p.kind)))) : null,
-    h('div.card-actions', {},
-      site ? h('a.btn.primary', { href: site.appUrl || site.url, target: '_blank', rel: 'noopener noreferrer', 'data-visit': '' }, 'Visit website') : null,
-      h('button.btn.ghost', { type: 'button', 'data-share': '', onclick: () => shareFloor(page) }, icon('share-fat'), 'Share')),
-  );
+  const s = page.state;
+  renderStatusCard(page, el, { shareFloor });
   if (page.logoEl) {
     clear(page.logoEl);
     page.logoEl.classList.toggle('has-logo', !!s.floor.logoUrl);

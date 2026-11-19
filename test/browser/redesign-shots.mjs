@@ -49,8 +49,10 @@ for (const [kind, w, h] of sizes) {
         await sleep(1500);
         await snap('launched');
       }
+      // A software-rendered room on a busy machine can be very slow to draw its first frame: one reload before giving up.
+      const floorReady = 'document.body.dataset.page === "floor" && !document.querySelector("#boot")';
       await p.goto(`${base}/floor/${boss.slug}`);
-      await p.until('document.body.dataset.page === "floor" && !document.querySelector("#boot")', 'floor', 120000);
+      try { await p.until(floorReady, 'floor', 90000); } catch { console.log('slow floor, reloading', kind, who); await p.goto(`${base}/floor/${boss.slug}`); await p.until(floorReady, 'floor', 120000); }
       await sleep(WAIT + 2000);
       await p.ev('(() => { const v = window.__office?.view; if (v && v.intro < 1) v.intro = 0.999; return true; })()').catch(() => {});
       await sleep(800);
