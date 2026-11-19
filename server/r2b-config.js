@@ -24,5 +24,7 @@ export function r2bSettings(env = process.env) {
     proposals: on(env.PROPOSALS),
     // r2-j65: "Did it work?": a before-and-after line on a shipped job's timeline card 7 days later. DID_IT_WORK=0 turns it off.
     didItWork: on(env.DID_IT_WORK),
+    // r2-j66: the "This week" page (/theoffice/thisweek). THIS_WEEK=0 turns it (and its link on the home page) off.
+    thisWeek: on(env.THIS_WEEK),
   };
 }

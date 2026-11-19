@@ -1174,6 +1174,8 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       limit('read', ip);
       // App pages are all the one shell. Anything else must be an exact known asset.
       if (rest === '/' || /^\/admin\/?$/.test(rest) || /^\/floor\/[a-z0-9-]+\/?$/.test(rest)) return serveStatic(req, res, INDEX);
+      // Round 2, lane B: the mailroom (r2-j50) and This week (r2-j66) are pages of the same shell.
+      if (/^\/(mailroom|thisweek)\/?$/.test(rest)) return serveStatic(req, res, INDEX);
       // redesign lane A (job 24): the Launched page and each floor's portfolio, with a link preview (title, screenshot) a chat app can read.
       const shareMatch = rest.match(/^\/launched(?:\/([a-z0-9-]+))?\/?$/);
       if (shareMatch) return serveSharePage(req, res, shareMatch[1] || null);

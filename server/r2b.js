@@ -6,6 +6,7 @@ import { bossAlerts } from './bossalerts.js';
 import { weeklyReports } from './weeklyreport.js';
 import { installProposals } from './proposals.js';
 import { installDidIt } from './didit.js';
+import { installThisWeek } from './thisweek.js';
 
 export function installR2B(ext) {
   // Lane B's timers, reachable as engine.r2b for the tests and the admin script.
@@ -18,5 +19,7 @@ export function installR2B(ext) {
   const proposals = installProposals(ext);
   // r2-j65: "Did it work?" lines on the timeline, 7 days after a change ships.
   const didit = installDidIt(ext);
-  return [installLive(ext), installMailroom(ext), alerts, reports, proposals, didit].filter(Boolean);
+  // r2-j66: the "This week" page, built Mondays 08:10.
+  const thisweek = installThisWeek(ext);
+  return [installLive(ext), installMailroom(ext), alerts, reports, proposals, didit, thisweek].filter(Boolean);
 }

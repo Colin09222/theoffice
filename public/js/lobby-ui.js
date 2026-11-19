@@ -145,7 +145,10 @@ export async function showLobby(root) {
           data.globalPause ? h('p.banner', {}, 'The building manager has paused all work for now.') : null,
           now,
           h('section.home-dir.card-ui', { 'aria-label': 'Open floors' },
-            h('div.home-dir-head', {}, h('h2', {}, 'Floors'), h('a.all-launches', { href: `${BASE}/launched`, 'data-all-launches': '', onclick: (e) => { e.preventDefault(); window.officeGo('/launched'); } }, 'All launches', icon('caret-right'))),
+            h('div.home-dir-head', {}, h('h2', {}, 'Floors'),
+              // Round 2, r2-j66: the Monday page, next to All launches.
+              h('a.all-launches.this-week', { href: `${BASE}/thisweek`, 'data-this-week': '', onclick: (e) => { e.preventDefault(); window.officeGo('/thisweek'); } }, 'This week'),
+              h('a.all-launches', { href: `${BASE}/launched`, 'data-all-launches': '', onclick: (e) => { e.preventDefault(); window.officeGo('/launched'); } }, 'All launches', icon('caret-right'))),
             list,
             h('div.lift-wrap', {}, lift, letLine)),
           h('div.home-foot', {},

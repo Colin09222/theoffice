@@ -333,6 +333,8 @@ CREATE TABLE IF NOT EXISTS change_checks (
   shipped_at INTEGER NOT NULL, due_at INTEGER NOT NULL, after_n INTEGER, line TEXT NOT NULL DEFAULT '', posted_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS change_checks_due ON change_checks(posted_at, due_at);
+-- r2-j66: the building's "This week" page, built Mondays 08:10 New York for the week just ended; 12 weeks kept.
+CREATE TABLE IF NOT EXISTS week_pages (week TEXT PRIMARY KEY, data TEXT NOT NULL, built_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS weekly_reports (floor_id INTEGER NOT NULL, week TEXT NOT NULL, status TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, PRIMARY KEY (floor_id, week));
 `;
 

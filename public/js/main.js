@@ -49,6 +49,8 @@ async function route() {
       const { showFloor, hideFloor } = await import('./floor-ui.js'); current = hideFloor; await showFloor(ui, floorMatch[1]);
       return;
     }
+    // This week in The Office (round 2, r2-j66): the Monday page, from real records.
+    if (path === '/thisweek') { const { showThisWeek, hideThisWeek } = await import('./thisweek-ui.js'); current = hideThisWeek; await showThisWeek(ui); return; }
     // The basement mailroom (round 2, r2-j50): from the foot of the tower and from B on the lift.
     if (path === '/mailroom') { const { showMailroom, hideMailroom } = await import('./mailroom-ui.js'); current = hideMailroom; await showMailroom(ui); return; }
     // Everything the building has launched, on one page (docs/redesign, jobs 14 and 24).
