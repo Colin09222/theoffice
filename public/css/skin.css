@@ -459,3 +459,13 @@ body[data-page="floor-lite"] #scene, body[data-page="floor-lite"] #labels { disp
   .btn.back, .lite-top .btn.back, .status-card .card-actions .btn, .stc-message .btn { min-height: 44px; min-width: 44px; }
   .stc-message input { min-height: 44px; }
 }
+
+/* ---- the boss's own spend, behind a tap on the status card (job 34) ---- */
+.stc-spend { margin-left: auto; align-self: center; font: 600 14px var(--f-body); color: var(--c-teal); }
+.spend-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.spend-table th, .spend-table td { padding: 8px 6px; text-align: right; border-bottom: 1px solid var(--c-line); }
+.spend-table th[scope="row"], .spend-table thead th:first-child { text-align: left; }
+.spend-jobs-head { font: 700 17px var(--f-head); margin: 16px 0 6px; }
+.spend-jobs { list-style: none; margin: 0; padding: 0; }
+.spend-jobs li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid var(--c-line); }
+.spend-jobs li small { grid-column: 1 / -1; color: var(--c-slate); }
