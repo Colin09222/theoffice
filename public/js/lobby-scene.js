@@ -631,7 +631,9 @@ function towerGlass() {
         float band = smoothstep(sill, sill + 0.03, yv) * smoothstep(0.995, 0.975, yv);
         float faceId = sideX ? 40.0 + sign(_nn.x) * 7.0 : sign(_nn.z) * 7.0;
         float rnd = hash(vec2(floor(along) + faceId, floor(vY)));
-        float busy = vState.y * (0.5 + 0.5 * sin(uTime * 0.9 + floor(vY) * 1.7));
+        // r2-j36: room light = work. A running job makes the room brighter and it flickers; a launch adds a flash on top (vState.y above 1).
+        float busy = min(vState.y, 1.0) * (0.75 + 0.25 * sin(uTime * 7.0 + floor(vY) * 1.7) * sin(uTime * 2.3));
+        float flash = max(vState.y - 1.0, 0.0);
         // r2-j35: from 23:00 to 08:00 the room lights are off; an open floor's glass then reads like an empty one's (the floor's colour stays on its spandrel).
         float taken = clamp(vState.x, 0.0, 1.0);
         float on = taken * uLights;
@@ -644,7 +646,7 @@ function towerGlass() {
         vec3 tt = (step(vec3(0.0), rd2) - ro) / rd2;
         float tm = min(tt.x, min(tt.y, tt.z));
         vec3 hit = ro + rd2 * tm;
-        float lamp = on > 0.5 ? (rnd > 0.12 ? 0.92 : 0.4) + busy * 0.25 : (rnd > 0.95 ? 0.4 : 0.05);
+        float lamp = on > 0.5 ? (rnd > 0.12 ? 0.92 : 0.4) + busy * 0.6 + flash * 1.6 : (rnd > 0.95 ? 0.4 : 0.05);
         vec3 wallTint = mix(vec3(0.20, 0.19, 0.21), mix(vec3(1.0, 0.60, 0.24), brand * 1.4 + 0.04, 0.38), on);
         vec3 room;
         if (tm == tt.z) room = wallTint * (0.72 + 0.28 * hit.y);
@@ -816,9 +818,15 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   glow.scale.setScalar(2.4); glow.position.copy(beacon.position); group.add(glow);
   mergeMeshes(group, (o) => o === beacon);
   const street = streetLights(); group.add(street.group);
-  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt, street };
+  // r2-j36: a small sign light on each floor's front face: real visits in the last 24 hours, in 4 levels. It stays on at night (Q2).
+  const visitSigns = new THREE.InstancedMesh(new THREE.BoxGeometry(0.34, 0.12, 0.06), new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }), Math.max(1, floorCount));
+  for (let i = 0; i < floorCount; i++) { m.makeTranslation(half - 0.55, GROUND + i * FLOOR_H + FLOOR_H * 0.8, half + 0.03); visitSigns.setMatrixAt(i, m); visitSigns.setColorAt(i, VISIT_COLORS[0]); }
+  visitSigns.count = floorCount; visitSigns.frustumCulled = false; group.add(visitSigns);
+  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt, street, visitSigns };
 }
 
+/** r2-j36: the visit sign light's 4 levels: off, then warmer and brighter: 1 to 50, 51 to 200, over 200 visits in 24 hours. */
+export const VISIT_COLORS = ['#2a2c33', '#7a6a3a', '#e0a83a', '#ffe9a6'].map((c) => new THREE.Color(c));
 /** r2-j35: street lights round the plaza. They stay on all night (Q2); their glow follows the dark (nylight.js PALETTE.street). Not on "low" (Q9: no lamp lights). */
 function streetLights() {
   const group = new THREE.Group(); group.name = 'street-lights';
@@ -1062,11 +1070,34 @@ export class LobbyView {
       const c = this.floorData.get(i + 1);
       col.set(c ? c.colors.primary : '#9fb1c4');
       f.setColorAt(i, col);
-      st[i * 3] = c && c.status === 'active' ? 1 : 0;
-      st[i * 3 + 1] = c?.busy ? 1 : 0;
+      // A hidden floor is not listed, but while a job runs there its windows light like any other's (r2-j36).
+      st[i * 3] = c && c.status === 'active' ? 1 : (this.liveWork?.get(i + 1) ?? 0);
+      st[i * 3 + 1] = this.liveWork?.has(i + 1) ? this.liveWork.get(i + 1) : c?.busy ? 1 : 0;
     }
     f.instanceColor.needsUpdate = true;
     f.geometry.getAttribute('aState').needsUpdate = true;
+  }
+  /**
+   * r2-j36: the live tower. `floors` is /api/building/live's list: work (room light), launchAt (a newer launch than this page has seen flashes
+   * the floor once, 0.8 s) and visits (the sign light's level). The first reading only sets the scene: nothing old flashes.
+   */
+  setLive(floors) {
+    const st = this.tower.state, signs = this.tower.visitSigns;
+    this.liveWork = new Map(); this.flashes ||= new Map(); this.seenLaunch ||= new Map();
+    for (const f of floors || []) {
+      const i = f.number - 1; if (i < 0 || i >= this.floorCount) continue;
+      this.liveWork.set(f.number, f.work ? 1 : 0);
+      const seen = this.seenLaunch.get(f.number);
+      if (this.liveRead && f.launchAt && (!seen || f.launchAt > seen)) this.flashes.set(f.number, 0.8);
+      if (f.launchAt) this.seenLaunch.set(f.number, Math.max(seen || 0, f.launchAt));
+      st[i * 3 + 1] = f.work ? 1 : 0;
+      if (!this.floorData.has(f.number)) st[i * 3] = f.work ? 1 : 0;  // a hidden floor: lit only while it works
+      if (signs) signs.setColorAt(i, VISIT_COLORS[Math.max(0, Math.min(3, f.visits | 0))]);
+    }
+    this.liveRead = true;
+    this.tower.floors.geometry.getAttribute('aState').needsUpdate = true;
+    if (signs?.instanceColor) signs.instanceColor.needsUpdate = true;
+    this.liveState = { floors: (floors || []).map((f) => ({ number: f.number, work: st[(f.number - 1) * 3 + 1] >= 1 ? 1 : 0, visits: f.visits })) };
   }
   pick(cx, cy, click) {
     if (this.flying) return;
@@ -1100,6 +1131,15 @@ export class LobbyView {
   update(dt) {
     this.time += dt;
     this.light.tick();
+    if (this.flashes?.size) {  // r2-j36: one 0.8 s flash per launch, on top of the work light
+      const st = this.tower.state;
+      for (const [n, left] of this.flashes) {
+        const l = left - dt, i = n - 1, base = this.liveWork?.get(n) ?? 0;
+        if (l <= 0) { this.flashes.delete(n); st[i * 3 + 1] = base; } else st[i * 3 + 1] = base + 1 + Math.sin((l / 0.8) * Math.PI);
+        this.flashCount = (this.flashCount || 0) + (l <= 0 ? 1 : 0);
+      }
+      this.tower.floors.geometry.getAttribute('aState').needsUpdate = true;
+    }
     this.world.update(dt, this.time);
     if (this.tower.glass.userData.shader) this.tower.glass.userData.shader.uniforms.uTime.value = this.time;
     this.tower.beacon.visible = this.tower.glow.visible = (this.time % 2.4) < 1.3;

@@ -10,5 +10,7 @@ export function r2bSettings(env = process.env) {
   return {
     // r2-j33: hero cards fade between up to 3 real screenshots. HERO_FADE=0 sends none, and each card keeps its one photo.
     heroFade: on(env.HERO_FADE),
+    // r2-j36: the live tower's address (/api/building/live: work light, launch flash, visit sign light, activity feed). LIVE_TOWER=0 takes it away.
+    liveTower: on(env.LIVE_TOWER),
   };
 }

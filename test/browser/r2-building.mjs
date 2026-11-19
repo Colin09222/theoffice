@@ -9,6 +9,8 @@ const base = `http://localhost:${t.port}/theoffice`;
 const boss = await claim(t, 'Tiny Arcade Works', { floor: 5 });
 const lab = await claim(t, 'LabStackr', { floor: 3 });
 const seeded = await seedShowcase(t, boss, { others: [lab.slug] });
+const hiddenLab = await claim(t, 'Hidden Lab', { floor: 9 });
+t.db.prepare('UPDATE floors SET hidden=1 WHERE slug=?').run(hiddenLab.slug);
 // Two more real screenshots of Loopling, so its hero card has three to fade between (r2-j33).
 const shot = t.db.prepare("SELECT image FROM launch_shots WHERE project='loopling' AND image IS NOT NULL").get()?.image;
 if (shot) {
@@ -45,6 +47,17 @@ try {
   check(!p.errors.length, `desktop: no console errors ${p.errors.slice(0, 2).join(' | ')}`);
   p.close();
   // ---- desktop, noon ----
+  // r2-j36: a test job started on a hidden floor brightens that floor's windows within 10 s.
+  p = await page({ width: 1440, height: 900 }, { clock: nyAt(12, 0) });
+  await p.until('!!window.__lobbyDebug?.liveState', 'the live tower', 90000);
+  const hid = t.db.prepare('SELECT id, number FROM floors WHERE slug=?').get(hiddenLab.slug);
+  check(await p.ev(`window.__lobbyDebug.tower.state[${(hid.number - 1) * 3 + 1}] === 0`), 'r2-j36: the hidden floor is dark before its job');
+  const started = Date.now();
+  t.db.prepare("INSERT INTO tasks (floor_id,title,status,created_at,updated_at) VALUES (?,'A test job','doing',?,?)").run(hid.id, started, started);
+  const lit = await p.until(`(() => { const s = window.__lobbyDebug.tower.state; return s[${(hid.number - 1) * 3}] === 1 && s[${(hid.number - 1) * 3 + 1}] >= 1; })()`, 'the hidden floor to light', 10000).then(() => Date.now() - started).catch(() => null);
+  check(lit !== null && lit <= 10000, `r2-j36: a job on a hidden floor brightens its windows within 10 s (${lit} ms)`);
+  t.db.prepare("UPDATE tasks SET status='done' WHERE floor_id=?").run(hid.id);
+  p.close();
   p = await page({ width: 1440, height: 900 }, { clock: nyAt(12, 0) });
   await p.until('!!window.__lobbyDebug?.lightState', 'the tower', 90000);
   const noon = await p.ev('window.__lobbyDebug.lightState');

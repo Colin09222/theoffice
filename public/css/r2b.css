@@ -13,3 +13,10 @@
   .lcard-shot img.lcard-fade { transition: none; }
   .dir-row .badge[data-state="working"]::before { animation: none; }
 }
+
+/* r2-j36: where there is no live tower (a phone, or no 3D), a floor where a job is running gets a pulsing dot in the floor list. */
+.dir-row[data-live="work"] .dir-num { position: relative; }
+.dir-row[data-live="work"] .dir-num::after { content: ''; position: absolute; top: -2px; right: -8px; width: 7px; height: 7px; border-radius: 50%; background: var(--c-amber, #f2a33a); display: none; }
+@media (max-width: 760px) { .dir-row[data-live="work"] .dir-num::after { display: block; animation: r2-pulse 1.4s ease-in-out infinite; } }
+.home:has(.home-tower[hidden]) .dir-row[data-live="work"] .dir-num::after { display: block; animation: r2-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .dir-row[data-live="work"] .dir-num::after { animation: none !important; } }

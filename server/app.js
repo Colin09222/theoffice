@@ -37,6 +37,7 @@ import { installEstimates } from './estimate.js';
 import { installWeekPlans } from './weekplan.js';
 import { installOnboarding } from './onboarding.js';
 import { installBuilding } from './building.js';
+import { installR2B } from './r2b.js';
 import { installOwnSpend } from './ownspend.js';
 import { installRanked } from './ranked.js';
 import { installLife } from './life.js';
@@ -748,6 +749,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
   const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext), installShots(ext), installJobCards(ext), installEstimates(ext), installWeekPlans(ext), installOnboarding(ext), installOwnSpend(ext), installRanked(ext)].filter(Boolean);  // estimates after job cards: they add to the boss's cards
+  extensions.push(...installR2B(ext));  // round 2, lane B (server/r2b.js)
   // The budget check, inside the server: a spend record every two hours (server/spendcheck.js, redesign job 5).
   const spendCheck = installSpendCheck({ db, cfg, log, now });
   extensions.push(spendCheck);

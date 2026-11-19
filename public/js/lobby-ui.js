@@ -17,10 +17,15 @@ const openLogin = () => claimModule().then((m) => m.openLogin());
 
 const NOW_LINES = 5;
 let floors = [], toLet = [], poll = null, nowPoll = null, tower = null, tip = null, alive = false, fades = [];
+// Round 2, r2-j36: the live tower's signals (/api/building/live), read every 5 s while the tab is in view, so a job that starts lights its
+// floor within 10 s. The tower draws them; on a phone (and wherever there is no tower) the floor list's dot pulses for a floor at work.
+const LIVE_MS = 5000;
+let live = null, livePoll = null;
+const liveWork = (n) => !!live?.floors?.find((f) => f.number === n)?.work;
 
 /** One open floor, one line: number, name, what it does, and its state. */
 function floorRow(card, onEnter) {
-  return h('button.dir-row', { type: 'button', 'data-floor': card.number, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => tower?.setHover?.(card.number), onpointerleave: () => tower?.setHover?.(-1) },
+  return h('button.dir-row', { type: 'button', 'data-floor': card.number, 'data-live': liveWork(card.number) ? 'work' : null, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => tower?.setHover?.(card.number), onpointerleave: () => tower?.setHover?.(-1) },
     h('span.dir-num', {}, String(card.number)),
     h('span.dir-mark', { 'aria-hidden': 'true' }),
     h('span.dir-text', {}, h('b', {}, card.name || 'Moving in'), h('small', {}, idleNote(card) || card.tagline || (card.name ? 'A tiny company' : 'Boxes still in the corridor'))),
@@ -134,6 +139,15 @@ export async function showLobby(root) {
         towerFrame)),
     tip);
 
+  const readLive = async () => {
+    try { live = await api('/building/live'); } catch { return; }
+    if (!alive) return;
+    for (const row of list.querySelectorAll('.dir-row')) { if (liveWork(Number(row.dataset.floor))) row.dataset.live = 'work'; else delete row.dataset.live; }
+    tower?.setLive?.(live.floors);
+  };
+  readLive();
+  livePoll = setInterval(() => { if (!document.hidden) readLive(); }, LIVE_MS);
+
   poll = setInterval(async () => {
     if (document.hidden) return;  // a tab nobody is looking at asks for nothing
     try { const fresh = await api('/floors'); floors = fresh.floors; toLet = fresh.toLet; renderFloors(); tower?.setFloors?.(fresh.floors, fresh.toLet); } catch { /* retried next time */ }
@@ -148,6 +162,7 @@ export async function showLobby(root) {
         if (!alive) return;
         tower = await m.showTower({ frame: towerFrame, floorCount: data.towerFloors, floors, toLet, onPick: (n) => { const c = floors.find((f) => f.number === n); if (c) enterFloor(c); else if (toLet.includes(n)) openClaim(); }, onHover: showTip });
         if (!tower) towerFrame.hidden = true;  // no 3D here: the floor list is the way round, and it is already on screen
+        else if (live) tower.setLive(live.floors);
       } catch (e) { console.warn('tower', e?.message); towerFrame.hidden = true; }
     }, 0)));
   }
@@ -165,6 +180,7 @@ function showTip(n, x, y) {
 export function hideLobby() {
   alive = false;
   clearInterval(poll); poll = null; clearInterval(nowPoll); nowPoll = null; tip = null;
+  clearInterval(livePoll); livePoll = null;
   fades.forEach((f) => f?.stop()); fades = [];
   tower?.leave?.(); tower = null;
 }

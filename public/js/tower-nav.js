@@ -18,6 +18,7 @@ export async function showTower({ frame, floorCount, floors, toLet, onPick, onHo
   return {
     setHover: (n) => view.setHover(n),
     setFloors: (f, t) => view.setFloors(f, t),
+    setLive: (l) => view.setLive(l),  // round 2, r2-j36
     flyTo: (n) => view.flyTo(n),
     leave: () => stage.setBoxed(false),
   };
