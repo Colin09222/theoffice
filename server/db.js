@@ -221,7 +221,8 @@ CREATE TABLE IF NOT EXISTS contractor_pings (task_id INTEGER PRIMARY KEY, job_id
 Object.assign(ADDED.tasks, { contractor_route: 'INTEGER NOT NULL DEFAULT 0', handed_back_at: 'INTEGER', tester_fails: 'INTEGER NOT NULL DEFAULT 0', fix_of: 'INTEGER' });
 /** Lane B's one-time fills, each guarded by a settings row so it runs once. */
 function laneBFills(db) {
-  const once = (key, fn) => { if (db.prepare('SELECT 1 x FROM settings WHERE key=?').get(key)) return; fn(); db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run(key, String(Date.now())); };
+  // A database from long before these columns (one with no agent_id on its tasks, say) has nothing to fill, and is never kept from booting by it.
+  const once = (key, fn) => { if (db.prepare('SELECT 1 x FROM settings WHERE key=?').get(key)) return; try { fn(); } catch { /* nothing to fill */ } db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run(key, String(Date.now())); };
   once('laneb_j04_route_v1', () => {
     // Work the contractor already handed back is never held again, and work waiting on a contractor floor keeps the routing it would have had.
     db.exec("UPDATE tasks SET handed_back_at=(SELECT MAX(COALESCE(j.done_at,j.closed_at)) FROM contractor_jobs j WHERE j.task_id=tasks.id AND j.status='closed') WHERE handed_back_at IS NULL AND id IN (SELECT task_id FROM contractor_jobs WHERE status='closed')");
