@@ -25,5 +25,7 @@ export function laneA2Settings(env = process.env) {
     // r2-j47: every job keeps its events with their times (server/eventlog.js) for JOB_EVENTS_DAYS (35, never under 30) (JOB_EVENTS=0: not recorded).
     jobEvents: on(env.JOB_EVENTS),
     jobEventsDays: Math.max(30, Number(env.JOB_EVENTS_DAYS) || 35),
+    // r2-j48: an Idle floor offers "Watch how this was made", a 30 to 60 s replay of its last real job (REPLAY=0: no offer, no route data).
+    replay: on(env.REPLAY),
   };
 }
