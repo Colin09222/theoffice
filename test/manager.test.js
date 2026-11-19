@@ -18,7 +18,7 @@ import { setContractor, completeJob } from '../server/contractor.js';
 import { writeFile, publishSnapshot } from '../server/workspace.js';
 import { cleanChecks, checksInBrief, briefWithChecks, briefWithoutChecks, readSelfCheck, selfChecked, selfCheckWords, estimateUsd, sameJob, SELF_CHECK_MARK } from '../server/brain.js';
 
-const OFF = { managerFastPath: false, managerIntentCheck: false, managerPlanFirst: false, staffSelfCheck: false, quietRoundReports: false };
+const OFF = { managerFastPath: false, managerIntentCheck: false, managerPlanFirst: false, staffSelfCheck: false, quietRoundReports: false, modelTiers: false };
 const MIN = 60000;
 const MON_NY_10 = Date.UTC(2026, 0, 5, 15, 0);
 const open = [];
@@ -37,7 +37,7 @@ function scripted({ manager, staff } = {}) {
 /** A floor whose manager the test drives by hand, through the manager's own tools. */
 async function floor(llm, overrides = {}, deps = {}) {
   // These suites test the manager's earlier rules with their own check counts; done-means lines (3 to 5, redesign job 9) are tested in donemeans.test.js.
-  const t = await boot({ peopleTalk: false, doneMeans: false, loopOnePlan: false, ...overrides }, { ...(llm ? { llm } : {}), ...deps });
+  const t = await boot({ peopleTalk: false, doneMeans: false, loopOnePlan: false, contractorManual: false, ...overrides }, { ...(llm ? { llm } : {}), ...deps });
   open.push(t);
   const c = await claim(t, `Brain ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
@@ -63,7 +63,7 @@ describe('the switches', () => {
   test('each is on by default and turns off from the environment', () => {
     const on = loadConfig({ AI_MODE: 'mock' });
     for (const k of Object.keys(OFF)) assert.equal(on[k], true, k);
-    const off = loadConfig({ AI_MODE: 'mock', MANAGER_FAST_PATH: '0', MANAGER_INTENT_CHECK: '0', MANAGER_PLAN_FIRST: '0', STAFF_SELF_CHECK: '0', ROUND_REPORTS: 'all' });
+    const off = loadConfig({ AI_MODE: 'mock', MANAGER_FAST_PATH: '0', MANAGER_INTENT_CHECK: '0', MANAGER_PLAN_FIRST: '0', STAFF_SELF_CHECK: '0', ROUND_REPORTS: 'all', MODEL_TIERS: '0' });
     for (const k of Object.keys(OFF)) assert.equal(off[k], false, k);
   });
   test('with every switch off the manager has the tools and the instructions it had before', () => {
@@ -445,7 +445,7 @@ describe('the self-check before handing in', () => {
 describe('plain reporting: a quiet round says so once', () => {
   async function quietFloor(over = {}, llm) {
     const clock = { t: MON_NY_10 };
-    const t = await boot({ modesTickMs: 15, ordersTickMs: 60000, mockDelayMs: 1, peopleTalk: false, autopilotGapMin: 5, doneMeans: false, ...over }, { now: () => clock.t, ...(llm ? { llm } : {}) });
+    const t = await boot({ modesTickMs: 15, ordersTickMs: 60000, mockDelayMs: 1, peopleTalk: false, autopilotGapMin: 5, doneMeans: false, contractorManual: false, ...over }, { now: () => clock.t, ...(llm ? { llm } : {}) });
     open.push(t);
     const c = await claim(t);
     const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);

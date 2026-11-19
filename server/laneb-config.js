@@ -48,5 +48,28 @@ export function laneBSettings(env = process.env) {
     smokeBrowser: on(env.SMOKE_BROWSER),
     editSkipsTester: on(env.EDIT_SKIPS_TESTER),
     testerComputerGamesShops: on(env.TESTER_COMPUTER_GAMES_SHOPS),
+    // j17, model tiers (config/models.json "tiers"): each task records its tier (1 Haiku, 2 Sonnet medium, 3 Opus); at most TIER3_PER_FLOOR_WEEK (2) Tier 3
+    // tasks a floor a week, each capped at TIER3_CAP_USD ($6). Fable only for a job the owner names (admin.mjs fable). MODEL_TIERS=0 goes back to floorLimits.
+    modelTiers: on(env.MODEL_TIERS),
+    tier3PerFloorWeek: onCap(env.TIER3_PER_FLOOR_WEEK, 2),
+    tier3CapUsd: Number(env.TIER3_CAP_USD) > 0 ? Number(env.TIER3_CAP_USD) : 6,
+    // j18, the Builder's context diet: the brief, a file list and only the files it opens. Teammates' papers are listed, not pasted in; its run is trimmed at
+    // BUILDER_KEEP_CHARS (240000, about 60,000 tokens) down to half that; a fix round on a computer past BUILDER_FRESH_OVER_TOKENS (80000) starts fresh.
+    // BUILDER_DIET=0 goes back to the old sizes. scripts/builder-context.mjs reports the average Builder call.
+    builderDiet: on(env.BUILDER_DIET),
+    builderKeepChars: Math.max(60000, Number(env.BUILDER_KEEP_CHARS) || 240000),
+    builderFreshOverTokens: Math.max(20000, Number(env.BUILDER_FRESH_OVER_TOKENS) || 80000),
+    // j19, the contractor by hand only (server/sendout.js): no automatic routing anywhere; the owner's Send out, at most CONTRACTOR_SENDOUT_PER_WEEK (2) a week.
+    // CONTRACTOR_MANUAL=0 brings back the floor switch (admin.mjs contractor --floor N on).
+    contractorManual: on(env.CONTRACTOR_MANUAL),
+    // j27, six working roles: Manager, Researcher, Writer (takes the Marketer's words), Designer (takes the Illustrator's), Builder, Tester. The beans keep their
+    // names and desks; only the model calls merge. The Analyst's and the Lawyer's jobs are the manager's and the office's own launch checklist (ROLE_MERGE=0
+    // brings the ten roles back). TEAM_MEETINGS=1 brings back the team's model-written huddles, BIZ_DEV_BEAN=1 the Business Development bean, and
+    // VIDEO_ADS_ON_REQUEST=0 the two video ads made by default in Business mode.
+    roleMerge: on(env.ROLE_MERGE),
+    teamMeetings: /^\s*(1|true|yes|on)\s*$/i.test(String(env.TEAM_MEETINGS ?? '')),
+    bizDevBean: /^\s*(1|true|yes|on)\s*$/i.test(String(env.BIZ_DEV_BEAN ?? '')),
+    videoAdsOnRequest: on(env.VIDEO_ADS_ON_REQUEST),
+    contractorSendOutPerWeek: Math.max(0, Number.isFinite(Number(env.CONTRACTOR_SENDOUT_PER_WEEK)) && String(env.CONTRACTOR_SENDOUT_PER_WEEK ?? '').trim() !== '' ? Number(env.CONTRACTOR_SENDOUT_PER_WEEK) : 2),
   };
 }

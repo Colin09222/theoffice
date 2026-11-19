@@ -341,7 +341,7 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
         .filter((r) => !isPrivateSlug(floorId, r.project) || r.project === here).slice(0, 4).map((r) => `"${r.title}": ${String(r.result).slice(0, ANSWER_WORK_CHARS)}`);
       const notes = notesFor(target, here);
       // A real question about the work, so it is answered on the colleague's own model, not the one that writes the chatter. A job the team picked for itself is routed the way its other calls are.
-      const route = answerRoute(engine.models, target.role, { autonomous: !!c.autonomous, tier: engine.budget.tier(c.floor.id) });
+      const route = answerRoute(engine.models, target.role, { autonomous: !!c.autonomous, tier: engine.floorTier ? engine.floorTier(c.floor.id) : engine.budget.tier(c.floor.id) });
       // Who they are and what they know come first and are the same for every question put to them, so that part is what the prompt cache keeps. The asker and the question come last.
       const answer = await callModel(floorId, target, route, {
         purpose: 'answer', maxTokens: route.maxTokens, signal: c.signal || ctl.signal, taskId: c.task?.id ?? null, cache: 'system', meta: { asker: c.agent.name, answerer: target.name, question, notes },

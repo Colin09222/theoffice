@@ -27,7 +27,8 @@ function scripted({ manager, staff } = {}) {
   } };
 }
 async function floor(llm, overrides = {}) {
-  const t = await boot({ peopleTalk: false, ...overrides }, llm ? { llm } : {});
+  // The hold machinery, driven by the floor switch it had before the contractor went by hand only (redesign job 19, sendout.test.js).
+  const t = await boot({ peopleTalk: false, contractorManual: false, ...overrides }, llm ? { llm } : {});
   open.push(t);
   const c = await claim(t, `Held ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);

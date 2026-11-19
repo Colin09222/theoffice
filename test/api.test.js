@@ -194,7 +194,8 @@ describe('boss controls', () => {
     assert.ok(s.feed.some((f) => /sent .* back/.test(f.text))); assert.ok(s.tasks.every((x) => x.status === 'done'));
   });
   test('hiring adds staff, and the cap holds', async () => {
-    const t2 = await boot({ maxStaff: 5 });
+    // The Analyst gets a job here, so the ten roles are back for this test (job 27 merges them; roles.test.js).
+    const t2 = await boot({ maxStaff: 5, roleMerge: false });
     const a = await claim(t2, 'Hirer');
     await a.post(`/api/floors/${a.slug}/chat`, { text: 'go build [hire] thing' });
     const s = await waitDone(a);

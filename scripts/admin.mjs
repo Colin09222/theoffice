@@ -29,6 +29,7 @@ import { chatAdminCommand } from '../server/cloud/chat.js';
 import { setContractor, contractorListing, contractorListingText, completeJob, ContractorError, SUMMARY_MAX } from '../server/contractor.js';
 import { pingContractor } from '../server/contractorping.js';
 import { refusalListing, refusalListingText } from '../server/handback.js';
+import { sendOut, stuckListing, SendOutError } from '../server/sendout.js';
 import { spendListing, spendListingText, writeSpendRecord } from '../server/spendcheck.js';
 import { alertLog, digestFacts, digestText, nightFrozen, setNightFreeze } from '../server/owneralerts.js';
 
@@ -44,6 +45,8 @@ const usage = () => {
     '  node scripts/admin.mjs mail pause|resume [--floor N]   stop or restart sending for one floor, or for the whole building. Receiving carries on',
     '  node scripts/admin.mjs mail form-alerts --floor N [on|off]   email the boss each new site-form entry (on by default); shows the boss address masked',
     '  node scripts/admin.mjs mail boss-email --floor N [--clear]   set the boss\'s own address for floor N (form alerts and reports go there), read from stdin so it stays out of the shell history; shown masked',
+    '  node scripts/admin.mjs fable --task N on|off   let one named job use Fable (off for floors otherwise); it applies when the job next starts',
+    '  node scripts/admin.mjs tiers [--floor N] [--since 7d]   tasks by model tier: how many, what they cost, and the Tier 3 jobs this week',
     '  node scripts/admin.mjs denied [--since 24h|7d|90m] [--json]   every "not allowed" (403) or "closed" (423) a signed-in boss or the admin got: who, which floor, what they tried, when',
     '  node scripts/admin.mjs mail suppress <address>   never send to this address again, from any floor',
     '  node scripts/admin.mjs login --floor N [--minutes M]   a short boss login to check floor N by hand (default 60 minutes, at most 240): the office_s cookie value, to this terminal only',
@@ -81,6 +84,8 @@ const usage = () => {
     '  node scripts/admin.mjs help answer --id N --decline          decline one',
     '  node scripts/admin.mjs contractor --floor N on|off   send floor N\'s Builder, Designer and Researcher jobs to the building\'s outside contractor instead of a model, or stop (off hands anything still held back to the floor\'s own staff). No model is called for a held job',
     '  node scripts/admin.mjs contractor list [--json] [--all]   jobs held for the contractor: floor, task, project, brief and the files on its drive. Everything a floor wrote is fenced as untrusted data',
+    '  node scripts/admin.mjs contractor stuck [--json]   stuck jobs (open and not moved for 6 hours, or failed in the last two days), and how many have gone out this week',
+    '  node scripts/admin.mjs contractor send-out --task N   Send out: the only way a job reaches the outside contractor now, at most CONTRACTOR_SENDOUT_PER_WEEK (2) a week. The server holds it on its next tick',
     '  node scripts/admin.mjs contractor refusals [--since 24h|7d|90m] [--json]   tries to hold work the contractor already handed back, which the server refused and logged',
     '  node scripts/admin.mjs contractor ping --task N   send buddehbot the contractor ping again for a job still held (OPENCLAW_HOOK_URL and OPENCLAW_HOOK_TOKEN)',
     '  node scripts/admin.mjs contractor done --task N --summary-file PATH   hand a held job back with what was done: the task finishes with that report on the server\'s next tick, and the floor carries on. Upload files to the floor\'s drive first, the usual way',
@@ -404,6 +409,12 @@ if (cmd === 'code' && rest[0] === 'hold') {
   if (sub === 'list') {
     const listing = contractorListing(db, { status: rest.includes('--all') ? 'all' : 'held' });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : contractorListingText(listing));
+  } else if (sub === 'stuck') {
+    const l = stuckListing(db, cfg);
+    console.log(rest.includes('--json') ? JSON.stringify(l, null, 2) : [l.notice, '', `Sent out this week: ${l.sentOutThisWeek} of ${l.mostAWeek}.`, '', ...(l.jobs.length ? l.jobs.map((j) => `Task #${j.task} [${j.status}] floor ${j.floorNumber}, ${j.role || '-'}, since ${j.since}${j.canSendOut ? '' : ' (can\'t be sent out)'}\n  title: ${j.title}`) : ['Nothing is stuck.'])].join('\n'));
+  } else if (sub === 'send-out') {
+    const id = Number(valueOf('--task'));
+    try { const r = sendOut(db, cfg, id); console.log(`Sent task #${id} out. The server holds it for the contractor on its next tick and pings once. ${r.left} more may go out this week.`); } catch (e) { if (e instanceof SendOutError) die(e.message); throw e; }
   } else if (sub === 'refusals') {
     const listing = refusalListing(db, { since: sinceArg() });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : refusalListingText(listing));
@@ -432,6 +443,7 @@ if (cmd === 'code' && rest[0] === 'hold') {
     const want = rest.find((x) => x === 'on' || x === 'off');
     if (want) setContractor(db, floor.id, want === 'on');
     const on = want ? want === 'on' : floor.contractor === 1;
+    if (cfg.contractorManual) console.error('Note: the contractor is by hand only now (CONTRACTOR_MANUAL). This switch does nothing until that is turned off; use "contractor send-out --task N".');
     const held = get(db, "SELECT COUNT(*) n FROM contractor_jobs WHERE floor_id=? AND status='held'", floor.id).n;
     console.log(JSON.stringify({ floor: floor.number, contractor: on ? 'on' : 'off', held, note: want === 'off' && held ? 'held jobs go back to the floor\'s own staff on the server\'s next tick' : undefined }));
   } else usage();
@@ -463,6 +475,21 @@ if (cmd === 'code' && rest[0] === 'hold') {
     const listing = spendListing(db, { last: i >= 0 ? Number(rest[i + 1]) || 12 : 12 });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : spendListingText(listing));
   }
+} else if (cmd === 'fable') {
+  const i = rest.indexOf('--task'); const id = Number(i >= 0 ? rest[i + 1] : NaN);
+  const want = rest.find((x) => x === 'on' || x === 'off');
+  const t = Number.isInteger(id) ? get(db, 'SELECT id, status, title, floor_id FROM tasks WHERE id=?', id) : null;
+  if (!t || !want) die('Give --task N and on or off.');
+  run(db, 'UPDATE tasks SET fable_ok=? WHERE id=?', want === 'on' ? 1 : 0, id);
+  // A job that hasn't started has its tier decided again when it does.
+  if (t.status === 'todo') run(db, "UPDATE tasks SET model_tier='', tier=NULL WHERE id=? AND transcript='' AND cost_usd=0", id);
+  console.log(JSON.stringify({ task: id, fable: want, applies: t.status === 'todo' ? 'when it starts' : 'only if it starts again' }));
+} else if (cmd === 'tiers') {
+  const since = sinceArg('7d');
+  const fl = rest.indexOf('--floor') >= 0 ? get(db, 'SELECT id FROM floors WHERE number=?', Number(rest[rest.indexOf('--floor') + 1]))?.id : null;
+  const rows = all(db, `SELECT COALESCE(tier,-1) tier, COUNT(*) n, ROUND(SUM(cost_usd),4) usd FROM tasks WHERE created_at>=? ${fl ? 'AND floor_id=?' : ''} GROUP BY COALESCE(tier,-1) ORDER BY 1`, since, ...(fl ? [fl] : []));
+  const t3 = all(db, `SELECT t.id, f.number, t.title, t.tier_why, ROUND(t.cost_usd,4) usd, t.cap_usd FROM tasks t JOIN floors f ON f.id=t.floor_id WHERE t.tier=3 AND t.tier_at>=? ${fl ? 'AND t.floor_id=?' : ''} ORDER BY t.id`, since, ...(fl ? [fl] : []));
+  console.log(JSON.stringify({ byTier: rows.map((r) => ({ tier: r.tier < 0 ? 'not started or before tiers' : r.tier, tasks: r.n, usd: r.usd })), tier3: t3.map((x) => ({ task: x.id, floor: x.number, why: x.tier_why, usd: x.usd, cap: x.cap_usd })) }, null, 2));
 } else if (cmd === 'denied') {
   const rows = deniedListing(db, { since: sinceArg('7d') });
   console.log(rest.includes('--json') ? JSON.stringify(rows, null, 2) : deniedListingText(rows));

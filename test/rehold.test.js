@@ -36,7 +36,8 @@ async function gateway() {
 }
 async function floor(llm, overrides = {}) {
   // loopMaxFixRounds off: the 16 November replay sends the same task back three times (job 10's one fix round is tested in loop.test.js).
-  const t = await boot({ peopleTalk: false, staffSelfCheck: false, loopMaxFixRounds: Infinity, ...overrides }, { llm });  // one model call per round, so rounds can be counted
+  // The hold machinery, driven by the floor switch it had before the contractor went by hand only (redesign job 19, sendout.test.js).
+  const t = await boot({ peopleTalk: false, staffSelfCheck: false, loopMaxFixRounds: Infinity, contractorManual: false, ...overrides }, { llm });  // one model call per round, so rounds can be counted
   open.push(t);
   const c = await claim(t, `Rehold ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);

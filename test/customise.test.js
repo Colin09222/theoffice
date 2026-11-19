@@ -28,7 +28,8 @@ const staffOf = (s, role) => s.agents.find((a) => a.role === role);
 
 describe('the settings change what the bots write', () => {
   let t, llm;
-  before(async () => { llm = spyClient(); t = await boot({}, { llm }); });
+  // The boss's own routing of words to the Marketer is tested here, so the ten roles are back (job 27 merges them; roles.test.js).
+  before(async () => { llm = spyClient(); t = await boot({ roleMerge: false }, { llm }); });
   after(() => t.close());
 
   test('a floor nobody has customised sends the prompt it always did, and writes as it always did', async () => {

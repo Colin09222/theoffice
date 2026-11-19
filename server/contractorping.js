@@ -12,7 +12,7 @@ const PRE_APPROVED = new Set([3, 6, 7]);
 export const pingKey = (taskId) => `theoffice-contractor-task-${taskId}`;
 
 /** What buddehbot reads. Only the office's own numbers sit outside the fence; the floor's name and the job title are fenced as untrusted data. */
-export function pingMessage({ floorNumber, floorName, taskId, role, title }) {
+export function pingMessage({ floorNumber, floorName, taskId, role, title, sentOut = false }) {
   const fence = newFence();
   const line = String(title ?? '').split(/\r?\n/)[0].slice(0, TITLE_MAX);
   return [
@@ -24,7 +24,9 @@ export function pingMessage({ floorNumber, floorName, taskId, role, title }) {
     `Job: ${fence.wrap('task title', line)}`,
     '',
     'Office jobs always run on buddehbot\'s Mac, never the PC.',
-    PRE_APPROVED.has(Number(floorNumber))
+    // From job 19 a job reaches the contractor only when Colon himself pressed Send out on it.
+    sentOut ? `Colon sent this job out himself: start a Mac worker for task #${taskId} per the contractor runbook in memory, then tell Colon in one or two lines.`
+    : PRE_APPROVED.has(Number(floorNumber))
       ? `Colon has pre-approved floor ${floorNumber}: start a Mac worker for task #${taskId} per the contractor runbook in memory, then tell Colon in one or two lines.`
       : `Before doing anything else, ask Colon in this Telegram chat: "Take contractor job #${taskId}?" with the floor and job title above. Do not start, queue or run it until he says yes, and never automatically.`,
     `The full brief is in \`node scripts/admin.mjs contractor list\` on hz (task #${taskId}).`,
