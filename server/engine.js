@@ -27,6 +27,7 @@ import { CONTRACTOR_ROLES, contractorOn, heldNow, jobFor } from './contractor.js
 import { pingContractor } from './contractorping.js';
 import { testerFailed, testedBy, refuseHold, firstPing } from './handback.js';
 import { createOwnerAlerts, nightFrozen } from './owneralerts.js';
+import { TESTER_LINES, readTestReport, testReportText, keepLater, linesProblem } from './donemeans.js';
 import { briefWithChecks, briefWithoutChecks, checksInBrief, readChecks, selfCheckAsk, selfCheckNudge, selfChecked, readSelfCheck, selfCheckWords, estimateUsd, SELF_CHECK_MARK } from './brain.js';
 
 const today = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -187,7 +188,8 @@ export class Engine {
       const stands = agent.role === 'tester' ? this.makers?.sameAsTested?.(floor, t) : null;
       if (stands) { this.finishTask(floor, agent, t.id, 'review', stands); return; }
       if (usedUp(agent)) continue;
-      run(this.db, "UPDATE tasks SET status='doing', updated_at=? WHERE id=?", this.now(), t.id);
+      // The done-means lines freeze when work starts (redesign job 9): from here only the boss can change them.
+      run(this.db, "UPDATE tasks SET status='doing', updated_at=?, checks_frozen_at=COALESCE(checks_frozen_at, ?) WHERE id=?", this.now(), this.now(), t.id);
       if (agent.role === 'builder') this.costAlerts.buildStarted(t.id, { computer: !!this.computer?.handles(agent.role, floor.id) });
       this.emitTask(t.id);
       this.passOn(floor, agent, t, deps);
@@ -788,8 +790,16 @@ export class Engine {
   finishTask(floor, agent, taskId, status, result) {
     const t = get(this.db, 'SELECT * FROM tasks WHERE id=?', taskId);
     if (t.status === 'cancelled') return;
+    // A Tester's report lists only the job's done-means lines; anything else it noticed goes to the project's Later list, never back to the Builder (job 9).
+    const lines = this.cfg.doneMeans && agent.role === 'tester' && status === 'review' ? readChecks(t) : [];
+    const tested = lines.length ? readTestReport(result, lines) : null;
+    if (tested) {
+      keepLater(this.db, { floorId: floor.id, project: t.project, taskId, items: tested.later, now: this.now() });
+      run(this.db, 'UPDATE tasks SET test_lines=? WHERE id=?', JSON.stringify(tested.lines), taskId);
+      result = testReportText(tested);
+    }
     run(this.db, 'UPDATE tasks SET status=?, result=?, updated_at=? WHERE id=?', status, result, this.now(), taskId);
-    if (agent.role === 'tester' && status === 'review' && testerFailed(result)) this.testerFailedOn(floor, agent, t, result);
+    if (agent.role === 'tester' && status === 'review' && (tested ? tested.failed : testerFailed(result))) this.testerFailedOn(floor, agent, t, result);
     // A maker job runs its own passes (server/makers.js): it decides the next step, and the manager isn't woken for it.
     const handled = !!this.makers?.afterTask(floor, agent, t, status, result);
     this.emitTask(taskId);
@@ -988,6 +998,8 @@ export class Engine {
     // The same care for the words that travel with the brief: a figure from the day's private numbers stays out of them too.
     const tidy = (s) => (this.daily ? this.daily.taskWords(floor.id, '', { title: s, brief: '', plan: '' }).title : s);
     checks = checks.map(tidy); intent = tidy(intent);
+    // A Tester checks the done-means lines of the job it tests and nothing else (redesign job 9): its own list replaces any the brief carried.
+    if (this.cfg.doneMeans && target.role === 'tester' && checks.length) brief = `${briefWithChecks(String(brief).replace(/\n*\s*done means\s*:[\s\S]*$/i, '').trimEnd(), checks)}\n\n${TESTER_LINES}`;
     brief = briefWithChecks(brief, checks);
     const project = wanted || (priv || floor.default_private ? 'private-work' : '');
     if (project) this.upsertProject(floor, project, { title: project, makePrivate: priv });
@@ -1012,9 +1024,21 @@ export class Engine {
    * A job that hasn't started gets what changed, in place. Without this the only way to change a waiting job was to cancel it and write it again, and one floor
    * cancelled 44 of its 86 tasks that way (docs/MANAGER.md). A job that has started keeps the brief it started on, and one with the contractor is theirs.
    */
-  amendTask(floor, mgr, taskId, { add = '', brief = '', title = '', checks = null, size = null }) {
+  amendTask(floor, mgr, taskId, { add = '', brief = '', title = '', checks = null, size = null, bossTurn = false }) {
     const t = get(this.db, 'SELECT * FROM tasks WHERE id=? AND floor_id=?', taskId, floor.id);
     if (!t) throw new ToolError('no such task on this floor');
+    const role = get(this.db, 'SELECT role FROM agents WHERE id=?', t.agent_id)?.role;
+    const started = !!(t.checks_frozen_at || t.transcript || t.cost_usd > 0 || t.revisions > 0 || t.status !== 'todo');
+    if (this.cfg.doneMeans && checks?.length && role !== 'tester') { const problem = linesProblem(checks); if (problem) throw new ToolError(problem); }
+    // Done-means lines are frozen once work starts; the boss alone can change them, through a message the manager turns into this amend (redesign job 9).
+    if (this.cfg.doneMeans && started && checks?.length && !add && !brief && !title && size === null && !['done', 'failed', 'cancelled'].includes(t.status)) {
+      if (!bossTurn) throw new ToolError(`#${t.id} has started, so its "done means" lines are frozen. Only the boss can change them: if they ask for that, amend it on their turn. Anything else they want is a job of its own, or the project's Later list.`);
+      const had = readChecks(t);
+      run(this.db, 'UPDATE tasks SET brief=?, checks=?, checks_amended_at=?, updated_at=? WHERE id=?', briefWithChecks(briefWithoutChecks(t.brief, had), checks), JSON.stringify(checks), this.now(), this.now(), t.id);
+      this.emitTask(t.id);
+      this.feed(floor.id, mgr, `changed the "done means" lines for "${t.title}", as the boss asked`, t.project);
+      return `Changed the "done means" lines of #${t.id}, as the boss asked. Whoever checks it next goes by the new lines.`;
+    }
     if (heldNow(t)) throw new ToolError('that job is with the building\'s outside contractor already, so it can\'t be changed from here. Give what changed as a new job after it, and tell the boss plainly it is with the contractor.');
     // A maker job runs its own passes, and each pass's brief is the office's (server/makers.js).
     if (t.plan.startsWith('Make ') && this.makers?.holds(floor.id, t.project)) throw new ToolError(`#${t.id} is one pass of a build the office is running step by step, so its brief isn't yours to change. Give what the boss wants as a job of its own after it.`);

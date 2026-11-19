@@ -28,5 +28,8 @@ export function laneBSettings(env = process.env) {
     nightFreezeTz: env.NIGHT_FREEZE_TZ || 'America/New_York',
     // j07, the hard cap (TASK_MAX_USD, default 5, in config.js): a task that reaches it is ended and ships or closes. HARD_CAP_ENDS=0 goes back to the old stop.
     hardCapEnds: on(env.HARD_CAP_ENDS),
+    // j09, done-means lines (server/donemeans.js): every job has 3 to 5, frozen once work starts; the Tester checks only those and its report lists only
+    // those; anything else goes to the project's Later list. DONE_MEANS=0 goes back to the free-form checks.
+    doneMeans: on(env.DONE_MEANS),
   };
 }

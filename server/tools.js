@@ -24,6 +24,7 @@ import { LAYOUTS, TONES, VIBES } from '../public/js/looks.js';
 import { checkRound } from './rounds.js';
 import { heldNow, contractorOn, CONTRACTOR_ROLES } from './contractor.js';
 import { SIZES, cleanChecks, checksInBrief, estimateUsd, waitingTwin, openManagerQuestion } from './brain.js';
+import { linesProblem, testedLines, LINES_MAX } from './donemeans.js';
 
 const LINK_SCAN_CHARS = 24 * 1000 * 1000, MAX_LINKS_CHECKED = 100;
 
@@ -210,7 +211,10 @@ function defFor(name, cfg) {
   const on = Object.keys(ASSIGN_MORE).filter((k) => cfg[k]);
   if (!on.length) return DEFS.assign_task;
   const f = DEFS.assign_task.function;
-  return { type: 'function', function: { ...f, parameters: { ...f.parameters, properties: { ...f.parameters.properties, ...Object.assign({}, ...on.map((k) => ASSIGN_MORE[k])) }, required: [...f.parameters.required, ...(cfg.managerIntentCheck ? ['intent'] : [])] } } };
+  const more = Object.assign({}, ...on.map((k) => ASSIGN_MORE[k]));
+  // Done-means lines (redesign job 9): three to five on every job, and the Tester's come from the job it tests.
+  if (cfg.doneMeans && more.checks) more.checks = { ...more.checks, description: 'The "done means" lines: three to five short things anyone could tick by opening it, small changes too (a job with fewer or more is refused). A Tester\'s job takes the lines of the job it tests, so leave them out there. The office writes them into the brief as its "Done means:" list, so leave that line out of the brief.' };
+  return { type: 'function', function: { ...f, parameters: { ...f.parameters, properties: { ...f.parameters.properties, ...more }, required: [...f.parameters.required, ...(cfg.managerIntentCheck ? ['intent'] : [])] } } };
 }
 
 Object.assign(DEFS, MAIL_DEFS);  // email: server/mail-tools.js
@@ -767,6 +771,19 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       }
       // The acceptance checks, from the manager's list or from a "Done means:" line it typed into the brief. Whoever does the job ticks them off before handing in.
       if (cfg.managerPlanFirst || cfg.staffSelfCheck) { more.checks = cfg.managerPlanFirst ? cleanChecks(a.checks) : []; if (!more.checks.length) more.checks = checksInBrief(brief); }
+      // Done-means lines (redesign job 9): every job has 3 to 5 before it starts. A Tester's job checks the lines of the job it tests, and nothing else.
+      if (cfg.doneMeans) {
+        const who = target || engine.staffFor(c.floor, to);
+        if (who.role === 'tester') {
+          const deps = [...dependsOn];
+          if (afterPrevious) { const prev = get(db, "SELECT id FROM tasks WHERE floor_id=? AND status IN ('todo','doing','blocked') ORDER BY id DESC LIMIT 1", c.floor.id); if (prev) deps.push(prev.id); }
+          const tested = testedLines(db, c.floor.id, { dependsOn: deps, project });
+          more.checks = tested.length ? tested : more.checks.slice(0, LINES_MAX);
+        } else {
+          const problem = linesProblem(more.checks);
+          if (problem) throw new WorkspaceError(problem);
+        }
+      }
       const t = engine.assignTask(c.floor, c.agent, { to, title, brief, plan: str(a, 'plan', 120, false), project, private: a.private === true, dependsOn, afterPrevious, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files), auto: !!c.autonomous, ...more });
       c.assigned.push(t.agentId);
       (c.assignedTasks ||= []).push({ id: t.id, size, project: t.project });
@@ -774,7 +791,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
     },
     amend_task(c, a) {
       const size = cfg.managerFastPath && SIZES.includes(a.size) ? a.size : null;
-      return engine.amendTask(c.floor, c.agent, Number(a.task_id), { add: str(a, 'add', 2000, false), brief: str(a, 'brief', 6000, false), title: str(a, 'title', 160, false), checks: a.checks === undefined || a.checks === null ? null : cleanChecks(a.checks), size });
+      return engine.amendTask(c.floor, c.agent, Number(a.task_id), { add: str(a, 'add', 2000, false), brief: str(a, 'brief', 6000, false), title: str(a, 'title', 160, false), checks: a.checks === undefined || a.checks === null ? null : cleanChecks(a.checks), size, bossTurn: !!c.bossTurn });
     },
     review_task(c, a) {
       if (a.verdict === 'revise') {
