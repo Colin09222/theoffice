@@ -10,11 +10,12 @@ DONE MEANS: "A task that reaches $5 is ended and shipped or closed, in a test wi
   - "a task with its own cap (Tier 3's $6) goes on past $5 and stops at its own": tasks.cap_usd overrides the building's cap (room left for job 17).
   - "TASK_MAX_USD sets the cap; HARD_CAP_ENDS=0 goes back to the old stop".
   The same stop applies on a computer (the session's room is the task's own cap; the computer gets its one last save first), and to paid tool calls.
-TESTS: npm test 1720/1723 on this branch before the last test fix. Failures: computer.test.js "no session starts when nothing is left of the task
-  cap" expected the old "Stopped by the building" words (updated in the next commit to the new "Ended by the building ... closed"; passes);
-  domains.test.js IPv6 (EAFNOSUPPORT, this container has no IPv6) and googleads.test.js "a total budget of exactly the approved amount ..." (date-
-  dependent; fails the same on office-redesign-base at this hour). Changed tests (spec changes the behaviour): buildwell.test.js now expects the $5
-  default and the ship/close outcome. Browser suites: none touch this job; not run.
+TESTS: npm test 1712/1720 on this branch's first commit; after the two test fixes that followed, all of those pass except 3 that fail the same on
+  office-redesign-base in this container: domains.test.js IPv6 (EAFNOSUPPORT ::1, no IPv6 here), googleads.test.js "a total budget of exactly the
+  approved amount ..." and (on later branches) business.test.js "the whole journey with ad money" (both date-dependent: "ends within 7 days" fails at
+  this hour on base too). Fixed tests, because the spec changes the behaviour: computer.test.js "no session starts when nothing is left of the task cap"
+  (new words), unlimited.test.js (the default is $5, not $40; its computer sessions that run past $5 on purpose set the cap off), buildwell.test.js
+  ($5 default; the ship/close outcome). Browser suites: none touch this job; not run.
 DEPLOY NOTES: TASK_MAX_USD default changes from 40 to 5 (set it on live only to override; "off" turns it off). New env HARD_CAP_ENDS (default on;
   0 = the old stop: failed and the boss told). Migration (lane B block): tasks.cap_usd, tasks.capped_at, tasks.wip, tasks.not_done.
   The owner alert needs OPENCLAW_HOOK_URL / OPENCLAW_HOOK_TOKEN (already set for the contractor ping).
