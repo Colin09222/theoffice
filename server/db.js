@@ -327,6 +327,12 @@ CREATE TABLE IF NOT EXISTS floor_proposals (
   metric TEXT NOT NULL DEFAULT '', project TEXT NOT NULL DEFAULT '', baseline INTEGER, line TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, task_id INTEGER,
   created_at INTEGER NOT NULL, decided_at INTEGER, UNIQUE (floor_id, week)
 );
+-- r2-j65: "Did it work?": each shipped change's target number when it shipped, and 7 days later the number after.
+CREATE TABLE IF NOT EXISTS change_checks (
+  card_id INTEGER PRIMARY KEY, floor_id INTEGER NOT NULL, project TEXT NOT NULL, title TEXT NOT NULL, metric TEXT NOT NULL, before_n INTEGER NOT NULL,
+  shipped_at INTEGER NOT NULL, due_at INTEGER NOT NULL, after_n INTEGER, line TEXT NOT NULL DEFAULT '', posted_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS change_checks_due ON change_checks(posted_at, due_at);
 CREATE TABLE IF NOT EXISTS weekly_reports (floor_id INTEGER NOT NULL, week TEXT NOT NULL, status TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, PRIMARY KEY (floor_id, week));
 `;
 
