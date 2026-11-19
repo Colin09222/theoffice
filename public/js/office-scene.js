@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows, pileSheets, queuedFor, trophiesFor, PHONE_BUDGET, shedPlan, trianglesOf, CameraFollow, driftYaw } from './room-rules.js';
+import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows, pileSheets, queuedFor, trophiesFor, PHONE_LIMITS, shedPlan, trianglesOf, CameraFollow, driftYaw } from './room-rules.js';
 import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
@@ -1878,7 +1878,7 @@ export class OfficeView {
     if (old) { old.removeFromParent(); old.traverse((m) => { if (m.userData?.merged) m.geometry.dispose(); }); }
     this.officeLegacy?.removeFromParent();
     for (const a of this.actors.values()) if (a.seated) a.sitDown();
-    if (stage.view === this) this.fitBudget();  // the furniture counts toward a phone's budget too (r2-j44)
+    if (stage.view === this) this.fitLimits();  // the furniture counts toward a phone's limits too (r2-j44)
   }
   /** A name plate over every office door, all on one texture: the owner's name and what they do, so you can find anyone at a glance. */
   drawSigns() {
@@ -2080,15 +2080,15 @@ export class OfficeView {
     r.toneMappingExposure = 0.92;
     const w = this.world; this.scene.add(w.group); w.group.scale.setScalar(WORLD_SCALE); w.group.position.set(0, this.worldLift, 0);
     w.setDetail((stage.q?.density ?? 1) >= 0.6);
-    this.fitBudget();
+    this.fitLimits();
   }
   /**
    * r2-j44: on a phone the room stays under 60,000 triangles (spec Q9). Everything sheddable is put back first, then shed a part at a time until
    * the room fits. The people and the room never go.
-   * Run on entering and again whenever furniture arrives. `this.budget` says what it found and what it shed (read by the tests).
+   * Run on entering and again whenever furniture arrives. `this.limits` says what it found and what it shed (read by the tests).
    */
-  fitBudget() {
-    if (this.host || !stage.mobile || this.roomCfg?.phoneBudget === false) { this.budget = null; return; }
+  fitLimits() {
+    if (this.host || !stage.mobile || this.roomCfg?.phoneLimits === false) { this.limits = null; return; }
     const w = this.world, kids = w?.group?.children || [];
     const [, water, shore, land, city, traffic, boats] = kids;
     // In order: the city blocks with their traffic and boats, the land and far shore, the water and the stub of tower under the room, the small
@@ -2099,16 +2099,16 @@ export class OfficeView {
     if (!this.detailOn && this.detail) this.detail.visible = false;
     const total = trianglesOf(this.scene);
     const steps = Object.entries(parts).map(([name, list]) => [name, list.reduce((n, o) => n + trianglesOf(o), 0)]);
-    const plan = shedPlan(total, steps, PHONE_BUDGET.triangles);
+    const plan = shedPlan(total, steps, PHONE_LIMITS.triangles);
     for (const name of plan.shed) for (const o of parts[name]) o.visible = false;
-    this.budget = { limit: PHONE_BUDGET.triangles, before: total, shed: plan.shed, after: trianglesOf(this.scene) };
+    this.limits = { limit: PHONE_LIMITS.triangles, before: total, shed: plan.shed, after: trianglesOf(this.scene) };
   }
   /** Nothing moving but the people: the stage may draw every other frame. */
   idle() { return !this.host && this.intro >= 1 && !this.pts?.size && Math.abs(this.targetZoom - this.zoom) < 1e-3 && Math.abs(this.targetYaw - this.yaw) < 1e-3 && this.pan.distanceTo(this.targetPan) < 1e-3; }
   leave() {
     const r = stage.renderer; r.shadowMap.enabled = false; r.shadowMap.autoUpdate = true; r.toneMappingExposure = 0.84;
     // The city is shared with the tower: whatever a phone room shed comes back for whoever shows it next.
-    if (this.budget?.shed.length) for (const o of this.world?.group?.children || []) o.visible = true;
+    if (this.limits?.shed.length) for (const o of this.world?.group?.children || []) o.visible = true;
   }
   setTier(q) {
     this.detailOn = q.density >= 0.6;
