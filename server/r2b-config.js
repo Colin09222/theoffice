@@ -20,5 +20,7 @@ export function r2bSettings(env = process.env) {
     bossAlerts: onlyIf(env.BOSS_ALERTS),
     // r2-j62: the weekly floor report email, Mondays 09:00 New York. Ships OFF: only WEEKLY_REPORT_EMAIL=1 turns it on.
     weeklyReportEmail: onlyIf(env.WEEKLY_REPORT_EMAIL),
+    // r2-j64: one proposal per active floor, Mondays 08:30 New York (one short model call per floor per week). PROPOSALS=0 turns it off.
+    proposals: on(env.PROPOSALS),
   };
 }

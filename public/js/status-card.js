@@ -39,11 +39,29 @@ export function renderStatusCard(page, el, { shareFloor }) {
     // Jobs 20 and 21, on hold: the weekly fuel gauge and Approve plan go here, for the boss only. Nothing is drawn until they are built.
     page.owner ? h('div.stc-slot', { 'data-slot': 'fuel-gauge', hidden: true }) : null,
     page.owner && s.weekPlan && ['draft', 'approved'].includes(s.weekPlan.status) ? weekPlanBox(page) : null,
+    page.owner && st.proposal ? proposalBox(page, st.proposal) : null,
     page.owner ? bossBits(page) : null,
     h('div.card-actions', {},
       site ? h('a.btn.primary', { href: site.appUrl || site.url, target: '_blank', rel: 'noopener noreferrer', 'data-visit': '' }, 'Visit website') : null,
       h('button.btn', { type: 'button', 'data-share': '', onclick: () => shareFloor(page) }, icon('share-fat'), 'Share'),
       page.owner && st.figuresTap ? h('button.link.stc-spend', { type: 'button', 'data-spend': '', onclick: () => openSpend(page) }, 'Spend') : null));
+}
+
+/**
+ * This week's proposal (round 2, r2-j64), for the boss: one change, one reason, the number behind it, and Yes or No. No reply in 7 days drops it.
+ */
+function proposalBox(page, pr) {
+  const answer = async (a, box) => {
+    for (const b of box.querySelectorAll('button')) b.disabled = true;
+    try { await api(`/floors/${page.slug}/proposal/${pr.id}`, { method: 'POST', body: { answer: a } }); box.replaceChildren(h('p.stc-proposal-done', {}, a === 'yes' ? 'Yes: the team has it.' : 'No: dropped.')); } catch (e) { toast(e.message, 'bad'); for (const b of box.querySelectorAll('button')) b.disabled = false; }
+  };
+  const box = h('section.stc-proposal', { 'data-proposal': String(pr.id) },
+    h('h3', {}, "This week's proposal"),
+    h('p.stc-proposal-change', {}, pr.change),
+    h('p', {}, h('b', {}, 'Why: '), pr.reason),
+    h('p', {}, h('b', {}, 'The number: '), pr.number));
+  box.append(h('div.card-actions', {}, h('button.btn.small.primary', { type: 'button', 'data-proposal-yes': '', onclick: () => answer('yes', box) }, 'Yes'), h('button.btn.small', { type: 'button', 'data-proposal-no': '', onclick: () => answer('no', box) }, 'No')));
+  return box;
 }
 
 const dollars = (n) => `$${(Number(n) || 0).toFixed(2)}`;

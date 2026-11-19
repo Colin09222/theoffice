@@ -321,6 +321,12 @@ const R2_LANE_B_SCHEMA = `
 CREATE TABLE IF NOT EXISTS boss_alerts (key TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, status TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS boss_alerts_floor_day ON boss_alerts(floor_id, day);
 -- r2-j62: the weekly floor report email, one per floor per week (week = that Monday's New York date).
+-- r2-j64: one numbers-led proposal per active floor per week: one change, one reason, the number behind it; Yes / No; dropped after 7 days.
+CREATE TABLE IF NOT EXISTS floor_proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, week TEXT NOT NULL, change TEXT NOT NULL, reason TEXT NOT NULL, number TEXT NOT NULL,
+  metric TEXT NOT NULL DEFAULT '', project TEXT NOT NULL DEFAULT '', baseline INTEGER, line TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, task_id INTEGER,
+  created_at INTEGER NOT NULL, decided_at INTEGER, UNIQUE (floor_id, week)
+);
 CREATE TABLE IF NOT EXISTS weekly_reports (floor_id INTEGER NOT NULL, week TEXT NOT NULL, status TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, PRIMARY KEY (floor_id, week));
 `;
 

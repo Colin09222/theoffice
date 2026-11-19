@@ -469,6 +469,13 @@ export function createMockClient(cfg) {
         const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
         return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
       }
+      // The Monday proposal (server/proposals.js, round 2 r2-j64): one change and one reason, as JSON.
+      if (meta?.kind === 'proposal') {
+        await sleep(Math.min(cfg.mockDelayMs, 20), signal);
+        const content = JSON.stringify({ change: 'Add the site to a local business directory', reason: 'Most visitors find a small business through a search, and the site is not listed anywhere yet.' });
+        const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
+        return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
+      }
       if (meta?.kind === 'weekplan') {
         await sleep(Math.min(cfg.mockDelayMs, 20), signal);
         const content = JSON.stringify({ goal: 'Get the site ready for more visitors', jobs: [
