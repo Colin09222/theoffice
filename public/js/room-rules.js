@@ -71,3 +71,37 @@ export function frameLayout(launches, { spots = 2, low = false } = {}) {
   }
   return { frames: out, more: Math.max(0, list.length - shown.length) };
 }
+
+// ---- r2-j39: state-true poses (Q4) ----
+/** What kind of work each role's desk shows while they are on a job. Roles not here keep the plain poses of their state. */
+export const WORK_KIND = { builder: 'building', designer: 'building', illustrator: 'building', researcher: 'researching', analyst: 'researching', writer: 'researching', tester: 'testing' };
+export const GLANCE = { EVERY: 15, HOLD: 1.6 };
+
+/**
+ * A bean's pose from true things only: their own state, whether a task of theirs is running ('doing'), and the floor. Returns the seated
+ * animation, the screen ('code', 'page', 'dim', 'saver' or 'off'), whether the monitor glows, and the desk prop ('papers', 'clipboard' or null).
+ * On an Idle floor nobody types and every screen is off (r2-j31). A Builder on a running job types fast with the glow on, even while thinking.
+ */
+export function poseFor({ role = '', state = 'idle', running = false, floorIdle = false } = {}) {
+  if (floorIdle) return { anim: 'sit', screen: 'off', glow: false, prop: null, fast: false };
+  const kind = WORK_KIND[role] || null;
+  const working = state !== 'idle' || running;
+  if (!working) return { anim: 'sit', screen: 'saver', glow: false, prop: null, fast: false };
+  if (kind === 'building') return { anim: state === 'talking' ? 'talk' : 'type', screen: 'code', glow: true, prop: null, fast: true };
+  const anim = state === 'typing' || state === 'browsing' ? 'type' : state === 'talking' ? 'talk' : 'think';
+  const screen = state === 'typing' ? 'code' : state === 'browsing' || state === 'reading' ? 'page' : 'dim';
+  if (kind === 'researching') return { anim, screen, glow: screen !== 'dim', prop: 'papers', fast: false };
+  if (kind === 'testing') return { anim: anim === 'type' ? 'type' : 'think', screen, glow: screen !== 'dim', prop: 'clipboard', fast: false };
+  return { anim, screen, glow: screen !== 'dim', prop: null, fast: false };
+}
+
+/**
+ * Waiting on boss: every 15 s each free bean glances at the boss's door for a moment. Each bean keeps its own offset so they don't turn as one.
+ * True while `id`'s glance is on at room time `time`.
+ */
+export function glancing(time, id, floorState) {
+  if (floorState !== 'waiting') return false;
+  let h = 2166136261; for (const c of String(id)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); }
+  const t = (time + ((h >>> 0) % 1000) / 1000 * GLANCE.EVERY) % GLANCE.EVERY;
+  return t < GLANCE.HOLD;
+}

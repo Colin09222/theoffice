@@ -58,6 +58,35 @@ try {
     }
     check(!p.errors.length, `j32 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
   }
+  if (want('j39')) {
+    // r2-j39: a Builder on a running job types with monitor glow; a waiting floor's beans glance at the boss door.
+    const boss = await claim(t, 'Busy Bench');
+    const p = await openRoom(boss.slug);
+    const r = await p.ev(`(() => {
+      const v = window.__office.view;
+      const b = [...v.actors.values()].find((a) => a.info.role === 'builder');
+      if (!b) return { none: true };
+      v.updateBoard([...v.tasks, { id: 999001, title: 'Build the page', status: 'doing', agent_id: b.id, plan: '' }]);
+      b.applyState('thinking', 'Working on it');
+      for (let i = 0; i < 20; i++) v.update(0.1);
+      return { anim: b.char.anim, typing: b.char.blend.type, glow: b.seat.glow.visible, detail: v.detailOn, screen: b.seat.screenMat.color.r, fast: b.char.fast };
+    })()`);
+    check(!r.none && r.anim === 'type' && r.typing > 0.5 && r.fast, `j39 the Builder on a running job types, fast (${r.anim}, ${r.typing?.toFixed(2)})`);
+    check(r.screen > 1 && (r.glow || !r.detail), `j39 with the monitor glowing (${r.detail ? `glow ${r.glow}` : 'phone low: the flat bright screen'}, ${r.screen})`);
+    const g = await p.ev(`(() => {
+      const v = window.__office.view;
+      v.updateBoard(v.tasks.filter((t) => t.id !== 999001));
+      for (const a of v.actors.values()) a.applyState('idle', null);
+      v.setFloorState('waiting');
+      const away = new Set();
+      for (let i = 0; i < 160; i++) { v.update(0.1); for (const a of v.actors.values()) if (a.action || !a.seated) away.add(a); }
+      const free = [...v.actors.values()].filter((a) => !a.isBoss && !away.has(a));
+      return { door: !!v.bossDoor, glanced: free.filter((a) => a.glanced !== undefined).length, free: free.length, idle: v.life.wasIdle };
+    })()`);
+    check(g.door && g.free > 0 && g.glanced === g.free && !g.idle, `j39 on a waiting floor every free bean (${g.glanced} of ${g.free}; the rest were up on a break) glanced at the boss door within 16 s`);
+    if (shots) await p.shot(`${shots}/r2-j39-poses.jpg`);
+    check(!p.errors.length, `j39 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+  }
 } finally {
   b.close(); await t.close();
 }

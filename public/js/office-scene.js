@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { frameLayout } from './room-rules.js';
+import { frameLayout, poseFor, glancing } from './room-rules.js';
 import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
@@ -470,7 +470,7 @@ export class Actor {
     if (rest.length) { const r = document.createElement('span'); r.className = 'char-rest'; r.textContent = ` ${rest.join(' ')}`; this.nameEl.append(r); }
     this.nameW = 0; this.nameH = 0;
   }
-  destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); }
+  destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); if (this.papers) { this.papers.removeFromParent(); for (const m of this.papers.children) { m.geometry.dispose(); m.material.dispose(); } } }
   sitDown() {
     this.seated = true; this.char.inChair = true; this.char.bigDesk = !!this.seat.big;
     // Hips land on the seat cushion; the legs hang in front of the chair, toward the desk. The height eases in with the
@@ -542,24 +542,50 @@ export class Actor {
     if (Math.hypot(this.group.position.x - sx, this.group.position.z - sz) > 0.3) { this.goTo(sx, sz, () => this.sitDown()); return; }
     this.sitDown();
   }
+  /** Whether a task of this person's is running right now: a true thing the pose can show (r2-j39). */
+  get running() { const id = String(this.id); return (this.view.tasks || []).some((t) => t.status === 'doing' && String(t.agentId ?? t.agent_id) === id); }
   applyStatePose() {
     const s = this.state;
     const screen = this.seat.screenMat;
+    const v = this.view;
+    // The pose from true things only (room-rules.js poseFor): own state, a running task, an Idle floor. A Builder on a running job types fast
+    // with the glow on; a Researcher's desk has papers spread; a Tester holds a clipboard; an Idle floor's screens are off (r2-j31).
+    const pose = this.pose = this.isBoss ? null : poseFor({ role: this.isManager ? 'manager' : this.info.role, state: s, running: this.running, floorIdle: !!v.life?.wasIdle });
     if (screen) {
-      const v = this.view;
-      const on = s !== 'idle';
+      const look = pose?.screen ?? (s === 'idle' ? 'saver' : 'dim');
       // A screen at work glows a little past white, untouched by the tone curve, so the bloom picks it out: the room's own little lights.
-      if (s === 'typing') { screen.map = v.codeTex; screen.color.setScalar(1.3); }
-      else if (s === 'browsing' || s === 'reading') { screen.map = v.pageTex; screen.color.setScalar(1.18); }
-      else if (on) { screen.map = v.pageTex; screen.color.set('#c9c4ba'); }
-      else if (v.life?.wasIdle) { screen.map = v.idleTex; screen.color.set('#2e2e33'); }  // an Idle floor's screens are off: no glow at all (r2-j31)
+      if (look === 'code') { screen.map = v.codeTex; screen.color.setScalar(1.3); }
+      else if (look === 'page') { screen.map = v.pageTex; screen.color.setScalar(1.18); }
+      else if (look === 'dim') { screen.map = v.pageTex; screen.color.set('#c9c4ba'); }
+      else if (look === 'off') { screen.map = v.idleTex; screen.color.set('#2e2e33'); }
       else { screen.map = v.idleTex; screen.color.set('#ffffff'); }
       screen.needsUpdate = true;
-      if (this.seat.glow) { this.seat.glow.material.color.set(s === 'typing' ? '#2a5aa8' : '#8a8060'); this.seat.glow.visible = v.detailOn && on; }
+      // On phone low the glow is the screen's own flat colour and nothing more (spec Q9).
+      if (this.seat.glow) { this.seat.glow.material.color.set(look === 'code' ? '#2a5aa8' : '#8a8060'); this.seat.glow.visible = v.detailOn && !!pose?.glow; }
       this.showProgress();
     }
+    this.char.fast = !!pose?.fast;
+    this.showProp(pose?.prop || null);
     if (!this.seated) return;
-    this.char.setAnim(s === 'typing' || s === 'browsing' ? 'type' : s === 'thinking' || s === 'queued' ? 'think' : s === 'talking' ? 'talk' : 'sit');
+    this.char.setAnim(pose ? pose.anim : s === 'typing' || s === 'browsing' ? 'type' : s === 'thinking' || s === 'queued' ? 'think' : s === 'talking' ? 'talk' : 'sit');
+  }
+  /** The desk prop for the work: papers spread beside the keyboard for research, a clipboard in hand for testing. Only while seated. */
+  showProp(prop) {
+    if (prop === 'papers' && !this.papers && this.seat.at) {
+      const g = this.papers = new THREE.Group(); g.name = 'papers';
+      const f = this.seatFace(), [sx, sz] = this.seat.at;
+      for (let i = 0; i < 3; i++) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.56), new THREE.MeshLambertMaterial({ color: i === 1 ? '#fffdf4' : '#f4ecd8' }));
+        m.rotation.x = -Math.PI / 2; m.rotation.z = f + (i - 1) * 0.35;
+        const side = (i - 1) * 0.5;
+        m.position.set(sx + Math.sin(f) * 0.95 + Math.cos(f) * side, 1.0 + i * 0.004, sz + Math.cos(f) * 0.95 - Math.sin(f) * side);
+        g.add(m);
+      }
+      this.view.root.add(g);
+    }
+    if (this.papers) this.papers.visible = prop === 'papers';
+    this.propNow = prop;
+    if (this.seated && !this.action) this.char.paper.visible = prop === 'clipboard';
   }
   // Real events can flip faster than the eye. Each visible state gets a moment on stage, and the ones behind it wait their
   // turn in a short queue. Paced on the wall clock, so a slow frame rate never swallows states that arrive at real-time speed.
@@ -660,7 +686,15 @@ export class Actor {
       this.idleTimer -= dt;
       if (this.idleTimer <= 0) { this.idleTimer = 20 + Math.random() * 40; this.idleErrand(); }
     }
-    if (this.seated) this.faceTo = this.seatFace();
+    if (this.seated) {
+      this.faceTo = this.seatFace();
+      // Waiting on boss: a free bean glances at the boss's door every 15 s (r2-j39), turned in the chair as far as it can.
+      const door = this.view.bossDoor;
+      if (door && !this.isBoss && !this.action && this.state === 'idle' && glancing(time, this.id, this.view.floorState)) {
+        let d = Math.atan2(door.x - g.position.x, door.z - g.position.z) - this.faceTo; d = Math.atan2(Math.sin(d), Math.cos(d));
+        this.faceTo += Math.max(-0.8, Math.min(0.8, d)); this.glanced = time;
+      }
+    }
     if (this.listening) {
       if (time > this.listening.until || this.listening.who.dead) { this.listening = null; if (!this.seated && !this.action && !this.path.length) this.char.setAnim('stand'); }
       else if (!moving) { const o = this.listening.who.group.position; this.faceTo = Math.atan2(o.x - g.position.x, o.z - g.position.z); }
@@ -693,6 +727,7 @@ export class OfficeView {
     this.labels = labels; this.onSelect = onSelect; this.host = host; this.pace = pace;
     this.bossView = !!state.viewer?.owner; this.colors = state.floor.colors; this.decor = state.floor.decor; this.logoUrl = state.floor.logoUrl || null; this.companyName = state.floor.name;
     this.plan = planFor(this.decor.layout);
+    this.bossDoor = this.plan.rooms.find((r) => r.id === 'boss')?.door || null;  // where a waiting floor's beans glance (r2-j39)
     this.staffCount = state.agents.filter((a) => a.role !== 'manager').length;
     this.scene = new THREE.Scene();
     // Linear fog with a long start: the room and the near city keep their full colour, only the far shore softens.
@@ -1556,6 +1591,8 @@ export class OfficeView {
     this.tasks = tasks;
     this.celebrateFinished(tasks);
     for (const a of this.actors.values()) if (a.state !== 'idle') a.renderBubble();
+    // A task starting or stopping changes what the desk shows, even before the person's own state does (r2-j39).
+    for (const a of this.actors.values()) { const r = a.running; if (r !== a.wasRunning) { a.wasRunning = r; if (!a.isBoss) a.applyStatePose(); } }
     const shown = tasks.filter((t) => ['todo', 'doing', 'review', 'blocked', 'done'].includes(t.status));
     const open = shown.some((t) => t.status !== 'done');
     const list = open ? shown : [];

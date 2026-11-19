@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES } from '../public/js/room-rules.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE } from '../public/js/room-rules.js';
 import { get } from '../server/db.js';
 import { REAL_JPEG, publish } from './r2-fixtures.js';
 import { storeShot } from '../server/shots.js';
@@ -192,5 +192,40 @@ describe('r2-j32 framed launches', () => {
     t.cfg.roomFrames = false;
     assert.equal((await visitor.get(`/api/floors/${six.slug}`)).data.room.frames, null);
     t.cfg.roomFrames = true;
+  });
+});
+
+describe('r2-j39 state-true poses', () => {
+  test('DONE MEANS (rules): a Builder on a running job types fast with the monitor glow, even between keystrokes', () => {
+    for (const state of ['typing', 'thinking', 'browsing', 'queued']) {
+      const p = poseFor({ role: 'builder', state, running: true });
+      assert.deepEqual([p.anim, p.screen, p.glow, p.fast], ['type', 'code', true, true], state);
+    }
+    assert.equal(poseFor({ role: 'builder', state: 'idle', running: true }).anim, 'type', 'a running task with the state not caught up yet');
+    const off = poseFor({ role: 'builder', state: 'idle', running: false });
+    assert.deepEqual([off.anim, off.glow, off.fast], ['sit', false, false], 'no running job: no typing');
+  });
+  test('researching spreads papers, testing holds a clipboard, others keep their state; an Idle floor never types', () => {
+    assert.equal(poseFor({ role: 'researcher', state: 'reading' }).prop, 'papers');
+    assert.equal(poseFor({ role: 'researcher', state: 'reading' }).anim, 'think');
+    assert.equal(poseFor({ role: 'tester', state: 'thinking', running: true }).prop, 'clipboard');
+    assert.equal(poseFor({ role: 'tester', state: 'idle', running: false }).prop, null, 'a prop only while on a job');
+    assert.equal(poseFor({ role: 'manager', state: 'talking' }).anim, 'talk');
+    for (const role of ['builder', 'researcher', 'tester', 'manager']) {
+      const p = poseFor({ role, state: 'idle', floorIdle: true });
+      assert.deepEqual([p.anim, p.screen, p.glow, p.prop], ['sit', 'off', false, null], role);
+    }
+  });
+  test('a waiting floor\'s beans glance at the boss door once every 15 s, each on its own beat; never on other floors', () => {
+    for (const id of ['1', '2', 'nico', 'bea']) {
+      const on = []; for (let t = 0; t < 60; t += 0.1) on.push(glancing(t, id, 'waiting'));
+      const starts = on.filter((x, i) => x && !on[i - 1]).length;
+      assert.ok(starts >= 4 && starts <= 5, `${id}: ${starts} glances in 60 s`);
+      const share = on.filter(Boolean).length / on.length;
+      assert.ok(Math.abs(share - GLANCE.HOLD / GLANCE.EVERY) < 0.02, `${id} glances ${share}`);
+    }
+    for (const st of ['working', 'idle', 'paused']) for (let t = 0; t < 30; t += 0.5) assert.equal(glancing(t, '1', st), false);
+    const a = [], b = []; for (let t = 0; t < 15; t += 0.1) { a.push(glancing(t, '1', 'waiting')); b.push(glancing(t, '2', 'waiting')); }
+    assert.notDeepEqual(a, b, 'not in step');
   });
 });
