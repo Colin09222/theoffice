@@ -394,7 +394,7 @@ export class Computer {
       const sentBack = !!task.session_fresh;
       if (sentBack) run(e.db, 'UPDATE tasks SET session_fresh=0 WHERE id=?', task.id);
       // The Builder's diet (redesign job 18): its fix round starts on a fresh computer much sooner.
-      const freshOver = e.cfg.builderDiet && agent.role === 'builder' ? Math.min(e.cfg.sessionFreshOverTokens, e.cfg.builderFreshOverTokens) : e.cfg.sessionFreshOverTokens;
+      const freshOver = e.cfg.builderDiet && agent.role === 'builder' && Number.isFinite(e.cfg.sessionFreshOverTokens) ? Math.min(e.cfg.sessionFreshOverTokens, e.cfg.builderFreshOverTokens) : e.cfg.sessionFreshOverTokens;
       if (sentBack && live?.status === 'idle' && task.session_ctx >= freshOver && this.freshStart(task)) {
         e.log('info', 'fix round on a fresh computer', { floorId: floor.id, taskId: task.id, tokens: task.session_ctx });
         st.id = ''; st.charged = 0; live = null;

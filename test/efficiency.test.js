@@ -251,7 +251,8 @@ describe('work sent back to a computer that has grown huge', () => {
   const BIG = { input_tokens: 100, cache_read_input_tokens: 290000, cache_creation_input_tokens: 4000, output_tokens: 300 };
   async function start(script = {}, overrides = {}) {
     const sessions = createMockSessions({}, script);
-    const t = await mk({ computerEnabled: true, outputLagMs: 0, ...overrides }, { sessions });
+    // These test the building-wide threshold for a fresh computer; the Builder's lower one (job 18) is tested in context.test.js.
+    const t = await mk({ computerEnabled: true, outputLagMs: 0, builderDiet: false, ...overrides }, { sessions });
     t.app.engine.runManager = async () => {};
     const c = await claim(t);
     const floor = floorOf(t, c); const mgr = managerOf(t, floor);
