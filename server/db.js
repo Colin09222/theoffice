@@ -248,6 +248,8 @@ Object.assign(ADDED.tasks, { cap_usd: 'REAL NOT NULL DEFAULT 0', capped_at: 'INT
 Object.assign(ADDED.tasks, { checks_frozen_at: 'INTEGER', checks_amended_at: 'INTEGER', test_lines: "TEXT NOT NULL DEFAULT ''" });
 // j11: the job's last smoke check (smoke_checks.id).
 Object.assign(ADDED.tasks, { smoke_id: 'INTEGER' });
+// j17: the task's model tier (0 to 3) and why, when it was decided, whether the manager tagged it a hard build, and whether the owner let it use Fable.
+Object.assign(ADDED.tasks, { tier: 'INTEGER', tier_why: "TEXT NOT NULL DEFAULT ''", tier_at: 'INTEGER', hard: 'INTEGER NOT NULL DEFAULT 0', fable_ok: 'INTEGER NOT NULL DEFAULT 0' });
 /** Lane B's one-time fills, each guarded by a settings row so it runs once. */
 function laneBFills(db) {
   // A database from long before these columns (one with no agent_id on its tasks, say) has nothing to fill, and is never kept from booting by it.

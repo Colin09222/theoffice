@@ -22,7 +22,8 @@ export async function boot(overrides = {}, deps = {}) {
   const cfg = loadConfig({ AI_MODE: 'mock', ADMIN_PASSWORD: 'correct horse battery', MOCK_DELAY_MS: '2', RETRY_BASE_MS: '1' }, { rateScale: 1000, towerFloors: 40, nightFreeze: false, ownerDigest: false, smokeBrowser: false, ...overrides });
   const log = (level, msg, extra) => logs.push(JSON.stringify({ level, msg, ...extra }));
   // The floor allowance is off unless a test asks for it (floor-limits.test.js): everything else here is about the role's own model.
-  const app = createApp({ db, cfg, models: { ...loadModels(), floorLimits: null }, log, ...deps });
+  // The model tiers (redesign job 17) are off too unless a test asks for them (tiers.test.js), so the models and prices other tests count stay put.
+  const app = createApp({ db, cfg, models: { ...loadModels(), floorLimits: null, tiers: null }, log, ...deps });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   const port = app.server.address().port;
   app.engine.start();

@@ -248,7 +248,7 @@ export function loadModels(path = resolve(ROOT, 'config/models.json')) {
   const priced = (x) => (x && !x.pricing && prices[x.model] ? { ...x, pricing: prices[x.model] } : x);
   const each = (group) => Object.fromEntries(Object.entries(group || {}).map(([k, r]) => [k, priced(r)]));
   const roles = each(m.roles), hireable = each(m.hireable);
-  return { roles, hireable, all: { ...roles, ...hireable }, tools: each(m.tools), prices, autonomous: m.autonomous || null, appAi: m.appAi || null, floorLimits: m.floorLimits || null };
+  return { roles, hireable, all: { ...roles, ...hireable }, tools: each(m.tools), prices, autonomous: m.autonomous || null, appAi: m.appAi || null, floorLimits: m.floorLimits || null, tiers: m.tiers || null };
 }
 
 /**
@@ -271,7 +271,9 @@ export function routeFor(models, roleKey, { autonomous = false, computer = false
   } else r = { provider: role.provider === 'anthropic' ? 'anthropic' : (role.provider || 'openrouter'), model: role.model, effort: role.effort, maxTokens: role.maxTokens, pricing: price(role.model, role.pricing) };
   // The floor's allowance moves the roles that shape the work between models. 'opus' and '' leave a role on its own, and everyone else stays where they are.
   const fl = models.floorLimits;
-  const moved = fl && (fl.roles || []).includes(roleKey) ? (tier === 'fable' ? { model: fl.fableModel } : tier === 'sonnet' ? { model: fl.sonnetModel, effort: fl.sonnetEffort } : null) : null;
+  // A task's model tier (redesign job 17): haiku, sonnet, opus or fable from the tiers block moves the roles it lists. Without one, floorLimits as before.
+  const tiered = models.tiers && (models.tiers.roles || []).includes(roleKey) && models.tiers[tier]?.model ? models.tiers[tier] : null;
+  const moved = tiered ? { model: tiered.model, effort: tiered.effort } : fl && (fl.roles || []).includes(roleKey) ? (tier === 'fable' ? { model: fl.fableModel } : tier === 'sonnet' ? { model: fl.sonnetModel, effort: fl.sonnetEffort } : null) : null;
   if (moved) r = { ...r, provider: 'anthropic', model: moved.model, effort: moved.effort ?? r.effort, pricing: price(moved.model, null) };
   const auto = models.autonomous;
   if (!autonomous || !auto?.model || (!computer && (auto.keepOwnModel || []).includes(roleKey))) return overFloor(r, floorRoute, models.prices);

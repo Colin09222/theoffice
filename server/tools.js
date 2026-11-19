@@ -202,6 +202,7 @@ const DEFS = {
 // and with all three off the tool is exactly what it was.
 const ASSIGN_MORE = {
   managerFastPath: { size: { type: 'string', enum: SIZES, description: 'small: a quick change to something that already exists (a link, a few words, a name, a number, a picture, one fix), made and checked by one person, with no Tester after it. big: a first build or a rebuild. standard: anything between.' } },
+  modelTiers: { hard: { type: 'boolean', description: 'True only for a first build that is genuinely hard (a real app, a game with real rules, a shop): it gets the strongest model. At most two a week, so leave it off for anything ordinary.' } },
   managerIntentCheck: { intent: S('What the boss asked for, in one line, in their words where you can. Whoever does the job checks their work against it.') },
   managerPlanFirst: { checks: { type: 'array', items: { type: 'string' }, description: 'The acceptance checks: three to six things anyone could tick by opening it, one or two for a small change. The office writes them into the brief as its "Done means:" list, so leave that line out of the brief.' } },
 };
@@ -793,6 +794,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (planName && Number.isFinite(cfg.loopMaxPlanJobs) && get(db, "SELECT COUNT(*) n FROM tasks WHERE floor_id=? AND plan=? AND status!='cancelled' AND (status IN ('todo','doing','blocked','review') OR created_at>=?)", c.floor.id, planName, roundsSince(db, c.floor.id, engine.now())).n >= cfg.loopMaxPlanJobs) throw new WorkspaceError(`plan "${planName.slice(0, 80)}" already has ${cfg.loopMaxPlanJobs} jobs, the most a plan can have. Ship what it makes first; anything more is the next plan, once this one is done.`);
       const openPlan = cfg.loopOnePlan && planName ? get(db, "SELECT plan, GROUP_CONCAT(id) ids FROM tasks WHERE floor_id=? AND plan!='' AND plan!=? AND status IN ('todo','doing','blocked','review') GROUP BY plan ORDER BY MIN(id) LIMIT 1", c.floor.id, planName) : null;
       if (openPlan) throw new WorkspaceError(`plan "${openPlan.plan.slice(0, 80)}" is still open (jobs #${openPlan.ids.split(',').slice(0, 5).join(', #')}). No new plan starts while one is open: finish it, or if the boss changed direction, cancel what is left of it first. More work for the same plan goes under its name.`);
+      more.hard = !!cfg.modelTiers && a.hard === true;
       const t = engine.assignTask(c.floor, c.agent, { to, title, brief, plan: planName, project, private: a.private === true, dependsOn, afterPrevious, lane: LANES.includes(a.lane) ? a.lane : '', files: taskFiles(c, a.files), auto: !!c.autonomous, ...more });
       c.assigned.push(t.agentId);
       (c.assignedTasks ||= []).push({ id: t.id, size, project: t.project });

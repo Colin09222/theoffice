@@ -48,5 +48,10 @@ export function laneBSettings(env = process.env) {
     smokeBrowser: on(env.SMOKE_BROWSER),
     editSkipsTester: on(env.EDIT_SKIPS_TESTER),
     testerComputerGamesShops: on(env.TESTER_COMPUTER_GAMES_SHOPS),
+    // j17, model tiers (config/models.json "tiers"): each task records its tier (1 Haiku, 2 Sonnet medium, 3 Opus); at most TIER3_PER_FLOOR_WEEK (2) Tier 3
+    // tasks a floor a week, each capped at TIER3_CAP_USD ($6). Fable only for a job the owner names (admin.mjs fable). MODEL_TIERS=0 goes back to floorLimits.
+    modelTiers: on(env.MODEL_TIERS),
+    tier3PerFloorWeek: onCap(env.TIER3_PER_FLOOR_WEEK, 2),
+    tier3CapUsd: Number(env.TIER3_CAP_USD) > 0 ? Number(env.TIER3_CAP_USD) : 6,
   };
 }
