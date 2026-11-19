@@ -56,6 +56,7 @@ import { alertLog, nightFrozen, setNightFreeze } from './owneralerts.js';
 import { logDenied, deniedListing } from './denied.js';
 import { sendOut, stuckListing, SendOutError } from './sendout.js';
 import { absoluteMeta } from './metaabs.js';
+import { createTaps, injectTaps, TAP_JS } from './taps.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any main-site cookie, page or API.
@@ -108,6 +109,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const mainCsp = cfg.appsBaseDomain ? APP_CSP.replace("frame-src 'self'", `frame-src 'self' ${cfg.appsScheme}://*.${cfg.appsBaseDomain}`) : APP_CSP;
   const secret = A.serverSecret(db);
   const adminHash = cfg.adminPassword ? A.hashSecret(cfg.adminPassword) : '';
+  // Tapped calls on published pages (redesign job 33): the counter, and the devices bosses and the admin use, so their own taps don't count.
+  const taps = createTaps({ db, now });
 
   // ---- request helpers ----
   const ipOf = (req) => {
@@ -153,8 +156,10 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     if (site && site !== 'same-origin') throw new HttpError(403, 'bad_origin', 'Cross-site request refused.');
   }
   // A published site on a sibling subdomain can plant a cookie for the parent domain. Two of ours at once means one is planted, so neither is believed.
-  const sessionOf = (req) => (A.cookieCount(req.headers.cookie, A.COOKIE) > 1 ? null : A.loadSession(db, A.parseCookies(req.headers.cookie)[A.COOKIE], 'owner', now()));
-  const adminOf = (req) => (A.cookieCount(req.headers.cookie, A.ADMIN_COOKIE) > 1 ? null : A.loadSession(db, A.parseCookies(req.headers.cookie)[A.ADMIN_COOKIE], 'admin', now()));
+  // Each signed-in request also notes the device, for job 33: a boss's or the admin's own taps on a published page are not counted.
+  const ownDevice = (req, s, who) => { if (s && cfg.tapCount !== false) taps.noteOwnDevice(ipOf(req), String(req.headers['user-agent'] || ''), who); return s; };
+  const sessionOf = (req) => (A.cookieCount(req.headers.cookie, A.COOKIE) > 1 ? null : ((s) => ownDevice(req, s, { floorId: s?.floor_id }))(A.loadSession(db, A.parseCookies(req.headers.cookie)[A.COOKIE], 'owner', now())));
+  const adminOf = (req) => (A.cookieCount(req.headers.cookie, A.ADMIN_COOKIE) > 1 ? null : ((s) => ownDevice(req, s, { admin: true }))(A.loadSession(db, A.parseCookies(req.headers.cookie)[A.ADMIN_COOKIE], 'admin', now())));
   // A slug can be renamed once, from floor-N to the company's name. The old one keeps working forever.
   const floorRow = (slug) => get(db, 'SELECT * FROM floors WHERE slug=?', slug) || get(db, 'SELECT f.* FROM floors f JOIN floor_old_slugs o ON o.floor_id=f.id WHERE o.slug=?', slug);
   const floorBySlug = (slug) => {
@@ -927,6 +932,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (name === 'office.js') return { type: 'text/javascript; charset=utf-8', body: SDK_JS };
     if (name === 'chat.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_JS, cache: 'public, max-age=3600' };
     if (name === 'chat-panel.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_PANEL_JS, cache: 'public, max-age=3600' };
+    if (name === 'taps.js') return { type: 'text/javascript; charset=utf-8', body: TAP_JS, cache: 'public, max-age=3600' };
     if (name === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
     if (name === 'phaser.min.js') return { type: 'text/javascript; charset=utf-8', body: phaserLib?.body };
     return null;
@@ -982,6 +988,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (welcome) delete HEAD['x-robots-tag'];
     if (segs[0] === '_data') return serveData(req, res, f, pr, label, rawUrl, HEAD);
     if (segs[0] === '_office' && segs[1] === 'cloud') return cloud.serve(req, res, { f, pr, label, segs: segs.slice(2), rawUrl, HEAD });
+    if (segs[0] === '_office' && segs[1] === 'tap' && segs.length === 2 && req.method === 'POST') return serveTap(req, res, f, pr, HEAD);
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...HEAD, allow: 'GET, HEAD' }); return res.end(); }
     limit('publicSite', ipOf(req));
     if (segs[0] === '_office' && segs[1] === 'pay' && segs.length === 2) return servePay(res, pr, HEAD);
@@ -1001,10 +1008,28 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     }
     if (!hit) return miss();
     if (/^text\/html/.test(hit.type) && req.method === 'GET' && !pr.private) visit(req, f, pr, segs.join('/'));
-    const etag = `W/"${pr.published_at}${cloud.chat.tag(f, pr)}"`;
+    const tapping = cfg.tapCount !== false && !pr.private;
+    const etag = `W/"${pr.published_at}${tapping ? '-t' : ''}${cloud.chat.tag(f, pr)}"`;
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ...HEAD, etag }); return res.end(); }
     res.writeHead(200, { ...HEAD, etag, 'content-type': hit.type });
-    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(cloud.chat.decorate(f, pr, hit.body, segs), `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
+    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(tapping ? injectTaps(cloud.chat.decorate(f, pr, hit.body, segs)) : cloud.chat.decorate(f, pr, hit.body, segs), `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
+  }
+  // One tapped call (job 33). Only the page's own origin may send it; a public project only; 204 whatever happens, so a page never waits on it.
+  async function serveTap(req, res, f, pr, HEAD) {
+    const done = () => { res.writeHead(204, { ...HEAD, 'cache-control': 'no-store' }); res.end(); };
+    try {
+      if (cfg.tapCount === false || pr.private) return done();
+      const own = `${cfg.appsScheme}://${String(req.headers.host).toLowerCase().replace(/\.$/, '')}`;
+      const site = req.headers['sec-fetch-site'];
+      if ((req.headers.origin && req.headers.origin !== own) || (site && site !== 'same-origin')) return done();
+      limit('publicSite', ipOf(req));
+      const chunks = []; let size = 0;
+      for await (const c of req) { size += c.length; if (size > 512) return done(); chunks.push(c); }
+      let b; try { b = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return done(); }
+      if (!b || typeof b !== 'object') return done();
+      taps.record({ floorId: f.id, project: pr.slug, path: String(b.path || '/'), number: String(b.number || ''), ip: ipOf(req), ua: String(req.headers['user-agent'] || '') });
+    } catch (e) { if (!(e instanceof HttpError)) log('warn', 'tap not recorded', { err: String(e?.message || e).slice(0, 120) }); }
+    return done();
   }
   async function serveData(req, res, f, pr, label, rawUrl, HEAD) {
     const reply = (status, obj) => { res.writeHead(status, { ...HEAD, 'cache-control': 'no-store', 'content-type': 'application/json; charset=utf-8', ...(status === 429 ? { 'retry-after': '30' } : {}) }); res.end(JSON.stringify(obj)); };

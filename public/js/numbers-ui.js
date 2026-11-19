@@ -71,6 +71,8 @@ function paint(page, box, v) {
     sold ? tile('Sales', money(win.grossCents, v.sales.currency)) : tile('Sales', '–', v.sales.state === 'error' ? 'couldn\'t be read just now' : 'no sales yet'),
     sold ? tile('Orders', count(win.orders)) : null, sold || v.sales.activeSubs ? tile('Active subscribers', count(v.sales.activeSubs)) : null));
   if (v.sales.wholeCompany && sold) box.append(h('p.num-note', {}, 'Sales are for the whole company, not this one project.'));
+  // Tapped calls on the company's pages (job 33): real people tapping a phone number, this week (Monday on).
+  if (v.calls?.show) box.append(h('p.num-note.num-calls', { 'data-calls': '' }, `Calls tapped: ${count(v.calls.week)} this week`));
   if (v.usage.accounts || v.signupsTotal) box.append(h('p.num-note', {}, `So far: ${count(v.usage.accounts)} account${v.usage.accounts === 1 ? '' : 's'} and ${count(v.signupsTotal)} sign-up${v.signupsTotal === 1 ? '' : 's'}.`));
 
   // Today has no bars of its own, so it shows the last 7 days with today picked out.

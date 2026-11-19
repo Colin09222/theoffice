@@ -5,6 +5,7 @@
 import { get, all } from './db.js';
 import { ensureAdSpend } from './business.js';
 import { slugPattern } from './workspace.js';
+import { weekStart } from './spendcheck.js';
 
 const DAY = 86400000, SERIES_DAYS = 30, TOP = 8;
 export const WINDOWS = { today: 1, week: 7, month: 30 };
@@ -76,13 +77,18 @@ export function companyNumbers(db, floor, { now = Date.now(), project = '', sale
   const adsView = ads.length ? { campaigns: ads.length, spentCents, approvedCents: sum(ads, 'amount') * 100, reported: ads.some((r) => r.synced_at), clicks: sum(ads, 'clicks'), impressions: sum(ads, 'impressions'), earnedCents: earned, currency, leftCents: currency === 'usd' ? earned - spentCents : null } : null;
   const usage = get(db, `SELECT COALESCE(SUM(users),0) accounts, COALESCE(SUM(docs),0) docs, COALESCE(SUM(saves),0) saves, COALESCE(SUM(scores),0) scores FROM cloud_usage WHERE floor_id=?${of(project)}`, floorId, ...arg(project));
   const signupsTotal = get(db, `SELECT COUNT(*) n FROM app_forms WHERE floor_id=?${of(project)}`, floorId, ...arg(project)).n;
+  // Tapped calls (job 33): real taps on tel: links on the company's published pages this week (Monday, the owner's time, as the digest
+  // counts it). Shown when the company has a tel: link published or a tap on record.
+  const callsWeek = get(db, `SELECT COUNT(*) n FROM tel_taps WHERE floor_id=?${of(project)} AND created_at>=?`, floorId, ...arg(project), weekStart(now)).n;
+  const callsEver = get(db, `SELECT COUNT(*) n FROM tel_taps WHERE floor_id=?${of(project)}`, floorId, ...arg(project)).n;
+  const hasTel = !!get(db, `SELECT 1 x FROM published_files WHERE floor_id=?${of(project)} AND path LIKE '%.htm%' AND content LIKE '%tel:%' LIMIT 1`, floorId, ...arg(project));
   // Every project the company has with something to show. The drive's working folders stay out.
   const seen = new Set(all(db, 'SELECT DISTINCT project FROM app_visits WHERE floor_id=? AND day>=? UNION SELECT DISTINCT project FROM app_forms WHERE floor_id=? UNION SELECT DISTINCT project FROM cloud_users WHERE floor_id=?', floorId, from, floorId, floorId).map((r) => r.project));
   const projects = all(db, 'SELECT slug, title, kind, private, published_at FROM projects WHERE floor_id=? ORDER BY COALESCE(published_at,0) DESC, created_at DESC LIMIT 60', floorId).filter((p) => p.slug !== 'brand' && (p.published_at || seen.has(p.slug))).map((p) => ({ slug: p.slug, title: p.title, kind: p.kind, live: !!p.published_at, private: !!p.private }));
   return {
     at: now, timezone: 'UTC', project, projects, windows, series: list,
     sales: { state: salesFailed ? 'error' : sales && (sales.orders || sales.grossCents || sales.activeSubs) ? 'ok' : 'none', currency, activeSubs: sales?.activeSubs || 0, refundsCents: sales?.refundsCents || 0, wholeCompany: !!project },
-    ads: adsView, usage, signupsTotal,
+    ads: adsView, usage, signupsTotal, calls: { week: callsWeek, ever: callsEver, show: hasTel || callsEver > 0 },
   };
 }
 

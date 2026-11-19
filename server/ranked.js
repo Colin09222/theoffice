@@ -7,17 +7,13 @@
 //   Kill         pauses the team and takes the floor off the public lists (hidden); "Bring back" puts both back as they were.
 // Nothing here sets a budget or a limit (the owner's ruling of 2026-11-19).
 import { get, all, run } from './db.js';
+import { tapsSince } from './taps.js';
 
 const DAY = 86400000;
 const WINDOW_DAYS = [7, 28];
 const usd = (n) => Math.round((Number(n) || 0) * 100) / 100;
-const has = (db, table) => !!get(db, "SELECT 1 x FROM sqlite_master WHERE type='table' AND name=?", table);
 const sumOf = (rows, key) => rows.reduce((n, r) => n + (Number(r[key]) || 0), 0);
 
-/** Tapped calls on a floor's published pages since `from` (job 33's table; zero until it exists). */
-export function tapsSince(db, floorId, from) {
-  return has(db, 'tel_taps') ? get(db, 'SELECT COUNT(*) n FROM tel_taps WHERE floor_id=? AND created_at>=?', floorId, from).n : 0;
-}
 
 /** The ranked list. `numbers` is the engine's Numbers reader (server/numbers.js), so the counts are the Numbers tab's own. */
 export async function rankedFloors(db, { numbers, now = Date.now() } = {}) {
