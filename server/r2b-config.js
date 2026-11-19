@@ -12,5 +12,7 @@ export function r2bSettings(env = process.env) {
     heroFade: on(env.HERO_FADE),
     // r2-j36: the live tower's address (/api/building/live: work light, launch flash, visit sign light, activity feed). LIVE_TOWER=0 takes it away.
     liveTower: on(env.LIVE_TOWER),
+    // r2-j49: buddehbot's mailroom feed (/api/mailroom), read-only. MAILROOM=0 takes it (and the mailroom display) away.
+    mailroom: on(env.MAILROOM),
   };
 }
