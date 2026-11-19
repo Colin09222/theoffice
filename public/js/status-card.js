@@ -42,7 +42,29 @@ export function renderStatusCard(page, el, { shareFloor }) {
     page.owner ? bossBits(page) : null,
     h('div.card-actions', {},
       site ? h('a.btn.primary', { href: site.appUrl || site.url, target: '_blank', rel: 'noopener noreferrer', 'data-visit': '' }, 'Visit website') : null,
-      h('button.btn', { type: 'button', 'data-share': '', onclick: () => shareFloor(page) }, icon('share-fat'), 'Share')));
+      h('button.btn', { type: 'button', 'data-share': '', onclick: () => shareFloor(page) }, icon('share-fat'), 'Share'),
+      page.owner && st.figuresTap ? h('button.link.stc-spend', { type: 'button', 'data-spend': '', onclick: () => openSpend(page) }, 'Spend') : null));
+}
+
+const dollars = (n) => `$${(Number(n) || 0).toFixed(2)}`;
+/**
+ * The boss's own floor's dollars, behind the tap (job 34): this week, last week and since the floor opened, split Claude and OpenRouter, and
+ * the latest jobs with what each cost. Fetched only now, from the boss's own route. Nothing here is a limit: no gauge, no budget, nothing "left".
+ */
+async function openSpend(page) {
+  let d;
+  try { d = await api(`/floors/${page.slug}/spend`); } catch (e) { toast(e.message, 'bad'); return; }
+  modal('Spend', (body) => {
+    const line = (label, x) => h('tr', {}, h('th', { scope: 'row' }, label), h('td', {}, dollars(x.totalUsd)), h('td', {}, dollars(x.claudeUsd)), h('td', {}, dollars(x.openrouterUsd)));
+    body.append(
+      h('p.fineprint', {}, 'What your floor has spent. Your floor only.'),
+      h('table.spend-table', { 'data-spend-table': '' },
+        h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', { scope: 'col' }, 'Total'), h('th', { scope: 'col' }, 'Claude'), h('th', { scope: 'col' }, 'OpenRouter'))),
+        h('tbody', {}, line('This week', d.thisWeek), line('Last week', d.lastWeek), line('Since you opened', d.sinceOpened))),
+      h('h3.spend-jobs-head', {}, 'Latest jobs'),
+      d.jobs.length ? h('ul.spend-jobs', {}, ...d.jobs.map((j) => h('li', { 'data-spend-job': '' }, h('span', {}, j.title), h('b', {}, dollars(j.costUsd)), h('small', {}, timeAgo(j.at)))))
+        : h('p.empty', {}, 'No jobs yet.'));
+  });
 }
 
 /**

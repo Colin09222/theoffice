@@ -194,6 +194,8 @@ export function installJobCards(ext) {
   hooks.snapshot.push((f, viewer, out) => {
     if (cfg.jobCards !== false) out.jobs = floorCards(db, f, { owner: viewer.owner, base: BASE });
     if (cfg.jobCards !== false) out.status = statusFor(db, f, { owner: viewer.owner, base: BASE, liveUrl: (slug) => engine.liveUrl(f, slug), at: now() });
+    // The boss's own figures are one tap away on the card (job 34); the figures themselves are never in the snapshot.
+    if (out.status && viewer.owner && cfg.ownSpend !== false) out.status.figuresTap = true;
     if (Array.isArray(out.messages)) {
       const quiet = new Set(all(db, 'SELECT message_id id FROM quiet_messages WHERE floor_id=?', f.id).map((r) => r.id));
       if (quiet.size) out.messages = out.messages.filter((m) => !quiet.has(m.id));

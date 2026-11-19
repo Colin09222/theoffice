@@ -73,7 +73,9 @@ export function digestFacts(db, cfg, at, { budget = null } = {}) {
   const help = get(db, "SELECT 1 x FROM sqlite_master WHERE type='table' AND name='help_requests'") ? get(db, "SELECT COUNT(*) n FROM help_requests WHERE status='pending'").n : 0;
   const held = get(db, "SELECT COUNT(*) n FROM contractor_jobs WHERE status='held'").n;
   const stopped = budget ? all(db, "SELECT id, number, name FROM floors WHERE status='active' AND filler=0").filter((f) => PROVIDERS.some((p) => { const s = budget.floorStatus(f.id); const spent = p === 'anthropic' ? s.claudeUsd : s.openrouterUsd; return spent >= s[STOP[p]]; })) : [];
-  return { yesterday, floors, pots, launches, stuck, decisions: { purchases, help, contractorHeld: held, floorsStopped: stopped } };
+  // Floors the owner doubled down on in the ranked view (job 26): named first, so he sees them every morning. A mark only, no cap.
+  const priority = get(db, "SELECT 1 x FROM sqlite_master WHERE type='table' AND name='floor_marks'") ? all(db, "SELECT f.number, f.name FROM floor_marks m JOIN floors f ON f.id=m.floor_id WHERE m.priority=1 AND f.status!='killed' ORDER BY f.number") : [];
+  return { yesterday, floors, pots, launches, stuck, priority, decisions: { purchases, help, contractorHeld: held, floorsStopped: stopped } };
 }
 
 const runway = (w) => (w === null ? 'no cap' : w === Infinity ? 'nothing spent in the last 7 days' : `${w.toFixed(1)} weeks at the last 7 days' pace`);
@@ -82,7 +84,9 @@ export function digestText(facts, fence) {
   const day = new Date(facts.yesterday + 12 * HOUR).toISOString().slice(0, 10);
   const name = (n) => fence.wrap('floor name', n);
   const total = facts.floors.reduce((s, f) => s + f.usd, 0);
-  const lines = [`The Office, daily digest for ${day}.`, '', `Spent yesterday: ${usd(total)}.`];
+  const lines = [`The Office, daily digest for ${day}.`, ''];
+  if (facts.priority?.length) lines.push(`Priority floors (double down): ${facts.priority.map((f) => `floor ${f.number} ${name(f.name)}`).join(', ')}.`, '');
+  lines.push(`Spent yesterday: ${usd(total)}.`);
   for (const f of facts.floors) lines.push(`- Floor ${f.number} ${name(f.name)}: ${usd(f.usd)}`);
   lines.push('', 'Pots:');
   for (const p of facts.pots) lines.push(`- ${POT_NAME[p.provider]}: ${p.left === null ? 'no cap' : `${usd(p.left)} left of ${usd(p.cap)}`}, ${runway(p.runwayWeeks)}.`);

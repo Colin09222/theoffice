@@ -6,8 +6,9 @@ import { stage } from './stage.js';
 let timer = null;
 export async function showAdmin(root) {
   document.body.dataset.page = 'admin';
-  stage.setView(null);
-  stage.renderer?.setClearColor?.('#16172a'); stage.renderer?.clear?.();
+  // A direct load has no 3D stage (since the home page stopped starting one, job 14): setView would throw and leave the page blank
+  // (found by job 26's check of the ranked view). Only a stage that is running has a view to drop.
+  if (stage.ok) { stage.setView(null); stage.renderer?.setClearColor?.('#16172a'); stage.renderer?.clear?.(); }
   const wrap = h('main.admin');
   root.append(wrap);
   if (!session.admin) return renderLogin(wrap);
@@ -30,8 +31,8 @@ function renderLogin(wrap) {
 }
 
 async function renderDash(wrap) {
-  const metrics = h('section.metrics'); const floors = h('div.table-wrap'); const buys = h('section.buys'); const head = h('div.admin-actions'); const doms = h('section.buys'); const helpLine = h('section.buys.help-line'); const budget = h('section.budget'); const stuck = h('section.buys.stuck-jobs');
-  clear(wrap).append(h('header.admin-head', {}, h('h1', {}, 'Building manager'), head), metrics, h('h2', {}, 'Building budget'), budget, h('h2', {}, 'Floors'), floors, h('h2', {}, 'Stuck jobs'), stuck, h('h2', {}, 'Help line'), helpLine, h('h2', {}, 'Pending purchase requests'), buys, h('h2', {}, 'Domains'), doms);
+  const metrics = h('section.metrics'); const floors = h('div.table-wrap'); const buys = h('section.buys'); const head = h('div.admin-actions'); const doms = h('section.buys'); const helpLine = h('section.buys.help-line'); const budget = h('section.budget'); const stuck = h('section.buys.stuck-jobs'); const ranked = h('div.table-wrap.ranked');
+  clear(wrap).append(h('header.admin-head', {}, h('h1', {}, 'Building manager'), head), metrics, h('h2', {}, 'Building budget'), budget, h('h2', {}, 'Floors'), floors, h('h2', {}, 'Ranked by real use per $100'), ranked, h('h2', {}, 'Stuck jobs'), stuck, h('h2', {}, 'Help line'), helpLine, h('h2', {}, 'Pending purchase requests'), buys, h('h2', {}, 'Domains'), doms);
   const post = async (path, body) => { try { const r = await api(path, { method: 'POST', body, admin: true }); await draw(); return r; } catch (e) { toast(e.message, 'bad'); return null; } };
   const confirm = (title, text, go) => modal(title, (b, close) => b.append(h('div.stack', {}, h('p.lede', {}, text), h('div.row', {}, h('button.btn.ghost.grow', { type: 'button', onclick: () => close() }, 'Cancel'), h('button.btn.danger.grow', { type: 'button', 'data-confirm': true, onclick: () => { close(); go(); } }, title)))));
   async function draw() {
@@ -54,6 +55,26 @@ async function renderDash(wrap) {
           h('button.btn.ghost.small', { type: 'button', onclick: () => confirm('Reset', `Wipe all work on ${f.name}, keeping the owner and their look?`, () => post(`/admin/floors/${f.id}/reset`)) }, 'Reset'),
           h('button.btn.danger.small', { type: 'button', onclick: () => confirm('Kill', `Delete ${f.name} and everything on it? This can't be undone, and the floor goes back on the market.`, () => post(`/admin/floors/${f.id}/kill`)) }, 'Kill'))));
     clear(floors).append(h('table.admin-table', {}, h('thead', {}, h('tr', {}, ...['#', 'Company', 'Status', 'Today', 'Total', 'Running', 'Projects', 'Storage', ''].map((t) => h('th', {}, t)))), h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: 9 }, 'No floors yet. Issue a code to get someone started.')))));
+    // Colon's ranked view (redesign job 26): real use per $100 over 7 and 28 days. Each button asks first; none of them sets a budget.
+    const rk = await api('/admin/ranked').catch(() => null);
+    if (rk) {
+      const press = (f, action, title, text) => confirm(title, text, () => post(`/admin/ranked/${f.id}/${action}`, { confirm: true }));
+      const per = (w) => (w.perHundred === null ? (w.realUse ? 'no spend' : '-') : String(w.perHundred));
+      const rrows = rk.floors.map((f) => h('tr', { 'data-ranked': f.slug, ...(f.priority ? { 'data-priority': '1' } : {}), ...(f.killed ? { 'data-killed': '1' } : {}) },
+        h('td', {}, String(f.number)), h('td', {}, f.name, f.priority ? h('span.filler-badge', {}, 'Priority') : null, f.killed ? h('span.filler-badge', {}, 'Killed') : null),
+        ...rk.windows.flatMap((n) => [h('td.num', {}, money(f.windows[n].spendUsd)), h('td.num', {}, String(f.windows[n].realUse)), h('td.num', { 'data-per': n }, per(f.windows[n]))]),
+        h('td', {}, f.lastLaunch ? `${f.lastLaunch.title} · ${new Date(f.lastLaunch.at).toLocaleDateString()}` : 'None yet'),
+        h('td.acts', {},
+          f.priority ? h('button.btn.ghost.small', { type: 'button', 'data-act': 'undo-double-down', onclick: () => press(f, 'undo-double-down', 'Undo double down', `Take the priority mark off ${f.name}?`) }, 'Undo double down')
+            : h('button.btn.primary.small', { type: 'button', 'data-act': 'double-down', onclick: () => press(f, 'double-down', 'Double down', `Mark ${f.name} as a priority, here and in your digest? It changes no cap.`) }, 'Double down'),
+          f.killed ? null : f.paused ? h('button.btn.ghost.small', { type: 'button', 'data-act': 'resume', onclick: () => press(f, 'resume', 'Resume', `Let ${f.name}'s team work again?`) }, 'Resume')
+            : h('button.btn.ghost.small', { type: 'button', 'data-act': 'pause', onclick: () => press(f, 'pause', 'Pause', `Pause ${f.name}'s team? Its boss can resume it.`) }, 'Pause'),
+          f.killed ? h('button.btn.ghost.small', { type: 'button', 'data-act': 'unkill', onclick: () => press(f, 'unkill', 'Bring back', `Bring ${f.name} back as it was before Kill?`) }, 'Bring back')
+            : h('button.btn.danger.small', { type: 'button', 'data-act': 'kill', onclick: () => press(f, 'kill', 'Kill', `Pause ${f.name}'s team and take it off the public lists? You can bring it back here.`) }, 'Kill'))));
+      const heads = ['#', 'Company', ...rk.windows.flatMap((n) => [`Spent ${n}d`, `Real use ${n}d`, `Per $100 ${n}d`]), 'Last launch', ''];
+      clear(ranked).append(h('table.admin-table', {}, h('thead', {}, h('tr', {}, ...heads.map((t) => h('th', {}, t)))), h('tbody', {}, ...rrows)),
+        h('p.fineprint', {}, rk.log.length ? `Last presses: ${rk.log.slice(0, 5).map((l) => `${l.action} on floor ${l.floorNumber} by ${l.who}, ${new Date(l.at).toLocaleString()}`).join('; ')}.` : 'No presses yet.'));
+    }
     // Stuck jobs, each with Send out: the only way a job reaches the outside contractor (redesign job 19). Titles were written by bots: text only.
     const sj = await api('/admin/stuck').catch(() => null);
     if (sj) clear(stuck).append(h('p.fineprint', {}, `Sent out this week: ${sj.sentOutThisWeek} of ${sj.mostAWeek}.`), ...(sj.jobs.length ? sj.jobs.map((j) => h('article.card.request', { 'data-stuck': j.task }, h('small', {}, `#${j.task} · Floor ${j.floorNumber} · ${j.role || ''} · ${j.status}`), h('p', {}, j.title), j.canSendOut ? h('div.row', {}, h('button.btn.primary.small', { type: 'button', 'data-send-out': j.task, onclick: () => confirm('Send out', `Send task #${j.task} to the outside contractor? ${sj.mostAWeek - sj.sentOutThisWeek} left this week.`, () => post(`/admin/tasks/${j.task}/send-out`)) }, 'Send out')) : null)) : [h('p.empty', {}, 'Nothing is stuck.')]));
