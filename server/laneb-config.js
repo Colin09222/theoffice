@@ -41,5 +41,12 @@ export function laneBSettings(env = process.env) {
     loopMaxQueued: onCap(env.LOOP_MAX_QUEUED, 3),
     loopOnePlan: on(env.LOOP_ONE_PLAN),
     maxEditSteps: onCap(env.MAX_EDIT_STEPS, 15),
+    // j11, the smoke check (server/smoke.js): after each publish a script opens the live page (SMOKE_CHECK=0 stops it), in a real browser when Playwright is
+    // on the machine (SMOKE_BROWSER=0 keeps it to plain HTTP). An edit ships on it with no Tester, unless it touches checkout, forms or sign-in, which get one
+    // Tester pass (EDIT_SKIPS_TESTER=0 lifts the rule). The Tester gets a computer only for games and shops (TESTER_COMPUTER_GAMES_SHOPS=0: always, as before).
+    smokeCheck: on(env.SMOKE_CHECK),
+    smokeBrowser: on(env.SMOKE_BROWSER),
+    editSkipsTester: on(env.EDIT_SKIPS_TESTER),
+    testerComputerGamesShops: on(env.TESTER_COMPUTER_GAMES_SHOPS),
   };
 }

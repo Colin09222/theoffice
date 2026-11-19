@@ -25,6 +25,7 @@ import { checkRound, roundsSince } from './rounds.js';
 import { heldNow, contractorOn, CONTRACTOR_ROLES } from './contractor.js';
 import { SIZES, cleanChecks, checksInBrief, estimateUsd, waitingTwin, openManagerQuestion } from './brain.js';
 import { linesProblem, testedLines, LINES_MAX } from './donemeans.js';
+import { touchesSensitive } from './smoke.js';
 
 const LINK_SCAN_CHARS = 24 * 1000 * 1000, MAX_LINKS_CHECKED = 100;
 
@@ -541,6 +542,7 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (notYet) throw new WorkspaceError(notYet);
       const n = publishSnapshot(db, c.floor.id, slug, cfg.quotaBytes, directory);
       engine.upsertProject(c.floor, slug, { title: str(a, 'title', 120), description: str(a, 'description', 300, false), kind, sources, published: true, makePrivate: inherited });
+      engine.afterPublish?.(c.floor, slug, c.task);  // the smoke check, by script (redesign job 11)
       saveCheck(db, c.floor.id, slug, check, reason, engine.now());
       if (check.claims.length) engine.feed(c.floor.id, c.agent, `published ${slug} with possible invented claims for the boss to check`, slug);
       c.say('typing', `Publishing ${slug}`, `published ${slug}`, { project: slug });
@@ -761,8 +763,10 @@ export function createTools({ db, cfg, engine, fetcher = safeFetch, httpFetch = 
       if (target && cfg.managerFastPath && target.role === 'tester') {
         // A small change is checked by whoever makes it. On floor 7 the Tester sent after each change was the whole model cost of that change (docs/MANAGER.md).
         const small = engine.smallBefore(c.floor, { project: project || (a.private === true || c.floor.default_private ? 'private-work' : ''), dependsOn, afterPrevious, thisTurn: c.assignedTasks, bossTurn: !!c.bossTurn });
-        if (small?.back) throw new WorkspaceError(`#${small.id} "${small.title.slice(0, 80)}" was a small change, and whoever made it has checked it: their self-check is with the report. No Tester follows a small change. If you think this one needs a real test anyway, tell the boss why in a line and let them say.`);
-        if (small) throw new WorkspaceError(`#${small.id} "${small.title.slice(0, 80)}" is a small change, so no Tester follows it: whoever makes it checks it against its "Done means" list and says what they saw. If it could break something that matters (taking money, signing in, people's details), it isn't small: ${cfg.managerPlanFirst ? `change it with amend_task (size "standard")` : 'cancel it and assign it again without size small'}, then add the Tester.`);
+        // An edit that touches checkout, a form or signing in still gets one Tester pass (redesign job 11).
+        const once = small && cfg.editSkipsTester && touchesSensitive(get(db, 'SELECT title,brief,intent FROM tasks WHERE id=?', small.id)) && !get(db, "SELECT 1 x FROM tasks t JOIN agents a ON a.id=t.agent_id WHERE t.floor_id=? AND a.role='tester' AND t.status!='cancelled' AND (t.depends_on LIKE ? OR t.depends_on LIKE ? OR t.depends_on LIKE ?)", c.floor.id, `[${small.id}]`, `[${small.id},%`, `%,${small.id}]`);
+        if (once) { /* one Tester pass, allowed */ } else if (small?.back) throw new WorkspaceError(`#${small.id} "${small.title.slice(0, 80)}" was a small change, and whoever made it has checked it: their self-check is with the report. No Tester follows a small change. If you think this one needs a real test anyway, tell the boss why in a line and let them say.`);
+        else if (small) throw new WorkspaceError(`#${small.id} "${small.title.slice(0, 80)}" is a small change, so no Tester follows it: whoever makes it checks it against its "Done means" list and says what they saw. If it could break something that matters (taking money, signing in, people's details), it isn't small: ${cfg.managerPlanFirst ? `change it with amend_task (size "standard")` : 'cancel it and assign it again without size small'}, then add the Tester.`);
       }
       if (target && cfg.managerPlanFirst) {
         const twin = waitingTwin(db, c.floor.id, target.id, project || (a.private === true || c.floor.default_private ? 'private-work' : ''), title);

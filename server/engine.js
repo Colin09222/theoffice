@@ -28,6 +28,7 @@ import { pingContractor } from './contractorping.js';
 import { testerFailed, testedBy, refuseHold, firstPing } from './handback.js';
 import { createOwnerAlerts, nightFrozen } from './owneralerts.js';
 import { TESTER_LINES, readTestReport, testReportText, keepLater, linesProblem } from './donemeans.js';
+import { smokeProject, testerNeedsComputer } from './smoke.js';
 import { briefWithChecks, briefWithoutChecks, checksInBrief, readChecks, selfCheckAsk, selfCheckNudge, selfChecked, readSelfCheck, selfCheckWords, estimateUsd, SELF_CHECK_MARK } from './brain.js';
 
 const today = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -161,7 +162,7 @@ export class Engine {
       this.launch(floor, mgr, (ctl) => this.runManager(floor.id, mgr.id, ctl));
     }
     // Named columns: this runs every second, and any number of queued tasks can be holding a transcript.
-    const todo = all(this.db, "SELECT id,agent_id,depends_on,project,contractor_route,handed_back_at FROM tasks WHERE floor_id=? AND status='todo' ORDER BY id", floor.id);
+    const todo = all(this.db, "SELECT id,floor_id,agent_id,depends_on,project,lane,contractor_route,handed_back_at FROM tasks WHERE floor_id=? AND status='todo' ORDER BY id", floor.id);
     const held = [];
     for (const t of todo) {
       if (this.runs.has(t.agent_id)) continue;
@@ -182,7 +183,8 @@ export class Engine {
         if (h) { held.push(h); continue; }
       }
       // A computer works from its own copy of the project. Two at once on one project means testing yesterday's version and fighting over the merge.
-      if (t.project && this.computer?.handles(agent.role, floor.id) && get(this.db, "SELECT 1 x FROM tasks WHERE floor_id=? AND project=? AND status='doing' AND id!=?", floor.id, t.project, t.id)) continue;
+      const computer = this.onComputer(agent, floor.id, t);
+      if (t.project && computer && get(this.db, "SELECT 1 x FROM tasks WHERE floor_id=? AND project=? AND status='doing' AND id!=?", floor.id, t.project, t.id)) continue;
       // A maker job's test of files the Tester has already been through, byte for byte: the last report stands, and nobody is put to work (server/makers.js).
       // The loop it feeds may queue or cancel tasks, so the rest of this floor waits for a fresh look at the board.
       const stands = agent.role === 'tester' ? this.makers?.sameAsTested?.(floor, t) : null;
@@ -190,10 +192,10 @@ export class Engine {
       if (usedUp(agent)) continue;
       // The done-means lines freeze when work starts (redesign job 9): from here only the boss can change them.
       run(this.db, "UPDATE tasks SET status='doing', updated_at=?, checks_frozen_at=COALESCE(checks_frozen_at, ?) WHERE id=?", this.now(), this.now(), t.id);
-      if (agent.role === 'builder') this.costAlerts.buildStarted(t.id, { computer: !!this.computer?.handles(agent.role, floor.id) });
+      if (agent.role === 'builder') this.costAlerts.buildStarted(t.id, { computer });
       this.emitTask(t.id);
       this.passOn(floor, agent, t, deps);
-      this.launch(floor, agent, (ctl) => (this.computer?.handles(agent.role, floor.id) ? this.computer.run(floor.id, agent.id, t.id, ctl) : this.runStaff(floor.id, agent.id, t.id, ctl)));
+      this.launch(floor, agent, (ctl) => (computer ? this.computer.run(floor.id, agent.id, t.id, ctl) : this.runStaff(floor.id, agent.id, t.id, ctl)));
     }
     if (held.length) this.toldContractor(floor, held);
     this.judgeBuildingBudget(floor, stopped);
@@ -290,6 +292,27 @@ export class Engine {
     this.emitFloor(floor.id);
   }
   // ---- the building's lifetime limits, one per provider ----
+  /** Whether this task runs on a computer. The Tester gets one only for games and shops (redesign job 11). */
+  onComputer(agent, floorId, task) {
+    if (!this.computer?.handles(agent.role, floorId)) return false;
+    return agent.role !== 'tester' || !this.cfg.testerComputerGamesShops || testerNeedsComputer(this.db, task);
+  }
+  /**
+   * After a job publishes: the smoke check, by script (redesign job 11). A failure goes to the manager as a note and wakes it; a pass says nothing.
+   * Runs in the background; this.smoking holds the latest so a test can wait for it.
+   */
+  afterPublish(floor, slug, task) {
+    if (!this.cfg.smokeCheck) return;
+    this.smoking = smokeProject(this, floor, slug, task, { now: this.now() }).then((r) => {
+      this.emit(floor.id, 'smoke', { project: slug, taskId: task?.id ?? null, ok: r.ok, shot: r.shotPath || '' }, { persist: true, project: slug });
+      if (!r.ok) {
+        this.addMessage(floor.id, 'note', null, `The smoke check on ${slug} after it went live found a problem: ${r.errors.join('; ')}. The live page is ${r.url}. Fix it with one small job, or tell the boss in a line.`);
+        run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);
+        this.kick();
+      }
+      return r;
+    }).catch((e) => this.fail('smoke check', e));
+  }
   /** Who gets paid when this person works. A computer is always Claude, whatever the role's own model is. */
   agentProvider(agent, floorId) {
     if (this.computer?.handles(agent.role, floorId)) return 'anthropic';
