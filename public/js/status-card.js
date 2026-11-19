@@ -8,9 +8,11 @@ import { icon } from './icons.js';
 const QUICK = ['Yes', 'No', 'You decide'];
 const OPEN = new Set(['todo', 'working', 'review', 'waiting']);
 
-/** The job on show under Now: the newest open card the page holds (it is live), else what the snapshot said. */
+/** A job untouched for a day is not happening now (job 30; the server's NOW_HORIZON_MS). */
+const NOW_HORIZON_MS = 24 * 3600e3;
+/** The job on show under Now: the newest open card the page holds (it is live) from the last day, else what the snapshot said. */
 function nowOf(s) {
-  const live = (s.jobs || []).filter((c) => OPEN.has(c.state)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+  const live = (s.jobs || []).filter((c) => OPEN.has(c.state) && (c.updatedAt || 0) >= Date.now() - NOW_HORIZON_MS).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
   return live ? { line: live.line, state: live.state } : s.status?.now || null;
 }
 const row = (label, ...kids) => h('div.stc-row', {}, h('dt', {}, label), h('dd', {}, ...kids));

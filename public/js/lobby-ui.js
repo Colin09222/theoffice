@@ -26,26 +26,35 @@ function floorRow(card, onEnter) {
     stateBadge(card));
 }
 
-/** Happening now: the newest lines of real work from the building's feed. A failed fetch hides the strip and says nothing. */
+/** Happening now (job 30): the newest real work in the building, one line per job from its job card, newest first, five at most, from
+ *  /api/building/now. A line that is already up is changed where it stands. Nothing in the last day: "Quiet right now", with when the
+ *  last job really finished. A failed fetch hides the strip and says nothing. */
 function buildNow() {
   const list = h('ol.now-list');
   const strip = h('section.home-now.card-ui', { 'aria-label': 'Happening now', 'data-now': '', hidden: true }, h('h2', {}, h('i.live-dot', { 'aria-hidden': 'true' }), 'Happening now'), list);
-  const quiet = () => {
-    const last = Math.max(0, ...floors.map((f) => f.lastActive || 0));
-    return last ? `Quiet right now. Last job finished ${timeAgo(last)}.` : 'Quiet right now.';
+  const rows = new Map();
+  const line = (it) => {
+    const go = it.url ? h('a.now-text', { href: it.url, target: '_blank', rel: 'noopener noreferrer' }, it.text) : h('span.now-text', {}, it.text);
+    const li = rows.get(it.id) || h('li.now-line', { 'data-id': it.id });
+    li.className = `now-line${it.kind === 'published' ? ' launch' : ''}`;
+    li.dataset.kind = it.kind;
+    li.replaceChildren(
+      h('button.now-floor', { type: 'button', title: `Walk into ${it.floor.name}`, onclick: () => window.officeGo(`/floor/${it.floor.slug}`) }, h('b', {}, String(it.floor.number)), it.floor.name),
+      go, h('time', {}, timeAgo(it.ts)));
+    rows.set(it.id, li);
+    return li;
   };
   const refresh = async () => {
-    let items;
-    try { items = (await api(`/building/ticker?limit=${NOW_LINES * 4}`)).items; } catch { strip.hidden = true; return; }
-    // Real work only: lines from the team and launches. The building's own notices (someone moved in) are not work.
-    const work = items.filter((i) => !i.filler && (i.kind === 'published' || !/ moved in on floor \d+\.?$/.test(i.text))).slice(0, NOW_LINES);
-    clear(list);
-    if (!work.length) list.append(h('li.now-quiet', {}, quiet()));
-    for (const it of work) {
-      const go = it.url ? h('a.now-text', { href: it.url, target: '_blank', rel: 'noopener noreferrer' }, it.text) : h('span.now-text', {}, it.text);
-      list.append(h(`li.now-line${it.kind === 'published' ? '.launch' : ''}`, { 'data-id': it.id },
-        h('button.now-floor', { type: 'button', title: `Walk into ${it.floor.name}`, onclick: () => window.officeGo(`/floor/${it.floor.slug}`) }, h('b', {}, String(it.floor.number)), it.floor.name),
-        go, h('time', {}, timeAgo(it.ts))));
+    let d;
+    try { d = await api('/building/now'); } catch { strip.hidden = true; return; }
+    const items = (d.items || []).slice(0, NOW_LINES);
+    if (!items.length) {
+      rows.clear();
+      list.replaceChildren(h('li.now-quiet', {}, d.lastFinished ? `Quiet right now. Last job finished ${timeAgo(d.lastFinished)}.` : 'Quiet right now.'));
+    } else {
+      const keep = new Set(items.map((i) => i.id));
+      for (const id of [...rows.keys()]) if (!keep.has(id)) rows.delete(id);
+      list.replaceChildren(...items.map(line));
     }
     strip.hidden = false;
   };
