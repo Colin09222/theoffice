@@ -84,5 +84,8 @@ export function laneBSettings(env = process.env) {
     // itself after WEEKLY_PLAN_AUTOSTART_HOURS (24). No plan ever holds a floor idle or stops its spending.
     weeklyPlan: on(env.WEEKLY_PLAN),
     weeklyPlanAutostartHours: Number.isFinite(Number(env.WEEKLY_PLAN_AUTOSTART_HOURS)) && String(env.WEEKLY_PLAN_AUTOSTART_HOURS ?? '').trim() !== '' ? Math.max(0, Number(env.WEEKLY_PLAN_AUTOSTART_HOURS)) : 24,
+    // Round 1 rest, j23: onboarding (server/onboarding.js): lane cards, a template with its price as information, three questions, the manager's plan and
+    // one Start. ONBOARDING=0 brings back the old setup screen.
+    onboarding: on(env.ONBOARDING),
   };
 }

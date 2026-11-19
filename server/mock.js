@@ -455,6 +455,16 @@ export function createMockClient(cfg) {
         return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
       }
       // The Monday plan (server/weekplan.js): a scripted manager drafts one goal and two jobs, each with its done-means lines.
+      // Onboarding (server/onboarding.js): a scripted manager turns the boss's three answers into a name, a goal and three jobs.
+      if (meta?.kind === 'onboarding') {
+        await sleep(Math.min(cfg.mockDelayMs, 20), signal);
+        const content = JSON.stringify({ name: 'Sunny Paws', goal: 'A one-page site for the dog-walking round, live', jobs: [
+          { title: 'Build the site', to: 'builder', brief: 'One page: who we are, prices, how to book.', checks: ['The page loads', 'Prices are on it', 'It fits a phone'], size: 'big', lane: 'website', project: 'site' },
+          { title: 'Write the words', to: 'writer', brief: 'Plain words from the boss\'s answers.', checks: ['The heading says what it is', 'It says who it is for', 'Nothing in it is made up'], size: 'standard', lane: 'website', project: 'site' },
+          { title: 'Publish it and check it on a phone', to: 'builder', brief: 'Put it live.', checks: ['It is live at its link', 'It loads on a phone', 'Every button does something'], size: 'small', lane: 'website', project: 'site' }] });
+        const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
+        return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
+      }
       if (meta?.kind === 'weekplan') {
         await sleep(Math.min(cfg.mockDelayMs, 20), signal);
         const content = JSON.stringify({ goal: 'Get the site ready for more visitors', jobs: [

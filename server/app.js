@@ -35,6 +35,7 @@ import { installShots } from './shots.js';
 import { installJobCards } from './jobcards.js';
 import { installEstimates } from './estimate.js';
 import { installWeekPlans } from './weekplan.js';
+import { installOnboarding } from './onboarding.js';
 import { installBuilding } from './building.js';
 import { installLife } from './life.js';
 import { installHelp } from './help.js';
@@ -273,12 +274,14 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     for (let n = 1; n <= cfg.towerFloors; n++) if (!taken.has(n) && !reserved.has(n)) toLet.push(n);
     json(res, 200, { floors, towerFloors: cfg.towerFloors, vacant: toLet[0] ?? null, toLet, globalPause: engine.globalPaused() });
   });
+  // A code that is unknown or already used (spec section 4, Onboarding; round 1 rest, j23). The same words for both, so a guess learns nothing.
+  const BAD_CODE = 'That code didn\'t work. Check with Colon.';
   POST('/api/claim/check', async ({ req, res, ip }) => {
     limit('code', ip);
     const b = await readJson(req, 2048);
     const row = get(db, 'SELECT floor_number,claimed_at FROM codes WHERE hash=?', A.sha256(A.normalizeCode(b.code)));
-    if (!row) throw new HttpError(404, 'bad_code', 'We don\'t recognise that code. Check it and try again.');
-    if (row.claimed_at) throw new HttpError(404, 'bad_code', 'That code has already opened an office.');
+    if (!row) throw new HttpError(404, 'bad_code', BAD_CODE);
+    if (row.claimed_at) throw new HttpError(404, 'bad_code', BAD_CODE);
     json(res, 200, { ok: true, floor: row.floor_number && row.floor_number <= cfg.towerFloors ? row.floor_number : nextFreeFloor() });
   });
   function nextFreeFloor(wanted) {
@@ -305,8 +308,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     const recovery = keep ? code : A.newRecoveryCode(); const recoveryHash = A.hashSecret(recovery);
     const floorId = tx(db, () => {
       const row = get(db, 'SELECT * FROM codes WHERE hash=?', hash);
-      if (!row) throw new HttpError(404, 'bad_code', 'We don\'t recognise that code. Check it and try again.');
-      if (row.claimed_at) throw new HttpError(404, 'bad_code', 'That code has already opened an office.');
+      if (!row) throw new HttpError(404, 'bad_code', BAD_CODE);
+      if (row.claimed_at) throw new HttpError(404, 'bad_code', BAD_CODE);
       const number = nextFreeFloor(row.floor_number);
       if (!number) throw new HttpError(409, 'no_floors', 'The building is full, or that floor is taken.');
       const base = name ? given : `floor-${number}`;
@@ -737,7 +740,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext), installShots(ext), installJobCards(ext), installEstimates(ext), installWeekPlans(ext)].filter(Boolean);  // estimates after job cards: they add to the boss's cards
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext), installShots(ext), installJobCards(ext), installEstimates(ext), installWeekPlans(ext), installOnboarding(ext)].filter(Boolean);  // estimates after job cards: they add to the boss's cards
   // The budget check, inside the server: a spend record every two hours (server/spendcheck.js, redesign job 5).
   const spendCheck = installSpendCheck({ db, cfg, log, now });
   extensions.push(spendCheck);

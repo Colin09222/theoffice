@@ -247,6 +247,13 @@ CREATE TABLE IF NOT EXISTS weekly_plans (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS weekly_plans_week ON weekly_plans(floor_id, week);
 CREATE TABLE IF NOT EXISTS weekly_plan_floors (floor_id INTEGER PRIMARY KEY, off INTEGER NOT NULL DEFAULT 0, draft_asked INTEGER, updated_at INTEGER NOT NULL);
+-- Round 1 rest, j23: the plan a new floor's boss is shown in onboarding (lane, template, three answers), drafted by one manager call, started by one Start.
+CREATE TABLE IF NOT EXISTS onboarding_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, status TEXT NOT NULL, lane TEXT NOT NULL, template TEXT NOT NULL, form INTEGER NOT NULL DEFAULT 0,
+  answers TEXT NOT NULL DEFAULT '[]', name TEXT NOT NULL DEFAULT '', goal TEXT NOT NULL DEFAULT '', jobs TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL, started_at INTEGER,
+  task_ids TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS onboarding_plans_floor ON onboarding_plans(floor_id, id);
 `;
 Object.assign(ADDED.tasks, { contractor_route: 'INTEGER NOT NULL DEFAULT 0', handed_back_at: 'INTEGER', tester_fails: 'INTEGER NOT NULL DEFAULT 0', fix_of: 'INTEGER' });
 // j07: a task's own cap when it isn't the building's (Tier 3 is $6), when it was ended at its cap, whether what it saved shipped as Work in progress, and what is not done yet.
