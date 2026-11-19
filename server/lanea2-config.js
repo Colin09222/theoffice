@@ -22,5 +22,8 @@ export function laneA2Settings(env = process.env) {
     phoneBudget: on(env.PHONE_BUDGET),
     // r2-j46: the desktop camera follows real handoffs (with a "Follow the work" switch) and an idle phone drifts (ROOM_CAMERA=0: neither).
     roomCamera: on(env.ROOM_CAMERA),
+    // r2-j47: every job keeps its events with their times (server/eventlog.js) for JOB_EVENTS_DAYS (35, never under 30) (JOB_EVENTS=0: not recorded).
+    jobEvents: on(env.JOB_EVENTS),
+    jobEventsDays: Math.max(30, Number(env.JOB_EVENTS_DAYS) || 35),
   };
 }

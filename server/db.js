@@ -315,6 +315,16 @@ CREATE TABLE IF NOT EXISTS rank_log (
 );
 `;
 
+// redesign r2 lane A (docs/redesign/ROUND2.md): the floor room, launch quality and the library. New tables only; safe to run on every start.
+const LANE_A2_SCHEMA = `
+CREATE TABLE IF NOT EXISTS job_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, card_id INTEGER NOT NULL, task_id INTEGER, kind TEXT NOT NULL, project TEXT NOT NULL DEFAULT '',
+  data TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS job_events_card ON job_events(card_id, created_at);
+CREATE INDEX IF NOT EXISTS job_events_floor ON job_events(floor_id, created_at);
+`;
+
 export function openDb(dataDir) {
   let path = ':memory:';
   if (dataDir !== ':memory:') { mkdirSync(dataDir, { recursive: true }); path = join(dataDir, 'office.db'); }
@@ -324,6 +334,7 @@ export function openDb(dataDir) {
   db.exec(CLOUD_SCHEMA);
   db.exec(PAY_SCHEMA);
   db.exec(LANE_A_SCHEMA);
+  db.exec(LANE_A2_SCHEMA);
   for (const [table, cols] of Object.entries(ADDED)) {
     const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
     for (const [name, def] of Object.entries(cols)) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);

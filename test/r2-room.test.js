@@ -2,7 +2,7 @@
 // stand-ins for the people, and the room's data comes from the server's snapshot.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { boot, claim, Client } from './helpers.js';
+import { boot, claim, Client, waitDone } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
 import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY, CameraFollow, driftYaw, CAMERA } from '../public/js/room-rules.js';
@@ -446,5 +446,48 @@ describe('r2-j46 camera follow and drift', () => {
     let max = 0; for (let s = 8; s < 200; s += 0.05) max = Math.max(max, Math.abs(deg(s)));
     assert.ok(max <= 15 + 1e-9);
     assert.equal(driftYaw(100, { allowed: false }), 0);
+  });
+});
+
+describe('r2-j47 job event log', () => {
+  let t, c;
+  before(async () => { t = await boot(); c = await claim(t, 'Event Log'); });
+  after(async () => { await t.close(); });
+  test('DONE MEANS: every job stores its events with times: card, tasks, handoffs, talk beats and the launch', async () => {
+    await c.post(`/api/floors/${c.slug}/chat`, { text: 'go build soup finder' });
+    await waitDone(c);
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const cards = all(t.db, 'SELECT id, title FROM job_cards WHERE floor_id=?', f.id);
+    assert.ok(cards.length >= 1);
+    const evs = all(t.db, 'SELECT * FROM job_events WHERE floor_id=? ORDER BY id', f.id);
+    const kinds = new Set(evs.map((e) => e.kind));
+    for (const k of ['card', 'task', 'handoff', 'talk', 'launch']) assert.ok(kinds.has(k), `has ${k} events (${[...kinds].join(', ')})`);
+    assert.ok(evs.every((e) => cards.some((x) => x.id === e.card_id)), 'every event belongs to a job');
+    assert.ok(evs.every((e, i) => !i || e.created_at >= evs[i - 1].created_at), 'in time order, each with its time');
+    assert.ok(evs.filter((e) => e.kind === 'task').every((e) => e.task_id), 'task events name their task');
+    const statuses = evs.filter((e) => e.kind === 'task').map((e) => JSON.parse(e.data).status);
+    assert.ok(statuses.includes('doing') && statuses.some((s) => s === 'done' || s === 'review'), statuses.join(','));
+  });
+  test('kept for at least 30 days: JOB_EVENTS_DAYS defaults to 35 and never goes under 30; older ones go', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const day = 86400000, now = Date.now();
+    for (const age of [29, 31, 34, 36, 60]) sql(t.db, "INSERT INTO job_events (floor_id, card_id, kind, data, created_at) VALUES (?, 999, 'task', '{}', ?)", f.id, now - age * day);
+    const { installEventLog, keepDays } = await import('../server/eventlog.js');
+    assert.equal(keepDays({}), 35); assert.equal(keepDays({ jobEventsDays: 10 }), 30); assert.equal(keepDays({ jobEventsDays: 90 }), 90);
+    const ext = { db: t.db, cfg: { jobEventsDays: 35 }, engine: { emit() {} }, now: () => now };
+    installEventLog(ext).prune();
+    const left = all(t.db, 'SELECT created_at FROM job_events WHERE card_id=999').map((r) => Math.round((now - r.created_at) / day)).sort((a, b) => a - b);
+    assert.deepEqual(left, [29, 31, 34], 'a month-old job is still there to replay');
+  });
+  test('JOB_EVENTS=0 records nothing', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const n = () => get(t.db, 'SELECT COUNT(*) n FROM job_events WHERE floor_id=?', f.id).n;
+    const before = n(); t.cfg.jobEvents = false;
+    const task = get(t.db, 'SELECT id FROM tasks WHERE floor_id=? ORDER BY id LIMIT 1', f.id);
+    t.app.engine.emitTask(task.id);
+    assert.equal(n(), before);
+    t.cfg.jobEvents = true;
+    t.app.engine.emitTask(task.id);
+    assert.ok(n() > before);
   });
 });
