@@ -20,7 +20,7 @@ function scripted({ manager, staff } = {}) {
   } };
 }
 async function floor(llm, overrides = {}) {
-  const t = await boot({ peopleTalk: false, ...overrides }, llm ? { llm } : {});
+  const t = await boot({ peopleTalk: false, doneMeans: false, ...overrides }, llm ? { llm } : {});  // one-line checks, as these were written; done-means lines are in donemeans.test.js
   open.push(t);
   const c = await claim(t, `Round ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
