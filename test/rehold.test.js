@@ -35,7 +35,8 @@ async function gateway() {
   return { seen, url: `http://127.0.0.1:${srv.address().port}/hooks/agent` };
 }
 async function floor(llm, overrides = {}) {
-  const t = await boot({ peopleTalk: false, staffSelfCheck: false, ...overrides }, { llm });  // one model call per round, so rounds can be counted
+  // loopMaxFixRounds off: the 16 November replay sends the same task back three times (job 10's one fix round is tested in loop.test.js).
+  const t = await boot({ peopleTalk: false, staffSelfCheck: false, loopMaxFixRounds: Infinity, ...overrides }, { llm });  // one model call per round, so rounds can be counted
   open.push(t);
   const c = await claim(t, `Rehold ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
