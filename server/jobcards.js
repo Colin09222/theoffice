@@ -95,6 +95,22 @@ export function floorCards(db, floor, { owner = false, limit = 30, base } = {}) 
   return all(db, 'SELECT * FROM job_cards WHERE floor_id=? ORDER BY updated_at DESC, id DESC LIMIT ?', floor.id, limit).map((r) => (owner ? cardView(r, floor, base) : publicCard(db, floor, r, base)));
 }
 
+/**
+ * A floor's past, for the empty states (job 32): whether it is genuinely new (never launched anything, never finished a task) and when its
+ * last job really finished. Read from tasks as well as job cards, because work done before job cards existed has no card. A visitor's
+ * copy leaves out private work; whether the floor is new is a fact about the floor, for everyone.
+ */
+export function floorHistory(db, floor, { owner = false } = {}) {
+  const seen = owner ? '' : ` AND (CASE WHEN project = '' THEN ${floor.default_private ? 0 : 1} ELSE project NOT IN (SELECT slug FROM projects WHERE floor_id = ${Number(floor.id)} AND private = 1) END)`;
+  const card = get(db, `SELECT MAX(done_at) at FROM job_cards WHERE floor_id=? AND state='done'${seen}`, floor.id)?.at || 0;
+  const task = get(db, `SELECT MAX(updated_at) at FROM tasks WHERE floor_id=? AND status='done'${seen}`, floor.id)?.at || 0;
+  const launch = get(db, `SELECT MAX(published_at) at FROM projects WHERE floor_id=? AND published_at IS NOT NULL${owner ? '' : ' AND private=0'}`, floor.id)?.at || 0;
+  const isNew = !get(db, 'SELECT 1 x FROM projects WHERE floor_id=? AND published_at IS NOT NULL LIMIT 1', floor.id)
+    && !get(db, "SELECT 1 x FROM tasks WHERE floor_id=? AND status='done' LIMIT 1", floor.id)
+    && !get(db, "SELECT 1 x FROM job_cards WHERE floor_id=? AND state='done' LIMIT 1", floor.id);
+  return { isNew, lastFinished: Math.max(card, task, launch) || null };
+}
+
 const LANE_WORDS = { game: 'Game', website: 'Website', business: 'Business' };
 /** How long a job's line counts as happening now: on the home page's strip and under Now on the status card (job 30). */
 export const NOW_HORIZON_MS = 24 * 3600e3;
@@ -119,7 +135,9 @@ export function statusFor(db, floor, { owner = false, base = '/theoffice', liveU
   const nextTask = all(db, "SELECT id, title, project FROM tasks WHERE floor_id=? AND status='todo' ORDER BY id LIMIT 10", floor.id).find((t) => visible(t.project) && !(now && now.state === 'todo' && now.line.includes(String(t.title).slice(0, 40))));
   const shipped = get(db, `SELECT slug, title, kind, published_at FROM projects WHERE floor_id=? AND published_at IS NOT NULL ${owner ? '' : 'AND private=0'} ORDER BY published_at DESC LIMIT 1`, floor.id);
   const shot = shipped && get(db, 'SELECT taken_at FROM launch_shots WHERE floor_id=? AND project=? AND image IS NOT NULL', floor.id, shipped.slug);
+  const past = floorHistory(db, floor, { owner });
   return {
+    ...past,
     lane: LANE_WORDS[lane] || '',
     goal,
     now: now ? { line: now.line, step: now.step, steps: now.steps, who: now.who, title: now.title, state: now.state } : null,

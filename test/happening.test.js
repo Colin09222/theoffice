@@ -26,6 +26,8 @@ function job(t, f, plan, steps, { project = '', ageH = 0, doneAgeH = null } = {}
   }
   const card = get(t.db, 'SELECT * FROM job_cards WHERE floor_id=? ORDER BY id DESC LIMIT 1', f.id);
   if (ageH) run(t.db, 'UPDATE job_cards SET updated_at=?, done_at=CASE WHEN done_at IS NULL THEN NULL ELSE ? END WHERE id=?', now - ageH * HOUR, now - (doneAgeH ?? ageH) * HOUR, card.id);
+  // Its tasks age with it: since job 32 "last job finished" reads finished tasks too.
+  if (ageH) for (const id of ids) run(t.db, 'UPDATE tasks SET updated_at=? WHERE id=?', now - (doneAgeH ?? ageH) * HOUR, id);
   return { card: get(t.db, 'SELECT * FROM job_cards WHERE id=?', card.id), ids };
 }
 const strip = async (t) => (await new Client(t).get('/api/building/now')).data;
