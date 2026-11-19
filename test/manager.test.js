@@ -37,7 +37,7 @@ function scripted({ manager, staff } = {}) {
 /** A floor whose manager the test drives by hand, through the manager's own tools. */
 async function floor(llm, overrides = {}, deps = {}) {
   // These suites test the manager's earlier rules with their own check counts; done-means lines (3 to 5, redesign job 9) are tested in donemeans.test.js.
-  const t = await boot({ peopleTalk: false, doneMeans: false, ...overrides }, { ...(llm ? { llm } : {}), ...deps });
+  const t = await boot({ peopleTalk: false, doneMeans: false, loopOnePlan: false, ...overrides }, { ...(llm ? { llm } : {}), ...deps });
   open.push(t);
   const c = await claim(t, `Brain ${open.length}`);
   const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);

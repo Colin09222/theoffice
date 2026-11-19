@@ -15,7 +15,8 @@ const DAILY = { every: 'day', at: '09:00' };
 
 async function mk(over = {}) {
   const clock = { t: MON_8 };
-  const t = await boot({ ordersTickMs: 20, mockDelayMs: 2, ...over }, { now: () => clock.t });
+  // Orders run one plan a day on the same project, so the redesign's tighter loop (job 10) is set back to the counts these were written for.
+  const t = await boot({ ordersTickMs: 20, mockDelayMs: 2, loopMaxRetests: 2, loopMaxReplans: 3, loopOnePlan: false, ...over }, { now: () => clock.t });
   return Object.assign(t, { clock });
 }
 const orders = async (c) => (await c.get(`/api/floors/${c.slug}/orders`)).data.orders;
