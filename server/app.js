@@ -30,6 +30,7 @@ import { recordVisit, projectStats, formEntries, formsCsv, formCount } from './l
 import { DomainRefused } from './domains.js';
 import { installOrders } from './orders.js';
 import { installFiller } from './filler.js';
+import { installLook } from './look.js';
 import { installBuilding } from './building.js';
 import { installLife } from './life.js';
 import { installHelp } from './help.js';
@@ -254,7 +255,8 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   GET('/api/floors', async ({ res }) => {
     const rows = all(db, "SELECT * FROM floors WHERE status!='killed' ORDER BY number DESC");
     // A hidden floor is left out of the directory and the lift, but its number is still taken. Only 1 to towerFloors are the building.
-    const floors = rows.filter((f) => !f.hidden && f.number <= cfg.towerFloors).map(floorCard);
+    // The demo floors are left out too (DEMO_FLOORS_PUBLIC=1 brings them back); the admin still has them, and their own links still open.
+    const floors = rows.filter((f) => !f.hidden && f.number <= cfg.towerFloors && (!f.filler || cfg.demoFloorsPublic)).map(floorCard);
     const taken = new Set(rows.map((f) => f.number));
     const reserved = new Set(all(db, 'SELECT floor_number n FROM codes WHERE claimed_at IS NULL AND floor_number IS NOT NULL').map((c) => c.n));
     // The floors that really are to let: a hidden floor's number and one a code is holding are neither listed nor offered.
@@ -726,7 +728,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext)].filter(Boolean);
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext)].filter(Boolean);
   // Email: every company's own address. See docs/MAIL.md.
   const mail = installMail(ext);
   extensions.push(mail);

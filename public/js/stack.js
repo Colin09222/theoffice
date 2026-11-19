@@ -3,18 +3,18 @@
 // on screen animate, and the 3D scene behind sleeps while this is up.
 import { h, api, clear } from './dom.js';
 import { portrait } from './portrait.js';
+import { STATE_WORDS, stateOf, idleNote } from './badge.js';
 
 const SPOT_KEY = 'office:stack-y';
 const MAX_FACES = 6;
 
 /** One line on how the floor is doing, from what the directory already knows. */
 export function statusLine(c) {
-  if (c.status === 'suspended') return 'Closed by the building manager';
   if (c.setup || !c.name) return 'New company moving in';
-  const mode = c.workMode && c.workMode.label !== 'On call' ? c.workMode.label : '';
-  if (c.workMode?.closed) return `${mode || 'Closed'} · closed for now`;
-  const at = c.busy ? `${c.busy} at work now` : 'Quiet right now';
-  return mode ? `${at} · ${mode}` : at;
+  // One of the four states (docs/redesign, Q2). Never "Closed", never the hours.
+  const word = STATE_WORDS[stateOf(c)];
+  const note = idleNote(c);
+  return note ? `${word}, ${note}` : c.busy && stateOf(c) === 'working' ? `${word}: ${c.busy} at it now` : word;
 }
 
 function strip(card, staff, onEnter) {

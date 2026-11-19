@@ -6,6 +6,7 @@ import { LobbyView } from './lobby-scene.js';
 import { icon } from './icons.js';
 import { muteButton, sfx } from './sfx.js';
 import { confetti, fanfare, mayParty } from './party.js';
+import { stateBadge, idleNote } from './badge.js';
 
 // The claim wizard and its character builder are only fetched when someone opens them.
 const claimModule = () => import('./claim.js');
@@ -74,10 +75,9 @@ function directoryRow(card, onEnter, onHover) {
   return h(`button.dir-row${party ? '.party' : ''}`, { type: 'button', 'data-floor': card.number, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => onHover(card.number) },
     h('span.dir-num', {}, String(card.number)),
     h('span.dir-mark', { 'aria-hidden': 'true' }),
-    h('span.dir-text', {}, h('b', {}, card.name || 'Moving in'), card.filler ? h('span.demo-tag', { title: 'A fictional demo company. Nothing here is real.' }, 'demo') : null, h('small', {}, card.status === 'suspended' ? 'Closed by the building manager' : card.tagline || (card.name ? 'A tiny company' : 'Boxes still in the corridor'))),
-    card.busy ? h('span.dir-busy', { title: `${card.busy} at work` }, h('i'), String(card.busy)) : null,
-    // The floor's hours, as its door sign shows them. On call is the usual, so it goes unsaid here.
-    card.workMode && card.workMode.label !== 'On call' ? h(`span.dir-hours${card.workMode.closed ? '.closed' : ''}`, { title: card.workMode.closed ? 'Closed for now' : 'Working on its own' }, card.workMode.label) : null,
+    h('span.dir-text', {}, h('b', {}, card.name || 'Moving in'), card.filler ? h('span.demo-tag', { title: 'A fictional demo company. Nothing here is real.' }, 'demo') : null, h('small', {}, idleNote(card) || card.tagline || (card.name ? 'A tiny company' : 'Boxes still in the corridor'))),
+    // One of four states, never "Closed" or the hours (docs/redesign, Q2).
+    stateBadge(card),
     party ? h('span.dir-balloons', { 'aria-hidden': 'true', 'data-party': 'balloons' }, h('i'), h('i'), h('i')) : null);
 }
 

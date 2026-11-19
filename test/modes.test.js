@@ -82,8 +82,9 @@ const setMode = async (c, body) => { const r = await c.post(`/api/floors/${c.slu
 const waitRuns = (t, f, n, status = null) => until(() => { const rows = runsOf(t, f).filter((r) => (status ? r.status === status : r.status !== 'running')); return rows.length >= n ? rows : null; }, { what: `${n} finished jobs`, timeout: 20000 });
 
 describe('setting the mode', () => {
+  // The old public sign, behind PUBLIC_HOURS=1 since the redesign (docs/redesign, Q2): by default a visitor never sees the hours (test/look.test.js).
   test('from the boss\'s form: the sign changes for visitors, the boss sees the plan, and the chat gets a line', async () => {
-    const t = await mk();
+    const t = await mk({ publicHours: true });
     try {
       const c = await claim(t);
       const f = floorOf(t, c);

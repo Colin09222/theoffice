@@ -18,7 +18,7 @@ const floorInfo = (f) => ({ number: f.number, slug: f.slug, name: f.name, colors
 const key = (floorId, slug) => `${floorId}/${slug}`;
 
 export function installBuilding(ext) {
-  const { db, engine, now, GET, json, send, floorBySlug, HttpError, BASE, PRIVATE_TEXT, viewEvent } = ext;
+  const { db, cfg = {}, engine, now, GET, json, send, floorBySlug, HttpError, BASE, PRIVATE_TEXT, viewEvent } = ext;
   const privateLine = PRIVATE_TEXT.toLowerCase();
 
   // ---- the stack ----
@@ -26,7 +26,7 @@ export function installBuilding(ext) {
   // is on each floor's own page already. Hidden floors and closed ones stay out.
   GET('/api/building/staff', async ({ res }) => {
     const rows = all(db, `SELECT f.number, a.name, a.role, a.look, a.state FROM agents a JOIN floors f ON f.id = a.floor_id
-      WHERE f.status = 'active' AND f.hidden = 0 ORDER BY f.number DESC, a.id`);
+      WHERE f.status = 'active' AND f.hidden = 0 AND (f.filler = 0 OR ?) ORDER BY f.number DESC, a.id`, cfg.demoFloorsPublic ? 1 : 0);
     const floors = {};
     for (const r of rows) {
       let look = null; try { look = JSON.parse(r.look); } catch { /* a drawn face in the defaults */ }
@@ -76,6 +76,8 @@ export function installBuilding(ext) {
     for (const it of cache.items) {
       const f = floors.get(it._floorId);
       if (!f || f.status !== 'active' || f.hidden) continue;
+      // Real work only: a demo floor's scripted lines never reach the strip (DEMO_FLOORS_PUBLIC=1 lets them back).
+      if (f.filler && !cfg.demoFloorsPublic) continue;
       if (it._project && priv.has(key(it._floorId, it._project))) continue;
       if (!it._project && f.default_private && it.kind === 'feed' && it._agent !== null) continue;
       const { _floorId, _project, _agent, ...pub } = it;

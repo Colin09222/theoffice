@@ -70,10 +70,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px; border-radius: 999px; border: 1.5px solid transparent;
   font: 500 13px/1.3 var(--f-body); letter-spacing: 0; text-transform: none; white-space: nowrap; box-shadow: none;
 }
-.badge[data-state="working"], .status-pill.busy, .status-pill.ok { background: var(--c-amber); color: var(--c-ink); border-color: var(--c-amber); }
-.badge[data-state="waiting"], .status-pill.warn { background: var(--c-red); color: #fff; border-color: var(--c-red); }
-.badge[data-state="idle"], .status-pill:not(.busy):not(.ok):not(.warn):not(.bad) { background: transparent; color: var(--c-slate); border-color: var(--c-slate); }
-.badge[data-state="paused"], .status-pill.bad { background: var(--c-slate); color: #fff; border-color: var(--c-slate); }
+.badge[data-state="working"], .status-pill.busy:not([data-state]), .status-pill.ok:not([data-state]) { background: var(--c-amber); color: var(--c-ink); border-color: var(--c-amber); }
+.badge[data-state="waiting"], .status-pill.warn:not([data-state]) { background: var(--c-red); color: #fff; border-color: var(--c-red); }
+.badge[data-state="idle"], .status-pill:not([data-state]):not(.busy):not(.ok):not(.warn):not(.bad) { background: transparent; color: var(--c-slate); border-color: var(--c-slate); }
+.badge[data-state="paused"], .status-pill.bad:not([data-state]) { background: var(--c-slate); color: #fff; border-color: var(--c-slate); }
 .badge[data-state="working"]::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--c-ink); }
 .live-dot, .card-dot.on, .dir-busy i { background: var(--c-amber); box-shadow: 0 0 0 2px rgba(242, 163, 58, .3); }
 .card-dot { background: var(--c-slate); }
@@ -247,3 +247,4 @@ body[data-page="admin"] { background: var(--c-paper); }
   .directory { border-radius: 16px 16px 0 0; }
 }
 @media (prefers-reduced-motion: reduce) { .badge::before { animation: none; } }
+.hours-sign[hidden] { display: none; }

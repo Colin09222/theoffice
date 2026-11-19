@@ -128,10 +128,11 @@ describe('what the floor gossips about', () => {
   });
 });
 
+// The model-written kettle, behind BANTER_LINES=0 since the redesign (docs/redesign, Q5). The default, fixed lines with no model call, is in test/look.test.js.
 describe('banter on the floor', () => {
   test('one cheap call writes a few lines that start from real news and rib the boss by name', async () => {
     const { seen, llm } = recorder();
-    const t = await boot({}, { llm });
+    const t = await boot({ banterLines: false }, { llm });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -154,7 +155,7 @@ describe('banter on the floor', () => {
 
   test('the boss can turn the sass off for their floor, and only the boss sees the setting', async () => {
     const { seen, llm } = recorder();
-    const t = await boot({}, { llm });
+    const t = await boot({ banterLines: false }, { llm });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -177,7 +178,7 @@ describe('banter on the floor', () => {
 
   test('BANTER=0 stops it everywhere, BANTER_SASS=0 keeps it clean everywhere', async () => {
     const { seen, llm } = recorder();
-    const t = await boot({}, { llm });
+    const t = await boot({ banterLines: false }, { llm });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -191,7 +192,7 @@ describe('banter on the floor', () => {
   });
 
   test('a floor\'s banter stops at its daily cost cap', async () => {
-    const t = await boot({ banterUsdPerFloorDay: 0.001 });
+    const t = await boot({ banterLines: false, banterUsdPerFloorDay: 0.001 });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -211,7 +212,7 @@ describe('banter on the floor', () => {
       { who: m.speakers[1], text: 'Nah, Boss is alright actually.' },
       ...Array.from({ length: 6 }, (_, i) => ({ who: m.speakers[0], text: `Filler line ${i}.` })),
     ]);
-    const t = await boot({}, { llm });
+    const t = await boot({ banterLines: false }, { llm });
     try {
       const c = await busyFloor(t);
       await t.app.engine.people.banter(row(t, c.slug).id); await t.app.engine.people.settled();
@@ -230,7 +231,7 @@ describe('banter on the floor', () => {
       { who: m.speakers[0], text: 'Boss asked for the buttons again, poor thing.' },
       { who: m.speakers[1], text: 'Boss goes “I trust you all completely”. Sure.' },
     ]);
-    const t = await boot({ banterClosedShare: 1 }, { llm });
+    const t = await boot({ banterLines: false, banterClosedShare: 1 }, { llm });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -249,7 +250,7 @@ describe('banter on the floor', () => {
       { who: m.speakers[0], text: 'Boss said "Make the buttons green" earlier.' },
       { who: m.speakers[1], text: 'Boss changed the buttons again.' },
     ]);
-    const t = await boot({ banterClosedShare: 0 }, { llm });
+    const t = await boot({ banterLines: false, banterClosedShare: 0 }, { llm });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -273,7 +274,7 @@ describe('banter on the floor', () => {
       { who: m.speakers[1], text: 'Somebody should check the footer before Friday.' },
       { who: m.speakers[0], text: 'Footer is mine, I will look after lunch.' },
     ]));
-    const t = await boot({}, { llm });
+    const t = await boot({ banterLines: false }, { llm });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -295,7 +296,7 @@ describe('banter on the floor', () => {
 
   test('talk built on what a visitor can\'t see stays with the boss', async () => {
     const { seen, llm } = recorder((m) => [{ who: m.speakers[0], text: 'Boss wants green. No, blue. Make up your mind.' }, { who: m.speakers[1], text: 'Blue is fine, honestly.' }]);
-    const t = await boot({ banterClosedShare: 1 }, { llm });
+    const t = await boot({ banterLines: false, banterClosedShare: 1 }, { llm });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -310,7 +311,7 @@ describe('banter on the floor', () => {
 
   test('nothing open on the floor\'s news means nothing private goes in', async () => {
     const { seen, llm } = recorder();
-    const t = await boot({ banterClosedShare: 0 }, { llm });
+    const t = await boot({ banterLines: false, banterClosedShare: 0 }, { llm });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -327,7 +328,7 @@ describe('banter on the floor', () => {
   });
 
   test('paced, a floor can only be a quarter of the day\'s banter money ahead of the clock', async () => {
-    const t = await boot({ banterUsdPerFloorDay: 2 });
+    const t = await boot({ banterLines: false, banterUsdPerFloorDay: 2 });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -348,7 +349,7 @@ describe('banter on the floor', () => {
 
   test('the kettle hears what was said in meetings and questions lately, but nothing private or hushed', async () => {
     const { seen, llm } = recorder();
-    const t = await boot({}, { llm });
+    const t = await boot({ banterLines: false }, { llm });
     try {
       const c = await busyFloor(t);
       const f = row(t, c.slug);
@@ -366,7 +367,7 @@ describe('banter on the floor', () => {
   });
 
   test('with two or more watching, the kettle talks sooner', async () => {
-    const t = await boot({ banterEveryMs: 1e9, banterBusyEveryMs: 5, banterTickMs: 5 });
+    const t = await boot({ banterLines: false, banterEveryMs: 1e9, banterBusyEveryMs: 5, banterTickMs: 5 });
     try {
       const c = await busyFloor(t);
       const one = sse(c, c.slug);

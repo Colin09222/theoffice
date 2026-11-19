@@ -224,7 +224,10 @@ export function loadConfig(env = process.env, overrides = {}) {
     banterEveryMs: num(env.BANTER_EVERY_MS, 75000), banterBusyEveryMs: num(env.BANTER_BUSY_EVERY_MS, 45000), banterTickMs: num(env.BANTER_TICK_MS, 15000), banterPerFloorDay: num(env.BANTER_PER_FLOOR_DAY, 4000),
     // Small talk building-wide (BANTER=0 stops it), whether it may rib the boss (BANTER_SASS=0, and each boss's own setting), and the hard cap on what one floor's banter may cost in a day.
     // BANTER_PACE=0 lets a floor spend its whole day's allowance at once; by default it may only be a quarter ahead of the clock (UTC day), so an evening still has some left.
-    banter: env.BANTER !== '0', banterSass: env.BANTER_SASS !== '0', banterUsdPerFloorDay: num(env.BANTER_USD_PER_FLOOR_DAY, 2), banterPace: env.BANTER_PACE !== '0',
+    banter: env.BANTER !== '0', banterSass: env.BANTER_SASS !== '0',
+    // redesign lane A: small talk is a fixed list of lines (config/banter-lines.json), room bubbles only, no model call (BANTER_LINES=0 brings the writer back);
+    // demo floors stay out of public lists (DEMO_FLOORS_PUBLIC=1 shows them); visitors never see hours or "closed" (PUBLIC_HOURS=1 shows them).
+    banterLines: env.BANTER_LINES !== '0', demoFloorsPublic: env.DEMO_FLOORS_PUBLIC === '1', publicHours: env.PUBLIC_HOURS === '1', banterUsdPerFloorDay: num(env.BANTER_USD_PER_FLOOR_DAY, 2), banterPace: env.BANTER_PACE !== '0',
     asksPerTask: num(env.ASKS_PER_TASK, 4), asksPerFloorDay: num(env.ASKS_PER_FLOOR_DAY, 80),
     // The help line: a manager can ask the owner's assistant for guidance. No credential is involved: the assistant answers through scripts/admin.mjs or the admin view.
     helpEnabled: env.HELP_ENABLED !== '0',

@@ -13,6 +13,7 @@ import { settingText } from './brief.js';
 import { scrub } from './llm.js';
 import { routeFor, overFloor } from './config.js';
 import { floorGossip, banterStyle, bossNameOf, sassOn, fitToSay, quotesHonest, freshLines, selfNamed } from './gossip.js';
+import { pickLines } from './banter.js';
 
 const MEMORY_KEEP = 24, MEMORY_SHOWN = 8, NOTE_CHARS = 170;
 // An answer to a colleague is a few sentences, so the role's own model gets room to think and write that, not the room it has for a whole job, and no more than high effort.
@@ -365,6 +366,7 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
     const f = floorRow(floorId);
     if (!speakable(f) || !f.name || engine.spentOver(floorId, 0)) return false;
     if (engine.modes?.closed(floorId)) return false;  // outside set hours everyone has gone home
+    if (cfg.banterLines !== false) return bubbles(floorId);
     if (usedToday(floorId, 'talk-banter') >= (cfg.banterPerFloorDay ?? 4000)) return false;
     // The day's cap is hard. Paced, a floor may only be a quarter of it ahead of the clock, so a long morning of watching doesn't leave the evening silent.
     const cap = cfg.banterUsdPerFloorDay ?? 2, paid = paidToday(floorId, 'talk-banter');
@@ -409,6 +411,23 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
     if (lines.length) lastExchanges.set(floorId, [...before, lines.map((l) => l.text)].slice(-3));
     await saySoon(floorId, lines, 'banter', topic.project, closed ? { hush: true } : {});
     return lines.length > 0;
+  }
+  // The redesign's small talk: two or three lines from the fixed list (server/banter.js), between two people, as bubbles over their heads.
+  // No model call, nothing stored, never in Talk: the stream carries it live to whoever is watching the room, and that is all.
+  const recentBanter = new Map();
+  async function bubbles(floorId) {
+    const everyone = shuffle(all(db, 'SELECT id,name FROM agents WHERE floor_id=? ORDER BY id', floorId));
+    if (everyone.length < 2) return false;
+    const pair = everyone.slice(0, 2);
+    if (!recentBanter.has(floorId)) recentBanter.set(floorId, []);
+    const lines = pickLines(Math.random() < 0.5 ? 2 : 3, recentBanter.get(floorId));
+    for (let i = 0; i < lines.length; i++) {
+      if (i) await pause(cfg.talkGapMs ?? 2200, ctl.signal);
+      if (!speakable(floorRow(floorId))) return i > 0;
+      const who = pair[i % 2], to = pair[(i + 1) % 2];
+      engine.emit(floorId, 'talk', { from: who.id, to: to.id, fromName: who.name, toName: to.name, text: lines[i], kind: 'banter', bubble: true, ts: engine.now() }, { persist: false });
+    }
+    return true;
   }
   /** The last few open lines from meetings and questions in the last three hours, so the kettle can pick up on them. Nothing private or kept from visitors. */
   function overheard(floorId, f) {

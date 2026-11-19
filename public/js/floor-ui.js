@@ -1,6 +1,7 @@
 // The floor page. One SSE stream feeds the 3D characters and the desk: the intercom, the group chat, the logbook, the corkboard, the filing cabinet, the in-tray.
 import { stage } from './stage.js';
 import { h, api, BASE, $, clear, put, modal, toast, money, timeAgo, session, ApiError } from './dom.js';
+import { STATE_WORDS, stateOf, idleNote } from './badge.js';
 import { OfficeView } from './office-scene.js';
 import { renderMarkdown } from './markdown.js';
 import { openCustomisePanel } from './customise.js';
@@ -361,16 +362,13 @@ class FloorPage {
   renderHeader() {
     const s = this.state; const f = s.floor;
     this.titleEl.textContent = f.name || 'Moving in'; this.tagEl.textContent = f.filler ? `${f.tagline} · A fictional demo company` : f.tagline || (f.setup ? 'Your manager is sorting out the sign' : '');
-    let label = 'Open', cls = 'ok';
-    const working = s.agents.some((a) => a.state !== 'idle');
-    if (working) { label = 'Working'; cls = 'busy'; }
-    if (f.outOfBudget || f.budgetStopped) { label = 'Back soon'; cls = 'warn'; }
-    if (f.paused) { label = 'Paused'; cls = 'warn'; }
-    if (f.globalPause) { label = 'Building paused'; cls = 'warn'; }
-    if (f.status === 'suspended') { label = 'Closed'; cls = 'bad'; }
-    else if (label === 'Open' && this.closedNow) { label = 'Closed'; cls = 'warn'; }
-    this.statusEl.className = `status-pill ${cls}`; this.statusEl.textContent = label;
-    // The sign with the hours: Open 9–5, Open 24/7 or On call.
+    // One of four states, worked out by the server (server/look.js): Working, Waiting on boss, Idle or Paused. Never "Closed" (docs/redesign, Q2).
+    // Someone at a desk right now counts as working even before the next snapshot says so.
+    const state = s.agents.some((a) => a.state !== 'idle') && (f.state || 'idle') === 'idle' ? 'working' : stateOf(f);
+    this.statusEl.className = "status-pill badge"; this.statusEl.dataset.state = state; this.statusEl.textContent = STATE_WORDS[state];
+    this.statusEl.title = idleNote({ ...f, state });
+    // The sign with the hours: Open 9–5, Open 24/7 or On call. The hours are the boss's setting; a visitor never sees them.
+    this.hoursEl.hidden = !this.owner;
     const w = f.workMode || { label: 'On call', mode: 'ask' };
     this.hoursEl.dataset.mode = w.mode; this.hoursEl.classList.toggle('closed', this.closedNow);
     this.hoursEl.firstChild.textContent = w.label; this.hoursEl.lastChild.textContent = w.days || (w.mode === 'nonstop' ? 'Every day' : 'When the boss calls');
@@ -555,7 +553,8 @@ class FloorPage {
     }
     const busy = s.agents.filter((a) => a.state !== 'idle');
     if (busy.length) { const a = busy[0]; return { line: `${a.name}: ${this.nowDoing(a) || (STATE_LABEL[a.state] || 'working').toLowerCase()}${busy.length > 1 ? ` (and ${busy.length - 1} more)` : ''}`, pct: null }; }
-    return { line: this.closedNow ? 'Closed for now' : `${this.manager?.name || 'Your manager'} is at the desk`, pct: null };
+    const idle = idleNote(this.state.floor);
+    return { line: this.owner && this.closedNow ? 'Outside your set hours' : idle ? `Idle, ${idle}` : `${this.manager?.name || 'Your manager'} is at the desk`, pct: null };
   }
   /** The newest thing said, for the resting sheet. */
   latestLine() {
@@ -583,13 +582,15 @@ class FloorPage {
   renderBanner() {
     const f = this.state.floor;
     let text = '';
-    if (f.status === 'suspended') text = 'The building manager has closed this floor for now.';
+    // A visitor gets the badge and nothing else: no reason for a pause, no hours, no "gone home" (docs/redesign, Q2 and section 4).
+    if (!this.owner) text = '';
+    else if (f.status === 'suspended') text = 'The building manager has paused this floor for now.';
     else if (f.globalPause) text = 'The building manager has paused all work.';
     else if (f.paused) text = f.pauseReason || 'This floor is paused.';
-    else if (f.budgetStopped) text = 'Everyone has gone home for today. Work picks up again tomorrow.';
+    else if (f.budgetStopped) text = 'Work has stopped for today. It picks up again tomorrow.';
     else if (f.outOfBudget) text = 'Work has stopped for now. The building manager knows.';
-    else if (this.closedNow) text = `Closed for now: everyone has gone home.${f.workMode.opensAt ? ` Back ${opensWhen(f.workMode.opensAt)}.` : ''}${this.owner ? ' You can still call your manager.' : ''}`;
-    else if (this.catchUp) text = this.catchUp;
+    else if (this.closedNow) text = `Outside your set hours.${f.workMode.opensAt ? ` Back ${opensWhen(f.workMode.opensAt)}.` : ''} You can still call your manager.`;
+    if (!text && this.catchUp) text = this.catchUp;
     this.bannerEl.textContent = text; this.bannerEl.hidden = !text;
   }
 
@@ -1168,6 +1169,8 @@ class FloorPage {
     // The words themselves: the same line goes in the Talk tab and over the speaker's head.
     on('talk', (d) => {
       const line = { id: d._id, from: d.from, to: d.to, fromName: d.fromName, toName: d.toName, text: d.text, kind: d.kind, beat: d.beat, ts: d._ts || d.ts };
+      // Small talk is a speech bubble in the room and nothing else: never a line in Talk (docs/redesign, Q5).
+      if (d.bubble || d.kind === 'banter' || d.kind === 'small') { if (fresh(d)) this.view?.life?.line(line); return; }
       this.state.talk ||= [];
       if (line.id && this.state.talk.some((l) => l.id === line.id)) return;
       this.state.talk.push(line);
