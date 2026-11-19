@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows, pileSheets, queuedFor, trophiesFor, PHONE_BUDGET, shedPlan, trianglesOf, CameraFollow, driftYaw } from './room-rules.js';
+import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows, pileSheets, queuedFor, trophiesFor, PHONE_BUDGET, shedPlan, trianglesOf, CameraFollow, driftYaw, PHOTO, photoStamp } from './room-rules.js';
 import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
@@ -1983,6 +1983,34 @@ export class OfficeView {
     // r2-j46: the camera follows a real handoff, to where the paper lands. The event's id is its record.
     const to = this.actors.get(toId);
     if (to && id != null && this.follow?.ask(this.time, { record: { type: 'handoff', id }, at: [to.group.position.x, to.group.position.z] })) this.followed = [...(this.followed || []).slice(-10), { id, at: this.time }];
+  }
+  /**
+   * r2-j71: a photo of the room, 1,920 by 1,080: the room drawn once more at that size through the same picture pipeline, with no page controls or
+   * labels (those are page elements, never in the 3D picture), and the floor's name and the date stamped in the corner. Returns a canvas.
+   */
+  photo({ name, number, at = Date.now() } = {}) {
+    const st = stage, r = st.renderer, { width: W, height: H } = PHOTO;
+    const prev = { dpr: r.getPixelRatio(), w: st.w, h: st.h };
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d');
+    try {
+      r.setPixelRatio(1); r.setSize(W, H, false); st.post?.setSize(W, H, 1);
+      this.camera.aspect = W / H; this.camera.clearViewOffset(); this.camera.updateProjectionMatrix();
+      if (st.post && st.post.level && this.post !== false) st.post.render(0, st.time); else r.render(this.scene, this.camera);
+      x.drawImage(r.domElement, 0, 0, W, H);  // in the same task as the draw, so the picture is still there to copy
+    } finally {
+      r.setPixelRatio(prev.dpr); r.setSize(prev.w, prev.h, false); st.post?.setSize(prev.w, prev.h, st.dpr);
+      this.applyInsets();
+    }
+    const s = photoStamp(name || this.floorName || this.companyName, number ?? this.floorNumber, at);
+    x.save();
+    const g = x.createLinearGradient(0, H - 190, 0, H); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.55)'); x.fillStyle = g; x.fillRect(0, H - 190, W, 190);
+    x.fillStyle = '#fff8e8'; x.shadowColor = 'rgba(0,0,0,.5)'; x.shadowBlur = 8; x.textBaseline = 'alphabetic';
+    x.font = '600 58px Fraunces, Georgia, serif'; x.fillText(s.title, 56, H - 92);
+    x.font = '500 30px Inter, system-ui, sans-serif'; x.fillText(s.line, 58, H - 46);
+    x.restore();
+    this.lastPhoto = { width: c.width, height: c.height, stamp: s };  // read by the tests
+    return c;
   }
   /** The "Follow the work" switch (r2-j46). */
   setFollow(on) { this.follow?.set(on); window.dispatchEvent(new CustomEvent('office:follow', { detail: { on: !!this.follow?.on } })); }

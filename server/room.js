@@ -93,6 +93,7 @@ export function roomView(db, cfg, f, viewer) {
     props: cfg.roomProps !== false,
     phoneFit: cfg.phoneBudget !== false,
     camera: cfg.roomCamera !== false,
+    photo: cfg.roomPhoto !== false,
   };
 }
 

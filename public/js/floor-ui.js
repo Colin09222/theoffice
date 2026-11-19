@@ -25,6 +25,7 @@ import { launchFlow, makerCard } from './launch-ui.js';
 import { setupOnArrival } from './setup-ui.js';
 import { recoveryBox } from './dom.js';
 import { Replay } from './replay.js';
+import { photoAllowed, photoFile } from './room-rules.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -392,6 +393,8 @@ class FloorPage {
     // r2-j48: an Idle floor with a real past job offers to play it back. Never while work is going on, never twice at once.
     const idleNow = (f.state || 'idle') === 'idle' && !this.state.agents.some((a) => a.state !== 'idle');
     const replay = this.state.room?.replay && idleNow && !this.replay ? h('button.btn.chrome.replay-offer', { type: 'button', title: `A replay of "${this.state.room.replay.title}", in under a minute`, onclick: () => this.startReplay() }, icon('play'), 'Watch how this was made') : null;
+    // r2-j71: a photo of the room, 1,920 by 1,080, with the floor's name and the date. Not on phone low.
+    const photo = this.view && this.state.room?.photo !== false && photoAllowed({ mobile: !!stage.mobile, low: !!this.view.low }) ? h('button.btn.chrome.photo-button', { type: 'button', title: 'Save a picture of the room', onclick: () => this.savePhoto() }, icon('sparkle'), 'Photo') : null;
     const follow = this.view?.follow?.allowed ? h('button.btn.chrome.follow-switch', { type: 'button', 'aria-pressed': String(!!this.view.follow.on), title: 'The camera goes to real handoffs and comes back', onclick: () => this.view.setFollow(!this.view.follow.on) }, icon('sparkle'), this.view.follow.on ? 'Following the work' : 'Follow the work') : null;
     if (this.owner) {
       const pause = f.paused
@@ -400,12 +403,24 @@ class FloorPage {
       this.controlsEl.append(pause,
         h('button.btn.chrome', { type: 'button', onclick: () => this.confirmStop() }, icon('stop'), 'Stop all'),
         h('button.btn.chrome', { type: 'button', onclick: () => this.openRedirect() }, icon('arrow-bend-up-right'), 'Redirect'),
-        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'), startButton(this) || '', follow || '', replay || '');
+        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'), startButton(this) || '', follow || '', replay || '', photo || '');
     } else {
       put(this.controlsEl,
         h('span.visitor-note', {}, f.filler ? 'Demo company: scripted and fictional' : 'You\'re visiting. Watch all you like.'),
-        session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'), replay, follow);
+        session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'), replay, follow, photo);
     }
+  }
+  /** r2-j71: the room as a PNG, saved to the device. */
+  savePhoto() {
+    if (!this.view?.photo) return;
+    const at = Date.now();
+    const canvas = this.view.photo({ name: this.state.floor.name, number: this.state.floor.number, at });
+    canvas.toBlob((blob) => {
+      if (!blob) { toast('The photo could not be made on this device', 'bad'); return; }
+      this.lastPhotoBlob = blob;  // read by the tests
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = photoFile(this.slug, at);
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, 'image/png');
   }
   /** r2-j48: fetch the floor's last real job and play it back. The room acts it out unless this is phone low, where it is cards and photos only. */
   async startReplay() {

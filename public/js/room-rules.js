@@ -298,3 +298,17 @@ export function replayLabel(ms, tz = 'America/New_York') {
   const hm = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz }).format(d);
   return `Replay · ${day} ${hm}`;
 }
+
+// ---- r2-j71: the photo button ----
+/** A 1,920 by 1,080 PNG of the room: no page controls, the floor's name and the date in the corner. Hidden on phone low. */
+export const PHOTO = { width: 1920, height: 1080 };
+export const photoAllowed = ({ mobile = false, low = false } = {}) => !(mobile && low);
+/** The words in the corner: the floor's name, then "Floor 6 · 19 November 2026" (New York's date, like the building's clock). */
+export function photoStamp(name, number, at, tz = 'America/New_York') {
+  const date = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: tz }).format(new Date(at));
+  return { title: String(name || `Floor ${number}`), line: `Floor ${number} · ${date}` };
+}
+export function photoFile(slug, at, tz = 'America/New_York') {
+  const d = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz }).format(new Date(at));
+  return `${String(slug || 'floor').replace(/[^a-z0-9-]/gi, '')}-${d}.png`;
+}

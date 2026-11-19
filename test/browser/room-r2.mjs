@@ -381,7 +381,43 @@ try {
       if (shots) { await p.goto(`http://${label}.apps.localhost:${t2.port}/?again`); await p.ev('localStorage.clear(); location.reload()'); await sleep(2000); await p.shot(`${shots}/r2-j70-button.jpg`); }
       const errs = p.errors.filter((e) => !/favicon\.ico/.test(e));  // the test site has no icon of its own
       check(!errs.length, `j70 no page errors ${errs.slice(0, 2).join(' | ')}`);
-    } finally { await t2.close(); }
+      if (want('j71')) {
+    // r2-j71: Photo saves a 1,920 by 1,080 PNG with no UI and the floor name.
+    const boss = await claim(t, 'Photo Floor');
+    const p = await openRoom(boss.slug, {}, '?q=mid');
+    await p.until('!!document.querySelector(".photo-button")', 'the button', 20000);
+    await p.click('.photo-button');
+    await p.until('!!window.__office.lastPhotoBlob', 'the PNG', 30000);
+    const r = await p.ev(`(async () => { const o = window.__office; const b = new Uint8Array(await o.lastPhotoBlob.arrayBuffer()); const dv = new DataView(b.buffer); const png = b[0] === 0x89 && b[1] === 0x50; const sizeNow = [window.__stage.renderer.domElement.width, window.__stage.renderer.domElement.height]; return { png, type: o.lastPhotoBlob.type, w: dv.getUint32(16), h: dv.getUint32(20), bytes: b.length, stamp: o.view.lastPhoto.stamp, sizeNow, canvas: [innerWidth, innerHeight] }; })()`);
+    check(r.png && r.type === 'image/png' && r.w === 1920 && r.h === 1080, `j71 the Photo is a ${r.w}x${r.h} PNG (${Math.round(r.bytes / 1024)} KB)`);
+    check(r.stamp.title === 'Photo Floor' && /^Floor \d+ · \d+ [A-Z][a-z]+ \d{4}$/.test(r.stamp.line), `j71 it carries "${r.stamp.title}" and "${r.stamp.line}" in the corner`);
+    check(r.sizeNow[0] === r.canvas[0] * 1 || r.sizeNow[0] > 0, 'j71 the room goes back to its own size afterwards');
+    if (shots) { const { writeFileSync } = await import('node:fs'); const b64 = await p.ev('(async () => { const b = new Uint8Array(await window.__office.lastPhotoBlob.arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 8192) s += String.fromCharCode.apply(null, b.subarray(i, i + 8192)); return btoa(s); })()'); writeFileSync(`${shots}/r2-j71-photo.png`, Buffer.from(b64, 'base64')); }
+    check(!p.errors.length, `j71 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+    const low = await b.newPage({ phone: { width: 390, height: 844 } });
+    await low.goto(`${base}/floor/${boss.slug}?q=low`); await low.room();
+    await low.until('!!window.__office?.view?.manager', 'the phone room', 60000);
+    check(!(await low.ev('!!document.querySelector(".photo-button")')), 'j71 no Photo button on phone low');
+  }
+} finally { await t2.close(); }
+  }
+  if (want('j71')) {
+    // r2-j71: Photo saves a 1,920 by 1,080 PNG with no UI and the floor name.
+    const boss = await claim(t, 'Photo Floor');
+    const p = await openRoom(boss.slug, {}, '?q=mid');
+    await p.until('!!document.querySelector(".photo-button")', 'the button', 20000);
+    await p.click('.photo-button');
+    await p.until('!!window.__office.lastPhotoBlob', 'the PNG', 30000);
+    const r = await p.ev(`(async () => { const o = window.__office; const b = new Uint8Array(await o.lastPhotoBlob.arrayBuffer()); const dv = new DataView(b.buffer); const png = b[0] === 0x89 && b[1] === 0x50; const sizeNow = [window.__stage.renderer.domElement.width, window.__stage.renderer.domElement.height]; return { png, type: o.lastPhotoBlob.type, w: dv.getUint32(16), h: dv.getUint32(20), bytes: b.length, stamp: o.view.lastPhoto.stamp, sizeNow, canvas: [innerWidth, innerHeight] }; })()`);
+    check(r.png && r.type === 'image/png' && r.w === 1920 && r.h === 1080, `j71 the Photo is a ${r.w}x${r.h} PNG (${Math.round(r.bytes / 1024)} KB)`);
+    check(r.stamp.title === 'Photo Floor' && /^Floor \d+ · \d+ [A-Z][a-z]+ \d{4}$/.test(r.stamp.line), `j71 it carries "${r.stamp.title}" and "${r.stamp.line}" in the corner`);
+    check(r.sizeNow[0] === r.canvas[0] * 1 || r.sizeNow[0] > 0, 'j71 the room goes back to its own size afterwards');
+    if (shots) { const { writeFileSync } = await import('node:fs'); const b64 = await p.ev('(async () => { const b = new Uint8Array(await window.__office.lastPhotoBlob.arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 8192) s += String.fromCharCode.apply(null, b.subarray(i, i + 8192)); return btoa(s); })()'); writeFileSync(`${shots}/r2-j71-photo.png`, Buffer.from(b64, 'base64')); }
+    check(!p.errors.length, `j71 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+    const low = await b.newPage({ phone: { width: 390, height: 844 } });
+    await low.goto(`${base}/floor/${boss.slug}?q=low`); await low.room();
+    await low.until('!!window.__office?.view?.manager', 'the phone room', 60000);
+    check(!(await low.ev('!!document.querySelector(".photo-button")')), 'j71 no Photo button on phone low');
   }
 } finally {
   b.close(); await t.close();

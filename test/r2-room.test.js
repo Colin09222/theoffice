@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client, waitDone } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY, CameraFollow, driftYaw, CAMERA, replayTimeline, replayLabel, REPLAY } from '../public/js/room-rules.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY, CameraFollow, driftYaw, CAMERA, replayTimeline, replayLabel, REPLAY, PHOTO, photoAllowed, photoStamp, photoFile } from '../public/js/room-rules.js';
 import { weekOf } from '../server/weekplan.js';
 import { get, all, run as sql } from '../server/db.js';
 import { REAL_JPEG, publish } from './r2-fixtures.js';
@@ -582,5 +582,15 @@ describe('r2-j67 milestones and real counts', () => {
       const literals = [...src.matchAll(/'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g)].map((m) => m[0]);
       for (const l of literals) assert.ok(!/\b(level|lvl)\s*\$?\{?\d|\bLevel\b/.test(l), `${fl}: ${l.slice(0, 80)}`);
     }
+  });
+});
+
+describe('r2-j71 photo button', () => {
+  test('1,920 by 1,080; the floor name and the date in the corner; hidden on phone low only', () => {
+    assert.deepEqual(PHOTO, { width: 1920, height: 1080 });
+    assert.deepEqual(photoStamp('TheTireRx', 6, Date.UTC(2026, 10, 19, 15)), { title: 'TheTireRx', line: 'Floor 6 · 19 November 2026' });
+    assert.equal(photoStamp('', 3, Date.UTC(2026, 10, 20, 2)).line, 'Floor 3 · 19 November 2026', 'New York\'s date');
+    assert.equal(photoFile('thetirerx', Date.UTC(2026, 10, 19, 15)), 'thetirerx-2026-11-19.png');
+    assert.deepEqual([photoAllowed({}), photoAllowed({ mobile: true }), photoAllowed({ low: true }), photoAllowed({ mobile: true, low: true })], [true, true, true, false]);
   });
 });

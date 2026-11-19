@@ -47,5 +47,7 @@ export function laneA2Settings(env = process.env) {
     // r2-j70: the "Was this useful?" button on launched sites and games. It changes what the public sees on real customer sites, so it ships OFF:
     // only FEEDBACK_BUTTON=1 turns it on (docs/redesign/ROUND2.md).
     feedbackButton: env.FEEDBACK_BUTTON === '1',
+    // r2-j71: the room's Photo button, a 1,920 by 1,080 PNG with the floor's name and date, not on phone low (ROOM_PHOTO=0: no button).
+    roomPhoto: on(env.ROOM_PHOTO),
   };
 }
