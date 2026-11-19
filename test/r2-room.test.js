@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE } from '../public/js/room-rules.js';
-import { get } from '../server/db.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS } from '../public/js/room-rules.js';
+import { get, all, run as sql } from '../server/db.js';
 import { REAL_JPEG, publish } from './r2-fixtures.js';
 import { storeShot } from '../server/shots.js';
 import { roomFrames } from '../server/room.js';
@@ -227,5 +227,47 @@ describe('r2-j39 state-true poses', () => {
     for (const st of ['working', 'idle', 'paused']) for (let t = 0; t < 30; t += 0.5) assert.equal(glancing(t, '1', st), false);
     const a = [], b = []; for (let t = 0; t < 15; t += 0.1) { a.push(glancing(t, '1', 'waiting')); b.push(glancing(t, '2', 'waiting')); }
     assert.notDeepEqual(a, b, 'not in step');
+  });
+});
+
+describe('r2-j40 result beats', () => {
+  test('DONE MEANS (rules): a real launch gives one cheer; a failed check one slump; a passed check one high five', () => {
+    const g = new BeatGate();
+    const launch = g.plan({ kind: 'launch', record: { type: 'launch', id: 'shop@1700000000000' } });
+    assert.deepEqual([launch.anim, launch.hold, launch.who], ['cheer', 2, 'all']);
+    assert.equal(g.plan({ kind: 'launch', record: { type: 'launch', id: 'shop@1700000000000' } }), null, 'the same launch never cheers twice');
+    const fail = g.plan({ kind: 'check', passed: false, agent: 7, record: { type: 'task', id: 41 } });
+    assert.deepEqual([fail.anim, fail.hold, fail.who], ['slump', 1.5, 7]);
+    assert.equal(g.plan({ kind: 'check', passed: false, agent: 7, record: { type: 'task', id: 41 } }), null, 'one slump per check');
+    const pass = g.plan({ kind: 'check', passed: true, agent: 7, record: { type: 'task', id: 42 } });
+    assert.deepEqual([pass.anim, pass.hold], ['five', 1.5]);
+    assert.deepEqual(BEATS, { launch: { anim: 'cheer', hold: 2 }, pass: { anim: 'five', hold: 1.5 }, fail: { anim: 'slump', hold: 1.5 } });
+  });
+  test('the gate refuses anything without a record type and number, and anything that is not a launch or a check', () => {
+    const g = new BeatGate();
+    for (const ev of [{ kind: 'launch' }, { kind: 'launch', record: { id: 3 } }, { kind: 'launch', record: { type: 'launch' } }, { kind: 'launch', record: { type: 'launch', id: '' } }, { kind: 'check', passed: true, record: { type: 'task', id: 1 } }, { kind: 'party', record: { type: 'x', id: 1 } }, null]) assert.equal(g.plan(ev), null, JSON.stringify(ev));
+    assert.equal(g.refused, 7);
+  });
+
+  let t, c;
+  before(async () => { t = await boot(); c = await claim(t, 'Beat Box'); });
+  after(async () => { await t.close(); });
+  test('a Tester\'s finished check sends one beat event: passed or failed, the task as its record; RESULT_BEATS=0 sends none', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const tid = Number(sql(t.db, "INSERT INTO agents (floor_id,role,title,name,look,created_at) VALUES (?,'tester','Tester','Tess','{}',1)", f.id).lastInsertRowid);
+    const tester = get(t.db, 'SELECT * FROM agents WHERE id=?', tid);
+    const task = (title) => Number(sql(t.db, "INSERT INTO tasks (floor_id,title,brief,agent_id,status,created_at,updated_at) VALUES (?,?,?,?, 'doing', ?, ?)", f.id, title, 'check it', tester.id, Date.now(), Date.now()).lastInsertRowid);
+    const beats = () => all(t.db, "SELECT data FROM events WHERE floor_id=? AND type='beat' ORDER BY id", f.id).map((e) => JSON.parse(e.data));
+    const a = task('Check the page'); t.app.engine.finishTask(f, tester, a, 'review', 'PASS: the page loads and the form sends.');
+    const b = task('Check the form'); t.app.engine.finishTask(f, tester, b, 'review', 'FAIL: the form does not send.');
+    assert.deepEqual(beats(), [{ kind: 'check', passed: true, agent: tester.id, task: a }, { kind: 'check', passed: false, agent: tester.id, task: b }]);
+    const builder = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='builder'", f.id);
+    const d = Number(sql(t.db, "INSERT INTO tasks (floor_id,title,brief,agent_id,status,created_at,updated_at) VALUES (?,?,?,?, 'doing', ?, ?)", f.id, 'Build', 'b', builder.id, Date.now(), Date.now()).lastInsertRowid);
+    t.app.engine.finishTask(f, builder, d, 'review', 'Built it.');
+    assert.equal(beats().length, 2, 'only a Tester\'s check is a check');
+    t.cfg.resultBeats = false;
+    const e = task('Check again'); t.app.engine.finishTask(f, tester, e, 'review', 'PASS');
+    assert.equal(beats().length, 2);
+    t.cfg.resultBeats = true;
   });
 });

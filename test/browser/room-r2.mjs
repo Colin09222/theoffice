@@ -87,6 +87,29 @@ try {
     if (shots) await p.shot(`${shots}/r2-j39-poses.jpg`);
     check(!p.errors.length, `j39 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
   }
+  if (want('j40')) {
+    // r2-j40: a real launch event triggers one cheer; a failed check triggers one slump.
+    const boss = await claim(t, 'Beat Street');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    const builder = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='builder'", f.id);
+    const p = await openRoom(boss.slug);
+    await sleep(1000);
+    publish(t.db, f.id, 'beat-shop', 'Beat Shop', Date.now());
+    t.app.engine.emitProject(f.id, 'beat-shop');
+    t.app.engine.emitProject(f.id, 'beat-shop');  // one publish can raise two project events
+    await p.until('(window.__office.view.played || []).some((b) => b.anim === "cheer")', 'the cheer', 30000);
+    await sleep(3000);
+    t.app.engine.emit(f.id, 'beat', { kind: 'check', passed: false, agent: builder.id, task: 4242 });
+    t.app.engine.emit(f.id, 'beat', { kind: 'check', passed: false, agent: builder.id, task: 4242 });
+    await p.until('(window.__office.view.played || []).some((b) => b.anim === "slump")', 'the slump', 30000);
+    await sleep(1500);
+    const r = await p.ev(`(() => { const v = window.__office.view; const b = v.actors.get(${builder.id}); return { played: v.played.map((x) => [x.anim, x.record.type, x.record.id, x.who.length]), anim: b.char.anim, bad: v.beat({ kind: "launch" }), refused: v.beats.refused }; })()`);
+    const cheers = r.played.filter((x) => x[0] === 'cheer'), slumps = r.played.filter((x) => x[0] === 'slump');
+    check(cheers.length === 1 && cheers[0][1] === 'launch' && /^beat-shop@\d+$/.test(cheers[0][2]) && cheers[0][3] > 1, `j40 one cheer for the launch, by the room, with its record (${JSON.stringify(cheers)})`);
+    check(slumps.length === 1 && slumps[0][1] === 'task' && slumps[0][2] === 4242 && slumps[0][3] === 1, `j40 one slump for the failed check, by the one bean, with its record (${JSON.stringify(slumps)})`);
+    check(r.bad === null && r.refused >= 1, 'j40 a beat with no record is refused');
+    check(!p.errors.length, `j40 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+  }
 } finally {
   b.close(); await t.close();
 }

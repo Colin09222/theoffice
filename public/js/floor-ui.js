@@ -1274,10 +1274,11 @@ class FloorPage {
     const fresh = (d) => Date.now() - (d._ts || 0) < 15000;
     on('meeting', (d) => { if (fresh(d)) this.view?.meeting(d.manager, d.staff); });
     on('handoff', (d) => { if (fresh(d)) this.view?.handoff(d.from, d.to); });
+    // A Tester's check came back (r2-j40): a high five when it passed, a slump when it failed. The record is the task.
+    on('beat', (d) => { if (fresh(d) && d.kind === 'check') this.view?.beat?.({ kind: 'check', passed: !!d.passed, agent: d.agent, record: { type: 'task', id: d.task } }); });
     on('project', (d) => {
       this.reload();
       if (fresh(d)) {
-        this.view?.cheer();
         // One publish can raise two project events; the boss gets one toast.
         if (this.lastToast?.slug !== d.slug || Date.now() - this.lastToast.at > 15000) toast(`Published: ${d.slug}`);
         this.lastToast = { slug: d.slug, at: Date.now() };
@@ -1299,10 +1300,12 @@ class FloorPage {
   async launchParty(slug) {
     await this.reloadSettled().catch(() => {});
     const p = this.state?.projects?.find((x) => x.slug === slug);
-    if (this.dead || !p?.publishedAt || Date.now() - p.publishedAt > 120000 || !mayParty()) return;
+    if (this.dead || !p?.publishedAt || Date.now() - p.publishedAt > 120000) return;
+    // One cheer for a real launch (r2-j40), whatever else the page does; its record is the project and when it launched.
+    this.view?.beat?.({ kind: 'launch', record: { type: 'launch', id: `${slug}@${p.publishedAt}` } });
+    if (!mayParty()) return;
     confetti({ brand: this.state.floor?.colors?.primary });
     fanfare();
-    setTimeout(() => { if (!this.dead) this.view?.cheer(); }, 2100);
   }
   async reloadSettled() {
     while (this.reloading) await new Promise((r) => setTimeout(r, 30));

@@ -5,7 +5,7 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import { specFor, Creature, drawnFace, PORTRAIT_FRAME } from './cast.js';
 import { stage } from './stage.js';
 
-const ANIMS = ['walk', 'sit', 'type', 'talk', 'carry', 'cheer', 'think', 'listen', 'stretch', 'sip', 'phone', 'pour'];
+const ANIMS = ['walk', 'sit', 'type', 'talk', 'carry', 'cheer', 'think', 'listen', 'stretch', 'sip', 'phone', 'pour', 'slump', 'five'];
 /** Unscaled height of the top of the head: where the name label hangs from. */
 export const HEAD_TOP = 1.7;
 
@@ -20,6 +20,7 @@ function wantFor(anim, speed, carrying, inChair) {
     walk: speed > 0.01 ? 1 : 0, sit: seated ? 1 : 0, type: a === 'type' ? 1 : 0, talk: a === 'talk' ? 1 : 0,
     carry: carrying ? 1 : 0, cheer: a === 'cheer' ? 1 : 0, think: a === 'think' ? 1 : 0, listen: a === 'listen' ? 1 : 0,
     stretch: a === 'stretch' ? 1 : 0, sip: a === 'sip' ? 1 : 0, phone: a === 'phone' ? 1 : 0, pour: a === 'pour' ? 1 : 0,
+    slump: a === 'slump' ? 1 : 0, five: a === 'five' ? 1 : 0,
   };
 }
 /**

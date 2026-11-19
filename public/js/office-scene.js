@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { frameLayout, poseFor, glancing } from './room-rules.js';
+import { frameLayout, poseFor, glancing, BeatGate } from './room-rules.js';
 import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
@@ -1893,6 +1893,19 @@ export class OfficeView {
       a.standUp();
       a.perform([{ anim: 'cheer', hold: 1.8 }]);
     }
+  }
+  /**
+   * A result beat for a real event (r2-j40): one cheer for a real launch, a high five for a passed check, a slump for a failed one. Through the
+   * one gate (room-rules.js BeatGate): no record type and number, no animation; the same record never plays twice. Returns what played, or null.
+   */
+  beat(ev) {
+    const b = (this.beats ||= new BeatGate()).plan(ev);
+    if (!b) return null;
+    const step = { anim: b.anim, hold: b.hold, record: b.record };
+    const who = b.who === 'all' ? [...this.actors.values()].filter((a) => !a.extra && !a.scene) : [this.actors.get(b.who) || [...this.actors.values()].find((a) => String(a.id) === String(b.who))].filter(Boolean);
+    for (const a of who) { if (b.who === 'all') a.standUp(); a.perform([step]); }
+    this.played = [...(this.played || []).slice(-20), { ...b, who: who.map((a) => a.id), at: this.time }];  // read by the tests
+    return who.length ? b : null;
   }
   /**
    * Drag to turn the room, or to slide across it once zoomed in; pinch or scroll to zoom, toward the pointer; two fingers also slide. Shift-drag,

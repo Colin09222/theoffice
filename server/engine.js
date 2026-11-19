@@ -876,7 +876,10 @@ export class Engine {
       result = testReportText(tested);
     }
     run(this.db, 'UPDATE tasks SET status=?, result=?, updated_at=? WHERE id=?', status, result, this.now(), taskId);
-    if (agent.role === 'tester' && status === 'review' && (tested ? tested.failed : testerFailed(result))) this.testerFailedOn(floor, agent, t, result);
+    const checkFailed = agent.role === 'tester' && status === 'review' && (tested ? tested.failed : testerFailed(result));
+    if (checkFailed) this.testerFailedOn(floor, agent, t, result);
+    // The room's result beat (redesign r2-j40, lane A): a Tester's check passed or failed, with the task as its record.
+    if (agent.role === 'tester' && status === 'review' && this.cfg.resultBeats !== false) this.emit(floor.id, 'beat', { kind: 'check', passed: !checkFailed, agent: agent.id, task: taskId }, { project: t.project });
     // A maker job runs its own passes (server/makers.js): it decides the next step, and the manager isn't woken for it.
     const handled = !!this.makers?.afterTask(floor, agent, t, status, result);
     this.emitTask(taskId);

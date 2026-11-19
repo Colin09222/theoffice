@@ -410,7 +410,7 @@ export class Creature {
     this.t = (spec.id % 1000) / 37; this.step = spec.phase; this.blinkAt = 1 + (spec.id % 300) / 90;
     this.nextFidget = 2 + (spec.id % 7); this.fidget = -1; this.fidgetT = 0; this.stumbleT = -1; this.nextStumble = 7 + ((spec.id >>> 4) % 11);
     this.hopT = -1; this.wide = 1; this.shut = 0; this.hatP = 0; this.hatV = 0; this.peekT = -1; this.nextPeek = 3 + (spec.id % 9); this.audience = null;
-    this.pose(0, 0, { walk: 0, sit: 0, type: 0, talk: 0, carry: 0, cheer: 0, think: 0, listen: 0, stretch: 0, sip: 0, phone: 0, pour: 0 });
+    this.pose(0, 0, { walk: 0, sit: 0, type: 0, talk: 0, carry: 0, cheer: 0, think: 0, listen: 0, stretch: 0, sip: 0, phone: 0, pour: 0, slump: 0, five: 0 });
   }
   /** A little jump for joy when a job is finished. */
   celebrate() { this.hopT = 0; }
@@ -446,7 +446,7 @@ export class Creature {
     hop += Math.abs(Math.sin(t * 7)) * 0.22 * b.cheer; squash += Math.cos(t * 14) * 0.05 * b.cheer; joy = Math.max(joy, b.cheer);
     eyeOpen = Math.max(eyeOpen, 1 + 0.25 * joy);
     // When they're not busy, something of their own: a wave, a leg in the air, a hop, hands on hips, a thumbs up or a small bow with the eyes shut.
-    const free = 1 - Math.min(1, b.walk + b.type + b.talk + b.cheer + b.carry + b.stretch + b.sip + b.phone + b.pour + b.think);
+    const free = 1 - Math.min(1, b.walk + b.type + b.talk + b.cheer + b.carry + b.stretch + b.sip + b.phone + b.pour + b.think + (b.slump ?? 0) + (b.five ?? 0));
     if (free > 0.8) { this.nextFidget -= dt; if (this.nextFidget <= 0 && this.fidget < 0) { this.fidget = Math.floor(Math.random() * 6); this.fidgetT = 0; this.nextFidget = 4 + Math.random() * 7; } }
     let wave = 0, legUp = 0, hips = 0, thumbs = 0, bow = 0;
     if (this.fidget >= 0) {
@@ -481,6 +481,10 @@ export class Creature {
     if (b.stretch > 0.01) { shut = Math.max(shut, 0.9 * b.stretch); squash += 0.08 * b.stretch; }
     if (b.pour > 0.01) lookY -= 0.02 * b.pour;
     if (b.phone > 0.01) lookX -= 0.02 * b.phone;
+    // Result beats (r2-j40): a slump on a failed check, the whole body sagging and the eyes half shut; a hand up high on a passed one.
+    const slump = b.slump ?? 0, five = b.five ?? 0;
+    if (slump > 0.01) { pitch += 0.32 * slump; squash -= 0.07 * slump; lookY -= 0.03 * slump; shut = Math.max(shut, 0.55 * slump); }
+    if (five > 0.01) { hop += Math.abs(Math.sin(t * 5)) * 0.06 * five; eyeOpen = Math.max(eyeOpen, 1 + 0.2 * five); }
     // Talking: no mouth to do it with, so the whole body nods along and the eyes get wider on the words.
     const talk = Math.max(b.talk, b.phone * 0.9);
     if (talk > 0.01) { squash += Math.sin(t * 6 + s.phase) * 0.03 * talk; tilt += Math.sin(t * 3 + s.phase) * 0.05 * talk; pitch += (Math.sin(t * 6.5 + s.phase) > 0.2 ? 0.05 : 0) * talk; eyeOpen = Math.max(eyeOpen, 1 + 0.2 * talk * (0.5 + 0.5 * Math.sin(t * 9))); }
@@ -496,6 +500,8 @@ export class Creature {
     if (b.sip > 0.01) { const k = this.sip ?? 0; to(b.sip, 0.2, 1.1 + 0.3 * k, 0.2, -0.35, 0.3, 1.0 + 0.4 * k); }
     if (b.phone > 0.01) to(b.phone, 0.3, 1.9, 0.2, 0.55, 0.3, 1.5);
     if (b.pour > 0.01) to(b.pour, 0.25, 1.05, 0.2, -0.14, 0.3, 0.4);
+    if (slump > 0.01) to(slump, -0.05, -0.05, 0.02, 0.02, 0.05, 0.05);
+    if (five > 0.01) to(five, 0.25, 3.0, 0.2, 0.45, 0.3, 0.12);
     // Hands out over the keys, tapping as fast as they can go.
     if (b.type > 0.01) to(b.type, 1.05 + (ty?.l ?? 0) * 0.32, 1.05 + (ty?.r ?? 0) * 0.32, -0.5, -0.5, 0.55, 0.55);
     if (b.cheer > 0.01 || joy > 0.01) { const up = s.id % 2, w = joy; if (up) to(w, 2.9 + Math.sin(t * 11) * 0.2, 0.3, 0.3, 1.2, 0.3, 0.3); else to(w, 0.3, 2.9 + Math.sin(t * 11) * 0.2, 1.2, 0.3, 0.3, 0.3); }

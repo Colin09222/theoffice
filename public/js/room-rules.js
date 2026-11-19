@@ -105,3 +105,27 @@ export function glancing(time, id, floorState) {
   const t = (time + ((h >>> 0) % 1000) / 1000 * GLANCE.EVERY) % GLANCE.EVERY;
   return t < GLANCE.HOLD;
 }
+
+// ---- r2-j40: result beats (Q4), real task events only ----
+/** Cheer on a launch (2 s), a high five on a passed check (1.5 s), a slump on a failed one (1.5 s). */
+export const BEATS = { launch: { anim: 'cheer', hold: 2 }, pass: { anim: 'five', hold: 1.5 }, fail: { anim: 'slump', hold: 1.5 } };
+
+/**
+ * Every animation the room plays for a real event carries its record: a type and a number (spec Q22). This is the one gate: anything without
+ * both is refused, and the same record never plays twice. `ev` is { kind: 'launch' | 'check', passed, agent, record: { type, id } }.
+ */
+export class BeatGate {
+  constructor() { this.played = new Set(); this.refused = 0; }
+  plan(ev) {
+    const r = ev?.record;
+    if (!r || !r.type || r.id === undefined || r.id === null || r.id === '') { this.refused++; return null; }
+    const key = `${r.type}:${r.id}`;
+    if (this.played.has(key)) return null;
+    let beat = null;
+    if (ev.kind === 'launch') beat = { ...BEATS.launch, who: 'all' };
+    else if (ev.kind === 'check' && ev.agent != null) beat = { ...(ev.passed ? BEATS.pass : BEATS.fail), who: ev.agent };
+    if (!beat) { this.refused++; return null; }
+    this.played.add(key);
+    return { ...beat, record: { type: r.type, id: r.id } };
+  }
+}

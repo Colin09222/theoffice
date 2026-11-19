@@ -11,5 +11,7 @@ export function laneA2Settings(env = process.env) {
     idleLife: on(env.IDLE_LIFE),
     // r2-j32: one frame per real launch on the room's wall, with its launch photo (ROOM_FRAMES=0: the old art only).
     roomFrames: on(env.ROOM_FRAMES),
+    // r2-j40: a Tester's finished check sends the room a 'beat' event (high five or slump) (RESULT_BEATS=0: none sent).
+    resultBeats: on(env.RESULT_BEATS),
   };
 }
