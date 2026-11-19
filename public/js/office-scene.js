@@ -16,6 +16,7 @@ import { cutaway, cutAmount, onWall, CUT } from './cutaway.js';
 import { toonMaterial, warmFlat } from './toon.js';
 import { frameCrew, aimAt } from './framing.js';
 import { roomLight } from './room-light.js';  // round 2 lane B, r2-j35: the New York clock switches the room lights
+import { mailroomFloor } from './mailroom-floor.js';  // round 2 lane B, r2-j51: folders to and from buddehbot's tube
 
 stage.onRestored.add(forgetEnvironment);  // the shared panorama lived on the GPU
 
@@ -2059,6 +2060,7 @@ export class OfficeView {
       this.sun.intensity = (2.5 + drift * 0.25) * (this.daylight ?? 1);
     }
     (this.nyLight ||= roomLight(this)).tick();  // round 2 lane B, r2-j35
+    if (!this.host) (this.mailFolders ||= mailroomFloor(this)).tick();  // round 2 lane B, r2-j51
     // Scrolling screens read as real work.
     this.codeTex.offset.y = (this.time * 0.25) % 1;
     this.pageTex.offset.y = (this.time * 0.05) % 1;

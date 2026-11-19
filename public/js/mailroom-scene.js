@@ -6,6 +6,7 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import { makeRobot, COLORS } from './robot.js';
 import { pigeonholes, trayView, signFor, TRAY_MAX } from './mailroom-state.js';
 import { stage } from './stage.js';
+import { EventPlayer, TUBE_S } from './mailroom-events.js';
 
 const ROOM_W = 7, ROOM_D = 5, ROOM_H = 3.2;
 
@@ -82,6 +83,14 @@ export class MailroomView {
     // A paper it reads when there is nothing in the tray (section 3, animation 8).
     this.paper = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.22), new THREE.MeshStandardMaterial({ color: '#efe8da', side: THREE.DoubleSide })); this.paper.position.set(0, 0.84, -0.6); this.paper.rotation.x = -Math.PI / 2; s.add(this.paper);
     this.pagesTurned = 0;
+    // r2-j51: folders come down the tube. One folder in flight at a time, each from a real record (the player refuses anything else).
+    this.inFlight = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.02, 0.22), new THREE.MeshStandardMaterial({ color: '#d9b779', roughness: 0.8 })); this.inFlight.visible = false; s.add(this.inFlight);
+    this.player = new EventPlayer((ev) => this.playEvent(ev));
+  }
+  /** One event from a real record. Returns how long it takes, in seconds. */
+  playEvent(ev) {
+    if (ev.event === 'arrive') { this.drop = { t: 0, ev }; this.inFlight.visible = true; return TUBE_S; }
+    return 0;
   }
   /** What /api/mailroom says: items, the robot's state and sign, the tray and the open floors. */
   setData(d) {
@@ -126,6 +135,14 @@ export class MailroomView {
   }
   update(dt) {
     this.time += dt;
+    this.player.update(dt);
+    if (this.drop) {  // down the tube (1.5 s) and into the in-tray
+      const d = this.drop; d.t += dt; const k = Math.min(1, d.t / TUBE_S);
+      const top = 3.0, bottom = 0.9 + (this.trayCount || 0) * 0.022;
+      this.inFlight.position.set(-0.75, top + (bottom - top) * k * k, -1.1 + 0.05 * k);
+      this.inFlight.rotation.z = (1 - k) * 0.6;
+      if (k >= 1) { this.inFlight.visible = false; this.drop = null; }
+    }
     // Free, with the heartbeat fresh: it turns a page of its paper every 20 to 40 s (section 3, animation 8). Nothing else moves: no busywork.
     const reading = this.state === 'free';
     this.paper.visible = reading;

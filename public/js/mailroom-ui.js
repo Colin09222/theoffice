@@ -5,6 +5,8 @@
 import { h, api, isPhone, put } from './dom.js';
 import { icon } from './icons.js';
 import { kindLine, trayView, signFor, COLORS, eyeFor } from './mailroom-state.js';
+import { diffFeed } from './mailroom-events.js';
+import { eventSound } from './sfx.js';
 
 export const STATE_WORDS = { asleep: 'Asleep', away: 'Away', busy: 'Busy', waiting: 'Inbox waiting', free: 'Free' };
 const POLL_MS = 5000;
@@ -82,7 +84,19 @@ export async function showMailroom(root) {
       if (stage.ok && alive) { stage.setBoxed(false); view = new MailroomView(); stage.setView(view); window.__mailroomDebug = view; document.body.classList.add('mailroom-3d'); }
     } catch (e) { console.warn('mailroom', e?.message); view = null; }
   }
-  const read = async () => { try { last = await api('/mailroom'); } catch { return; } if (alive) render(last); };
+  // r2-j51: what changed since the last reading becomes events (none on the first: a late visitor sees the current state only).
+  let prev = null;
+  const read = async () => {
+    try { last = await api('/mailroom'); } catch { return; }
+    if (!alive) return;
+    const events = diffFeed(prev, last); prev = last;
+    for (const ev of events) {
+      if (ev.event === 'arrive') eventSound('paper');
+      view?.player.push(ev);  // a phone has no tube animation (Q9): its tray simply shows one more folder
+    }
+    window.__mailroomEvents = (window.__mailroomEvents || []).concat(events);
+    render(last);
+  };
   await read();
   poll = setInterval(() => { if (!document.hidden) read(); }, POLL_MS);
 }
