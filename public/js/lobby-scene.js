@@ -5,6 +5,7 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import { mergeMeshes } from './batch.js';
 import { stage } from './stage.js';
 import { lightClock } from './nylight.js';
+import { makeBillboard, W as BOARD_W, H as BOARD_H } from './billboard.js';
 
 export const FLOOR_H = 1.0, TOWER_W = 8.6, GROUND = 3.6;
 // A low sun off to one side: long shadows down the streets, one lit face and one shaded face on every block.
@@ -797,6 +798,7 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   const steps = [[TOWER_W - 1.6, 1.5], [TOWER_W - 3.2, 1.3], [TOWER_W - 4.8, 1.1]];
   const signTex = signTexture();
   const signMat = new THREE.MeshBasicMaterial({ map: signTex, transparent: true, depthWrite: false });
+  const boardMat = new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }), boards3d = [];
   steps.forEach(([w, hh], i) => {
     add(stone, w, hh, w, 0, y, 0);
     if (i === 0) {
@@ -805,6 +807,16 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
         const ang = (a * Math.PI) / 2;
         s.position.set(Math.sin(ang) * (w / 2 + 0.02), y + hh / 2, Math.cos(ang) * (w / 2 + 0.02));
         s.rotation.y = ang; group.add(s);
+      }
+    }
+    // r2-j37: the crown billboard, one 512 x 320 picture on each face of the second step. Blank and hidden until it has pictures.
+    if (i === 1) {
+      const bh = hh * 0.86, bw = bh * (BOARD_W / BOARD_H);
+      for (let a = 0; a < 4; a++) {
+        const b = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh), boardMat);
+        const ang = (a * Math.PI) / 2;
+        b.position.set(Math.sin(ang) * (w / 2 + 0.03), y + hh / 2, Math.cos(ang) * (w / 2 + 0.03));
+        b.rotation.y = ang; b.userData.billboard = true; b.visible = false; boards3d.push(b); group.add(b);
       }
     }
     add(brass, w + 0.24, 0.1, w + 0.24, 0, y + hh, 0, false);
@@ -816,13 +828,13 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), new THREE.MeshBasicMaterial({ color: '#ff6a52' })); beacon.position.set(0, y + mastH + 0.15, 0); group.add(beacon);
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial('#ff7a5a'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 }));
   glow.scale.setScalar(2.4); glow.position.copy(beacon.position); group.add(glow);
-  mergeMeshes(group, (o) => o === beacon);
+  mergeMeshes(group, (o) => o === beacon || o.userData.billboard);
   const street = streetLights(); group.add(street.group);
   // r2-j36: a small sign light on each floor's front face: real visits in the last 24 hours, in 4 levels. It stays on at night (Q2).
   const visitSigns = new THREE.InstancedMesh(new THREE.BoxGeometry(0.34, 0.12, 0.06), new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }), Math.max(1, floorCount));
   for (let i = 0; i < floorCount; i++) { m.makeTranslation(half - 0.55, GROUND + i * FLOOR_H + FLOOR_H * 0.8, half + 0.03); visitSigns.setMatrixAt(i, m); visitSigns.setColorAt(i, VISIT_COLORS[0]); }
   visitSigns.count = floorCount; visitSigns.frustumCulled = false; group.add(visitSigns);
-  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt, street, visitSigns };
+  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt, street, visitSigns, billboard: { mat: boardMat, meshes: boards3d } };
 }
 
 /** r2-j36: the visit sign light's 4 levels: off, then warmer and brighter: 1 to 50, 51 to 200, over 200 visits in 24 hours. */
@@ -994,6 +1006,7 @@ export class LobbyView {
     this.sun.castShadow = sh > 0;
     if (sh > 0) { this.sun.shadow.mapSize.set(sh, sh); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null; }
     this.world.setDetail(q.density >= 0.6);
+    if (this.board) this.showBoard();
     if (this.active) { const r = stage.renderer; r.shadowMap.enabled = sh > 0; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = sh > 0; }
   }
   bind() {
@@ -1099,6 +1112,18 @@ export class LobbyView {
     if (signs?.instanceColor) signs.instanceColor.needsUpdate = true;
     this.liveState = { floors: (floors || []).map((f) => ({ number: f.number, work: st[(f.number - 1) * 3 + 1] >= 1 ? 1 : 0, visits: f.visits })) };
   }
+  /** r2-j37: the crown billboard's pictures: the hero list's (or, on a Friday, the featured floor's). Not shown on "low" (Q9). */
+  async setBillboard(urls) {
+    const bb = this.tower.billboard; if (!bb) return 0;
+    if (!this.board) { this.board = makeBillboard(); this.boardTex = new THREE.CanvasTexture(this.board.canvas); this.boardTex.colorSpace = THREE.SRGBColorSpace; this.boardTex.anisotropy = 4; bb.mat.map = this.boardTex; bb.mat.needsUpdate = true; }
+    const key = (urls || []).join('|');
+    if (key === this.boardKey) return this.board.count;
+    this.boardKey = key;
+    const n = await this.board.set(urls || [], performance.now());  // wall-clock time: a slow frame never stretches the 6 s
+    this.showBoard();
+    return n;
+  }
+  showBoard() { const on = !!this.board?.count && stage.tier !== 'low'; for (const m of this.tower.billboard?.meshes || []) m.visible = on; this.boardOn = on; }
   pick(cx, cy, click) {
     if (this.flying) return;
     // Window coordinates into the canvas's own: on the home page the canvas is a box, not the whole window.
@@ -1131,6 +1156,7 @@ export class LobbyView {
   update(dt) {
     this.time += dt;
     this.light.tick();
+    if (this.boardOn && this.board.draw(performance.now())) this.boardTex.needsUpdate = true;  // r2-j37: only while a picture changes
     if (this.flashes?.size) {  // r2-j36: one 0.8 s flash per launch, on top of the work light
       const st = this.tower.state;
       for (const [n, left] of this.flashes) {

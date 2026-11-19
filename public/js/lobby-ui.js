@@ -9,6 +9,7 @@ import { muteButton, sfx } from './sfx.js';
 import { stateBadge, idleNote } from './badge.js';
 import { launchCard } from './launch-card.js';
 import { heroFrames, crossfade } from './hero-fade.js';
+import { billboardImages } from './billboard.js';
 
 // The claim wizard and its character builder are only fetched when someone opens them.
 const claimModule = () => import('./claim.js');
@@ -21,6 +22,8 @@ let floors = [], toLet = [], poll = null, nowPoll = null, tower = null, tip = nu
 // floor within 10 s. The tower draws them; on a phone (and wherever there is no tower) the floor list's dot pulses for a floor at work.
 const LIVE_MS = 5000;
 let live = null, livePoll = null;
+// Round 2, r2-j37: the crown billboard shows the same 3 launches as the hero, from the same list.
+let heroList = [];
 const liveWork = (n) => !!live?.floors?.find((f) => f.number === n)?.work;
 
 /** One open floor, one line: number, name, what it does, and its state. */
@@ -74,6 +77,7 @@ function buildHero(onFloor) {
   const strip = h('section.hero-strip', { 'data-hero': '', 'aria-label': 'The best launches this week', hidden: true });
   strip.ready = api('/building/hero').then(({ projects }) => {
     const list = projects || [];
+    heroList = list; tower?.setBillboard?.(billboardImages(heroList));
     const cards = list.map((pr) => launchCard(pr, { hero: true, onFloor }));
     // Round 2, r2-j33: a card with more than one real screenshot fades between them while it is on screen.
     fades.forEach((f) => f?.stop()); fades = cards.map((c, i) => crossfade(c, heroFrames(list[i])));
@@ -162,7 +166,7 @@ export async function showLobby(root) {
         if (!alive) return;
         tower = await m.showTower({ frame: towerFrame, floorCount: data.towerFloors, floors, toLet, onPick: (n) => { const c = floors.find((f) => f.number === n); if (c) enterFloor(c); else if (toLet.includes(n)) openClaim(); }, onHover: showTip });
         if (!tower) towerFrame.hidden = true;  // no 3D here: the floor list is the way round, and it is already on screen
-        else if (live) tower.setLive(live.floors);
+        else { if (live) tower.setLive(live.floors); tower.setBillboard(billboardImages(heroList)); }
       } catch (e) { console.warn('tower', e?.message); towerFrame.hidden = true; }
     }, 0)));
   }

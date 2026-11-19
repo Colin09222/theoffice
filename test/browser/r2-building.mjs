@@ -58,6 +58,17 @@ try {
   check(lit !== null && lit <= 10000, `r2-j36: a job on a hidden floor brightens its windows within 10 s (${lit} ms)`);
   t.db.prepare("UPDATE tasks SET status='done' WHERE floor_id=?").run(hid.id);
   p.close();
+  // r2-j37: on a tier above low the crown billboard shows the 3 hero pictures and moves to the next every 6 s.
+  p = await b.newPage({ width: 1440, height: 900 });
+  await p.goto(`${base}/?q=mid`);
+  await p.until('!!window.__lobbyDebug?.boardOn', 'the billboard', 90000).catch(() => null);
+  const board = await p.ev('(() => { const v = window.__lobbyDebug; return v?.board ? { n: v.board.count, w: v.board.canvas.width, h: v.board.canvas.height, on: v.boardOn } : null; })()');
+  check(board?.on && board.n === 3 && board.w === 512 && board.h === 320, `r2-j37: the crown billboard has the 3 hero pictures at 512 x 320 (${JSON.stringify(board)})`);
+  const i0 = await p.ev('window.__lobbyDebug.board.frame(performance.now()).index');
+  await sleep(6100);
+  const i1 = await p.ev('window.__lobbyDebug.board.frame(performance.now()).index');
+  check(i1 === (i0 + 1) % 3, `r2-j37: 6 s later it shows the next one (${i0} then ${i1})`);
+  p.close();
   p = await page({ width: 1440, height: 900 }, { clock: nyAt(12, 0) });
   await p.until('!!window.__lobbyDebug?.lightState', 'the tower', 90000);
   const noon = await p.ev('window.__lobbyDebug.lightState');
