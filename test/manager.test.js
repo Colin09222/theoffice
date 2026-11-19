@@ -18,7 +18,7 @@ import { setContractor, completeJob } from '../server/contractor.js';
 import { writeFile, publishSnapshot } from '../server/workspace.js';
 import { cleanChecks, checksInBrief, briefWithChecks, briefWithoutChecks, readSelfCheck, selfChecked, selfCheckWords, estimateUsd, sameJob, SELF_CHECK_MARK } from '../server/brain.js';
 
-const OFF = { managerFastPath: false, managerIntentCheck: false, managerPlanFirst: false, staffSelfCheck: false, quietRoundReports: false };
+const OFF = { managerFastPath: false, managerIntentCheck: false, managerPlanFirst: false, staffSelfCheck: false, quietRoundReports: false, modelTiers: false };
 const MIN = 60000;
 const MON_NY_10 = Date.UTC(2026, 0, 5, 15, 0);
 const open = [];
