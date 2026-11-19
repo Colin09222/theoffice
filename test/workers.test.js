@@ -422,7 +422,7 @@ describe('one computer at a time on a project', () => {
       await api.message('Done.');
       order.push(`end ${title}`);
     } });
-    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0 }, { sessions });
+    const h = await start(scripted(), { computerEnabled: true, outputLagMs: 0, testerComputerGamesShops: false }, { sessions });  // a Tester on a computer, as before job 11
     h.e.runManager = async () => {};
     await h.e.hireStaff(h.f, 'tester');
     const a = h.e.assignTask(h.f, h.mgr, { to: 'builder', title: 'Build', brief: 'b', plan: '', project: 'same', dependsOn: [], afterPrevious: false });
