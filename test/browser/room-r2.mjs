@@ -206,6 +206,38 @@ try {
     check(!back.still && !back.paused, 'j45 Try the moving room brings it back');
     check(!p.errors.length, `j45 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
   }
+  if (want('j46')) {
+    // r2-j46: the desktop camera eases to a real handoff and back, and stops after a drag.
+    const boss = await claim(t, 'Camera Floor');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    const [a, m] = [get(t.db, "SELECT id FROM agents WHERE floor_id=? AND role='builder'", f.id).id, get(t.db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", f.id).id];
+    const p = await openRoom(boss.slug);
+    await sleep(2500);
+    const sw = await p.ev('({ on: document.querySelector(".follow-switch")?.getAttribute("aria-pressed"), text: document.querySelector(".follow-switch")?.textContent })');
+    t.app.engine.emit(f.id, 'handoff', { from: a, to: m, kind: 'paper' });
+    await p.until('(window.__office.view.followed || []).length === 1', 'the follow', 20000);
+    const track = await p.ev(`(() => { const v = window.__office.view; const out = []; const home = v.camera.position.clone(); for (let i = 0; i < 60; i++) { v.update(0.1); out.push([Math.round(v.followK * 100) / 100, Math.round(v.camera.position.distanceTo(home) * 10) / 10]); } return out; })()`);
+    const ks = track.map((x) => x[0]), peak = Math.max(...ks);
+    check(sw.on === 'true' && /Following the work/.test(sw.text), `j46 the switch reads "${sw.text}"`);
+    check(peak === 1 && ks.at(-1) === 0 && Math.max(...track.map((x) => x[1])) > 1, `j46 the camera eases to the real handoff and back (k ${ks.filter((_, i) => i % 6 === 0).join(' ')})`);
+    // A drag: the camera is the visitor's, Follow goes off, and the next handoff is not followed.
+    await p.drag(700, 500, 900, 520);
+    const off = await p.ev('({ on: window.__office.view.follow.on, pressed: document.querySelector(".follow-switch")?.getAttribute("aria-pressed") })');
+    await p.ev('window.__office.view.follow.lastAt = -1e9');
+    t.app.engine.emit(f.id, 'handoff', { from: a, to: m, kind: 'paper' });
+    await sleep(2500);
+    const n = await p.ev('(window.__office.view.followed || []).length');
+    check(!off.on && off.pressed === 'false' && n === 1, `j46 after a drag Follow is off (switch pressed ${off.pressed}) and the next handoff is not followed (${n})`);
+    await p.click('.follow-switch');
+    check(await p.ev('window.__office.view.follow.on'), 'j46 the switch turns Follow back on');
+    check(!p.errors.length, `j46 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+    // A phone left alone drifts; it never follows.
+    const ph = await b.newPage({ phone: { width: 390, height: 844 } });
+    await ph.goto(`${base}/floor/${boss.slug}?q=mid`); await ph.room();
+    await ph.until('!!window.__office?.view?.manager', 'the phone room', 120000);
+    const d = await ph.ev(`(() => { const v = window.__office.view; v.lastInputAt = v.time; const yaws = []; for (let i = 0; i < 160; i++) { v.update(0.1); yaws.push(Math.atan2(v.camera.position.x - v.pan.x, v.camera.position.z - v.pan.y)); } return { follow: v.follow.allowed, drift: v.driftOn, early: Math.abs(yaws[70] - yaws[0]), late: Math.abs(yaws[159] - yaws[90]) * 180 / Math.PI }; })()`);
+    check(!d.follow && d.drift && d.early < 0.01 && d.late > 5, `j46 a phone never follows; left alone 8 s it drifts (${d.late.toFixed(1)} degrees in the next 7 s)`);
+  }
 } finally {
   b.close(); await t.close();
 }

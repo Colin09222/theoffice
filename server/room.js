@@ -74,6 +74,7 @@ export function roomView(db, cfg, f, viewer) {
     milestones: cfg.roomProps === false ? null : roomMilestones(db, f),
     props: cfg.roomProps !== false,
     phoneBudget: cfg.phoneBudget !== false,
+    camera: cfg.roomCamera !== false,
   };
 }
 

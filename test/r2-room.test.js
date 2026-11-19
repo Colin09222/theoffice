@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY } from '../public/js/room-rules.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY, CameraFollow, driftYaw, CAMERA } from '../public/js/room-rules.js';
 import { weekOf } from '../server/weekplan.js';
 import { get, all, run as sql } from '../server/db.js';
 import { REAL_JPEG, publish } from './r2-fixtures.js';
@@ -408,5 +408,43 @@ describe('r2-j45 auto quality', () => {
     const m = new QualityWatch('mid');
     const steps = feed(m, 8, 12);
     assert.deepEqual(steps.map((x) => x.drop || (x.still && 'still')), ['low', 'still'], 'mid drops to low, then the still');
+  });
+});
+
+describe('r2-j46 camera follow and drift', () => {
+  const ev = (id, at = [3, 4]) => ({ record: { type: 'handoff', id }, at });
+  test('DONE MEANS (rules): the camera eases to a real handoff in 1.2 s, holds 3 s, eases back in 1.2 s', () => {
+    const f = new CameraFollow();
+    assert.equal(f.ask(10, ev(1)), true);
+    assert.equal(f.pose(10).k, 0);
+    assert.ok(f.pose(10.6).k > 0.3 && f.pose(10.6).k < 0.7, 'half way in');
+    assert.equal(f.pose(11.2).k, 1); assert.deepEqual(f.pose(13).at, [3, 4]); assert.equal(f.pose(14.19).k, 1);
+    assert.ok(f.pose(14.8).k > 0.3 && f.pose(14.8).k < 0.7, 'half way back');
+    assert.equal(f.pose(15.41).k, 0, 'home after 5.4 s');
+    assert.deepEqual([CAMERA.IN, CAMERA.HOLD, CAMERA.OUT, CAMERA.EVERY], [1.2, 3, 1.2, 20]);
+  });
+  test('at most once every 20 s; never without a record; a drag turns it off until the switch turns it on', () => {
+    const f = new CameraFollow();
+    assert.equal(f.ask(0, ev(1)), true);
+    assert.equal(f.ask(10, ev(2)), false, 'too soon');
+    assert.equal(f.ask(20, ev(3)), true);
+    assert.equal(f.ask(41, { at: [1, 1] }), false, 'no record, no follow');
+    assert.equal(f.ask(41, { record: { type: 'handoff' }, at: [1, 1] }), false);
+    f.drag();
+    assert.equal(f.pose(21).k, 0, 'a drag stops it at once');
+    assert.equal(f.ask(60, ev(4)), false, 'off after a drag');
+    f.set(true);
+    assert.equal(f.ask(61, ev(5)), true, 'the switch turns it back on');
+    assert.equal(new CameraFollow({ allowed: false }).ask(100, ev(6)), false, 'never on a phone, under reduce motion, or with ROOM_CAMERA=0');
+  });
+  test('idle drift: nothing for 8 s, then 2 degrees a second, swinging 15 degrees each way', () => {
+    const deg = (s) => (driftYaw(s) * 180) / Math.PI;
+    assert.equal(driftYaw(0), 0); assert.equal(driftYaw(8), 0);
+    assert.ok(Math.abs(deg(9) - 2) < 1e-9, '2 degrees a second');
+    assert.ok(Math.abs(deg(15.5) - 15) < 1e-9, 'out to 15');
+    assert.ok(Math.abs(deg(23) - 0) < 1e-9 && Math.abs(deg(30.5) + 15) < 1e-9, 'back through 0 to -15');
+    let max = 0; for (let s = 8; s < 200; s += 0.05) max = Math.max(max, Math.abs(deg(s)));
+    assert.ok(max <= 15 + 1e-9);
+    assert.equal(driftYaw(100, { allowed: false }), 0);
   });
 });

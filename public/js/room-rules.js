@@ -228,3 +228,46 @@ export class QualityWatch {
   /** After "Try the moving room": watch again from scratch, still allowed once more. */
   reset() { this.stilled = false; this.t0 = null; this.frames = 0; }
 }
+
+// ---- r2-j46: camera follow (desktop) and idle drift (phones) (Q3) ----
+/** Follow: 1.2 s ease in, 3 s hold, 1.2 s back, at most once every 20 s. Drift: after 8 s without input, 2 degrees a second, 15 degrees each way. */
+export const CAMERA = { IN: 1.2, HOLD: 3, OUT: 1.2, EVERY: 20, DRIFT_AFTER: 8, DRIFT_SPEED: 2, DRIFT_SWING: 15 };
+const smooth = (t) => t * t * (3 - 2 * t);
+
+/**
+ * Following the work on a desktop. A real event asks to be followed with its record and a place on the floor; the camera eases there, holds and
+ * eases back. Any drag switches it off until the "Follow the work" switch is turned on again. Off entirely under reduce motion or on phone low.
+ */
+export class CameraFollow {
+  constructor({ allowed = true } = {}) { this.allowed = allowed; this.on = true; this.lastAt = -Infinity; this.shot = null; }
+  /** A real event at room time `t`. Returns true when the camera goes. */
+  ask(t, ev) {
+    if (!this.allowed || !this.on || !ev?.record?.type || ev.record.id == null || !ev.at) return false;
+    if (this.shot && t < this.shot.t + CAMERA.IN + CAMERA.HOLD + CAMERA.OUT) return false;
+    if (t - this.lastAt < CAMERA.EVERY) return false;
+    this.lastAt = t; this.shot = { t, at: ev.at, record: ev.record };
+    return true;
+  }
+  /** How far toward the event the camera is at room time `t` (0 home, 1 there), and where. */
+  pose(t) {
+    const s = this.shot; if (!s) return { k: 0, at: null };
+    const u = t - s.t, { IN, HOLD, OUT } = CAMERA;
+    if (u >= IN + HOLD + OUT) { this.shot = null; return { k: 0, at: null }; }
+    const k = u < IN ? smooth(u / IN) : u < IN + HOLD ? 1 : smooth(1 - (u - IN - HOLD) / OUT);
+    return { k, at: s.at, record: s.record };
+  }
+  /** Someone dragged the room: the camera is theirs, now and until they turn Follow back on. */
+  drag() { this.on = false; this.shot = null; }
+  set(on) { this.on = !!on; }
+}
+/**
+ * The phone's idle drift: after 8 s with no input the camera swings gently, 2 degrees a second, 15 degrees either side of where it was left.
+ * Returns the yaw offset in radians for `idle` seconds without input.
+ */
+export function driftYaw(idle, { allowed = true } = {}) {
+  if (!allowed || idle <= CAMERA.DRIFT_AFTER) return 0;
+  const deg = (idle - CAMERA.DRIFT_AFTER) * CAMERA.DRIFT_SPEED, w = CAMERA.DRIFT_SWING;
+  const p = deg % (4 * w);  // a triangle wave: out to +15, back through 0 to -15, and home
+  const d = p < w ? p : p < 3 * w ? 2 * w - p : p - 4 * w;
+  return (d * Math.PI) / 180;
+}

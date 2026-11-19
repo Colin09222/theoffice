@@ -20,5 +20,7 @@ export function laneA2Settings(env = process.env) {
     // r2-j44: a phone room keeps under 60,000 triangles by shedding the city around it, then the shore, then small props (PHONE_BUDGET=0: no shedding;
     // the 30 fps cap and 1.5 pixel ratio live in the browser and lift with ?budget=0).
     phoneBudget: on(env.PHONE_BUDGET),
+    // r2-j46: the desktop camera follows real handoffs (with a "Follow the work" switch) and an idle phone drifts (ROOM_CAMERA=0: neither).
+    roomCamera: on(env.ROOM_CAMERA),
   };
 }

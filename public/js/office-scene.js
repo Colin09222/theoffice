@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows, pileSheets, queuedFor, trophiesFor, PHONE_BUDGET, shedPlan, trianglesOf } from './room-rules.js';
+import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows, pileSheets, queuedFor, trophiesFor, PHONE_BUDGET, shedPlan, trianglesOf, CameraFollow, driftYaw } from './room-rules.js';
 import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
@@ -784,7 +784,15 @@ export class OfficeView {
     // In the tower, or built ahead for the lift, the people come a step after the room, so the build is two short pieces and not one long one.
     const staff = () => { if (!this.dead && !this.synced) { this.syncAgents(state); this.loadLooks(); } };
     if (host || pace) Promise.resolve(this.turn()).then(staff); else staff();
-    if (!host) this.bind();
+    if (!host) { this.bind(); this.initCamera(); }
+  }
+  /** r2-j46: a desktop follows the work; a phone drifts when left alone. Neither under reduce motion, on phone low, or with ROOM_CAMERA=0. */
+  initCamera() {
+    const still = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
+    const camOk = !still && this.roomCfg.camera !== false;
+    this.follow = new CameraFollow({ allowed: camOk && !stage.mobile });
+    this.driftOn = camOk && !!stage.mobile && !this.low;
+    this.lastInputAt = this.time;
   }
   /**
    * In the tower a floor is put together a step at a time, each step when the tower gives it a turn: one a frame, and none while the
@@ -1963,7 +1971,14 @@ export class OfficeView {
     m.perform([{ anim: 'phone', hold: 3.2 }]);
   }
   /** Finished work is physically carried over, unless the words that go with it are already on their way. */
-  handoff(fromId, toId) { this.life.handoff(fromId, toId); }
+  handoff(fromId, toId, id = null) {
+    this.life.handoff(fromId, toId);
+    // r2-j46: the camera follows a real handoff, to where the paper lands. The event's id is its record.
+    const to = this.actors.get(toId);
+    if (to && id != null && this.follow?.ask(this.time, { record: { type: 'handoff', id }, at: [to.group.position.x, to.group.position.z] })) this.followed = [...(this.followed || []).slice(-10), { id, at: this.time }];
+  }
+  /** The "Follow the work" switch (r2-j46). */
+  setFollow(on) { this.follow?.set(on); window.dispatchEvent(new CustomEvent('office:follow', { detail: { on: !!this.follow?.on } })); }
   cheer() {
     for (const a of this.actors.values()) {
       if (a.action || a.extra) continue;
@@ -1999,13 +2014,14 @@ export class OfficeView {
       this.targetPan.x -= (dx * c + dy * sn * up) * per; this.targetPan.y -= (-dx * sn + dy * c * up) * per;
       clampPan(this.targetPan);
     };
-    this.onDown = (e) => { if (e.target !== el) return; this.pts.set(e.pointerId, [e.clientX, e.clientY]); this.moved = 0; this.turning = e.shiftKey || e.button === 2; el.setPointerCapture?.(e.pointerId); };
+    this.onDown = (e) => { if (e.target !== el) return; this.lastInputAt = this.time; this.pts.set(e.pointerId, [e.clientX, e.clientY]); this.moved = 0; this.turning = e.shiftKey || e.button === 2; el.setPointerCapture?.(e.pointerId); };
     this.onMove = (e) => {
       if (!this.pts.has(e.pointerId)) return;
       const [px, py] = this.pts.get(e.pointerId);
       const dx = e.clientX - px, dy = e.clientY - py;
       this.moved += Math.abs(dx) + Math.abs(dy);
-      if (this.moved > 8) this.touched = true;  // from here on the camera is theirs
+      if (this.moved > 8) { this.touched = true; if (this.follow?.on) this.setFollow(false); }  // from here on the camera is theirs, Follow off (r2-j46)
+      this.lastInputAt = this.time;
       if (this.pts.size === 1) {
         if (this.targetZoom > 1.12 && !this.turning) slide(dx, dy);
         else this.targetYaw -= dx * 0.006;  // all the way round: the walls facing the camera are cut away (cutaway.js)
@@ -2026,6 +2042,7 @@ export class OfficeView {
       if (a) el.dispatchEvent(new CustomEvent('office:agent-tap', { detail: { id: a.id }, bubbles: true }));
     };
     this.onWheel = (e) => {
+      this.lastInputAt = this.time;
       if (e.target !== el) return; e.preventDefault();
       this.touched = true;
       const before = this.targetZoom;
@@ -2088,6 +2105,7 @@ export class OfficeView {
   }
   setTier(q) {
     this.detailOn = q.density >= 0.6;
+    if (this.driftOn && q.density < 0.6) this.driftOn = false;  // phone low: no drift (spec Q9)
     this.detail.visible = this.detailOn;
     if (this.officeDetail) this.officeDetail.visible = this.detailOn;
     for (const a of this.actors.values()) if (a.seat.glow) a.seat.glow.visible = this.detailOn && a.state !== 'idle';
@@ -2121,7 +2139,7 @@ export class OfficeView {
       this.insets = { ...pose.insets }; this.insetNow = { ...pose.insets };
       this.insetsHeldUntil = performance.now() + 600;  // whatever the page then asks for waits until the cross-fade is over
     }
-    this.buildWorld(); this.bind(); this.addBackdrop();
+    this.buildWorld(); this.bind(); this.initCamera(); this.addBackdrop();
     // The same light the tower gave it. Its materials are already the floor page's own, so nothing reloads or bakes again under the camera.
     this.pageLight();
   }
@@ -2182,9 +2200,9 @@ export class OfficeView {
   /** Zoomed well in, the camera comes down toward eye level, so faces show rather than the tops of heads. The usual views keep their angle. */
   tilt() { return this.tiltAt(this.zoom); }
   tiltAt(zoom) { const t = Math.min(1, Math.max(0, (zoom - 1.6) / (TILT_END - 1.6))); return this.pitch - (this.pitch - 0.6) * t * t * (3 - 2 * t); }
-  placeCamera(dist, px = 0, pz = 0, pitch = this.pitch) {
+  placeCamera(dist, px = 0, pz = 0, pitch = this.pitch, yaw = this.yaw) {
     const y = Math.sin(pitch) * dist, r = Math.cos(pitch) * dist;
-    this.camera.position.set(px + Math.sin(this.yaw) * r, y, pz + Math.cos(this.yaw) * r);
+    this.camera.position.set(px + Math.sin(yaw) * r, y, pz + Math.cos(yaw) * r);
     this.camera.lookAt(px, 0.8, pz + 0.3);
   }
   /** The closest camera distance at which every corner of the room lands inside the free area. Cached per angle. */
@@ -2273,9 +2291,15 @@ export class OfficeView {
       this.zoom += (this.targetZoom - this.zoom) * k;
       this.pan.lerp(this.targetPan, k);
       // Fit the room to the free area at any aspect ratio, and let the intro pull back from close up.
-      const dist = (this.fitDistance() / this.zoom) * (1.5 - 0.5 * e);
+      // r2-j46: following a real event (desktop) eases the camera over and back; an idle phone drifts gently. Neither moves the user's own pan.
+      const f = this.follow?.pose(this.time) || { k: 0 };
+      let px = this.pan.x, pz = this.pan.y, zoom = this.zoom;
+      if (f.k > 0) { px += (f.at[0] - px) * f.k; pz += (f.at[1] - pz) * f.k; zoom += (Math.max(zoom, 2.3) - zoom) * f.k; }
+      this.followK = f.k;
+      const sway = this.driftOn ? driftYaw(this.time - this.lastInputAt) : 0;
+      const dist = (this.fitDistance() / zoom) * (1.5 - 0.5 * e);
       this.camDist = dist;
-      this.placeCamera(dist, this.pan.x, this.pan.y, this.tilt());
+      this.placeCamera(dist, px, pz, this.tiltAt(zoom), this.yaw + sway);
       this.sun.position.set(SUN_DIR.x + drift * 0.05, SUN_DIR.y, SUN_DIR.z + Math.cos(this.time * 0.05) * 0.04).multiplyScalar(SUN_FAR);
       this.sun.intensity = 2.5 + drift * 0.25;
     }
