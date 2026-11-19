@@ -5,12 +5,12 @@
 import { h, api, isPhone, put } from './dom.js';
 import { icon } from './icons.js';
 import { kindLine, trayView, signFor, COLORS, eyeFor } from './mailroom-state.js';
-import { diffFeed } from './mailroom-events.js';
+import { diffFeed, EventPlayer, stampFor, lineFor, STAMP_S, BUBBLE_S } from './mailroom-events.js';
 import { eventSound } from './sfx.js';
 
 export const STATE_WORDS = { asleep: 'Asleep', away: 'Away', busy: 'Busy', waiting: 'Inbox waiting', free: 'Free' };
 const POLL_MS = 5000;
-let poll = null, view = null, alive = false;
+let poll = null, view = null, alive = false, stopDom = () => {};
 
 /** The robot as a small drawing, for a phone and for the strip at the foot of the tower. Its eye is the state's colour. */
 export function robotSvg(state, size = 56) {
@@ -84,6 +84,30 @@ export async function showMailroom(root) {
       if (stage.ok && alive) { stage.setBoxed(false); view = new MailroomView(); stage.setView(view); window.__mailroomDebug = view; document.body.classList.add('mailroom-3d'); }
     } catch (e) { console.warn('mailroom', e?.message); view = null; }
   }
+  // r2-j52: the stamp and the one voice line, drawn over the room on a desktop and on a phone alike. One bubble per event, 2.5 s, never more.
+  const stampEl = h('div.mailroom-stamp', { hidden: true, 'aria-hidden': 'true' }), bubble = h('div.mailroom-bubble', { hidden: true, role: 'status' });
+  roomBox.parentNode.prepend(h('div.mailroom-overlay', {}, stampEl, bubble));
+  let bubbleTimer = null, stampTimer = null;
+  const said = window.__mailroomSaid = [];
+  const onStamp = (word, ev) => {
+    if (!word) return;
+    eventSound('stamp');
+    stampEl.textContent = word; stampEl.dataset.record = `${ev.type}:${ev.number}`; stampEl.hidden = false; stampEl.classList.remove('down'); void stampEl.offsetWidth; stampEl.classList.add('down');
+    clearTimeout(stampTimer); stampTimer = setTimeout(() => { stampEl.hidden = true; }, STAMP_S * 1000 + 1400);
+  };
+  const onSay = (line, ev) => {
+    said.push({ line, record: `${ev.type}:${ev.number}`, at: Math.round(performance.now()) });
+    bubble.textContent = line; bubble.hidden = false;
+    clearTimeout(bubbleTimer); bubbleTimer = setTimeout(() => { bubble.hidden = true; }, BUBBLE_S * 1000);
+  };
+  // A phone has no 3D room: its own player says and stamps the same events, with no tube.
+  let domPlayer = null, domTick = null;
+  if (view) { view.onStamp = onStamp; view.onSay = onSay; } else {
+    domPlayer = new EventPlayer((ev) => { if (ev.event === 'close') { onStamp(stampFor(ev), ev); const l = lineFor(ev); if (l) onSay(l, ev); return l ? BUBBLE_S : STAMP_S; } if (ev.event === 'pickup') { const l = lineFor(ev); if (l) onSay(l, ev); return l ? BUBBLE_S : 0; } return 0; });
+    window.__mailroomDomPlayer = domPlayer;
+    domTick = setInterval(() => domPlayer.update(0.1), 100);
+  }
+  stopDom = () => clearInterval(domTick);
   // r2-j51: what changed since the last reading becomes events (none on the first: a late visitor sees the current state only).
   let prev = null;
   const read = async () => {
@@ -92,7 +116,7 @@ export async function showMailroom(root) {
     const events = diffFeed(prev, last); prev = last;
     for (const ev of events) {
       if (ev.event === 'arrive') eventSound('paper');
-      view?.player.push(ev);  // a phone has no tube animation (Q9): its tray simply shows one more folder
+      (view ? view.player : domPlayer).push(ev);  // a phone has no tube animation (Q9): its tray simply shows one more folder
     }
     window.__mailroomEvents = (window.__mailroomEvents || []).concat(events);
     render(last);
@@ -102,7 +126,7 @@ export async function showMailroom(root) {
 }
 
 export function hideMailroom() {
-  alive = false; clearInterval(poll); poll = null;
+  alive = false; clearInterval(poll); poll = null; stopDom();
   document.body.classList.remove('mailroom-3d');
   if (view) { import('./stage-start.js').then(({ stage }) => { if (stage.view === view) stage.setView(null); }); view = null; }
 }

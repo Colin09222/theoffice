@@ -142,6 +142,12 @@ try {
   await p.until(`window.__mailroomDebug.player.played.some((e) => e.event === 'arrive' && e.number === ${buy2})`, 'the folder down the tube', 12000).catch(() => null);
   const after = await p.ev(`({ tray: window.__mailroomDebug.trayCount, played: window.__mailroomDebug.player.played.filter((e) => e.number === ${buy2}).map((e) => e.event), refused: window.__mailroomDebug.player.refused })`);
   check(after.tray === trayBefore + 1 && after.played.includes('arrive') && after.refused === 0, `r2-j51: in the mailroom the folder comes down the tube and the tray rises by one (${trayBefore} -> ${JSON.stringify(after)})`);
+  // r2-j52: closing it as bought shows BOUGHT and says "Bought." once.
+  t.db.prepare("UPDATE purchases SET status='bought', decided_at=? WHERE id=?").run(Date.now(), buy2);
+  const stamped = await p.until(`(() => { const s = document.querySelector('.mailroom-stamp'); return s && !s.hidden && s.dataset.record === 'purchases:${buy2}' ? s.textContent : null; })()`, 'the stamp', 12000).catch(() => null);
+  await sleep(6000);  // another reading: nothing more is said
+  const said = await p.ev(`window.__mailroomSaid.filter((x) => x.record === 'purchases:${buy2}').map((x) => x.line)`);
+  check(stamped === 'BOUGHT' && JSON.stringify(said) === '["Bought."]', `r2-j52: closing it as bought shows BOUGHT and says "Bought." once (${stamped}, ${JSON.stringify(said)})`);
   p.close();
   // r2-j38: a fresh browser (a first-time visitor): the fly-in plays once on the desktop, never on the second visit, never under reduce motion,
   // and a click skips it.

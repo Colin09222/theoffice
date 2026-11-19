@@ -49,3 +49,23 @@ export class EventPlayer {
     this.busy = Math.max(0, Number(this.play(ev)) || 0);
   }
 }
+
+// r2-j52: stamps and voice lines, section 3's list and nothing else. One bubble per event, 2.5 s. "Item was already finished" is left out: no
+// record ever says so (a second decision on a help request or a contractor job is refused with an error and stored nowhere), and "Purchase
+// flagged to Colon" has no record either. Asleep and Away are signs, not bubbles (mailroom-state.js SIGN).
+export const STAMPS = { answered: 'ANSWERED', bought: 'BOUGHT', done: 'DONE', declined: 'DECLINED', expired: 'EXPIRED' };
+export const APPROVED_STAMP = 'COLON APPROVED';
+export const VOICE_LINES = ['Answered.', 'Not this one.', 'Bought.', 'Approved.', 'On it.', 'Done.'];
+/** The stamp an event brings down, or '' for none. */
+export const stampFor = (ev) => (ev?.event === 'close' ? STAMPS[ev.state] || '' : '');
+/** The one line an event may say, or '' (help expired: stamp only). */
+export function lineFor(ev) {
+  if (!ev) return '';
+  if (ev.event === 'close') {
+    if (ev.kind === 'help') return ev.state === 'answered' ? 'Answered.' : ev.state === 'declined' ? 'Not this one.' : '';
+    if (ev.kind === 'purchase') return ev.state === 'bought' ? 'Bought.' : ev.state === 'declined' ? 'Not this one.' : '';
+    if (ev.kind === 'contractor') return ev.state === 'done' ? 'Done.' : '';
+  }
+  if (ev.event === 'pickup' && ev.kind === 'contractor') return 'On it.';
+  return '';
+}

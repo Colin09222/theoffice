@@ -75,7 +75,7 @@ test('a test purchase request puts a folder in a bean\'s hand within 10 s, and t
 test('the mailroom page plays arrivals down the tube on a desktop, and a phone just shows the tray (no tube animation)', () => {
   const ui = src('mailroom-ui.js'), scene = src('mailroom-scene.js');
   assert.match(ui, /const events = diffFeed\(prev, last\); prev = last;/);
-  assert.match(ui, /view\?\.player\.push\(ev\);/);
+  assert.match(ui, /\(view \? view\.player : domPlayer\)\.push\(ev\);/);
   assert.match(scene, /if \(ev\.event === 'arrive'\) \{ this\.drop = \{ t: 0, ev \}; this\.inFlight\.visible = true; return TUBE_S; \}/);
   assert.match(src('office-scene.js'), /if \(!this\.host\) \(this\.mailFolders \|\|= mailroomFloor\(this\)\)\.tick\(\);/);
 });

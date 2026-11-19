@@ -51,3 +51,13 @@ body.mailroom-3d .mailroom-room { min-height: 60vh; pointer-events: none; }
   .mailroom-page { padding: 12px 16px; }
   .mailroom-main { grid-template-columns: 1fr; }
 }
+
+/* r2-j52: the stamp (Tower Red, 0.6 s down) and the one voice bubble (2.5 s), over the mailroom. */
+.mailroom-main { position: relative; }
+.mailroom-overlay { position: absolute; left: 0; top: 0; width: calc(100% - 360px); min-width: 260px; height: 0; z-index: 4; pointer-events: none; }
+.mailroom-stamp { position: absolute; left: 50%; top: 40px; transform: translateX(-50%) rotate(-8deg); padding: 6px 14px; border: 4px solid #C93A24; color: #C93A24; background: rgba(246, 241, 231, .92); font: 800 28px/1 var(--f-head, sans-serif); letter-spacing: .06em; border-radius: 6px; }
+.mailroom-stamp.down { animation: r2-stamp .6s cubic-bezier(.3, 1.6, .5, 1) both; }
+@keyframes r2-stamp { from { transform: translateX(-50%) rotate(-8deg) scale(2.2); opacity: 0; } to { transform: translateX(-50%) rotate(-8deg) scale(1); opacity: 1; } }
+.mailroom-bubble { position: absolute; left: 50%; top: 110px; transform: translateX(-50%); padding: 8px 14px; background: #fff; color: var(--c-ink); border: 1.5px solid var(--c-ink); border-radius: 14px; font: 600 16px/1.2 var(--f-body, sans-serif); }
+@media (max-width: 760px) { .mailroom-overlay { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .mailroom-stamp.down { animation: none; } }

@@ -6,7 +6,7 @@ import * as THREE from '../vendor/three/three.module.min.js';
 import { makeRobot, COLORS } from './robot.js';
 import { pigeonholes, trayView, signFor, TRAY_MAX } from './mailroom-state.js';
 import { stage } from './stage.js';
-import { EventPlayer, TUBE_S } from './mailroom-events.js';
+import { EventPlayer, TUBE_S, STAMP_S, BUBBLE_S, stampFor, lineFor } from './mailroom-events.js';
 
 const ROOM_W = 7, ROOM_D = 5, ROOM_H = 3.2;
 
@@ -90,6 +90,14 @@ export class MailroomView {
   /** One event from a real record. Returns how long it takes, in seconds. */
   playEvent(ev) {
     if (ev.event === 'arrive') { this.drop = { t: 0, ev }; this.inFlight.visible = true; return TUBE_S; }
+    // r2-j52: the stamp comes down (0.6 s), one voice line, and the folder goes up the tube.
+    if (ev.event === 'close') {
+      const word = stampFor(ev), line = lineFor(ev);
+      this.stamping = { t: 0 };
+      this.onStamp?.(word, ev); if (line) this.onSay?.(line, ev);
+      return Math.max(STAMP_S + TUBE_S, line ? BUBBLE_S : 0);
+    }
+    if (ev.event === 'pickup') { const line = lineFor(ev); if (line) this.onSay?.(line, ev); return line ? BUBBLE_S : 0; }
     return 0;
   }
   /** What /api/mailroom says: items, the robot's state and sign, the tray and the open floors. */
@@ -136,6 +144,11 @@ export class MailroomView {
   update(dt) {
     this.time += dt;
     this.player.update(dt);
+    if (this.stamping) {  // the arm brings the stamp down and up again in 0.6 s
+      const st = this.stamping; st.t += dt; const k = Math.min(1, st.t / STAMP_S);
+      this.robot.arm.rotation.x = -Math.sin(k * Math.PI) * 0.9;
+      if (k >= 1) { this.robot.arm.rotation.x = 0; this.stamping = null; }
+    }
     if (this.drop) {  // down the tube (1.5 s) and into the in-tray
       const d = this.drop; d.t += dt; const k = Math.min(1, d.t / TUBE_S);
       const top = 3.0, bottom = 0.9 + (this.trayCount || 0) * 0.022;
