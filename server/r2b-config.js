@@ -26,5 +26,7 @@ export function r2bSettings(env = process.env) {
     didItWork: on(env.DID_IT_WORK),
     // r2-j66: the "This week" page (/theoffice/thisweek). THIS_WEEK=0 turns it (and its link on the home page) off.
     thisWeek: on(env.THIS_WEEK),
+    // r2-j68: the Friday feature (Fridays 16:00 to 23:00 New York, only if something shipped that week). FRIDAY=0 turns it off.
+    friday: on(env.FRIDAY),
   };
 }

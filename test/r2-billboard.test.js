@@ -28,8 +28,10 @@ test('it cycles every 6 s: one picture held, then a 0.6 s fade into the next, an
 });
 test('the page feeds it from the hero list; the tower hides it on low and draws only while a picture changes', () => {
   const ui = src('lobby-ui.js'), s = src('lobby-scene.js');
-  assert.match(ui, /heroList = list; tower\?\.setBillboard\?\.\(billboardImages\(heroList\)\);/);
-  assert.match(ui, /tower\.setBillboard\(billboardImages\(heroList\)\)/);
+  // Since r2-j68 the list is boardImages(): the hero list, or on a Friday evening the featured floor's launches.
+  assert.match(ui, /heroList = list; tower\?\.setBillboard\?\.\(boardImages\(\)\);/);
+  assert.match(ui, /tower\.setBillboard\(boardImages\(\)\)/);
+  assert.match(ui, /billboardImages\(friday\?\.on && friday\.launches\?\.length \? friday\.launches : heroList\)/);
   assert.match(s, /showBoard\(\) \{ const on = !!this\.board\?\.count && stage\.tier !== 'low';/);
   assert.match(s, /if \(this\.boardOn && this\.board\.draw\(performance\.now\(\)\)\) this\.boardTex\.needsUpdate = true;/);
   assert.match(s, /const bh = hh \* 0\.86, bw = bh \* \(BOARD_W \/ BOARD_H\);/, 'the board keeps the 512:320 shape');

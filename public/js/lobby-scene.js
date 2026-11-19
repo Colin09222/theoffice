@@ -831,11 +831,16 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   glow.scale.setScalar(2.4); glow.position.copy(beacon.position); group.add(glow);
   mergeMeshes(group, (o) => o === beacon || o.userData.billboard);
   const street = streetLights(); group.add(street.group);
+  // r2-j68: the lit crown, Friday evenings only: warm floodlight glows round the crown steps, hidden the rest of the week.
+  const crownGlow = new THREE.Group(); crownGlow.visible = false; crownGlow.name = 'friday-crown';
+  const gmat = new THREE.SpriteMaterial({ map: radial('#ffd27a'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.85 });
+  for (let a = 0; a < 8; a++) { const g = new THREE.Sprite(gmat); const ang = (a * Math.PI) / 4; g.scale.setScalar(3.2); g.position.set(Math.sin(ang) * (TOWER_W / 2 - 0.6), H + 1.6, Math.cos(ang) * (TOWER_W / 2 - 0.6)); crownGlow.add(g); }
+  group.add(crownGlow);
   // r2-j36: a small sign light on each floor's front face: real visits in the last 24 hours, in 4 levels. It stays on at night (Q2).
   const visitSigns = new THREE.InstancedMesh(new THREE.BoxGeometry(0.34, 0.12, 0.06), new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }), Math.max(1, floorCount));
   for (let i = 0; i < floorCount; i++) { m.makeTranslation(half - 0.55, GROUND + i * FLOOR_H + FLOOR_H * 0.8, half + 0.03); visitSigns.setMatrixAt(i, m); visitSigns.setColorAt(i, VISIT_COLORS[0]); }
   visitSigns.count = floorCount; visitSigns.frustumCulled = false; group.add(visitSigns);
-  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt, street, visitSigns, billboard: { mat: boardMat, meshes: boards3d } };
+  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt, street, visitSigns, billboard: { mat: boardMat, meshes: boards3d }, crownGlow };
 }
 
 /** r2-j36: the visit sign light's 4 levels: off, then warmer and brighter: 1 to 50, 51 to 200, over 200 visits in 24 hours. */
@@ -1127,6 +1132,8 @@ export class LobbyView {
     this.showBoard();
     return n;
   }
+  /** r2-j68: Friday evening's featured floor: the lit crown, and its launches on the billboard. Null puts the week back: the hero list. */
+  setFriday(f) { this.friday = f || null; if (this.tower.crownGlow) this.tower.crownGlow.visible = !!f; }
   showBoard() { const on = !!this.board?.count && stage.tier !== 'low'; for (const m of this.tower.billboard?.meshes || []) m.visible = on; this.boardOn = on; }
   pick(cx, cy, click) {
     if (this.flying) return;

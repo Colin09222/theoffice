@@ -23,11 +23,14 @@ let floors = [], toLet = [], poll = null, nowPoll = null, tower = null, tip = nu
 // Round 2, r2-j36: the live tower's signals (/api/building/live), read every 5 s while the tab is in view, so a job that starts lights its
 // floor within 10 s. The tower draws them; on a phone (and wherever there is no tower) the floor list's dot pulses for a floor at work.
 const LIVE_MS = 5000;
-let live = null, livePoll = null;
+let live = null, livePoll = null, fridayPoll = null;
 // Round 2, r2-j43: a launch somewhere in the building rings the bell once (if sound is on). The first reading only learns what is already there.
 const launchSeen = new Map(); let liveRead = false;
 // Round 2, r2-j37: the crown billboard shows the same 3 launches as the hero, from the same list.
 let heroList = [];
+// Round 2, r2-j68: on a Friday evening with something shipped, the featured floor's launches take the billboard and its crown is lit.
+let friday = null;
+const boardImages = () => billboardImages(friday?.on && friday.launches?.length ? friday.launches : heroList);
 const liveWork = (n) => !!live?.floors?.find((f) => f.number === n)?.work;
 
 /** One open floor, one line: number, name, what it does, and its state. */
@@ -81,7 +84,7 @@ function buildHero(onFloor) {
   const strip = h('section.hero-strip', { 'data-hero': '', 'aria-label': 'The best launches this week', hidden: true });
   strip.ready = api('/building/hero').then(({ projects }) => {
     const list = projects || [];
-    heroList = list; tower?.setBillboard?.(billboardImages(heroList));
+    heroList = list; tower?.setBillboard?.(boardImages());
     const cards = list.map((pr) => launchCard(pr, { hero: true, onFloor }));
     // Round 2, r2-j33: a card with more than one real screenshot fades between them while it is on screen.
     fades.forEach((f) => f?.stop()); fades = cards.map((c, i) => crossfade(c, heroFrames(list[i])));
@@ -171,6 +174,8 @@ export async function showLobby(root) {
     tower?.setLive?.(live.floors);
   };
   readLive();
+  const readFriday = async () => { try { friday = await api('/building/friday'); } catch { friday = null; } tower?.setFriday?.(friday?.on ? friday.floor : null); tower?.setBillboard?.(boardImages()); };
+  readFriday(); fridayPoll = setInterval(() => { if (!document.hidden) readFriday(); }, 5 * 60000);
   livePoll = setInterval(() => { if (!document.hidden) { readLive(); readMailroom(); } }, LIVE_MS);
 
   poll = setInterval(async () => {
@@ -187,7 +192,7 @@ export async function showLobby(root) {
         if (!alive) return;
         tower = await m.showTower({ frame: towerFrame, floorCount: data.towerFloors, floors, toLet, onPick: (n) => { const c = floors.find((f) => f.number === n); if (c) enterFloor(c); else if (toLet.includes(n)) openClaim(); }, onHover: showTip });
         if (!tower) towerFrame.hidden = true;  // no 3D here: the floor list is the way round, and it is already on screen
-        else { if (live) tower.setLive(live.floors); tower.setBillboard(billboardImages(heroList)); flyInOnce(); }
+        else { if (live) tower.setLive(live.floors); tower.setFriday(friday?.on ? friday.floor : null); tower.setBillboard(boardImages()); flyInOnce(); }
       } catch (e) { console.warn('tower', e?.message); towerFrame.hidden = true; }
     }, 0)));
   }
@@ -218,7 +223,7 @@ function showTip(n, x, y) {
 export function hideLobby() {
   alive = false;
   clearInterval(poll); poll = null; clearInterval(nowPoll); nowPoll = null; tip = null;
-  clearInterval(livePoll); livePoll = null;
+  clearInterval(livePoll); livePoll = null; clearInterval(fridayPoll); fridayPoll = null;
   fades.forEach((f) => f?.stop()); fades = [];
   tower?.leave?.(); tower = null;
 }
