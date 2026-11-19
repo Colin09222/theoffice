@@ -63,7 +63,7 @@ describe('the switches', () => {
   test('each is on by default and turns off from the environment', () => {
     const on = loadConfig({ AI_MODE: 'mock' });
     for (const k of Object.keys(OFF)) assert.equal(on[k], true, k);
-    const off = loadConfig({ AI_MODE: 'mock', MANAGER_FAST_PATH: '0', MANAGER_INTENT_CHECK: '0', MANAGER_PLAN_FIRST: '0', STAFF_SELF_CHECK: '0', ROUND_REPORTS: 'all' });
+    const off = loadConfig({ AI_MODE: 'mock', MANAGER_FAST_PATH: '0', MANAGER_INTENT_CHECK: '0', MANAGER_PLAN_FIRST: '0', STAFF_SELF_CHECK: '0', ROUND_REPORTS: 'all', MODEL_TIERS: '0' });
     for (const k of Object.keys(OFF)) assert.equal(off[k], false, k);
   });
   test('with every switch off the manager has the tools and the instructions it had before', () => {
