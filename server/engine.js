@@ -302,9 +302,10 @@ export class Engine {
    * Runs in the background; this.smoking holds the latest so a test can wait for it.
    */
   afterPublish(floor, slug, task) {
-    if (!this.cfg.smokeCheck) return;
+    // A private project isn't open to the public, so there is no live page to check; and the result is the boss's, never a visitor's.
+    if (!this.cfg.smokeCheck || get(this.db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', floor.id, slug)?.private) return;
     this.smoking = smokeProject(this, floor, slug, task, { now: this.now() }).then((r) => {
-      this.emit(floor.id, 'smoke', { project: slug, taskId: task?.id ?? null, ok: r.ok, shot: r.shotPath || '' }, { persist: true, project: slug });
+      this.emit(floor.id, 'smoke', { project: slug, taskId: task?.id ?? null, ok: r.ok, shot: r.shotPath || '' }, { persist: true, project: slug, ownerOnly: true });
       if (!r.ok) {
         this.addMessage(floor.id, 'note', null, `The smoke check on ${slug} after it went live found a problem: ${r.errors.join('; ')}. The live page is ${r.url}. Fix it with one small job, or tell the boss in a line.`);
         run(this.db, 'UPDATE floors SET manager_wake=1 WHERE id=?', floor.id);

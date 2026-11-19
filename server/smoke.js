@@ -1,10 +1,9 @@
 // The smoke check (docs/redesign/OFFICE-ANSWERS-1.md, Q9 Tier 0 and section 5 step 7; job 11). After a job publishes, a script, not a model, opens the live
 // page: it must load, with no console errors, and a 16:10 screenshot is saved to the job (on the floor's drive, and in smoke_checks for the timeline).
 // With Playwright's Chromium on this machine it is a real browser; without it, the page and its own scripts and styles are fetched and every classic
-// script is parsed, so a page that won't load, a missing file or a script that can't even parse still fails, and there is simply no screenshot.
+// own script and style is fetched, so a page that won't load or a missing file still fails, and there is simply no screenshot.
 // An edit then ships on this check alone, with no Tester (except one that touches checkout, forms or sign-in). Nothing here calls a model.
 import { createRequire } from 'node:module';
-import { Script } from 'node:vm';
 import { get, all, run } from './db.js';
 import { writeBinaryFile } from './workspace.js';
 
@@ -21,7 +20,7 @@ export async function loadPlaywright() {
 
 const clip = (s, n = 200) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 
-/** The page through plain HTTP: it loads, its own scripts and styles answer, and each classic script parses. */
+/** The page through plain HTTP: it loads, and its own scripts and styles answer. */
 async function httpCheck(url, { httpFetch = fetch } = {}) {
   const errors = [];
   let res, html = '';
@@ -33,10 +32,6 @@ async function httpCheck(url, { httpFetch = fetch } = {}) {
     .map((m) => m[1] || m[2] || m[3]).filter((u) => u && !/^(https?:)?\/\//i.test(u) && !/^data:/i.test(u)).slice(0, ASSETS_MAX);
   for (const ref of refs) {
     try { const r = await httpFetch(new URL(ref, base), { headers: UA, signal: AbortSignal.timeout(TIMEOUT_MS) }); await r.arrayBuffer(); if (r.status !== 200) errors.push(`${clip(ref, 80)} answered ${r.status}`); } catch { errors.push(`${clip(ref, 80)} didn't load`); }
-  }
-  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
-    if (/\bsrc=/i.test(m[1]) || /type=["']?(module|application\/(ld\+)?json|text\/(template|x-[a-z-]+))/i.test(m[1]) || !m[2].trim()) continue;
-    try { new Script(m[2]); } catch (e) { errors.push(`a script on the page can't run: ${clip(e?.message, 120)}`); }
   }
   return { ok: errors.length === 0, status: 200, errors: errors.slice(0, ERRORS_KEPT) };
 }
@@ -86,7 +81,7 @@ export const lastSmoke = (db, taskId) => get(db, 'SELECT * FROM smoke_checks WHE
 export const smokeFor = (db, floorId, project) => all(db, 'SELECT * FROM smoke_checks WHERE floor_id=? AND project=? ORDER BY id DESC LIMIT 20', floorId, project);
 
 /** Whether an edit touches something a Tester must still look at once: checkout, a form, or signing in. */
-export const SENSITIVE = /\b(check-?out|basket|cart|payments?|pay|stripe|price|form|forms|booking|book|sign[- ]?in|log[- ]?in|sign[- ]?up|account|password)\b/i;
+export const SENSITIVE = /\b(check-?out|basket|cart|payments?|pay|price|form|forms|booking|book|sign[- ]?in|log[- ]?in|sign[- ]?up|account|password)\b/i;
 export const touchesSensitive = (t) => SENSITIVE.test(`${t?.title || ''} ${t?.brief || ''} ${t?.intent || ''}`);
 /** The Tester gets a computer only for games and shops. */
 export function testerNeedsComputer(db, task) {

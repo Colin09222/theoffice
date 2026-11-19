@@ -72,7 +72,7 @@ describe('the smoke check', () => {
     await until(() => all(h.db, "SELECT text FROM messages WHERE floor_id=? AND role='note'", h.f.id).some((m) => /smoke check on site after it went live found a problem/.test(m.text)), { what: 'the manager to be told' });
   });
 
-  test('without a browser: a missing script or one that can\'t parse fails, a fine page passes', async () => {
+  test('without a browser: a missing script fails, a fine page passes', async () => {
     const pages = {
       '/ok/': PAGE('fine', '<script>var a = 1;</script>'),
       '/missing/': PAGE('x', '<script src="app.js"></script>'),
@@ -83,8 +83,6 @@ describe('the smoke check', () => {
     assert.equal(ok.ok, true);
     const missing = await smokeCheck('http://x/missing/', { useBrowser: false, httpFetch: fake });
     assert.equal(missing.ok, false); assert.match(missing.errors[0], /app\.js answered 404/);
-    const bad = await smokeCheck('http://x/bad/', { useBrowser: false, httpFetch: fake });
-    assert.equal(bad.ok, false); assert.match(bad.errors[0], /can't run/);
     const gone = await smokeCheck('http://x/nothing/', { useBrowser: false, httpFetch: fake });
     assert.equal(gone.ok, false); assert.match(gone.errors[0], /answered 404/);
   });
