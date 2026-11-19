@@ -17,5 +17,8 @@ export function laneA2Settings(env = process.env) {
     roomWhiteboard: on(env.ROOM_WHITEBOARD),
     // r2-j42: paper piles (one sheet per queued job, max 5) and the trophy shelf (first launch, 100, 1,000, 10,000 real visits) (ROOM_PROPS=0: none).
     roomProps: on(env.ROOM_PROPS),
+    // r2-j44: a phone room keeps under 60,000 triangles by shedding the city around it, then the shore, then small props (PHONE_BUDGET=0: no shedding;
+    // the 30 fps cap and 1.5 pixel ratio live in the browser and lift with ?budget=0).
+    phoneBudget: on(env.PHONE_BUDGET),
   };
 }

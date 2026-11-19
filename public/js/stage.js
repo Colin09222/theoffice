@@ -5,6 +5,7 @@
 // then the pixels, then the tier, for the rest of the visit, and tells the current view.
 import * as THREE from '../vendor/three/three.module.min.js';
 import { loadAddons } from './addons.js';
+import { PHONE_BUDGET, skipFrame, phoneDpr } from './room-rules.js';
 
 const TIERS = {
   high: { dpr: 2, shadow: 4096, soft: true, post: true, ao: 'full', bloom: 1, density: 1 },
@@ -172,6 +173,10 @@ class Stage {
     this.q.shadow = Math.min(this.q.shadow, this.renderer.capabilities.maxTextureSize);
     // A phone starts with half-resolution occlusion; the frame-time watchdog below turns it off if the phone can't keep up.
     if (mobile && this.q.ao === 'full') this.q.ao = 'half';
+    // The phone's hard budget (r2-j44, spec Q9): at most 30 frames a second and a pixel ratio of 1.5. ?budget=0 lifts it, for comparing.
+    this.phoneBudget = mobile && new URLSearchParams(location.search).get('budget') !== '0';
+    this.fpsCap = this.phoneBudget ? PHONE_BUDGET.fps : 0;
+    this.q.dpr = phoneDpr(this.q.dpr, this.phoneBudget);
     this.dprCap = this.q.dpr;
   }
   get dpr() { return Math.min(window.devicePixelRatio || 1, this.dprCap); }
@@ -254,6 +259,9 @@ class Stage {
       // halves the battery a page left open costs and still looks alive.
       this.idle = now - this.lastInput > 6000 && !!this.view?.idle?.();
       if (this.idle && (this.frame & 1) && this.frameMs < 24) { this.frame++; return; }
+      // A phone draws at most 30 frames a second (r2-j44): a frame that comes too soon after the last one drawn is skipped.
+      if (skipFrame(now, this.lastDraw, this.fpsCap)) { this.frame++; return; }
+      this.lastDraw = now;
       const real = Math.max(0, now - this.last); this.last = now;
       const dt = Math.min(real / 1000, 0.1);
       this.time += dt; this.frame++;
@@ -286,7 +294,7 @@ class Stage {
     this.post?.setAO(level);
   }
   setTier(tier) {
-    this.tier = tier; this.q = { ...TIERS[tier] }; this.dprCap = Math.min(this.dprCap, this.q.dpr);
+    this.tier = tier; this.q = { ...TIERS[tier] }; this.q.dpr = phoneDpr(this.q.dpr, this.phoneBudget); this.dprCap = Math.min(this.dprCap, this.q.dpr);
     if (this.mobile && this.q.ao === 'full') this.q.ao = 'half';
     this.applyPost();
     this.resize(true);

@@ -168,3 +168,34 @@ export function trophiesFor(milestones) {
   if (!milestones) return [];
   return MILESTONES.filter((m) => m.test(milestones)).map(({ id, label }) => ({ id, label })).slice(0, 4);
 }
+
+// ---- r2-j44: the phone's hard budget (Q9) ----
+/** Once 3D loads on a phone: 30 fps cap, pixel ratio 1.5, one shadow light, 60,000 triangles, 2 MB of 3D files. */
+export const PHONE_BUDGET = { fps: 30, dpr: 1.5, shadowLights: 1, triangles: 60000, bytes: 2 * 1024 * 1024 };
+
+/**
+ * What a phone room sheds to get under its triangle budget, in order, until it fits: `steps` are [name, triangles it saves] in the order they
+ * may go (the city around the floor first, the room's own people never). Returns { shed: [names], left: triangles after }.
+ */
+export function shedPlan(total, steps, limit = PHONE_BUDGET.triangles) {
+  const shed = []; let left = total;
+  for (const [name, saves] of steps) {
+    if (left <= limit) break;
+    if (saves > 0) { shed.push(name); left -= saves; }
+  }
+  return { shed, left };
+}
+/** Visible triangles under a three.js object, the way the renderer would draw them (instanced meshes count every copy). */
+export function trianglesOf(root) {
+  let n = 0;
+  root?.traverseVisible?.((o) => {
+    if (!o.isMesh || !o.geometry) return;
+    const g = o.geometry, per = g.index ? g.index.count / 3 : (g.attributes?.position?.count || 0) / 3;
+    n += per * (o.isInstancedMesh ? o.count : 1);
+  });
+  return Math.round(n);
+}
+/** The phone's frame cap: whether a frame at `now` (ms) comes too soon after the last one drawn. A 3 ms slack keeps a 60 Hz screen at an even 30. */
+export const skipFrame = (now, lastDraw, cap) => !!cap && now - (lastDraw ?? -1e9) < 1000 / cap - 3;
+/** The pixel ratio a phone may draw at, under the budget. */
+export const phoneDpr = (want, budget = true) => (budget ? Math.min(want, PHONE_BUDGET.dpr) : want);

@@ -155,6 +155,39 @@ try {
     }
     check(!p.errors.length, `j42 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
   }
+  if (want('j44')) {
+    // r2-j44: the phone room stays under 60,000 triangles and 2 MB of 3D files; 30 fps cap, pixel ratio 1.5, one shadow light.
+    const boss = await claim(t, 'Phone Budget');
+    const p = await b.newPage({ phone: { width: 390, height: 844 } });
+    await p.send('Network.setCacheDisabled', { cacheDisabled: true });
+    await p.goto(`${base}/floor/${boss.slug}`);
+    await p.room();
+    await p.until('!!window.__office?.view?.manager && !!window.__office.view.budget', 'the phone room', 120000);
+    await sleep(6000);  // furniture arrives and the budget is fitted again
+    const r = await p.ev(`(() => {
+      const v = window.__office.view, st = window.__stage;
+      let tris = 0; v.scene.traverseVisible((o) => { if (o.isMesh) { const g = o.geometry; tris += (g.index ? g.index.count / 3 : g.attributes.position.count / 3) * (o.isInstancedMesh ? o.count : 1); } });
+      let shadowLights = 0; v.scene.traverse((o) => { if (o.isLight && o.castShadow) shadowLights++; });
+      const THREE_D = /three\\.module|addons\\.module|\\/js\\/(stage|stage-start|lobby-scene|tower-nav|office-scene|cast|character|portrait|floor-ui|life|layouts|offices|labels|cutaway|toon|framing|batch|models|textures|room-rules)\\.js|\\.glb|\\/models\\/|\\/assets\\/(3d|tex)\\//;
+      const files = performance.getEntriesByType('resource').filter((e) => THREE_D.test(e.name));
+      return { tris: Math.round(tris), budget: v.budget, shadowLights, dpr: st.renderer.getPixelRatio(), cap: st.fpsCap, bytes: files.reduce((n, e) => n + (e.decodedBodySize || e.transferSize || 0), 0), files: files.length };
+    })()`);
+    const f0 = await p.ev('window.__stage.drawn'); await sleep(3000); const f1 = await p.ev('window.__stage.drawn');
+    const fps = (f1 - f0) / 3;
+    check(r.tris <= 60000, `j44 the phone room is ${r.tris} triangles, under 60,000 (shed ${r.budget.shed.join(', ') || 'nothing'} from ${r.budget.before})`);
+    check(r.bytes <= 2 * 1024 * 1024 && r.files > 5, `j44 its 3D files are ${(r.bytes / 1048576).toFixed(2)} MB uncompressed over ${r.files} files, under 2 MB`);
+    check(r.cap === 30 && fps <= 31, `j44 it draws at most 30 frames a second (${fps.toFixed(1)} drawn)`);
+    check(r.dpr <= 1.5, `j44 pixel ratio ${r.dpr} on a 2x phone, at most 1.5`);
+    check(r.shadowLights <= 1, `j44 ${r.shadowLights} shadow light`);
+    if (shots) await p.shot(`${shots}/r2-j44-phone.jpg`);
+    // A phone the stage would put on its top tier still draws at 1.5, not 2.
+    const hi = await b.newPage({ phone: { width: 390, height: 844 } });
+    await hi.goto(`${base}/floor/${boss.slug}?q=high`); await hi.room();
+    await hi.until('!!window.__office?.view?.manager', 'the room on the top tier', 120000);
+    const h = await hi.ev('({ tier: window.__stage.tier, dpr: window.__stage.renderer.getPixelRatio(), cap: window.__stage.fpsCap })');
+    check((h.tier !== 'high' || h.dpr === 1.5) && h.cap === 30, `j44 on the top tier a 2x phone still draws at ${h.dpr} (tier ${h.tier}), capped at ${h.cap} fps`);
+    check(!p.errors.length, `j44 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+  }
 } finally {
   b.close(); await t.close();
 }

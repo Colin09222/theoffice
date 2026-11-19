@@ -73,6 +73,7 @@ export function roomView(db, cfg, f, viewer) {
     whiteboard: cfg.roomWhiteboard === false ? null : roomWhiteboard(db, f, viewer),
     milestones: cfg.roomProps === false ? null : roomMilestones(db, f),
     props: cfg.roomProps !== false,
+    phoneBudget: cfg.phoneBudget !== false,
   };
 }
 
