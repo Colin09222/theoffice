@@ -78,7 +78,7 @@ async function boot() {
   trackKeyboard();
   wireSounds();
   // Fonts first, because canvas signs draw with them and the headline shouldn't reflow in front of anyone.
-  await Promise.race([Promise.all([document.fonts?.load('400 64px "Lilita One"'), document.fonts?.load('600 64px Fraunces'), document.fonts?.load('500 16px Barlow')]).catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
+  await Promise.race([Promise.all([document.fonts?.load('700 64px "Bricolage Grotesque"'), document.fonts?.load('600 64px Fraunces'), document.fonts?.load('400 16px "DM Sans"')]).catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
   try { await refreshMe(); } catch { /* still browsable */ }
   window.addEventListener('popstate', route);
   try { await route(); } catch (e) { console.error(e); toast('Something broke on the way in. Try reloading.'); }

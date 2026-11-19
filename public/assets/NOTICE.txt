@@ -1,7 +1,10 @@
 Assets in the interface, with their sources and licences.
 
-Fonts (public/assets/fonts), all SIL Open Font License 1.1, from Google Fonts:
-  Lilita One (Juan Montoreano), Barlow and Barlow Condensed (Jeremy Tribby), Patrick Hand (Patrick Wagesreiter).
+Fonts (public/assets/fonts), both SIL Open Font License 1.1 (https://openfontlicense.org), self-hosted, never fetched from Google at run time:
+  Bricolage Grotesque, Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage).
+  DM Sans, Copyright 2014 The DM Sans Project Authors (https://github.com/googlefonts/dm-fonts).
+  The latin variable-weight woff2 files, taken unchanged from the npm packages @fontsource-variable/bricolage-grotesque@5.3.0 and
+  @fontsource-variable/dm-sans@5.3.0.
 Icons (public/js/icons.js): Phosphor Icons, fill weight. MIT License, Copyright (c) 2023 Phosphor Icons. github.com/phosphor-icons/core
 Sounds (public/js/sfx-data.js): Interface Sounds 1.0 by Kenney (www.kenney.nl). CC0. Taken from Kenney's own upload at opengameart.org/content/interface-sounds, re-encoded as small mp3s.
 Textures (public/assets/tex): Cork001 and Wood051 from ambientCG.com. CC0. Resized and reduced to fit.

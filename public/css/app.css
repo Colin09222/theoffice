@@ -1,18 +1,11 @@
 /* The Office: a management game about a real building. Every piece of interface is an object you'd find in it: enamel signs, a felt directory
    board, brass lift panels, ID badges, cork and manila. Chunky, high contrast, and it presses back when you press it. */
-@font-face { font-family: "Lilita One"; src: url(/theoffice/assets/fonts/lilita-one-400.woff2) format('woff2'); font-weight: 400; font-display: swap; }
-/* The 3D scene's painted signs ask for this family by name. It means the building's sign lettering now. */
-@font-face { font-family: Fraunces; src: url(/theoffice/assets/fonts/lilita-one-400.woff2) format('woff2'); font-weight: 100 900; font-display: swap; }
-@font-face { font-family: Barlow; src: url(/theoffice/assets/fonts/barlow-500.woff2) format('woff2'); font-weight: 500; font-display: swap; }
-@font-face { font-family: Barlow; src: url(/theoffice/assets/fonts/barlow-700.woff2) format('woff2'); font-weight: 700; font-display: swap; }
-@font-face { font-family: "Barlow Condensed"; src: url(/theoffice/assets/fonts/barlow-condensed-600.woff2) format('woff2'); font-weight: 600; font-display: swap; }
-@font-face { font-family: "Barlow Condensed"; src: url(/theoffice/assets/fonts/barlow-condensed-700.woff2) format('woff2'); font-weight: 700; font-display: swap; }
-@font-face { font-family: "Patrick Hand"; src: url(/theoffice/assets/fonts/patrick-hand-400.woff2) format('woff2'); font-weight: 400; font-display: swap; }
+/* The two faces (Bricolage Grotesque, DM Sans) are declared in skin.css, the one skin both pages wear. */
 :root {
-  --display: "Lilita One", "Arial Black", sans-serif;
-  --sans: Barlow, "Trebuchet MS", Verdana, sans-serif;
-  --cond: "Barlow Condensed", "Arial Narrow", Arial, sans-serif;
-  --hand: "Patrick Hand", "Comic Sans MS", cursive;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --sans: "DM Sans", "Segoe UI", system-ui, sans-serif;
+  --cond: var(--sans);
+  --hand: var(--sans);
   --mono: var(--cond);
   --serif: var(--display);
   --ink: #1c1712; --ink-2: #43392e; --ink-3: #5f5244;

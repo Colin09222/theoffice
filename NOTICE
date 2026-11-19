@@ -13,4 +13,9 @@ Starters (server/app-client/starters/), copied into a project when a maker job s
 Sound and art used by the office and given to game builders on a computer (.office/assets/)
 - Kenney (www.kenney.nl) packs, CC0 1.0. Recorded in public/models/NOTICE.txt and public/assets/NOTICE.txt.
 
+Fonts of the office (public/assets/fonts), SIL Open Font License 1.1 (https://openfontlicense.org):
+- Bricolage Grotesque, Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage).
+- DM Sans, Copyright 2014 The DM Sans Project Authors (https://github.com/googlefonts/dm-fonts).
+  Latin variable-weight woff2 files from the npm packages @fontsource-variable/bricolage-grotesque and @fontsource-variable/dm-sans (5.3.0).
+
 Fonts and other assets of the office itself are recorded in public/assets/NOTICE.txt and public/models/NOTICE.txt.

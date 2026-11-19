@@ -1,10 +1,13 @@
-/* The two plain pages: /theoffice/about and /theoffice/privacy. */
-body { margin: 0; background: #f7f1e4; color: #2a2118; font: 18px/1.55 Georgia, 'Times New Roman', serif; }
+/* The two plain pages: /theoffice/about and /theoffice/privacy. The same palette and faces as the building (skin.css). */
+@font-face { font-family: "Bricolage Grotesque"; src: url(/theoffice/assets/fonts/bricolage-grotesque-latin-wght.woff2) format('woff2'); font-weight: 200 800; font-display: swap; }
+@font-face { font-family: "DM Sans"; src: url(/theoffice/assets/fonts/dm-sans-latin-wght.woff2) format('woff2'); font-weight: 100 1000; font-display: swap; }
+body { margin: 0; background: #F6F1E7; color: #1F2430; font: 17px/1.55 "DM Sans", system-ui, sans-serif; }
+h1, h2 { font-family: "Bricolage Grotesque", system-ui, sans-serif; }
 main { max-width: 680px; margin: 0 auto; padding: 40px 22px 60px; }
 h1 { font-size: 34px; line-height: 1.15; margin: 0 0 4px; }
-.updated { color: #7a6a52; font-size: 15px; margin: 0 0 26px; }
+.updated { color: #5B6270; font-size: 15px; margin: 0 0 26px; }
 h2 { font-size: 22px; margin: 30px 0 8px; }
 p, li { margin: 0 0 12px; }
 ul { padding-left: 22px; }
-a { color: #8a3b12; }
-footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #d8ccb4; font-size: 15px; color: #7a6a52; }
+a { color: #17766F; }
+footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #E3DBCB; font-size: 15px; color: #5B6270; }
