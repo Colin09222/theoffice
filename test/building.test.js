@@ -109,7 +109,7 @@ describe('building: ticker and launched wall', () => {
     assert.ok(projects.length >= 3);
     for (const p of projects) {
       // The launch card's fields since the redesign (docs/redesign, job 3): visits or plays this week, how long it took, work in progress, a real photo or not.
-      assert.deepEqual(Object.keys(p).sort(), ['description', 'floor', 'kind', 'madeDays', 'publishedAt', 'shot', 'slug', 'thumb', 'title', 'url', 'visits', 'wip']);
+      assert.deepEqual(Object.keys(p).sort(), ['description', 'floor', 'kind', 'lane', 'madeDays', 'publishedAt', 'shot', 'slug', 'thumb', 'title', 'url', 'visits', 'wip']);
       assert.equal(p.floor.slug, pub.slug);
       assert.equal(p.url, `/theoffice/f/${pub.slug}/${p.slug}/`);
       assert.equal(p.thumb, `/theoffice/api/building/thumb/${pub.slug}/${p.slug}`);

@@ -1,11 +1,11 @@
-// The lobby overlay: the sign out front, the felt directory board with its lift panel, the To Let board, and the news strip.
-import { stage } from './stage.js';
-import { h, api, session, isPhone, toast, clear, put, timeAgo, BASE } from './dom.js';
-import { buildStack } from './stack.js';
-import { LobbyView } from './lobby-scene.js';
+// The home page (docs/redesign/OFFICE-ANSWERS-1.md, Q1, Q3, section 4 "Home"): what got made and what is happening, in 10 seconds.
+// Top bar, the 3 best launches, Happening now (5 lines at most, real work only), the open floors with their state, All launches, Open an
+// office and one line of floors to let. All of it is plain DOM from small modules: it is on screen before any 3D code is fetched. On a desktop
+// the small 3D tower comes last, in a frame about a third of the width, and works as a navigator; if it can't load, the floor list is the way
+// round. A phone gets no 3D on the home page at all.
+import { h, api, session, isPhone, clear, put, timeAgo, BASE } from './dom.js';
 import { icon } from './icons.js';
 import { muteButton, sfx } from './sfx.js';
-import { confetti, fanfare, mayParty } from './party.js';
 import { stateBadge, idleNote } from './badge.js';
 import { launchCard } from './launch-card.js';
 
@@ -14,291 +14,143 @@ const claimModule = () => import('./claim.js');
 const openClaim = () => claimModule().then((m) => m.openClaim());
 const openLogin = () => claimModule().then((m) => m.openLogin());
 
-let view = null, stack = null, poll = null, keepFloors = [], toLetFloors = new Set(), tip = null, tickerPoll = null, partyPoll = null, partying = null, tickerLed = null;
+const NOW_LINES = 5;
+let floors = [], toLet = [], poll = null, nowPoll = null, tower = null, tip = null, alive = false;
 
-// ---- the building, live: a ticker of public happenings across every floor ----
-function tickerItem(it, fresh) {
-  return h(`${it.url ? 'a' : 'button'}.ticker-item${fresh ? '.fresh' : ''}${it.kind === 'published' ? '.published' : ''}${it.filler ? '.chatter' : ''}`,
-    it.url ? { href: it.url, target: '_blank', rel: 'noopener noreferrer', 'data-id': it.id, title: `Open ${it.text}` }
-      : { type: 'button', 'data-id': it.id, title: `Walk into ${it.floor.name}`, onclick: () => window.officeGo(`/floor/${it.floor.slug}`) },
-    h('span.ticker-chip', {}, h('b', {}, String(it.floor.number)), it.floor.name || 'New company'),
-    h('span.ticker-text', {}, it.text));
+/** One open floor, one line: number, name, what it does, and its state. */
+function floorRow(card, onEnter) {
+  return h('button.dir-row', { type: 'button', 'data-floor': card.number, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => tower?.setHover?.(card.number), onpointerleave: () => tower?.setHover?.(-1) },
+    h('span.dir-num', {}, String(card.number)),
+    h('span.dir-mark', { 'aria-hidden': 'true' }),
+    h('span.dir-text', {}, h('b', {}, card.name || 'Moving in'), h('small', {}, idleNote(card) || card.tagline || (card.name ? 'A tiny company' : 'Boxes still in the corridor'))),
+    stateBadge(card));
 }
-function buildTicker() {
-  const rail = h('div.ticker-rail');
-  // The LED headline takes over the strip for a launch party.
-  tickerLed = h('a.ticker-led', { target: '_blank', rel: 'noopener noreferrer', 'data-party': 'headline', hidden: true });
-  const strip = h('section.ticker', { 'aria-label': 'The building, live', 'data-ticker': 'empty' },
-    h('span.ticker-label', {}, 'Live'),
-    h('div.ticker-track', {}, rail), tickerLed);
-  let items = []; let latest = 0;
-  const paint = (freshIds) => {
-    clear(rail);
-    strip.dataset.ticker = items.length ? 'live' : 'empty';
-    if (!items.length) { rail.append(h('span.ticker-quiet', {}, 'All quiet. Open an office and give the building something to talk about.')); return; }
-    const shown = items.slice(0, 20);
-    for (const it of shown) rail.append(tickerItem(it, freshIds.has(it.id)));
-    // A second copy makes the loop seamless; it carries no meaning of its own.
-    for (const it of shown) { const g = tickerItem(it, false); g.className = g.className.replace('ticker-item', 'ticker-ghost'); g.setAttribute('aria-hidden', 'true'); g.tabIndex = -1; rail.append(g); }
-    rail.style.setProperty('--dur', `${Math.max(18, shown.length * 5)}s`);
+
+/** Happening now: the newest lines of real work from the building's feed. A failed fetch hides the strip and says nothing. */
+function buildNow() {
+  const list = h('ol.now-list');
+  const strip = h('section.home-now.card-ui', { 'aria-label': 'Happening now', 'data-now': '', hidden: true }, h('h2', {}, h('i.live-dot', { 'aria-hidden': 'true' }), 'Happening now'), list);
+  const quiet = () => {
+    const last = Math.max(0, ...floors.map((f) => f.lastActive || 0));
+    return last ? `Quiet right now. Last job finished ${timeAgo(last)}.` : 'Quiet right now.';
   };
-  const refresh = async (first) => {
-    const data = await api(`/building/ticker?limit=20${latest && !first ? `&since=${latest}` : ''}`);
-    if (!data.items.length) { if (first) paint(new Set()); return; }
-    const freshIds = new Set(first ? [] : data.items.map((i) => i.id));
-    items = first ? data.items : [...data.items, ...items].slice(0, 20);
-    latest = Math.max(latest, ...items.map((i) => i.id));
-    paint(freshIds);
+  const refresh = async () => {
+    let items;
+    try { items = (await api(`/building/ticker?limit=${NOW_LINES * 4}`)).items; } catch { strip.hidden = true; return; }
+    // Real work only: lines from the team and launches. The building's own notices (someone moved in) are not work.
+    const work = items.filter((i) => !i.filler && (i.kind === 'published' || !/ moved in on floor \d+\.?$/.test(i.text))).slice(0, NOW_LINES);
+    clear(list);
+    if (!work.length) list.append(h('li.now-quiet', {}, quiet()));
+    for (const it of work) {
+      const go = it.url ? h('a.now-text', { href: it.url, target: '_blank', rel: 'noopener noreferrer' }, it.text) : h('span.now-text', {}, it.text);
+      list.append(h(`li.now-line${it.kind === 'published' ? '.launch' : ''}`, { 'data-id': it.id },
+        h('button.now-floor', { type: 'button', title: `Walk into ${it.floor.name}`, onclick: () => window.officeGo(`/floor/${it.floor.slug}`) }, h('b', {}, String(it.floor.number)), it.floor.name),
+        go, h('time', {}, timeAgo(it.ts))));
+    }
+    strip.hidden = false;
   };
-  refresh(true).catch(() => paint(new Set()));
-  tickerPoll = setInterval(() => { if (!document.hidden) refresh(false).catch(() => { /* retried next time */ }); }, 10000);
+  strip.ready = refresh();
+  nowPoll = setInterval(() => { if (!document.hidden) refresh(); }, 15000);
   return strip;
 }
 
-// ---- the launched wall: every public project in the building, each on a launch card with its real screenshot ----
-function wallCard(pr, onFloor) {
-  return launchCard(pr, { onFloor: (fl) => onFloor(keepFloors.find((f) => f.slug === fl.slug) || fl) });
-}
-
-/** Where the directory folds away to its search row until it is wanted: a phone, or a phone on its side, where it would otherwise cover the tower. */
-const folds = () => isPhone() || window.innerHeight <= 520;
-function directoryRow(card, onEnter, onHover) {
-  const party = partying?.floor === card.number;
-  return h(`button.dir-row${party ? '.party' : ''}`, { type: 'button', 'data-floor': card.number, css: { '--brand': card.colors.primary }, onclick: () => onEnter(card), onpointerenter: () => onHover(card.number) },
-    h('span.dir-num', {}, String(card.number)),
-    h('span.dir-mark', { 'aria-hidden': 'true' }),
-    h('span.dir-text', {}, h('b', {}, card.name || 'Moving in'), card.filler ? h('span.demo-tag', { title: 'A fictional demo company. Nothing here is real.' }, 'demo') : null, h('small', {}, idleNote(card) || card.tagline || (card.name ? 'A tiny company' : 'Boxes still in the corridor'))),
-    // One of four states, never "Closed" or the hours (docs/redesign, Q2).
-    stateBadge(card),
-    party ? h('span.dir-balloons', { 'aria-hidden': 'true', 'data-party': 'balloons' }, h('i'), h('i'), h('i')) : null);
+/** The hero: the three best launches, with real screenshots. Fewer than three: what there is, then an Open an office card. */
+function buildHero(onFloor) {
+  const strip = h('section.hero-strip', { 'data-hero': '', 'aria-label': 'The best launches this week', hidden: true });
+  strip.ready = api('/building/hero').then(({ projects }) => {
+    const cards = (projects || []).map((pr) => launchCard(pr, { hero: true, onFloor }));
+    if (cards.length < 3) cards.push(h('article.lcard.lcard-open', {}, h('div.lcard-body', {}, h('h3.lcard-title', {}, 'Your company could be here'), h('p.lcard-line', {}, 'A floor of your own, a team of AI staff, and a real thing on the web.'), h('button.btn.small.lcard-go', { type: 'button', onclick: () => openClaim() }, 'Open an office'))));
+    strip.replaceChildren(...cards);
+    strip.hidden = false;
+  }).catch(() => { /* no strip, and no error for a visitor */ });
+  return strip;
 }
 
 export async function showLobby(root) {
   document.body.dataset.page = 'lobby';
-  const data = await api('/floors').catch(() => ({ floors: [], towerFloors: 10, vacant: 1, toLet: [] }));
-  keepFloors = data.floors; toLetFloors = new Set(data.toLet);
+  alive = true;
+  const data = await api('/floors').catch(() => ({ floors: [], towerFloors: 10, vacant: null, toLet: [] }));
+  floors = data.floors; toLet = data.toLet;
 
   const enterFloor = async (card) => {
     sfx('press', { rate: 0.75 });
-    // A short swoop to the floor's glass, then its page. A lift panel button on the floor itself goes straight there.
-    if (view && stage.ok && document.body.dataset.lobby === 'outside') {
-      document.body.classList.add('flying');
-      await Promise.race([view.flyTo(card.number), new Promise((r) => setTimeout(r, 650))]);
-      document.body.classList.remove('flying');
-    }
+    // A short swoop to the floor's glass in the small tower, when it is there, then the floor's page.
+    if (tower?.flyTo) { document.body.classList.add('flying'); await Promise.race([tower.flyTo(card.number), new Promise((r) => setTimeout(r, 650))]); document.body.classList.remove('flying'); }
     window.officeGo(`/floor/${card.slug}`);
   };
+  const onFloor = (fl) => { const f = floors.find((x) => x.slug === fl.slug); if (f) enterFloor(f); else window.officeGo(`/floor/${fl.slug}`); };
 
-  if (stage.ok) {
-    view ||= new LobbyView({
-      floorCount: data.towerFloors,
-      onHover: (n, x, y) => showTip(n, x, y),
-      onPick: (n) => {
-        if (n < 1) return;
-        const card = keepFloors.find((f) => f.number === n);
-        if (card) enterFloor(card);
-        else if (toLetFloors.has(n)) openClaim();
-        else toast(`Floor ${n} is reserved.`);
-      },
-    });
-    view.setFloors(data.floors, data.toLet);
-    stage.setView(view);
-    window.__lobbyDebug = view;  // read by the browser e2e tests
-  }
-
-  const search = h('input', { type: 'search', placeholder: 'Search the building', 'aria-label': 'Search the directory', oninput: () => renderList() });
-  const list = h('div.dir-list', { tabindex: '-1' });
-  const count = h('span.dir-count');
-  const renderList = () => {
-    const q = search.value.trim().toLowerCase();
-    const shown = keepFloors.filter((f) => !q || `${f.name} ${f.tagline}`.toLowerCase().includes(q));
-    count.textContent = `${keepFloors.length} ${keepFloors.length === 1 ? 'company' : 'companies'}`;
-    clear(list);
-    for (const c of shown) list.append(directoryRow(c, enterFloor, (n) => view?.setHover(n)));
-    if (q && !shown.length) list.append(h('p.dir-empty', {}, 'Nobody by that name in the building.'));
-    if (!q) {
-      if (!keepFloors.length) list.append(h('p.dir-empty', {}, 'The building is brand new, and every floor is empty. Someone has to go first.'));
-      list.append(elevatorPanel());
-    }
+  // ---- the open floors: the directory and the lift, both open floors only ----
+  const list = h('div.dir-list', { role: 'list' });
+  const lift = h('div.lift', { role: 'group', 'aria-label': 'The lift' });
+  const letLine = h('p.to-let');
+  const renderFloors = () => {
+    clear(list); clear(lift);
+    if (!floors.length) list.append(h('p.dir-empty', {}, 'The building is brand new, and every floor is empty. Someone has to go first.'));
+    for (const c of floors) list.append(floorRow(c, enterFloor));
+    for (const c of [...floors].sort((a, b) => b.number - a.number)) lift.append(h('button.lift-btn.lit', { type: 'button', 'data-lift': c.number, css: { '--brand': c.colors.primary }, 'aria-label': `Floor ${c.number}, ${c.name || 'moving in'}`, onclick: () => enterFloor(c), onpointerenter: () => tower?.setHover?.(c.number) }, String(c.number)));
+    const n = toLet.length;
+    letLine.replaceChildren(n ? `${n} ${n === 1 ? 'floor' : 'floors'} to let` : 'Every floor is taken');
   };
-  // The lift buttons: every floor in the building. Lit ones have someone in, and dark ones are for the taking.
-  const elevatorPanel = () => {
-    const grid = h('div.lift', { role: 'group', 'aria-label': 'Lift buttons' });
-    for (let n = data.towerFloors; n >= 1; n--) {
-      const card = keepFloors.find((f) => f.number === n);
-      const free = toLetFloors.has(n);  // not a company, and not one a code is holding
-      grid.append(h(`button.lift-btn${card ? '.lit' : ''}`, { type: 'button', 'data-lift': n, disabled: !card && !free, css: card ? { '--brand': card.colors.primary } : {}, 'aria-label': card ? `Floor ${n}, ${card.name || 'moving in'}` : free ? `Floor ${n}, to let` : `Floor ${n}, reserved`, title: card ? undefined : free ? 'To let' : 'Reserved', onpointerenter: () => view?.setHover(n), onclick: () => { if (card) enterFloor(card); else if (free) openClaim(); } }, String(n)));
-    }
-    const vacant = toLetFloors.size;
-    return h('section.lift-wrap', {}, h('h3', {}, 'The lift', h('small', {}, `${vacant} ${vacant === 1 ? 'floor' : 'floors'} to let`)), grid);
-  };
-  renderList();
-
-  // The launched wall shares the panel with the directory. The directory's own list is left exactly as it is.
-  const wall = h('div.wall', { 'data-wall': 'grid', hidden: true });
-  const wallCount = h('span.dir-count');
-  const wallHead = h('div.dir-head.wall-head', { hidden: true }, h('span', {}, 'Launched'), wallCount);
-  let wallOn = false, wallItems = null;
-  const renderWall = () => {
-    const q = search.value.trim().toLowerCase();
-    clear(wall);
-    if (!wallItems) { wall.append(h('p.dir-empty', {}, 'Looking down the corridors…')); return; }
-    const shown = wallItems.filter((p) => !q || `${p.title} ${p.description} ${p.floor.name} ${p.kind}`.toLowerCase().includes(q));
-    wallCount.textContent = `${wallItems.length} ${wallItems.length === 1 ? 'launch' : 'launches'}`;
-    if (!wallItems.length) { wall.append(h('p.dir-empty', {}, 'Nothing has launched yet. The first site, game or doc to go public shows up here.')); return; }
-    if (!shown.length) { wall.append(h('p.dir-empty', {}, 'Nothing launched by that name.')); return; }
-    wall.append(h('div.wall-grid', {}, shown.map((p) => wallCard(p, enterFloor))));
-  };
-  const loadWall = async () => {
-    try { wallItems = (await api('/building/launched?limit=60')).projects; } catch { wallItems = wallItems || []; }
-    if (wallOn) renderWall();
-  };
-  const toggle = h('button.wall-toggle', { type: 'button', 'data-wall': 'toggle', 'aria-pressed': 'false', title: 'Everything the building has launched' }, icon('rocket-launch'), 'Launched');
-  const setWall = (on) => {
-    if (on && boardOn) setBoard(false);
-    wallOn = on;
-    toggle.setAttribute('aria-pressed', String(on));
-    panel.classList.toggle('showing-wall', on);
-    list.hidden = on; head.hidden = on; wall.hidden = !on; wallHead.hidden = !on;
-    search.placeholder = on ? 'Search what launched' : 'Search the building';
-    if (on) { if (folds()) panel.classList.add('open'); renderWall(); loadWall(); } else renderList();
-  };
-  toggle.addEventListener('click', () => setWall(!wallOn));
-
-  // The leaderboard: the most played games, the most visited sites and the newest launches, counted by the building.
-  const board = h('div.leaderboard', { 'data-board': 'board', hidden: true });
-  const boardHead = h('div.dir-head.board-head', { hidden: true }, h('span', {}, 'Leaderboard'), h('span.dir-count', {}, 'Last 30 days'));
-  let boardOn = false, boardData = null;
-  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-  const boardRow = (c, i, note) => h('li.board-row', { css: { '--brand': c.floor.colors.primary } },
-    h('span.board-rank', {}, String(i + 1)),
-    h('span.board-text', {},
-      h('a.board-title', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, c.title),
-      h('button.board-floor', { type: 'button', title: `Visit floor ${c.floor.number}`, onclick: () => { const f = keepFloors.find((x) => x.slug === c.floor.slug); if (f) enterFloor(f); } }, h('b', {}, String(c.floor.number)), c.floor.name || 'New company')),
-    h('span.board-count', {}, note));
-  const renderBoard = () => {
-    clear(board);
-    if (!boardData) { board.append(h('p.dir-empty', {}, 'Counting the visitors…')); return; }
-    const col = (title, items, note, none) => h('section.board-col', {}, h('h4', {}, title),
-      items.length ? h('ol', {}, items.map((c, i) => boardRow(c, i, note(c)))) : h('p.board-none', {}, none));
-    board.append(
-      col('Most played games', boardData.games, (c) => plural(c.count, 'play', 'plays'), 'No games played yet.'),
-      col('Most visited sites', boardData.sites, (c) => plural(c.count, 'visitor', 'visitors'), 'No visitors yet.'),
-      col('Newest launches', boardData.newest, (c) => timeAgo(c.publishedAt), 'Nothing launched yet.'));
-  };
-  const loadBoard = async () => {
-    try { boardData = await api('/building/leaderboard'); } catch { boardData = boardData || { games: [], sites: [], newest: [] }; }
-    if (boardOn) renderBoard();
-  };
-  const topBtn = h('button.wall-toggle.board-toggle', { type: 'button', 'data-board': 'toggle', 'aria-pressed': 'false', title: 'The leaderboard: most played, most visited and newest' }, icon('sparkle'), h('span', {}, 'Top'));
-  const setBoard = (on) => {
-    if (on && wallOn) setWall(false);
-    boardOn = on;
-    topBtn.setAttribute('aria-pressed', String(on));
-    list.hidden = on || wallOn; head.hidden = on || wallOn; board.hidden = !on; boardHead.hidden = !on;
-    if (on) { if (folds()) panel.classList.add('open'); renderBoard(); loadBoard(); } else if (!wallOn) renderList();
-  };
-  topBtn.addEventListener('click', () => setBoard(!boardOn));
-  // On a phone the sheet is mostly tucked away. Tapping search brings it up, so the results and the field aren't left behind the keyboard.
-  search.addEventListener('focus', () => { if (folds()) panel.classList.add('open'); });
-  search.addEventListener('input', () => { if (wallOn) renderWall(); });
-
-  const head = h('div.dir-head', {}, h('span', {}, 'Directory'), count);
-  const panel = h('aside.directory', { 'aria-label': 'Floor directory' },
-    h('button.sheet-grip', { type: 'button', 'aria-label': 'Show or hide the directory', onclick: () => panel.classList.toggle('open') }, h('i'), h('span.grip-label', {}, 'Directory')),
-    h('div.dir-search', {}, search, toggle, topBtn),
-    head, wallHead, boardHead,
-    list, wall, board,
-    h('p.dir-hint', {}, 'Anyone can walk in and watch'),
-    h('p.dir-legal', {}, h('a', { href: `${BASE}/about` }, 'About'), ' · ', h('a', { href: `${BASE}/privacy` }, 'Privacy'), ' · ', h('a', { href: `${BASE}/terms` }, 'Terms')));
-
-  // The hero: the three best launches, with their real screenshots (docs/redesign, Q3). If they can't be fetched, the strip just isn't there.
-  const heroIntro = h('p', {}, 'Each floor belongs to one friend, with an office manager and a small staff of AI agents who plan, research, write and build while you watch. Spin the building, take the lift, and drop in on anyone.');
-  const heroStrip = h('div.hero-strip', { 'data-hero': '', 'aria-label': 'The best launches this week', hidden: true });
-  api('/building/hero').then(({ projects }) => {
-    if (!projects?.length) return;
-    heroStrip.replaceChildren(...projects.map((pr) => launchCard(pr, { hero: true, onFloor: (fl) => { const f = keepFloors.find((x) => x.slug === fl.slug); if (f) enterFloor(f); } })));
-    heroStrip.hidden = false; heroIntro.hidden = true;
-  }).catch(() => { /* no strip, and no error for a visitor */ });
+  renderFloors();
 
   const account = session.floor
-    ? h('button.btn.chrome', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, icon('elevator'), h('span', {}, 'My floor'))
-    : h('button.btn.chrome', { type: 'button', onclick: () => openLogin() }, icon('sign-in'), h('span', {}, 'Sign in'));
+    ? h('button.btn', { type: 'button', onclick: () => window.officeGo(`/floor/${session.floor.slug}`) }, icon('elevator'), h('span', {}, 'My floor'))
+    : h('button.btn', { type: 'button', onclick: () => openLogin() }, icon('sign-in'), h('span', {}, 'Sign in'));
+  const towerFrame = h('aside.home-tower', { 'aria-label': 'The building', hidden: isPhone() }, h('p.tower-wait', {}, 'The building is on its way…'));
+  tip = h('div.floor-tip', { hidden: true });
 
+  const hero = buildHero(onFloor), now = buildNow();
   put(root,
-    h('header.topbar', {}, h('div.topbar-right', {}, account, muteButton())),
-    h('section.hero', {},
-      h('h1', {}, 'The Office', h('span', {}, 'Clock in. Someone else does the work.')),
-      heroIntro,
-      heroStrip),
-    panel,
-    h('button.open-pill', { type: 'button', onclick: () => openClaim() },
-      h('span.pill-status', {}, data.vacant ? 'To let' : 'Full up', h('small', {}, data.vacant ? `Floor ${data.vacant} is empty` : 'Building full')),
-      h('span.pill-go', {}, 'Open an office'), h('span.pill-arrow', {}, icon('key'))),
-    h('p.hints', {}, isPhone() ? 'Drag to look around. Tap a lit floor.' : 'Drag to spin. Any lit floor is open.'),
-    buildTicker(),
-    data.globalPause ? h('p.banner', {}, 'The building manager has paused all work for now.') : null,
-    tip = h('div.floor-tip', { hidden: true }),
-  );
-
-  // ---- no WebGL: the strips ----
-  // Everyone else has the tower outside. The strips are only the fallback for a browser that can't draw it, and it comes with no switch.
-  if (!stage.ok) {
-    stack?.destroy();
-    stack = buildStack({ onEnter: (card) => { sfx('press', { rate: 0.75 }); window.officeGo(`/floor/${card.slug}`); } });
-    stack.update(data);
-    root.append(stack.el);
-    document.body.dataset.lobby = 'building'; stage.paused = true; stack.show();
-  } else document.body.dataset.lobby = 'outside';
-
-  // ---- launch parties ----
-  // The building picks them and keeps them rare. This tab also takes one a minute at most, and never the same one twice.
-  const celebrate = (p) => {
-    partying = { floor: p.floor.number };
-    confetti({ brand: p.floor.colors?.primary });
-    fanfare();
-    if (document.activeElement !== search) renderList();
-    if (tickerLed) {
-      tickerLed.textContent = `Launch party · Floor ${p.floor.number} · ${p.floor.name || 'New company'} ${p.text}`;
-      tickerLed.href = p.url; tickerLed.hidden = false;
-    }
-    setTimeout(() => {
-      partying = null;
-      if (tickerLed) tickerLed.hidden = true;
-      if (poll && document.activeElement !== search) renderList();
-    }, 14000);
-  };
-  const checkParty = async () => {
-    const { party } = await api('/building/party');
-    if (party && poll && mayParty(party.id)) celebrate(party);
-  };
-  setTimeout(() => checkParty().catch(() => { /* retried next time */ }), 1200);
-  partyPoll = setInterval(() => { if (!document.hidden) checkParty().catch(() => { /* retried next time */ }); }, 10000);
+    h('div.home', {},
+      h('header.home-top', {},
+        h('div.home-brand', {}, h('span.home-logo', { 'aria-hidden': 'true' }, 'O'), h('div', {}, h('h1', {}, 'The Office'), h('p', {}, 'Clock in. Someone else does the work.'))),
+        h('div.home-acts', {}, account, muteButton())),
+      h('div.home-main', {},
+        h('div.home-col', {},
+          hero,
+          data.globalPause ? h('p.banner', {}, 'The building manager has paused all work for now.') : null,
+          now,
+          h('section.home-dir.card-ui', { 'aria-label': 'Open floors' },
+            h('div.home-dir-head', {}, h('h2', {}, 'Floors'), h('a.all-launches', { href: `${BASE}/launched`, 'data-all-launches': '', onclick: (e) => { e.preventDefault(); window.officeGo('/launched'); } }, 'All launches', icon('caret-right'))),
+            list,
+            h('div.lift-wrap', {}, lift, letLine)),
+          h('div.home-foot', {},
+            h('button.btn.primary.open-office', { type: 'button', onclick: () => openClaim() }, icon('key'), 'Open an office'),
+            h('p.dir-legal', {}, h('a', { href: `${BASE}/about` }, 'About'), ' · ', h('a', { href: `${BASE}/privacy` }, 'Privacy'), ' · ', h('a', { href: `${BASE}/terms` }, 'Terms')))),
+        towerFrame)),
+    tip);
 
   poll = setInterval(async () => {
     if (document.hidden) return;  // a tab nobody is looking at asks for nothing
-    try {
-      const fresh = await api('/floors');
-      keepFloors = fresh.floors; toLetFloors = new Set(fresh.toLet); view?.setFloors(fresh.floors, fresh.toLet); stack?.update(fresh);
-      if (document.activeElement !== search) renderList();
-      if (wallOn) loadWall();
-      if (boardOn) loadBoard();
-    } catch { /* retried next time */ }
+    try { const fresh = await api('/floors'); floors = fresh.floors; toLet = fresh.toLet; renderFloors(); tower?.setFloors?.(fresh.floors, fresh.toLet); } catch { /* retried next time */ }
   }, 20000);
+
+  // ---- the tower, last: once the hero and Happening now are on screen (or have failed), and never on a phone ----
+  const contentIn = Promise.race([Promise.allSettled([hero.ready, now.ready]), new Promise((r) => setTimeout(r, 4000))]);
+  if (!isPhone()) {
+    contentIn.then(() => requestAnimationFrame(() => setTimeout(async () => {
+      try {
+        const m = await import('./tower-nav.js');
+        if (!alive) return;
+        tower = await m.showTower({ frame: towerFrame, floorCount: data.towerFloors, floors, toLet, onPick: (n) => { const c = floors.find((f) => f.number === n); if (c) enterFloor(c); else if (toLet.includes(n)) openClaim(); }, onHover: showTip });
+        if (!tower) towerFrame.hidden = true;  // no 3D here: the floor list is the way round, and it is already on screen
+      } catch (e) { console.warn('tower', e?.message); towerFrame.hidden = true; }
+    }, 0)));
+  }
 }
 
 function showTip(n, x, y) {
   if (!tip) return;
   if (n < 1) { tip.hidden = true; return; }
-  const c = keepFloors.find((f) => f.number === n);
+  const c = floors.find((f) => f.number === n);
   tip.hidden = false;
-  tip.textContent = c ? `${n} · ${c.name || 'Moving in'}` : toLetFloors.has(n) ? `${n} · To let` : `${n} · Reserved`;
+  tip.textContent = c ? `${n} · ${c.name || 'Moving in'}` : toLet.includes(n) ? `${n} · To let` : `${n}`;
   tip.style.transform = `translate(${x + 16}px, ${y - 12}px)`;
 }
 
 export function hideLobby() {
-  clearInterval(poll); poll = null; tip = null;
-  stack?.destroy(); stack = null; stage.paused = false; delete document.body.dataset.lobby;
-  clearInterval(tickerPoll); tickerPoll = null;
-  clearInterval(partyPoll); partyPoll = null; partying = null; tickerLed = null;
+  alive = false;
+  clearInterval(poll); poll = null; clearInterval(nowPoll); nowPoll = null; tip = null;
+  tower?.leave?.(); tower = null;
 }

@@ -37,15 +37,20 @@ for (const [kind, w, h] of sizes) {
       await p.until('document.body.dataset.page === "lobby" && !document.querySelector("#boot")', 'lobby', 60000);
       await sleep(WAIT);
       await snap('home');
-      // The Launched wall, as a visitor opens it from the directory.
-      if (who === 'visitor' && await p.ev('!!document.querySelector("[data-wall=toggle]")')) {
+      // The Launched wall, as a visitor opens it: from the directory before job 14, the All launches page after.
+      if (who === 'visitor' && await p.ev('!!document.querySelector("[data-all-launches]")')) {
+        await p.ev('document.querySelector("[data-all-launches]").click(); true');
+        await p.until('document.querySelectorAll(".launched-page .lcard").length > 0', 'the launched page', 15000).catch(() => {});
+        await sleep(1500);
+        await snap('launched');
+      } else if (who === 'visitor' && await p.ev('!!document.querySelector("[data-wall=toggle]")')) {
         await p.ev('document.querySelector("[data-wall=toggle]").click(); true');
         await p.until('document.querySelectorAll(".wall .lcard").length > 0', 'the wall', 15000).catch(() => {});
         await sleep(1500);
         await snap('launched');
       }
       await p.goto(`${base}/floor/${boss.slug}`);
-      await p.until('document.body.dataset.page === "floor" && !document.querySelector("#boot")', 'floor', 60000);
+      await p.until('document.body.dataset.page === "floor" && !document.querySelector("#boot")', 'floor', 120000);
       await sleep(WAIT + 2000);
       await p.ev('(() => { const v = window.__office?.view; if (v && v.intro < 1) v.intro = 0.999; return true; })()').catch(() => {});
       await sleep(800);
