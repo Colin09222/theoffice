@@ -100,11 +100,15 @@ function ideaCards(unsourced) {
     ideas: [
       { name: 'Doorstep Dog Groom', who_pays: 'Busy dog owners', problem: 'Grooming salons are booked up for weeks', what_you_sell: unsourced ? 'Home grooming visits in a $2 billion market' : 'Home grooming visits booked online', why_now: 'More people work from home and want services that come to them',
         evidence: [ev('findings', 'Small services that come to you tend to do well'), ev('dogs', 'Owners complain that salons have long waits')],
-        revenue: { low: 2000, high: 6000, per: 'month', assumptions: [{ text: 'Between 20 and 60 visits a month at a planned price', source_url: IDEA_LINKS.dogs }] } },
+        revenue: { low: 2000, high: 6000, per: 'month', assumptions: [{ text: 'Between 20 and 60 visits a month at a planned price', source_url: IDEA_LINKS.dogs }] },
+        scores: { who_pays: 3, days_to_first_dollar: 3, cost_to_build: 3, cost_to_run: 2 } },
       { name: 'Shift Supper', who_pays: 'Nurses and other night-shift workers', problem: 'Nothing healthy is open when their shift ends', what_you_sell: 'A weekly box of ready meals for the night shift', why_now: 'Meal prep is popular and shift work is not going away',
-        evidence: [ev('meals', 'Shift workers ask for meals that suit odd hours'), ev('findings', 'Small things that work tend to do well')] },
+        evidence: [ev('meals', 'Shift workers ask for meals that suit odd hours'), ev('findings', 'Small things that work tend to do well')],
+        scores: { who_pays: 2, days_to_first_dollar: 2, cost_to_build: 2, cost_to_run: 2 } },
       { name: 'Night Desk Notes', who_pays: 'Shift supervisors', problem: 'Handover notes get lost between shifts', what_you_sell: 'A simple handover notebook app', why_now: 'Teams already share notes on their phones',
-        evidence: [ev('meals', 'Night-shift teams describe messy handovers'), ev('findings', 'Simple tools that do one job well')] },
+        evidence: [ev('meals', 'Night-shift teams describe messy handovers'), ev('findings', 'Simple tools that do one job well')],
+        // Below the bar (job 25): the boss is warned and can still pick it.
+        scores: { who_pays: 0, days_to_first_dollar: 1, cost_to_build: 2, cost_to_run: 3 } },
     ],
     markets_checked: ['Pet services at home', 'Meals for shift workers'],
     compared: [{ idea: 'Doorstep Dog Groom', verdict: 'Clear demand and simple to start' }, { idea: 'Shift Supper', verdict: 'Real need, harder to deliver' }, { idea: 'Dog cafe', verdict: 'Dropped: it needs premises' }],

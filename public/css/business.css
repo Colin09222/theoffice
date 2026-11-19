@@ -183,3 +183,8 @@
   .controls .biz-start { order: -1; }
 }
 @media (min-width: 761px) and (max-height: 520px) { .journey-slot { left: 210px; right: 370px; top: 6px; } .journey-name { display: none; } .journey { grid-template-columns: 1fr; padding: 5px 10px; } }
+/* The idea scorecard (round 1 rest, j25): four scores out of 3, the total, and a plain warning below the bar. */
+.idea-card .score-list { margin: 2px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.idea-card .score-list li { display: grid; grid-template-columns: 1fr auto; column-gap: 8px; font-size: 14px; }
+.idea-card .score-list small { grid-column: 1 / -1; color: var(--ink-3); font-size: 12px; }
+.idea-card .idea-warn { margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; background: #fff3cd; color: #5c4400; font-size: 14px; }

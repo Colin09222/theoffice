@@ -87,5 +87,8 @@ export function laneBSettings(env = process.env) {
     // Round 1 rest, j23: onboarding (server/onboarding.js): lane cards, a template with its price as information, three questions, the manager's plan and
     // one Start. ONBOARDING=0 brings back the old setup screen.
     onboarding: on(env.ONBOARDING),
+    // Round 1 rest, j25: the idea scorecard (server/scorecard.js): four 0-to-3 scores on each Business idea card, filled in by the Researcher in the call it
+    // already makes; below 8 of 12, or nobody clear who pays, the boss sees a warning and can still pick it. IDEA_SCORECARD=0 turns it off.
+    ideaScorecard: on(env.IDEA_SCORECARD),
   };
 }
