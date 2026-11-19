@@ -444,6 +444,13 @@ function scan(value, where, { owner = false, spentValues = [], itemPrices = [] }
   };
   walk(value, '');
 }
+/** Takes the boss's job estimates out of a view (round 1 rest, job 21) and returns them, so the rest can be scanned for money as before. */
+function takeEstimates(v) {
+  const out = [];
+  const walk = (x) => { if (!x || typeof x !== 'object') return; if (x.estimate && typeof x.estimate === 'object' && 'line' in x.estimate) { out.push(x.estimate); delete x.estimate; } for (const y of Object.values(x)) walk(y); };
+  walk(v);
+  return out;
+}
 const scanPrompt = (text, where) => {
   for (const s of SENTINELS) assert.ok(!text.includes(s), `${where}: a limit (${s})`);
   assert.ok(!AMOUNT.test(text), `${where}: an amount in "${text.match(/.{0,80}\$\s?\d.{0,40}/)?.[0]}"`);
@@ -488,13 +495,17 @@ describe('leak tests: what bosses and visitors can see', () => {
     assert.equal(snap.spend, undefined);
     for (const t of snap.tasks) assert.equal(t.costUsd, undefined);
     // The one figure a boss keeps: the price of the thing they are being asked about. Checked apart from the rest.
+    // Since the owner's ruling of 2026-11-19 (round 1 rest, job 21) the boss also reads each job's estimate, as information: checked apart too.
+    const estimates = takeEstimates(snap);
+    assert.ok(estimates.length >= 1, 'the boss sees what the jobs will cost about');
+    for (const e of estimates) assert.match(e.line, /^This will cost about \$\d+(\.\d\d)?\.$/);
     const { purchases, ...rest } = snap;
     scan(rest, 'owner snapshot', o);
     for (const p of purchases) { const { price, ...others } = p; assert.equal(typeof price, 'number'); scan(others, 'purchase', o); }
     scan((await b.owner.get(`/api/floors/${b.owner.slug}/orders`)).data, 'orders API', o);
     assert.ok(b.liveOwner.events.length > 20);
     assert.ok(!b.liveOwner.events.some((e) => e.type === 'spend'), 'there is no spend event any more');
-    for (const e of b.liveOwner.events) if (e.type !== 'purchase') scan(e.data, `owner SSE ${e.type}`, o);
+    for (const e of b.liveOwner.events) if (e.type !== 'purchase') { takeEstimates(e.data); scan(e.data, `owner SSE ${e.type}`, o); }
     // A report is where a cost line used to be.
     const reports = snap.messages.filter((m) => m.role === 'report');
     assert.ok(reports.length >= 1); for (const r of reports) assert.doesNotMatch(r.text, /cost/i);
