@@ -320,6 +320,8 @@ const R2_LANE_B_SCHEMA = `
 -- r2-j61: what reached a boss by email, one row per event (question waiting, its 24 h reminder, launch ready, something shipped).
 CREATE TABLE IF NOT EXISTS boss_alerts (key TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, status TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS boss_alerts_floor_day ON boss_alerts(floor_id, day);
+-- r2-j62: the weekly floor report email, one per floor per week (week = that Monday's New York date).
+CREATE TABLE IF NOT EXISTS weekly_reports (floor_id INTEGER NOT NULL, week TEXT NOT NULL, status TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, PRIMARY KEY (floor_id, week));
 `;
 
 export function openDb(dataDir) {
