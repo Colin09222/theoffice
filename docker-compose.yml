@@ -13,7 +13,7 @@ services:
       DATA_DIR: /data
       # The shared headless browser below (redesign job 28): smoke checks and screenshots open pages there. It reaches the Office's own /theoffice/...
       # pages by this service's name on the compose network; published sites on their own origins load over the internet.
-      SHOTS_CDP_URL: http://shots:9222
+      SHOTS_CDP_URL: http://shots:9223
       SHOTS_ORIGIN: http://theoffice:8083
     ports:
       - "127.0.0.1:8083:8083"
@@ -38,14 +38,20 @@ services:
         max-size: 10m
         max-file: "3"
 
-  # The building's headless browser (redesign job 28): Chromium's headless shell from the runner's browser base image (already on the server; nothing is
-  # built here), with the DevTools protocol on 9222. No published port and no host network: only containers on this compose network (the Office)
-  # reach it. Each check gets a fresh browser context that is thrown away after. It runs as the image's unprivileged user with every capability
-  # dropped, so Chromium's own sandbox can't start and --no-sandbox is used; the container is the sandbox (read-only, tmpfs, no new privileges).
+  # The building's headless browser (redesign jobs 28 and 31): Chromium's headless shell from the runner's browser base image (already on the server;
+  # nothing is built here). That shell ignores --remote-debugging-address and only ever listens on 127.0.0.1:9222 inside the container, so a small
+  # node forwarder (node is in the image) listens on 0.0.0.0:9223 and pipes each connection to 127.0.0.1:9222. Only 9223 is reachable from the
+  # compose network; there is no published port and no host network. The forwarder starts first, then the browser takes over the shell's process;
+  # if the forwarder can't listen it kills the browser, so the container restarts instead of running unreachable. init: true reaps the browser's
+  # children. The healthcheck goes through the forwarder on the container's own network address, the way the Office reaches it, so "healthy"
+  # means the Office can get in. Each check gets a fresh browser context that is thrown away after. Chromium's own sandbox can't start with every
+  # capability dropped, so --no-sandbox is used; the container is the sandbox (read-only, tmpfs, no new privileges).
+  # FWD_LISTEN and FWD_TARGET only exist so test/shotsport.test.js can run this exact forwarder on spare ports; leave them unset here.
   shots:
     image: office-runner/browser:pw1.65.0
     container_name: theoffice-shots
     restart: unless-stopped
+    init: true
     user: "10001:10001"
     environment:
       HOME: /tmp
@@ -54,16 +60,30 @@ services:
       - >-
         B=$$(find /ms-playwright -type f \( -name chrome-headless-shell -o -name headless_shell \) | head -n 1);
         [ -n "$$B" ] || { echo 'no headless shell in /ms-playwright' >&2; exit 1; };
+        node -e "const net = require('net'); const L = Number(process.env.FWD_LISTEN) || 9223, T = Number(process.env.FWD_TARGET) || 9222;
+        const s = net.createServer((c) => { const u = net.connect(T, '127.0.0.1'); const end = () => { c.destroy(); u.destroy(); };
+        c.on('error', end); u.on('error', end); c.on('close', end); u.on('close', end); c.pipe(u); u.pipe(c); });
+        s.on('error', (e) => { console.error('shots forwarder: ' + e.message); try { process.kill(process.ppid, 'SIGKILL'); } catch {} process.exit(1); });
+        s.listen(L, '0.0.0.0', () => console.error('shots forwarder: 0.0.0.0:' + L + ' -> 127.0.0.1:' + T));" &
         exec "$$B" --no-sandbox --disable-gpu --disable-dev-shm-usage --no-first-run --no-default-browser-check
         --disable-background-networking --disable-extensions --mute-audio --hide-scrollbars
-        --remote-debugging-address=0.0.0.0 --remote-debugging-port=9222 --user-data-dir=/tmp/profile about:blank
+        --remote-debugging-port=9222 --user-data-dir=/tmp/profile about:blank
     expose:
-      - "9222"
+      - "9223"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9222/json/version').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const ip = Object.values(require('os').networkInterfaces()).flat().find((a) => a.family === 'IPv4' && !a.internal)?.address;
+          if (!ip) process.exit(1);
+          fetch('http://' + ip + ':' + (Number(process.env.FWD_LISTEN) || 9223) + '/json/version', { signal: AbortSignal.timeout(4000) })
+          .then((r) => r.json()).then((v) => process.exit(v && v.webSocketDebuggerUrl ? 0 : 1), () => process.exit(1));
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 10s
     read_only: true
     tmpfs:
       - /tmp:size=256m,nosuid,nodev
