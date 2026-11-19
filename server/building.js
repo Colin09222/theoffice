@@ -130,7 +130,7 @@ export function installBuilding(ext) {
     const f = { id: r.fid, number: r.number, slug: r.fslug, name: r.fname, colors: r.colors };
     const liveUrl = engine.liveUrl(f, r.slug);
     const thumb = r.shot_at ? `${BASE}/api/building/shot/${f.slug}/${r.slug}?v=${r.shot_at}` : thumbFor(f, { slug: r.slug, published_at: r.published_at }, liveUrl);
-    return { floor: floorInfo(f), slug: r.slug, title: r.title, description: r.description, kind: r.kind, publishedAt: r.published_at, url: liveUrl, thumb, shot: !!r.shot_at, visits: r.visits, wip: r.wip, madeDays: r.madeDays };
+    return { floor: floorInfo(f), slug: r.slug, title: r.title, description: r.description, kind: r.kind, publishedAt: r.published_at, url: liveUrl, thumb, shot: !!r.shot_at, visits: r.visits, wip: r.wip, madeDays: r.madeDays, lane: r.lane };
   };
   GET('/api/building/launched', async ({ res, url }) => {
     const limit = num(url.searchParams.get('limit'), 60, 1, MAX_WALL);

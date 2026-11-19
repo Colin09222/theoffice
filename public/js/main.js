@@ -1,6 +1,6 @@
 // Router and app shell. Pages: lobby, floor, admin. Everything else is a dialog.
-import { stage } from './stage.js';
-import { BASE, refreshMe, clear, toast, $ } from './dom.js';
+// No 3D code is imported here (docs/redesign, jobs 14 and 16): the home page is plain DOM, and the stage starts when a page needs it.
+import { BASE, refreshMe, clear, toast, isPhone, $ } from './dom.js';
 import { showLobby, hideLobby } from './lobby-ui.js';
 import { wireSounds } from './sfx.js';
 
@@ -37,9 +37,12 @@ async function route() {
     if (path === '/admin') { const { showAdmin, hideAdmin } = await import('./admin-ui.js'); current = hideAdmin; await showAdmin(ui); return; }
     if (floorMatch) {
       // The doors shut straight away, so a slow line never holds up on a frozen close-up of the glass. The floor opens them when its room is ready.
+      (await import('./stage-start.js')).startStage();
       const { showFloor, hideFloor } = await import('./floor-ui.js'); current = hideFloor; await showFloor(ui, floorMatch[1]);
       return;
     }
+    // Everything the building has launched, on one page (docs/redesign, jobs 14 and 24).
+    if (path === '/launched') { const { showLaunched, hideLaunched } = await import('./launched-ui.js'); current = hideLaunched; await showLaunched(ui); return; }
     current = hideLobby;
     await showLobby(ui);
   } finally {
@@ -73,8 +76,6 @@ function lift() {
 }
 
 async function boot() {
-  stage.init($('#scene'));
-  stage.notice = (m) => toast(m);
   trackKeyboard();
   wireSounds();
   // Fonts first, because canvas signs draw with them and the headline shouldn't reflow in front of anyone.
@@ -85,10 +86,15 @@ async function boot() {
   // One clean reveal: the curtain lifts on the finished picture, not on a half-built one that then changes.
   // The admin page has no scene to wait for, so its curtain has nothing to hold out for.
   // A floor's curtain lifts on the room's first picture: its furniture and people fill in from there, with nothing in the way.
-  await Promise.race([stage.ok && document.body.dataset.page !== 'admin' ? stage.whenPainted(2600) : null, new Promise((r) => setTimeout(r, 3400))]);
+  // The home page waits for nothing 3D: its content is the picture. A floor waits for its room's first frame, as before.
+  if (document.body.dataset.page === 'floor') {
+    const { stage } = await import('./stage-start.js');
+    await Promise.race([stage.ok ? stage.whenPainted(2600) : null, new Promise((r) => setTimeout(r, 3400))]);
+  }
   lift();
-  // Once things are quiet, fetch the floor's code in the background, so the first walk in is instant. Not on a data-saving connection.
-  if (document.body.dataset.page === 'lobby' && !navigator.connection?.saveData) {
+  // Once things are quiet, fetch the floor's code in the background, so the first walk in is instant. Not on a data-saving connection, and never
+  // on a phone, where no 3D code loads until someone asks for the room (docs/redesign, job 16).
+  if (document.body.dataset.page === 'lobby' && !navigator.connection?.saveData && !isPhone()) {
     setTimeout(() => (window.requestIdleCallback || setTimeout)(() => import('./floor-ui.js').catch(() => {}), { timeout: 4000 }), 2500);
   }
 }

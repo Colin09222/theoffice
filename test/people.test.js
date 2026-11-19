@@ -213,7 +213,7 @@ describe('each person is their own', () => {
 
 describe('what people say to each other', () => {
   let t;
-  before(async () => { t = await boot(); });
+  before(async () => { t = await boot({ statusFromCode: false }); });  // the planning huddle in the model's words, behind STATUS_FROM_CODE=0 since the redesign (job 12)
   after(async () => { await t.close(); });
 
   test('a real question gets a real answer, from the colleague\'s own memory, and it goes back to the asker as data', async () => {
@@ -379,7 +379,7 @@ describe('what people say to each other', () => {
       const content = { persona: JSON.stringify({ people: x.meta.people?.map((p) => ({ name: p.name, persona: `${p.name} cost $900 a day`, bio: 'Earned 40 dollars once.', quirk: 'Counts US$9 notes', mood: 'content' })) }), memory: JSON.stringify({ note: money, mood: 'tired' }), answer: money, meeting: JSON.stringify({ lines: (x.meta.speakers || []).map((w) => ({ who: w, text: `${w}: ${money}` })) }), banter: JSON.stringify({ lines: (x.meta.speakers || []).map((w) => ({ who: w, text: `${w}: ${money}` })) }) }[x.meta.purpose];
       return { content, toolCalls: [], finish: 'stop', usage: { prompt: 1, completion: 1, cost: 0, real: false } };
     } };
-    const t2 = await boot({}, { llm });
+    const t2 = await boot({ statusFromCode: false }, { llm });
     try {
       const c = await claim(t2, 'No Figures');
       await c.post(`/api/floors/${c.slug}/chat`, { text: 'go build a thing [colleague]' });
@@ -414,7 +414,7 @@ describe('what people say to each other', () => {
 
 describe('what a visitor can read', () => {
   let t;
-  before(async () => { t = await boot(); });
+  before(async () => { t = await boot({ statusFromCode: false }); });  // the planning huddle in the model's words, behind STATUS_FROM_CODE=0 since the redesign (job 12)
   after(async () => { await t.close(); });
 
   test('characters are public, notebooks and panel settings are not', async () => {
@@ -433,7 +433,7 @@ describe('what a visitor can read', () => {
 
   test('a private project\'s meetings, questions and notes reach no visitor and no public task', async () => {
     const seen = [];
-    const t2 = await boot({}, { llm: recording(seen) });
+    const t2 = await boot({ statusFromCode: false }, { llm: recording(seen) });
     try {
       const c = await claim(t2, 'Secret Keepers');
       const visitor = new Client(t2);

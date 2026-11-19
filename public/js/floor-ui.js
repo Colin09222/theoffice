@@ -2,6 +2,7 @@
 import { stage } from './stage.js';
 import { h, api, BASE, $, clear, put, modal, toast, money, timeAgo, session, ApiError } from './dom.js';
 import { STATE_WORDS, stateOf, idleNote } from './badge.js';
+import { renderTimeline, onJobCard, onTimelineMessage } from './timeline-ui.js';
 import { OfficeView } from './office-scene.js';
 import { renderMarkdown } from './markdown.js';
 import { openCustomisePanel } from './customise.js';
@@ -462,7 +463,8 @@ class FloorPage {
     const tabs = [];
     if (this.canSeeChat) tabs.push(['chat', this.owner ? 'Manager' : 'Chat']);
     if (businessActive(this)) tabs.push(['business', 'Business']);
-    tabs.push(['talk', 'Talk'], ['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
+    // The Timeline replaces Talk (docs/redesign, job 13). It keeps the tab's id, so every way into it still works. Without job cards from the server, the old Talk.
+    tabs.push(['talk', this.timelineOn ? 'Timeline' : 'Talk'], ['work', 'Work'], ['tasks', 'Tasks'], ['projects', 'Projects']);
     if (this.owner) {
       const pending = (s.purchases || []).filter((p) => p.status === 'pending').length + (s.domainsOn ? (s.domains || []).filter((d) => d.status === 'awaiting_boss').length : 0) + serversPending(this) + (s.ios || []).filter((i) => i.status === 'awaiting_boss').length + mailPending(this) + payPending(this) + legalPending(this);
       tabs.push(mailTab(this));  // email: the boss's own Inbox (mail-ui.js)
@@ -524,7 +526,7 @@ class FloorPage {
     this.bodyEl.dataset.surface = this.tab;
     if (this.tab === 'chat') this.renderChat();
     if (this.tab === 'about') this.bodyEl.append(this.cardEl);
-    if (this.tab === 'talk') this.renderTalk();
+    if (this.tab === 'talk') { if (this.timelineOn) renderTimeline(this); else this.renderTalk(); }
     if (this.tab === 'work') this.renderWork();
     if (this.tab === 'tasks') this.renderTasks();
     if (this.tab === 'projects') this.renderProjects();
@@ -541,7 +543,7 @@ class FloorPage {
     clear(this.headEl);
     if (!isPhone() || this.tab === 'chat') return;  // the chat brings its own, the intercom
     const label = (this.tabsFor().find(([id]) => id === this.tab)?.[1] || '').replace(/\s*\d+$/, '');
-    this.headEl.append(h('div.sheet-title', {}, h('b', {}, label || 'Your floor'), this.tab === 'talk' ? h('small', {}, 'The team\'s group chat') : null));
+    this.headEl.append(h('div.sheet-title', {}, h('b', {}, label || 'Your floor'), this.tab === 'talk' ? h('small', {}, this.timelineOn ? 'What the team is doing' : 'The team\'s group chat') : null));
   }
   /** One plain sentence for what’s going on here, and how far along when a job is running. */
   statusLine() {
@@ -747,7 +749,10 @@ class FloorPage {
         h('p', {}, l.text),
         h('time', {}, timeAgo(l.ts))));
   }
+  /** The Timeline (job cards) is on when the server sends them; JOB_CARDS=0 brings the old Talk list back. */
+  get timelineOn() { return Array.isArray(this.state?.jobs); }
   addTalkLine(l) {
+    if (this.timelineOn) return;  // bean-to-bean lines are not on the timeline; the room still shows them over their heads
     if (this.tab === 'talk' && this.talkList) {
       this.talkList.querySelector('.empty')?.remove();
       this.talkList.append(this.talkEl(l, this.talkLast));
@@ -1196,11 +1201,15 @@ class FloorPage {
       if (d.role === 'manager') { this.streamBuf = ''; this.showStream(); }
       if (d.role === 'boss') this.dropLanes();
       if (this.tab === 'chat' && this.chatList) { this.chatList.insertBefore(this.messageEl(m), this.lanesEl || this.questionsEl); this.scrollChat({ line: true, force: d.role === 'boss' }); }
+      if (this.tab === 'talk' && this.timelineOn) onTimelineMessage(this, m);
       this.renderPeek();
       // floors-plus: a report means an order ran, so the Orders tab and its history are stale.
       if (d.role === 'report') { if (this.tab !== 'chat') toast('A report from your manager is in the chat'); if (this.owner) this.refreshOrders(); }
     });
     on('orders', () => { if (this.owner) this.refreshOrders(); });
+    // One card per job, built by the server from task changes (server/jobcards.js). The boss gets their own version, everyone else the public one.
+    on('jobcard', (d) => { if (this.owner) onJobCard(this, d); });
+    on('jobcard_public', (d) => { if (!this.owner) onJobCard(this, d); });
     // Work modes: the sign, the hours and the plan.
     on('work_mode', () => this.reload());
     on('work_plan', () => { if (this.owner) this.reload(); });

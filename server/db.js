@@ -252,6 +252,20 @@ CREATE TABLE IF NOT EXISTS launch_shots (
   floor_id INTEGER NOT NULL, project TEXT NOT NULL, image BLOB, type TEXT NOT NULL DEFAULT 'image/jpeg', bytes INTEGER NOT NULL DEFAULT 0,
   url TEXT NOT NULL DEFAULT '', taken_at INTEGER, failed_at INTEGER, error TEXT NOT NULL DEFAULT '', PRIMARY KEY (floor_id, project)
 );
+CREATE TABLE IF NOT EXISTS job_cards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, key TEXT NOT NULL, project TEXT NOT NULL DEFAULT '', title TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'todo', step INTEGER NOT NULL DEFAULT 1, steps INTEGER NOT NULL DEFAULT 1, agent_id INTEGER, who TEXT NOT NULL DEFAULT '',
+  line TEXT NOT NULL DEFAULT '', task_ids TEXT NOT NULL DEFAULT '[]', thumb TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  done_at INTEGER, UNIQUE (floor_id, key)
+);
+CREATE INDEX IF NOT EXISTS job_cards_floor ON job_cards(floor_id, updated_at);
+CREATE TABLE IF NOT EXISTS quiet_messages (message_id INTEGER PRIMARY KEY, floor_id INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS job_shots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, card_id INTEGER NOT NULL, step TEXT NOT NULL, project TEXT NOT NULL,
+  image BLOB, bytes INTEGER NOT NULL DEFAULT 0, url TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, taken_at INTEGER, failed_at INTEGER, tries INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (card_id, step)
+);
+CREATE INDEX IF NOT EXISTS job_shots_pending ON job_shots(taken_at, failed_at);
 `;
 
 export function openDb(dataDir) {

@@ -28,6 +28,7 @@ import { pingContractor } from './contractorping.js';
 import { testerFailed, testedBy, refuseHold, firstPing } from './handback.js';
 import { createOwnerAlerts, nightFrozen } from './owneralerts.js';
 import { briefWithChecks, briefWithoutChecks, checksInBrief, readChecks, selfCheckAsk, selfCheckNudge, selfChecked, readSelfCheck, selfCheckWords, estimateUsd, SELF_CHECK_MARK } from './brain.js';
+import { markQuiet } from './jobcards.js';
 
 const today = (ms) => new Date(ms).toISOString().slice(0, 10);
 // What the last outside design review said, for the manager's state message.
@@ -560,7 +561,9 @@ export class Engine {
         if (res.toolCalls.length) assistant.tool_calls = res.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args } }));
         if (res.rawContent) assistant.anthropic_content = res.rawContent;
         messages.push(assistant);
-        if (text) { if (hush) hush.kept.push(text); else { this.managerSays(floorId, text); said = true; } acted = true; }
+        // redesign lane A (job 12): a round the team runs on its own reports through its job cards, built by code. The manager's words are kept for its own
+        // memory, as before, but never shown as a status line (STATUS_FROM_CODE=0: the old way).
+        if (text) { if (hush) hush.kept.push(text); else { this.managerSays(floorId, text, { quiet: !!(this.cfg.statusFromCode && ctx.autonomous) }); said = true; } acted = true; }
         if (!res.toolCalls.length) {
           // Work that was finished and never went live is the commonest way a job ends badly, so it gets one reminder before the turn closes.
           const stuck = nudged || step >= maxSteps - 1 ? [] : this.unpublishedWork(floorId).filter((u) => meta.toReview.some((t) => t.project === u.slug));
@@ -1193,10 +1196,17 @@ export class Engine {
     const attachments = files.length ? { attachments: files.map(({ id, name, type, size }) => ({ id, name, type, size })) } : {};
     if (role !== 'note') this.emit(floorId, 'message', { id: Number(r.lastInsertRowid), role, agentId, text, createdAt: this.now(), ...attachments }, { chat: true, ownerOnly: role === 'budget' });
   }
-  managerSays(floorId, text) {
+  managerSays(floorId, text, { quiet = false } = {}) {
+    const mgr = get(this.db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", floorId);
+    // redesign lane A (job 12): a round report stays in the manager's own history but is never a line in the chat; the job card is the status.
+    if (quiet) {
+      if (this.daily?.running(floorId)) return;  // a daily report was the boss's only, and outside the manager's history anyway
+      const r = run(this.db, 'INSERT INTO messages (floor_id,role,agent_id,text,files,created_at) VALUES (?,?,?,?,?,?)', floorId, 'manager', mgr?.id ?? null, text, '', this.now());
+      markQuiet(this.db, floorId, Number(r.lastInsertRowid));
+      return;
+    }
     // In a daily run the manager has the company's private numbers in front of it, so what it says then is the boss's alone, even with public chat on.
     if (this.daily?.running(floorId)) { this.reportToBoss(floorId, text); return; }
-    const mgr = get(this.db, "SELECT id FROM agents WHERE floor_id=? AND role='manager'", floorId);
     this.addMessage(floorId, 'manager', mgr?.id ?? null, text);
   }
   /** The launch report: for the boss alone. It holds sign-up counts and checklist findings, so even a public-chat floor doesn't show it. */

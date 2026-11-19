@@ -179,9 +179,12 @@ class Stage {
    * A phone's toolbars and keyboard change the window's height while nothing about the scene should move, so on a phone only a real
    * change of shape redraws at a new size. The canvas keeps its size under the keyboard; the sheet moves, not the world.
    */
+  /** The home page frames the tower in a box of its own (docs/redesign, job 14); everywhere else the canvas is the whole window. */
+  setBoxed(on) { if (this.boxed === !!on) return; this.boxed = !!on; document.body.classList.toggle('stage-boxed', this.boxed); this.resize(true); }
   resize(force) {
     if (!this.ok) return;
-    const w = window.innerWidth, h = window.innerHeight;
+    const box = this.boxed ? this.canvas.getBoundingClientRect() : null;
+    const w = box?.width ? Math.round(box.width) : window.innerWidth, h = box?.height ? Math.round(box.height) : window.innerHeight;
     const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
     if (!force && this.mobile && w === this.w && this.h && (typing || Math.abs(h - this.h) < 130)) return;
     this.w = w; this.h = h;

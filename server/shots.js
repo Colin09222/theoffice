@@ -37,12 +37,14 @@ export function launches(db, { now = Date.now(), floorId = null } = {}) {
   const rows = all(db, `SELECT p.floor_id, p.slug, p.title, p.description, p.kind, p.published_at, p.created_at,
       f.id fid, f.number, f.slug fslug, f.name fname, f.colors,
       COALESCE((SELECT SUM(v.uniques) FROM app_visits v WHERE v.floor_id = p.floor_id AND v.project = p.slug AND v.day >= ?), 0) visits,
+      COALESCE((SELECT t.lane FROM tasks t WHERE t.floor_id = p.floor_id AND t.project = p.slug AND t.lane != '' ORDER BY t.id DESC LIMIT 1), '') lane,
       s.taken_at shot_at, s.bytes shot_bytes
     FROM projects p JOIN floors f ON f.id = p.floor_id LEFT JOIN launch_shots s ON s.floor_id = p.floor_id AND s.project = p.slug AND s.image IS NOT NULL
     WHERE p.published_at IS NOT NULL AND p.private = 0 AND f.status = 'active' AND f.filler = 0 AND f.hidden = 0 ${floorId ? 'AND f.id = ?' : ''}
     ORDER BY p.published_at DESC, p.slug`, from, ...(floorId ? [floorId] : []));
   const wip = wipSet(db);
-  return rows.map((r) => ({ ...r, wip: wip.has(`${r.floor_id}/${r.slug}`), madeDays: Math.max(1, Math.round((r.published_at - r.created_at) / DAY)) }));
+  // The lane (Game, Website, Business) is the one its work was done in; a project made before lanes takes it from its kind.
+  return rows.map((r) => ({ ...r, lane: ['game', 'website', 'business'].includes(r.lane) ? r.lane : ['game', 'simulation'].includes(r.kind) ? 'game' : 'website', wip: wip.has(`${r.floor_id}/${r.slug}`), madeDays: Math.max(1, Math.round((r.published_at - r.created_at) / DAY)) }));
 }
 /** Projects still being worked on: a maker job not launched and not stopped, or a business journey under way and not launched. */
 function wipSet(db) {
@@ -102,6 +104,40 @@ export async function takeDue(db, cfg, { shooter, origin = '', now = () => Date.
   return out;
 }
 
+// ---- a photo per job step (job 13): the timeline's thumbnails ----
+// One photo per step at most, four per job, of the project's public page once it is up. The same camera, the same timer, no model.
+export const MAX_JOB_SHOTS = 4;
+/** Ask for a photo of a job's step. Only a public project that is published has a page to photograph. Returns true when one was queued. */
+export function queueJobShot(db, { floorId, cardId, step, project, now = Date.now() }) {
+  if (!project || !cardId) return false;
+  const pr = get(db, 'SELECT private, published_at FROM projects WHERE floor_id=? AND slug=?', floorId, project);
+  if (!pr || pr.private || !pr.published_at) return false;
+  if (get(db, 'SELECT COUNT(*) n FROM job_shots WHERE card_id=?', cardId).n >= MAX_JOB_SHOTS) return false;
+  return run(db, 'INSERT OR IGNORE INTO job_shots (floor_id, card_id, step, project, created_at) VALUES (?,?,?,?,?)', floorId, cardId, String(step), project, now).changes > 0;
+}
+const pendingJobShots = (db, now) => all(db, 'SELECT * FROM job_shots WHERE taken_at IS NULL AND tries < 2 AND (failed_at IS NULL OR ? - failed_at > 600000) ORDER BY id LIMIT 20', now);
+/** Take the queued step photos. Each one taken becomes its job card's thumbnail. Returns the cards that changed. */
+export async function takeJobShots(db, cfg, { shooter, origin = '', now = () => Date.now(), log = () => {} } = {}) {
+  const changed = [];
+  for (const j of pendingJobShots(db, now())) {
+    const floor = get(db, 'SELECT id, slug FROM floors WHERE id=?', j.floor_id);
+    if (!floor) continue;
+    let url = liveUrlOf(db, cfg, floor, j.project);
+    if (url.startsWith('/')) url = `${origin}${url}`;
+    try {
+      const image = await shooter.shoot(url);
+      if (!Buffer.isBuffer(image) || image.length > MAX_BYTES || image[0] !== 0xff || image[1] !== 0xd8) throw new Error('not a card-sized JPEG');
+      run(db, 'UPDATE job_shots SET image=?, bytes=?, url=?, taken_at=?, failed_at=NULL, tries=tries+1 WHERE id=?', image, image.length, url, now(), j.id);
+      run(db, 'UPDATE job_cards SET thumb=? WHERE id=?', String(j.id), j.card_id);
+      changed.push(j.card_id);
+    } catch (e) {
+      run(db, 'UPDATE job_shots SET failed_at=?, tries=tries+1 WHERE id=?', now(), j.id);
+      log('warn', 'job step shot failed', { floorId: j.floor_id, project: j.project });
+    }
+  }
+  return changed;
+}
+
 export function installShots(ext) {
   const { db, cfg, log, now, GET, send, floorBySlug, HttpError } = ext;
   // The photo itself: public, but only for a project that is on the wall right now. Anything else answers like a page that isn't there.
@@ -117,7 +153,7 @@ export function installShots(ext) {
   let timer = null, busy = false, noBrowser = false;
   async function tick() {
     if (busy || cfg.shots === false) return;
-    if (!dueShots(db, { now: now() }).length) return;
+    if (!dueShots(db, { now: now() }).length && !pendingJobShots(db, now()).length) return;
     busy = true;
     let shooter = null;
     try {
@@ -125,13 +161,18 @@ export function installShots(ext) {
       if (!shooter) { if (!noBrowser) log('info', 'launch shots: no browser reachable (SHOTS_CDP_URL); run scripts/launch-shots.mjs where there is one'); noBrowser = true; return; }
       noBrowser = false;
       const origin = cfg.shotsOrigin || `http://127.0.0.1:${cfg.port}`;
+      // Step photos first: they are what someone watching the floor is waiting for.
+      for (const cardId of await takeJobShots(db, cfg, { shooter, origin, now, log })) ext.cardChanged?.(cardId);
       const r = await takeDue(db, cfg, { shooter, origin, now, log });
       if (r.taken.length || r.failed.length) log('info', 'launch shots', { taken: r.taken.length, failed: r.failed.length });
     } catch (e) { log('warn', 'launch shots', { err: String(e?.message || e).slice(0, 160) }); } finally { shooter?.close(); busy = false; }
   }
+  // A step photo was asked for: take it in a few seconds rather than at the next hourly look.
+  let nudgeTimer = null;
+  ext.shotsNudge = () => { if (cfg.shots === false) return; clearTimeout(nudgeTimer); nudgeTimer = setTimeout(() => { tick(); }, cfg.shotsNudgeMs ?? 3000); nudgeTimer.unref?.(); };
   return {
     tick,
     start() { if (cfg.shots === false) return; timer = setInterval(() => { tick(); }, cfg.shotsEveryMs || 3600000); timer.unref?.(); },
-    stop() { clearInterval(timer); },
+    stop() { clearInterval(timer); clearTimeout(nudgeTimer); },
   };
 }

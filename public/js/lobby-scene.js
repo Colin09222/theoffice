@@ -992,13 +992,13 @@ export class LobbyView {
   resize(w, h) {
     this.w = w; this.h = h;
     this.camera.aspect = w / h;
-    const phone = w <= 760;
+    const phone = !stage.boxed && w <= 760;
     // Frame the tower in the clear area: left of the desktop panel, above the phone's sheet.
     // On a wide screen the tower stands in the gap between the sign on the left and the directory on the right. A phone on its side has the directory folded to its
     // search row, and stands the same way, clear of the buttons beside it.
     const short = h <= 520, heroRight = short ? Math.min(w * 0.3, 250) + 12 : Math.min(w * 0.3, 372) + 24, panelLeft = short ? w - 314 : w - 404;
-    this.shiftX = phone ? 0 : Math.round(w / 2 - (heroRight + panelLeft) / 2);
-    this.shiftY = phone ? (PHONE_BOTTOM - PHONE_TOP) / 2 - h * 0.012 : 0;
+    this.shiftX = phone || stage.boxed ? 0 : Math.round(w / 2 - (heroRight + panelLeft) / 2);
+    this.shiftY = stage.boxed ? 0 : phone ? (PHONE_BOTTOM - PHONE_TOP) / 2 - h * 0.012 : 0;
     this.targetDist = this.frame(phone);
     if (!this.framed) { this.dist = this.targetDist; this.framed = true; }  // the first picture is the right one, with no zoom into place
     this.camera.setViewOffset(w, h, this.shiftX, this.shiftY, w, h);
@@ -1021,15 +1021,18 @@ export class LobbyView {
     f.instanceColor.needsUpdate = true;
     f.geometry.getAttribute('aState').needsUpdate = true;
   }
-  pick(x, y, click) {
+  pick(cx, cy, click) {
     if (this.flying) return;
+    // Window coordinates into the canvas's own: on the home page the canvas is a box, not the whole window.
+    const r = stage.boxed ? stage.canvas.getBoundingClientRect() : { left: 0, top: 0 };
+    const x = cx - r.left, y = cy - r.top;
     this.ptr.set((x / this.w) * 2 - 1, -(y / this.h) * 2 + 1);
     this.ray.setFromCamera(this.ptr, this.camera);
     const hit = this.ray.intersectObject(this.tower.floors, false)[0];
     const n = hit ? hit.instanceId + 1 : -1;
     this.setHover(n);
     if (click) this.onPick?.(n);
-    else this.onHover?.(n, x, y);
+    else this.onHover?.(n, cx, cy);
     document.getElementById('scene').style.cursor = n > 0 ? 'pointer' : 'grab';
   }
   setHover(n) {
