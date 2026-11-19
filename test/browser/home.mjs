@@ -24,7 +24,8 @@ async function page(opts, { noGl = false, failFeed = false } = {}) {
   const p = await b.newPage(opts);
   await p.send('Page.addScriptToEvaluateOnNewDocument', { source: WATCH + (noGl ? 'HTMLCanvasElement.prototype.getContext = function () { return null; };' : '') });
   if (failFeed) {
-    await p.send('Fetch.enable', { patterns: [{ urlPattern: '*building/ticker*' }] });
+    // Happening now reads /api/building/now since job 30 (it read the ticker before).
+    await p.send('Fetch.enable', { patterns: [{ urlPattern: '*building/now*' }] });
     p.on('Fetch.requestPaused', (e) => { p.send('Fetch.failRequest', { requestId: e.requestId, errorReason: 'Failed' }).catch(() => {}); });
   }
   await p.goto(`${base}/`);

@@ -96,11 +96,13 @@ export function floorCards(db, floor, { owner = false, limit = 30, base } = {}) 
 }
 
 const LANE_WORDS = { game: 'Game', website: 'Website', business: 'Business' };
+/** How long a job's line counts as happening now: on the home page's strip and under Now on the status card (job 30). */
+export const NOW_HORIZON_MS = 24 * 3600e3;
 /**
  * What the floor's status card says (docs/redesign, Q4, job 15), from rows alone: lane, goal, now (step N of M), next, last shipped.
  * A visitor's copy has private work taken out, as everywhere else. No model is asked anything.
  */
-export function statusFor(db, floor, { owner = false, base = '/theoffice', liveUrl = null } = {}) {
+export function statusFor(db, floor, { owner = false, base = '/theoffice', liveUrl = null, at = Date.now() } = {}) {
   const hide = owner ? (x) => x : redactor(db, floor.id);
   const has = (t) => !!get(db, "SELECT 1 x FROM sqlite_master WHERE type='table' AND name=?", t);
   const priv = (project) => (project ? !!get(db, 'SELECT private FROM projects WHERE floor_id=? AND slug=?', floor.id, project)?.private : !!floor.default_private);
@@ -108,7 +110,8 @@ export function statusFor(db, floor, { owner = false, base = '/theoffice', liveU
   let lane = get(db, "SELECT lane FROM tasks WHERE floor_id=? AND lane!='' ORDER BY id DESC LIMIT 1", floor.id)?.lane || '';
   if (has('business_journeys') && get(db, "SELECT 1 x FROM business_journeys WHERE floor_id=? AND status='active'", floor.id)) lane = 'business';
   const cards = all(db, 'SELECT * FROM job_cards WHERE floor_id=? ORDER BY updated_at DESC, id DESC LIMIT 20', floor.id);
-  const open = cards.find((c) => !['done', 'failed', 'cancelled'].includes(c.state) && visible(c.project));
+  // Now is what is happening now (job 30): an open job nobody has touched for a day is not, and the card says nothing is under way.
+  const open = cards.find((c) => !['done', 'failed', 'cancelled'].includes(c.state) && visible(c.project) && c.updated_at >= at - NOW_HORIZON_MS);
   const now = open ? (owner ? cardView(open, floor, base) : publicCard(db, floor, open, base)) : null;
   const goalRow = has('work_modes') ? get(db, 'SELECT goal FROM work_modes WHERE floor_id=?', floor.id)?.goal : '';
   const goal = goalRow ? hide(String(goalRow).split('\n')[0].slice(0, 140)) : now ? now.title : '';
@@ -172,7 +175,7 @@ export function installJobCards(ext) {
   });
   hooks.snapshot.push((f, viewer, out) => {
     if (cfg.jobCards !== false) out.jobs = floorCards(db, f, { owner: viewer.owner, base: BASE });
-    if (cfg.jobCards !== false) out.status = statusFor(db, f, { owner: viewer.owner, base: BASE, liveUrl: (slug) => engine.liveUrl(f, slug) });
+    if (cfg.jobCards !== false) out.status = statusFor(db, f, { owner: viewer.owner, base: BASE, liveUrl: (slug) => engine.liveUrl(f, slug), at: now() });
     if (Array.isArray(out.messages)) {
       const quiet = new Set(all(db, 'SELECT message_id id FROM quiet_messages WHERE floor_id=?', f.id).map((r) => r.id));
       if (quiet.size) out.messages = out.messages.filter((m) => !quiet.has(m.id));

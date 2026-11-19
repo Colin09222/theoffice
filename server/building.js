@@ -5,12 +5,24 @@ import { get, all } from './db.js';
 import { esc } from '../public/js/markdown.js';
 import { mimeOf } from './workspace.js';
 import { launches, heroLaunches } from './shots.js';
+import { publicCard, NOW_HORIZON_MS } from './jobcards.js';
 
 const TICKER_TTL_MS = 5000;
 const TICKER_SCAN = 150;
 const MAX_TICKER = 60;
 const MAX_WALL = 120;
 const PINNED_LAUNCHES = 3;
+const NOW_LINES = 5;
+// Happening now (docs/redesign/OFFICE-ANSWERS-1.md, Q3 and section 4; job 30). An old feed line counts only when it says a piece of work moved:
+// something started, finished, handed over, checked or put live. Everything else is a status ping ("picked the next job to work on",
+// "looked over the day's work", a round report, a retry, the floor pausing) and never fills the strip.
+const REAL_WORK = [
+  /^started "/, /^finished "/, /^could not finish "/, /^published \S/, /^gave .+ a task: "/, /^approved "/, /^sent ".+" back to /,
+  /^changed the brief for "/, /^handed ".+" to the building's outside contractor$/, /^drafted the legal pages for /, /^put up the approved legal pages for /,
+  /^flagged .+ for a real lawyer$/, /^Bought \S+\.$/, /^\S+ now points at \S+\.$/,
+];
+/** Whether a feed line (without the person's name in front) says that real work happened. */
+export const isRealWork = (text) => REAL_WORK.some((re) => re.test(String(text || '').trim()));
 const GLYPH = { site: '◆', app: '▣', game: '▲', simulation: '◎', doc: '≡', research: '☍' };
 const KIND_WORD = { site: 'Site', app: 'App', game: 'Game', simulation: 'Simulation', doc: 'Doc', research: 'Research' };
 
@@ -56,7 +68,7 @@ export function installBuilding(ext) {
         const text = String(v.data?.text ?? '');
         if (!text || text.toLowerCase().includes(privateLine) || /private task/i.test(text)) continue;
         const who = v.data.agent === null || !v.data.name || v.data.name === 'Office' ? '' : `${v.data.name} `;
-        out.push({ ...base, kind: 'feed', text: `${who}${text}`, _agent: v.data.agent ?? null });
+        out.push({ ...base, kind: 'feed', text: `${who}${text}`, _work: text, _agent: v.data.agent ?? null });
       } else {
         const slug = String(v.data?.slug || r.project || '');
         if (!slug) continue;
@@ -81,8 +93,8 @@ export function installBuilding(ext) {
       if (f.filler && !cfg.demoFloorsPublic) continue;
       if (it._project && priv.has(key(it._floorId, it._project))) continue;
       if (!it._project && f.default_private && it.kind === 'feed' && it._agent !== null) continue;
-      const { _floorId, _project, _agent, ...pub } = it;
-      out.push({ ...pub, filler: !!f.filler });
+      const { _floorId, _project, _agent, _work, ...pub } = it;
+      out.push({ ...pub, ...(it.kind === 'feed' ? { work: _work } : {}), filler: !!f.filler });
     }
     return out;
   }
@@ -91,7 +103,7 @@ export function installBuilding(ext) {
   GET('/api/building/ticker', async ({ res, url }) => {
     const limit = num(url.searchParams.get('limit'), 40, 1, MAX_TICKER);
     const since = num(url.searchParams.get('since'), 0, 0, Number.MAX_SAFE_INTEGER);
-    const fresh = tickerItems().filter((i) => i.id > since);
+    const fresh = tickerItems().filter((i) => i.id > since).map(({ work, ...pub }) => pub);
     const items = fresh.slice(0, limit);
     // A launch is the headline of the building. The newest few stay in the strip even when task chatter would bury them.
     for (const pin of fresh.filter((i) => i.kind === 'published').slice(0, PINNED_LAUNCHES)) {
@@ -102,6 +114,59 @@ export function installBuilding(ext) {
     }
     items.sort((a, b) => b.id - a.id);
     json(res, 200, { items, latest: items[0]?.id ?? since, ts: now() });
+  });
+
+  // ---- Happening now ----
+  // What the home page's strip shows: the newest real work in the building, one line per job, newest first, five at most. A job's line is
+  // its job card (job 12), so a job that moves on changes its line rather than adding one. A launch is a line of its own. Old feed lines fill
+  // in only for a floor with no job card in the window, and only when they are real work (isRealWork). Nothing older than a day counts, and
+  // the same words from the same floor never show twice. With nothing left, the strip says when the last job really finished.
+  function happeningNow({ limit = NOW_LINES } = {}) {
+    const t = now(), since = t - NOW_HORIZON_MS;
+    const floors = all(db, "SELECT id, number, slug, name, colors, default_private, filler FROM floors WHERE status='active' AND hidden=0 AND (filler=0 OR ?)", cfg.demoFloorsPublic ? 1 : 0);
+    const byId = new Map(floors.map((f) => [f.id, f]));
+    const priv = new Set(all(db, 'SELECT floor_id, slug FROM projects WHERE private=1').map((p) => key(p.floor_id, p.slug)));
+    const isPrivate = (f, project) => (project ? priv.has(key(f.id, project)) : !!f.default_private);
+    const lines = [];
+    const withCards = new Set();
+    for (const r of all(db, "SELECT * FROM job_cards WHERE updated_at >= ? AND state != 'cancelled' ORDER BY updated_at DESC, id DESC LIMIT 200", since)) {
+      const f = byId.get(r.floor_id);
+      if (!f) continue;
+      withCards.add(f.id);
+      if (isPrivate(f, r.project)) continue;
+      const c = publicCard(db, f, r, BASE);
+      lines.push({ id: `job:${r.id}`, kind: 'job', state: c.state, text: c.line, ts: r.updated_at, floor: floorInfo(f) });
+    }
+    for (const it of tickerItems()) {
+      if (it.ts < since) continue;
+      const f = floors.find((x) => x.slug === it.floor.slug);
+      if (!f) continue;
+      if (it.kind === 'published') lines.push({ id: `launch:${it.id}`, kind: 'published', text: it.text, url: it.url, ts: it.ts, floor: it.floor });
+      else if (!withCards.has(f.id) && isRealWork(it.work)) lines.push({ id: `feed:${it.id}`, kind: 'feed', text: it.text, ts: it.ts, floor: it.floor });
+    }
+    lines.sort((a, b) => b.ts - a.ts);
+    const seen = new Set(); const items = [];
+    for (const l of lines) {
+      const k = `${l.floor.slug}|${l.text.trim().toLowerCase()}`;
+      if (seen.has(k)) continue;
+      seen.add(k); items.push(l);
+      if (items.length >= limit) break;
+    }
+    // When the last job really finished: a finished job card, else a real "finished" line, else a launch. Pings never move it.
+    const ids = floors.filter((f) => !f.default_private).map((f) => f.id);
+    let lastFinished = null;
+    if (ids.length) {
+      const marks = ids.map(() => '?').join(',');
+      const done = get(db, `SELECT MAX(done_at) at FROM job_cards WHERE state='done' AND floor_id IN (${marks})`, ...ids)?.at || null;
+      const launched = get(db, `SELECT MAX(published_at) at FROM projects WHERE private=0 AND published_at IS NOT NULL AND floor_id IN (${marks})`, ...ids)?.at || null;
+      const finishedLine = cache.items.filter((i) => i.kind === 'feed' && /^finished "/.test(i._work || '') && ids.includes(i._floorId)).reduce((m, i) => Math.max(m, i.ts), 0) || null;
+      lastFinished = done || finishedLine || launched || null;
+    }
+    return { items, lastFinished };
+  }
+  ext.happeningNow = happeningNow;
+  GET('/api/building/now', async ({ res }) => {
+    json(res, 200, { ...happeningNow(), ts: now() });
   });
 
   // ---- the launched wall ----
