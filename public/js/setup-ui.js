@@ -3,6 +3,7 @@
 import { h, session, recoveryBox, toast } from './dom.js';
 import { icon } from './icons.js';
 import { launchTypes, typeIcon, ideaTag, fetchIdeas, wordsToCard, startWork, landInChat } from './launch-ui.js';
+import { openOnboarding } from './onboard-ui.js';
 
 const QUESTIONS = ['what', 'which', 'ready'];
 const TILE = { game: '#FFE6EF', app: '#E0EEFC', website: '#E3F6EC', business: '#FFF2D6' };
@@ -30,6 +31,11 @@ function restored(saved, types) {
 /** The floor page's one hook: wires "Make something new", and takes over the screen if this boss has a floor to set up. True when it did. */
 export function setupOnArrival(page) {
   page.startNew = () => openSetup(page, { again: true });
+  // Round 1 rest, job 23: a floor nobody has started on gets onboarding (lanes, a template, three questions, the plan and Start) when the server offers it.
+  if (page.state.onboarding?.on && page.isNewFloor() && !recall(page.slug).out) {
+    openOnboarding(page, { out: () => { remember(page.slug, { out: true }); page.setTab?.('chat'); if (window.innerWidth > 760) page.bodyEl?.querySelector('.chat-input textarea')?.focus(); } });
+    return true;
+  }
   if (!page.state.floor.setup || !page.isNewFloor() || recall(page.slug).out) return false;
   openSetup(page);
   return true;

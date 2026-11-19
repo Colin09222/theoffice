@@ -100,11 +100,15 @@ function ideaCards(unsourced) {
     ideas: [
       { name: 'Doorstep Dog Groom', who_pays: 'Busy dog owners', problem: 'Grooming salons are booked up for weeks', what_you_sell: unsourced ? 'Home grooming visits in a $2 billion market' : 'Home grooming visits booked online', why_now: 'More people work from home and want services that come to them',
         evidence: [ev('findings', 'Small services that come to you tend to do well'), ev('dogs', 'Owners complain that salons have long waits')],
-        revenue: { low: 2000, high: 6000, per: 'month', assumptions: [{ text: 'Between 20 and 60 visits a month at a planned price', source_url: IDEA_LINKS.dogs }] } },
+        revenue: { low: 2000, high: 6000, per: 'month', assumptions: [{ text: 'Between 20 and 60 visits a month at a planned price', source_url: IDEA_LINKS.dogs }] },
+        scores: { who_pays: 3, days_to_first_dollar: 3, cost_to_build: 3, cost_to_run: 2 } },
       { name: 'Shift Supper', who_pays: 'Nurses and other night-shift workers', problem: 'Nothing healthy is open when their shift ends', what_you_sell: 'A weekly box of ready meals for the night shift', why_now: 'Meal prep is popular and shift work is not going away',
-        evidence: [ev('meals', 'Shift workers ask for meals that suit odd hours'), ev('findings', 'Small things that work tend to do well')] },
+        evidence: [ev('meals', 'Shift workers ask for meals that suit odd hours'), ev('findings', 'Small things that work tend to do well')],
+        scores: { who_pays: 2, days_to_first_dollar: 2, cost_to_build: 2, cost_to_run: 2 } },
       { name: 'Night Desk Notes', who_pays: 'Shift supervisors', problem: 'Handover notes get lost between shifts', what_you_sell: 'A simple handover notebook app', why_now: 'Teams already share notes on their phones',
-        evidence: [ev('meals', 'Night-shift teams describe messy handovers'), ev('findings', 'Simple tools that do one job well')] },
+        evidence: [ev('meals', 'Night-shift teams describe messy handovers'), ev('findings', 'Simple tools that do one job well')],
+        // Below the bar (job 25): the boss is warned and can still pick it.
+        scores: { who_pays: 0, days_to_first_dollar: 1, cost_to_build: 2, cost_to_run: 3 } },
     ],
     markets_checked: ['Pet services at home', 'Meals for shift workers'],
     compared: [{ idea: 'Doorstep Dog Groom', verdict: 'Clear demand and simple to start' }, { idea: 'Shift Supper', verdict: 'Real need, harder to deliver' }, { idea: 'Dog cafe', verdict: 'Dropped: it needs premises' }],
@@ -455,6 +459,16 @@ export function createMockClient(cfg) {
         return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
       }
       // The Monday plan (server/weekplan.js): a scripted manager drafts one goal and two jobs, each with its done-means lines.
+      // Onboarding (server/onboarding.js): a scripted manager turns the boss's three answers into a name, a goal and three jobs.
+      if (meta?.kind === 'onboarding') {
+        await sleep(Math.min(cfg.mockDelayMs, 20), signal);
+        const content = JSON.stringify({ name: 'Sunny Paws', goal: 'A one-page site for the dog-walking round, live', jobs: [
+          { title: 'Build the site', to: 'builder', brief: 'One page: who we are, prices, how to book.', checks: ['The page loads', 'Prices are on it', 'It fits a phone'], size: 'big', lane: 'website', project: 'site' },
+          { title: 'Write the words', to: 'writer', brief: 'Plain words from the boss\'s answers.', checks: ['The heading says what it is', 'It says who it is for', 'Nothing in it is made up'], size: 'standard', lane: 'website', project: 'site' },
+          { title: 'Publish it and check it on a phone', to: 'builder', brief: 'Put it live.', checks: ['It is live at its link', 'It loads on a phone', 'Every button does something'], size: 'small', lane: 'website', project: 'site' }] });
+        const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
+        return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
+      }
       if (meta?.kind === 'weekplan') {
         await sleep(Math.min(cfg.mockDelayMs, 20), signal);
         const content = JSON.stringify({ goal: 'Get the site ready for more visitors', jobs: [

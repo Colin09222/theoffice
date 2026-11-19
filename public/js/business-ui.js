@@ -123,8 +123,20 @@ function ideaCard(page, x, i) {
     row('Who pays', x.whoPays), row('Their problem', x.problem), row('What you sell', x.sell), row('Why now', x.whyNow),
     x.revenue ? h('div.card-row.estimate', {}, h('span', {}, 'Estimate'), h('p', {}, `${dollars(x.revenue.low)}–${dollars(x.revenue.high)} a ${x.revenue.per}, if:`),
       h('ul', {}, ...x.revenue.assumptions.map((a) => h('li', {}, `${a.text} `, h('a', { href: a.source, target: '_blank', rel: 'noopener noreferrer nofollow' }, 'source'))))) : null,
+    x.score ? scoreEl(x.score) : null,
     h('div.card-row.evidence', {}, h('span', {}, 'Evidence'), h('ul', {}, ...x.evidence.map((e) => h('li', {}, h('a', { href: e.url, target: '_blank', rel: 'noopener noreferrer nofollow' }, e.title || hostOf(e.url)), e.shows ? ` — ${e.shows}` : '')))),
     h('button.btn.primary', { type: 'button', 'data-pick': String(i), onclick: pickIt }, 'Pick this one'));
+}
+/**
+ * The idea's scorecard (round 1 rest, job 25), the boss's only: four scores out of 3 with what each means, the total, and below the bar a plain warning.
+ * A warning only: the card can still be picked.
+ */
+function scoreEl(sc) {
+  return h(`div.card-row.idea-score${sc.below ? '.below' : ''}`, { 'data-score': String(sc.total) },
+    h('span', {}, 'Score'),
+    h('p', {}, h('b', {}, `${sc.total} of ${sc.max}`)),
+    h('ul.score-list', {}, ...sc.rows.map((r) => h('li', { 'data-score-key': r.key, title: r.legend }, h('span', {}, r.label), h('b', {}, `${r.value}/3`), h('small', {}, r.legend)))),
+    sc.warning ? h('p.idea-warn', { role: 'note', 'data-idea-warning': '' }, sc.warning) : null);
 }
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
 

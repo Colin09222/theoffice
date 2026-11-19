@@ -12,6 +12,7 @@ import { slugify, readFile, floorBytes, mimeOf } from './workspace.js';
 import { seedStarter } from './makers.js';
 import { googleAdsFromConfig, planCampaign, createCampaign, campaignId, campaignStats, checkSearchAd, monthStartMs, accountInfo, AdsError, HARD_MAX_USD, LIMITS, usd, pauseTrouble } from './googleads.js';
 import { createMockGoogleAds } from './googleads-mock.js';
+import { readScores, scoreView, SCORES_BRIEF } from './scorecard.js';
 
 const CONFIG = JSON.parse(readFileSync(new URL('../config/business.json', import.meta.url), 'utf8'));
 export const loadBusinessConfig = () => CONFIG;
@@ -89,7 +90,11 @@ export function unbacked(text, backing) {
 }
 
 /** The researcher's idea cards, checked. unseen(urls) gives back the keys of links nobody on this floor has opened or found in a search. */
-export function checkIdeas(input, { cfg = CONFIG, unseen = () => new Set() } = {}) {
+/**
+ * The researcher's idea cards, checked. With `scored` (round 1 rest, job 25; IDEA_SCORECARD=0 turns it off), each card also needs its four scores, 0 to 3,
+ * in the same call (server/scorecard.js); they are kept on the card as `scores`.
+ */
+export function checkIdeas(input, { cfg = CONFIG, unseen = () => new Set(), scored = false } = {}) {
   const problems = [];
   const { min, max, evidenceMin, evidenceMax } = cfg.ideas;
   const list = Array.isArray(input?.ideas) ? input.ideas : [];
@@ -99,6 +104,7 @@ export function checkIdeas(input, { cfg = CONFIG, unseen = () => new Set() } = {
     const n = `idea ${i + 1}`;
     const card = { name: plain(raw?.name, 60), whoPays: plain(raw?.who_pays, 200), problem: plain(raw?.problem, 300), sell: plain(raw?.what_you_sell, 300), whyNow: plain(raw?.why_now, 300), evidence: [], revenue: null };
     for (const [k, label] of [['name', 'name'], ['whoPays', 'who_pays'], ['problem', 'problem'], ['sell', 'what_you_sell'], ['whyNow', 'why_now']]) if (card[k].length < 3) problems.push(`${n}: ${label} is missing`);
+    if (scored) { card.scores = readScores(raw?.scores); if (!card.scores) problems.push(`${n}: give its four scores, each a whole number 0 to 3: who_pays, days_to_first_dollar, cost_to_build, cost_to_run`); }
     const ev = Array.isArray(raw?.evidence) ? raw.evidence : [];
     card.evidence = ev.slice(0, evidenceMax + 1).map((e) => ({ url: String(e?.url ?? '').trim().slice(0, 1000), title: plain(e?.title, 160), shows: plain(e?.shows, 240) }));
     if (card.evidence.some((e) => !isUrl(e.url))) problems.push(`${n}: every evidence link must be a full http(s) address`);
@@ -217,6 +223,7 @@ export function installBusiness(ext) {
       'Use web_search (at most three searches), then open the pages that matter with fetch_url. Check real markets: who pays today, what they pay for, who already sells it.',
       'Each card: the name, who pays, the problem they have, what you would sell, why now, and 2 to 4 links to pages you opened or found in a search, each with a few words on what it shows.',
       'Only give a revenue range if you can state every assumption with a source link; otherwise leave it out. Any number you write on a card must be quoted from one of its links in what that link shows. No invented figures.',
+      cfg.ideaScorecard !== false ? SCORES_BRIEF : '',
       'Then call propose_ideas with the cards, the markets you checked, and how the ideas compared, including any you dropped and why. Do not publish anything. Your reply can be one line: the boss reads the cards.'].filter(Boolean).join(' ');
   }
   function assignIdeas(floor, row, { wish = '', again = false } = {}) {
@@ -251,7 +258,7 @@ export function installBusiness(ext) {
   function proposeIdeas(c, a, { unseen }) {
     const row = activeRow(c.floor.id);
     if (!row || row.step !== 'idea' || tasksOf(row).ideas !== c.task?.id) throw new BusinessError(409, 'not_now', 'propose_ideas is only for the Business mode idea task');
-    const r = checkIdeas(a, { unseen });
+    const r = checkIdeas(a, { unseen, scored: cfg.ideaScorecard !== false });
     if (!r.ok) throw new BusinessError(400, 'bad_ideas', `nothing was saved. Fix these and call propose_ideas again: ${r.problems.join('; ')}`);
     const old = parse(row.research, {});
     patch(c.floor.id, { ideas: JSON.stringify(r.ideas.map((x, i) => ({ ...x, id: i }))), research: JSON.stringify({ ...old, ...r.research }), picked: -1 });
@@ -805,7 +812,8 @@ export function installBusiness(ext) {
     const research = parse(row.research, {});
     return {
       ...base, chips: chipsFor(row, phase), picked: row.picked, wish: row.wish,
-      ideas: ideas.map((x) => ({ id: x.id, name: x.name, whoPays: x.whoPays, problem: x.problem, sell: x.sell, whyNow: x.whyNow, evidence: x.evidence, revenue: x.revenue })),
+      // The scorecard (job 25) is the boss's only, and a card from before it has none.
+      ideas: ideas.map((x) => ({ id: x.id, name: x.name, whoPays: x.whoPays, problem: x.problem, sell: x.sell, whyNow: x.whyNow, evidence: x.evidence, revenue: x.revenue, ...(x.scores && cfg.ideaScorecard !== false ? { score: scoreView(x.scores) } : {}) })),
       research: { searches: (research.searches || []).slice(-8), pages: (research.pages || []).slice(-12), markets: research.markets || [], compared: research.compared || [] },
       researchTask: (() => { const t = taskRow(tasksOf(row).ideas); return t ? { status: t.status } : null; })(),
       ads, preview: !!row.project && stepIndex(row.step) >= 1,

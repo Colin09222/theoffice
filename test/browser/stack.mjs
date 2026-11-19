@@ -11,7 +11,7 @@ const OUT = process.env.STACK_SHOTS || ''; if (OUT) mkdirSync(OUT, { recursive: 
 let failures = 0;
 const check = (name, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`); if (!ok) failures++; };
 const step = async (name, fn) => { try { await fn(); check(name, true); } catch (e) { check(name, false, String(e.message).slice(0, 240)); } };
-const t = await boot({ mockDelayMs: 40, peopleTalk: false });
+const t = await boot({ onboarding: false, mockDelayMs: 40, peopleTalk: false });
 const base = `http://localhost:${t.port}/theoffice`;
 await claim(t, 'Alpha Soup', { floor: 3 });
 await claim(t, 'Beta Bakes', { floor: 7, body: { colors: { primary: '#2f6f62', accent: '#f4c95d' } } });

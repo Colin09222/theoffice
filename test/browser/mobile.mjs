@@ -13,7 +13,7 @@ const results = []; let failures = 0;
 const check = (name, ok, detail = '') => { results.push(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${String(detail).slice(0, 900)})` : ''}`); if (!ok) failures++; console.log(results.at(-1)); };
 const step = async (name, fn) => { try { await fn(); check(name, true); } catch (e) { check(name, false, e.message); } };
 
-const t = await boot({ mockDelayMs: 40, rateScale: 50 });
+const t = await boot({ onboarding: false, mockDelayMs: 40, rateScale: 50 });
 const base = `http://localhost:${t.port}/theoffice`;
 
 async function audit(p, name, opts) {

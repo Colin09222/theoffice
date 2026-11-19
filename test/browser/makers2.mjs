@@ -16,7 +16,7 @@ const step = async (name, fn) => { try { await fn(); } catch (e) {
   check(name, false, `${e.message} ${info}`); } };
 
 // A slow enough team that the held state is on screen long enough to read.
-const t = await boot({ mockDelayMs: 700, peopleTalk: false, liveCheckDelayMs: 5 });
+const t = await boot({ onboarding: false, mockDelayMs: 700, peopleTalk: false, liveCheckDelayMs: 5 });
 const base = t.base;
 const main = new URL(base).origin;
 const b = await launch();

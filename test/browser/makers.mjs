@@ -24,7 +24,7 @@ const step = async (name, fn) => { try { await fn(); } catch (e) { check(name, f
 
 // An OS-assigned port, known before boot so the apps domain can name it and project origins resolve to this server.
 const PORT = await new Promise((r) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => r(port)); }); });
-const t = await boot({ appsBaseDomain: `apps.localhost:${PORT}`, appsScheme: 'http', mockDelayMs: 350, peopleTalk: false }, {});
+const t = await boot({ onboarding: false, appsBaseDomain: `apps.localhost:${PORT}`, appsScheme: 'http', mockDelayMs: 350, peopleTalk: false }, {});
 await new Promise((r) => t.app.server.close(r));
 await new Promise((r) => t.app.server.listen(PORT, '127.0.0.1', r));
 const main = `http://localhost:${PORT}`;

@@ -18,6 +18,7 @@ import { OrderError } from './orders.js';
 import { ModeError } from './modes.js';
 import { HelpError, HELP_LIMITS, flatText } from './help.js';
 import { BusinessError } from './business.js';
+import { SCORES_SCHEMA } from './scorecard.js';
 import { MAIL_DEFS, mailHandlers, mailToolsFor } from './mail-tools.js';
 import { CHAT_TOOLS, CHAT_DEFS, chatHandlers } from './cloud/chat-tools.js';
 import { LAYOUTS, TONES, VIBES } from '../public/js/looks.js';
@@ -179,8 +180,9 @@ const DEFS = {
     ideas: { type: 'array', description: 'The idea cards', items: { type: 'object', properties: {
       name: S('A short name for the business'), who_pays: S('Who pays for it'), problem: S('Their problem, in their terms'), what_you_sell: S('What you would sell them'), why_now: S('Why now'),
       evidence: { type: 'array', description: '2 to 4 links that back the card up', items: { type: 'object', properties: { url: S('http(s) URL you opened or found'), title: S('Page title'), shows: S('What this page shows, with any figure you use quoted') }, required: ['url', 'shows'] } },
+      scores: SCORES_SCHEMA,
       revenue: { type: 'object', description: 'Optional. Only with every assumption stated and sourced', properties: { low: { type: 'number' }, high: { type: 'number' }, per: { type: 'string', enum: ['month', 'year'] }, assumptions: { type: 'array', items: { type: 'object', properties: { text: S('The assumption'), source_url: S('The page it comes from') }, required: ['text', 'source_url'] } } } },
-    }, required: ['name', 'who_pays', 'problem', 'what_you_sell', 'why_now', 'evidence'] } },
+    }, required: ['name', 'who_pays', 'problem', 'what_you_sell', 'why_now', 'evidence', 'scores'] } },
     markets_checked: { type: 'array', items: { type: 'string' }, description: 'The markets you looked at' },
     compared: { type: 'array', description: 'How the ideas compared, including any you dropped', items: { type: 'object', properties: { idea: S('Idea'), verdict: S('Why it made the cut or didn\'t') }, required: ['idea', 'verdict'] } },
   }, ['ideas', 'markets_checked', 'compared']),
