@@ -404,3 +404,25 @@ a.now-text { color: var(--c-teal); font-weight: 600; }
 .stc-message .btn { width: 44px; min-height: 40px; padding: 0; }
 .status-card .card-actions .btn { min-height: 38px; }
 @media (max-width: 760px) { .floor-top { width: auto; } }
+
+/* ---- a floor on a phone, before the room (job 16): status card, timeline, projects, then Watch the room ---- */
+html:has(body[data-page="floor-lite"]), body[data-page="floor-lite"] { background: var(--c-paper); }
+body[data-page="floor-lite"] #scene, body[data-page="floor-lite"] #labels { display: none; }
+#ui > .floor-lite { position: fixed; inset: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; pointer-events: auto; }
+.lite-top { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: max(10px, env(safe-area-inset-top)) 16px 10px; background: var(--c-paper); border-bottom: 1px solid var(--c-line); }
+.lite-top .btn.back { min-height: 40px; padding: 4px 10px; }
+.lite-title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.lite-title b { font: 700 18px/1.15 var(--f-head); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lite-title small { font: 500 12px var(--f-body); color: var(--c-slate); }
+.lite-main { display: flex; flex-direction: column; gap: 14px; padding: 14px 16px calc(28px + env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto; }
+.floor-top.lite-card { position: static; width: auto; max-height: none; padding: 0; background: none; border: 0; box-shadow: none; overflow: visible; }
+.lite-card .status-card { background: var(--c-card); box-shadow: var(--card-shadow); padding: 16px; border-radius: var(--card-r); }
+.lite-tl h2, .lite-projects h2 { font: 700 20px var(--f-head); margin: 0 0 10px; }
+.lite-tl .timeline { padding: 0; background: none; overflow: visible; }
+.lite-projects { display: flex; flex-direction: column; }
+.lite-project { display: flex; justify-content: space-between; gap: 10px; padding: 10px 0; border-top: 1px solid var(--c-line); text-decoration: none; }
+.lite-project:first-of-type { border-top: 0; }
+.lite-project small { font: 500 12px var(--f-body); color: var(--c-slate); text-transform: capitalize; white-space: nowrap; }
+.lite-none { margin: 0; color: var(--c-slate); }
+.watch-room { min-height: 50px; font-size: 17px; }
+.flat-face { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: #fff; font: 700 17px var(--f-head); }

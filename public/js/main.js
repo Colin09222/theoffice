@@ -6,7 +6,8 @@ import { wireSounds } from './sfx.js';
 
 // A direct link to a floor names every module the floor page needs here, so a slow line fetches them together rather than discovering them one import at a time.
 const FLOOR_MODULES = ['floor-ui', 'office-scene', 'character', 'cast', 'looks', 'models', 'toon', 'layouts', 'offices', 'textures', 'life', 'labels', 'cutaway', 'framing', 'markdown', 'customise', 'builder', 'numbers-ui', 'claim', 'floor-chrome', 'portrait', 'floorcache', 'attach', 'party', 'business-ui', 'mail-ui', 'chat-ui', 'server-panel', 'pay-ui', 'legal-ui', 'launch-ui', 'setup-ui'];
-if (location.pathname.includes('/floor/')) {
+// Not on a phone: there a floor opens as plain DOM, and its room's code is only fetched once someone taps Watch the room (docs/redesign, job 16).
+if (location.pathname.includes('/floor/') && !window.matchMedia('(max-width: 760px)').matches) {
   const stamp = new URL(import.meta.url).search;
   for (const m of FLOOR_MODULES) document.head.append(Object.assign(document.createElement('link'), { rel: 'modulepreload', href: new URL(`./${m}.js${stamp}`, import.meta.url).href }));
 }
@@ -36,6 +37,9 @@ async function route() {
   try {
     if (path === '/admin') { const { showAdmin, hideAdmin } = await import('./admin-ui.js'); current = hideAdmin; await showAdmin(ui); return; }
     if (floorMatch) {
+      // A phone gets the floor without its room first: no 3D code until Watch the room (docs/redesign, job 16).
+      const lite = await import('./floor-lite.js');
+      if (lite.liteFloor(floorMatch[1])) { current = lite.hideFloorLite; await lite.showFloorLite(ui, floorMatch[1], { onRoom: () => route() }); return; }
       // The doors shut straight away, so a slow line never holds up on a frozen close-up of the glass. The floor opens them when its room is ready.
       (await import('./stage-start.js')).startStage();
       const { showFloor, hideFloor } = await import('./floor-ui.js'); current = hideFloor; await showFloor(ui, floorMatch[1]);
