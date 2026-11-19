@@ -227,7 +227,9 @@ export function loadConfig(env = process.env, overrides = {}) {
     banter: env.BANTER !== '0', banterSass: env.BANTER_SASS !== '0',
     // redesign lane A: small talk is a fixed list of lines (config/banter-lines.json), room bubbles only, no model call (BANTER_LINES=0 brings the writer back);
     // demo floors stay out of public lists (DEMO_FLOORS_PUBLIC=1 shows them); visitors never see hours or "closed" (PUBLIC_HOURS=1 shows them).
-    banterLines: env.BANTER_LINES !== '0', demoFloorsPublic: env.DEMO_FLOORS_PUBLIC === '1', publicHours: env.PUBLIC_HOURS === '1', banterUsdPerFloorDay: num(env.BANTER_USD_PER_FLOOR_DAY, 2), banterPace: env.BANTER_PACE !== '0',
+    banterLines: env.BANTER_LINES !== '0', demoFloorsPublic: env.DEMO_FLOORS_PUBLIC === '1', publicHours: env.PUBLIC_HOURS === '1',
+    // Launch card photos (server/shots.js): taken every 7 days by a timer that checks hourly, when a browser is reachable. SHOTS=0 stops the timer.
+    shots: env.SHOTS !== '0', shotsEveryMs: num(env.SHOTS_EVERY_MS, 3600000), shotsChrome: env.SHOTS_CHROME || '', shotsCdpUrl: env.SHOTS_CDP_URL || '', shotsOrigin: (env.SHOTS_ORIGIN || '').replace(/\/+$/, ''), banterUsdPerFloorDay: num(env.BANTER_USD_PER_FLOOR_DAY, 2), banterPace: env.BANTER_PACE !== '0',
     asksPerTask: num(env.ASKS_PER_TASK, 4), asksPerFloorDay: num(env.ASKS_PER_FLOOR_DAY, 80),
     // The help line: a manager can ask the owner's assistant for guidance. No credential is involved: the assistant answers through scripts/admin.mjs or the admin view.
     helpEnabled: env.HELP_ENABLED !== '0',

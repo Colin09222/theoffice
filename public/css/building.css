@@ -8,7 +8,7 @@
 .hero { position: absolute; left: 24px; top: 22px; width: min(30vw, 372px); }
 .hero h1 { position: relative; padding: 15px 20px 17px; background: var(--tomato); color: #fff8e6; font-size: clamp(38px, 3.7vw, 56px); line-height: 1; border-radius: 14px; box-shadow: inset 0 0 0 4px #fff8e6, inset 0 0 0 6px var(--tomato-d), 0 7px 0 var(--tomato-d), 0 18px 30px rgba(0, 0, 0, .28); transform: rotate(-1.4deg); }
 .hero h1 span { display: block; margin-top: 7px; color: var(--sun); font-size: max(.4em, 16px); line-height: 1.1; }
-.hero p { margin: 16px 0 0 10px; padding: 11px 14px; max-width: 24em; background: rgba(255, 248, 230, .93); color: var(--ink); font-size: 15px; line-height: 1.36; border-radius: 4px; box-shadow: 0 4px 0 var(--line), 0 12px 20px rgba(0, 0, 0, .25); transform: rotate(.5deg); }
+.hero > p { margin: 16px 0 0 10px; padding: 11px 14px; max-width: 24em; background: rgba(255, 248, 230, .93); color: var(--ink); font-size: 15px; line-height: 1.36; border-radius: 4px; box-shadow: 0 4px 0 var(--line), 0 12px 20px rgba(0, 0, 0, .25); transform: rotate(.5deg); }
 .hints { position: absolute; left: 26px; bottom: 18px; margin: 0; padding: 6px 11px; background: var(--felt); color: #fff4d8; font: 600 15px var(--cond); border-radius: 6px; max-width: 280px; }
 .banner { position: absolute; top: 240px; left: 28px; margin: 0; padding: 10px 14px; background: var(--sun); color: var(--ink); font-weight: 700; border-radius: 8px; box-shadow: 0 4px 0 var(--sun-d); }
 .floor-tip { position: fixed; top: 0; left: 0; padding: 6px 12px; background: var(--felt); color: #ffb52e; font: 700 17px var(--cond); letter-spacing: .03em; pointer-events: none !important; white-space: nowrap; z-index: 6; border-radius: 6px; box-shadow: 0 0 0 3px var(--brass); }
@@ -115,7 +115,7 @@ body.flying .ticker { opacity: 0; transition: opacity .2s; }
   .hero { left: 12px; top: max(10px, env(safe-area-inset-top)); width: min(60vw, 222px); }
   .hero h1 { font-size: 23px; padding: 8px 12px 9px; border-radius: 9px; box-shadow: inset 0 0 0 2.5px #fff8e6, 0 4px 0 var(--tomato-d), 0 10px 16px rgba(0, 0, 0, .26); }
   .hero h1 span { margin-top: 4px; font-size: 11px; white-space: nowrap; }
-  .hero p, .hints, .floor-tip { display: none; }
+  .hero > p, .hints, .floor-tip { display: none; }
   .banner { top: 130px; left: 12px; right: 12px; }
   .directory { left: 0; right: 0; bottom: 0; top: auto; width: 100%; height: 66vh; height: 66dvh; padding: 0 10px 0; border-radius: 16px 16px 0 0; box-shadow: inset 0 2px 0 rgba(255, 220, 170, .3), 0 -5px 0 #2c1608; transform: translateY(calc(100% - 86px - env(safe-area-inset-bottom))); transition: transform .3s cubic-bezier(.2, 1.1, .4, 1); }
   .directory.open { transform: translateY(calc(-1 * var(--kb, 0px))); }
@@ -153,7 +153,7 @@ body.flying .ticker { opacity: 0; transition: opacity .2s; }
   .hero { top: 8px; left: max(12px, env(safe-area-inset-left)); width: min(30vw, 250px); }
   .hero h1 { font-size: 24px; padding: 8px 12px 9px; border-radius: 10px; box-shadow: inset 0 0 0 3px #fff8e6, 0 4px 0 var(--tomato-d), 0 10px 16px rgba(0, 0, 0, .26); }
   .hero h1 span { margin-top: 4px; font-size: 11.5px; }
-  .hero p, .hints, .ticker { display: none; }
+  .hero > p, .hints, .ticker { display: none; }
   #ui { --dir-w: 304px; }
   .directory { top: 8px; bottom: 8px; right: max(10px, env(safe-area-inset-right)); padding: 8px; }
   .topbar-right { right: calc(var(--dir-w) + 22px + env(safe-area-inset-right)); top: 8px; }

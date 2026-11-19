@@ -208,6 +208,14 @@ Object.assign(ADDED, {
   chat_conversations: { kind: "TEXT NOT NULL DEFAULT 'chat'", visitor: "TEXT NOT NULL DEFAULT ''", cost_usd: 'REAL NOT NULL DEFAULT 0', screened: 'INTEGER NOT NULL DEFAULT 0', off_topic: 'INTEGER NOT NULL DEFAULT 0', flags: "TEXT NOT NULL DEFAULT ''" },
 });
 
+// redesign lane A (docs/redesign): what visitors see. New tables only; each statement is safe to run on every start.
+const LANE_A_SCHEMA = `
+CREATE TABLE IF NOT EXISTS launch_shots (
+  floor_id INTEGER NOT NULL, project TEXT NOT NULL, image BLOB, type TEXT NOT NULL DEFAULT 'image/jpeg', bytes INTEGER NOT NULL DEFAULT 0,
+  url TEXT NOT NULL DEFAULT '', taken_at INTEGER, failed_at INTEGER, error TEXT NOT NULL DEFAULT '', PRIMARY KEY (floor_id, project)
+);
+`;
+
 export function openDb(dataDir) {
   let path = ':memory:';
   if (dataDir !== ':memory:') { mkdirSync(dataDir, { recursive: true }); path = join(dataDir, 'office.db'); }
@@ -216,6 +224,7 @@ export function openDb(dataDir) {
   db.exec(SCHEMA);
   db.exec(CLOUD_SCHEMA);
   db.exec(PAY_SCHEMA);
+  db.exec(LANE_A_SCHEMA);
   for (const [table, cols] of Object.entries(ADDED)) {
     const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
     for (const [name, def] of Object.entries(cols)) if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);

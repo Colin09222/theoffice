@@ -13,8 +13,8 @@ const WAIT = Number(process.env.SHOTS_WAIT || 4000);
 const t = await boot({ mockDelayMs: 2500, peopleTalk: true, towerFloors: 30, fillerCompanies: true, fillerTickMs: 2500 });
 const base = `http://localhost:${t.port}/theoffice`;
 const boss = await claim(t, 'Tiny Arcade Works', { floor: 5, body: { tagline: 'Small browser games', bossName: 'Colon', colors: { primary: '#17766F', accent: '#F2A33A' } } });
-await claim(t, 'LabStackr', { floor: 3, body: { tagline: 'Cash prices for lab tests', bossName: 'Colon', colors: { primary: '#C93A24', accent: '#F6F1E7' } } });
-await seedShowcase(t, boss);
+const lab = await claim(t, 'LabStackr', { floor: 3, body: { tagline: 'Cash prices for lab tests', bossName: 'Colon', colors: { primary: '#C93A24', accent: '#F6F1E7' } } });
+await seedShowcase(t, boss, { others: [lab.slug] });
 await sleep(1500);
 
 const sizes = [['desktop', 1440, 900], ['phone', 390, 844]];
@@ -37,6 +37,13 @@ for (const [kind, w, h] of sizes) {
       await p.until('document.body.dataset.page === "lobby" && !document.querySelector("#boot")', 'lobby', 60000);
       await sleep(WAIT);
       await snap('home');
+      // The Launched wall, as a visitor opens it from the directory.
+      if (who === 'visitor' && await p.ev('!!document.querySelector("[data-wall=toggle]")')) {
+        await p.ev('document.querySelector("[data-wall=toggle]").click(); true');
+        await p.until('document.querySelectorAll(".wall .lcard").length > 0', 'the wall', 15000).catch(() => {});
+        await sleep(1500);
+        await snap('launched');
+      }
       await p.goto(`${base}/floor/${boss.slug}`);
       await p.until('document.body.dataset.page === "floor" && !document.querySelector("#boot")', 'floor', 60000);
       await sleep(WAIT + 2000);
