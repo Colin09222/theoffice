@@ -44,5 +44,8 @@ export function laneA2Settings(env = process.env) {
     // (LIBRARY=0: closed). LIBRARY_SEED_FLOORS: Colon's own floor numbers whose launches seed it, as waiting entries (e.g. "6").
     library: on(env.LIBRARY),
     librarySeedFloors: env.LIBRARY_SEED_FLOORS || '',
+    // r2-j70: the "Was this useful?" button on launched sites and games. It changes what the public sees on real customer sites, so it ships OFF:
+    // only FEEDBACK_BUTTON=1 turns it on (docs/redesign/ROUND2.md).
+    feedbackButton: env.FEEDBACK_BUTTON === '1',
   };
 }

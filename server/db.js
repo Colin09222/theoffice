@@ -336,6 +336,10 @@ CREATE TABLE IF NOT EXISTS library_entries (
   status TEXT NOT NULL, removed INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, decided_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS library_entries_floor ON library_entries(floor_id, week);
+CREATE TABLE IF NOT EXISTS app_feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, path TEXT NOT NULL, answer TEXT NOT NULL, line TEXT NOT NULL DEFAULT '',
+  hash TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE (floor_id, project, hash)
+);
 CREATE TABLE IF NOT EXISTS launch_checklists (floor_id INTEGER NOT NULL, project TEXT NOT NULL, result TEXT NOT NULL, checked_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project));
 `;
 

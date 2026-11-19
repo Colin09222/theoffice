@@ -64,6 +64,7 @@ import { installFreshEyes } from './fresheyes.js';
 import { installShareCards } from './sharecards.js';
 import { installUpkeep } from './upkeep.js';
 import { installLibrary } from './library.js';
+import { createFeedback, injectFeedback, FEEDBACK_JS } from './feedback.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any main-site cookie, page or API.
@@ -118,6 +119,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const adminHash = cfg.adminPassword ? A.hashSecret(cfg.adminPassword) : '';
   // Tapped calls on published pages (redesign job 33): the counter, and the devices bosses and the admin use, so their own taps don't count.
   const taps = createTaps({ db, now });
+  const feedback = createFeedback({ db, now });  // r2-j70: the feedback button's answers
 
   // ---- request helpers ----
   const ipOf = (req) => {
@@ -942,6 +944,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (name === 'chat.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_JS, cache: 'public, max-age=3600' };
     if (name === 'chat-panel.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_PANEL_JS, cache: 'public, max-age=3600' };
     if (name === 'taps.js') return { type: 'text/javascript; charset=utf-8', body: TAP_JS, cache: 'public, max-age=3600' };
+    if (name === 'feedback.js') return { type: 'text/javascript; charset=utf-8', body: FEEDBACK_JS, cache: 'public, max-age=3600' };
     if (name === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
     if (name === 'phaser.min.js') return { type: 'text/javascript; charset=utf-8', body: phaserLib?.body };
     return null;
@@ -998,6 +1001,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (segs[0] === '_data') return serveData(req, res, f, pr, label, rawUrl, HEAD);
     if (segs[0] === '_office' && segs[1] === 'cloud') return cloud.serve(req, res, { f, pr, label, segs: segs.slice(2), rawUrl, HEAD });
     if (segs[0] === '_office' && segs[1] === 'tap' && segs.length === 2 && req.method === 'POST') return serveTap(req, res, f, pr, HEAD);
+    if (segs[0] === '_office' && segs[1] === 'feedback' && segs.length === 2 && req.method === 'POST') return serveFeedback(req, res, f, pr, HEAD);
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...HEAD, allow: 'GET, HEAD' }); return res.end(); }
     limit('publicSite', ipOf(req));
     if (segs[0] === '_office' && segs[1] === 'pay' && segs.length === 2) return servePay(res, pr, HEAD);
@@ -1018,10 +1022,11 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (!hit) return miss();
     if (/^text\/html/.test(hit.type) && req.method === 'GET' && !pr.private) visit(req, f, pr, segs.join('/'));
     const tapping = cfg.tapCount !== false && !pr.private;
-    const etag = `W/"${pr.published_at}${tapping ? '-t' : ''}${cloud.chat.tag(f, pr)}"`;
+    const asking = cfg.feedbackButton === true && !pr.private;  // r2-j70: off unless FEEDBACK_BUTTON=1
+    const etag = `W/"${pr.published_at}${tapping ? '-t' : ''}${asking ? '-f' : ''}${cloud.chat.tag(f, pr)}"`;
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ...HEAD, etag }); return res.end(); }
     res.writeHead(200, { ...HEAD, etag, 'content-type': hit.type });
-    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(tapping ? injectTaps(cloud.chat.decorate(f, pr, hit.body, segs)) : cloud.chat.decorate(f, pr, hit.body, segs), `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
+    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(((x) => (asking ? injectFeedback(x) : x))(tapping ? injectTaps(cloud.chat.decorate(f, pr, hit.body, segs)) : cloud.chat.decorate(f, pr, hit.body, segs)), `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
   }
   // One tapped call (job 33). Only the page's own origin may send it; a public project only; 204 whatever happens, so a page never waits on it.
   async function serveTap(req, res, f, pr, HEAD) {
@@ -1038,6 +1043,23 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (!b || typeof b !== 'object') return done();
       taps.record({ floorId: f.id, project: pr.slug, path: String(b.path || '/'), number: String(b.number || ''), ip: ipOf(req), ua: String(req.headers['user-agent'] || '') });
     } catch (e) { if (!(e instanceof HttpError)) log('warn', 'tap not recorded', { err: String(e?.message || e).slice(0, 120) }); }
+    return done();
+  }
+  // One feedback answer (r2-j70). Only the page's own origin, a public project, and only while FEEDBACK_BUTTON=1; 204 whatever happens.
+  async function serveFeedback(req, res, f, pr, HEAD) {
+    const done = () => { res.writeHead(204, { ...HEAD, 'cache-control': 'no-store' }); res.end(); };
+    try {
+      if (cfg.feedbackButton !== true || pr.private) return done();
+      const own = `${cfg.appsScheme}://${String(req.headers.host).toLowerCase().replace(/\.$/, '')}`;
+      const site = req.headers['sec-fetch-site'];
+      if ((req.headers.origin && req.headers.origin !== own) || (site && site !== 'same-origin')) return done();
+      limit('publicSite', ipOf(req));
+      const chunks = []; let size = 0;
+      for await (const c of req) { size += c.length; if (size > 1024) return done(); chunks.push(c); }
+      let b; try { b = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return done(); }
+      if (!b || typeof b !== 'object') return done();
+      feedback.record({ floorId: f.id, project: pr.slug, path: String(b.path || '/'), answer: String(b.answer || ''), line: String(b.line || ''), ip: ipOf(req), ua: String(req.headers['user-agent'] || '') });
+    } catch (e) { if (!(e instanceof HttpError)) log('warn', 'feedback not recorded', { err: String(e?.message || e).slice(0, 120) }); }
     return done();
   }
   async function serveData(req, res, f, pr, label, rawUrl, HEAD) {

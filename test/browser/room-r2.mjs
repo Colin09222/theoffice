@@ -355,6 +355,34 @@ try {
     check(get(t.db, 'SELECT status FROM library_entries WHERE id=?', id).status === 'approved', 'j69 one tap approves it');
     check(!p.errors.length, `j69 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
   }
+  if (want('j70')) {
+    // r2-j70: a "Yes" on a test site adds one to that floor's Numbers tab. The button is OFF by default; this run turns it on for one test site.
+    const t2 = await boot({ mockDelayMs: 50, appsBaseDomain: 'apps.localhost', appsScheme: 'http', publicOrigin: '', feedbackButton: true });
+    try {
+      t2.app.engine.runManager = async () => {};
+      const boss = await claim(t2, 'Feedback Tyres');
+      const f = get(t2.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+      const html = '<!doctype html><html><head><title>Tyres</title></head><body><h1>Tyres</h1></body></html>';
+      run(t2.db, "INSERT INTO projects (floor_id,slug,title,kind,private,published_at,created_at) VALUES (?,?,?,'site',0,?,?)", f.id, 'tyres', 'Tyres', Date.now(), Date.now());
+      run(t2.db, "INSERT INTO published_files (floor_id,project,path,content,size) VALUES (?,'tyres','index.html',?,?)", f.id, html, html.length);
+      await boss.get(`/api/floors/${boss.slug}`);
+      const label = get(t2.db, "SELECT label FROM app_labels WHERE floor_id=? AND project='tyres'", f.id).label;
+      // A person's browser: headless Chrome says "HeadlessChrome", which the site rightly counts as a bot.
+      const p = await b.newPage({ phone: { width: 390, height: 844 } });
+      await p.goto(`http://${label}.apps.localhost:${t2.port}/`);
+      await p.until('!!document.querySelector("[data-office-feedback] [data-answer=yes]")', 'the button', 20000);
+      await p.click('[data-office-feedback] [data-answer=yes]');
+      await p.until('!!document.querySelector("[data-office-feedback] [data-send]")', 'the line', 5000);
+      await p.type('[data-office-feedback] input', 'Found my size fast.');
+      await p.click('[data-office-feedback] [data-send]');
+      await sleep(1500);
+      const n = (await boss.get(`/api/floors/${boss.slug}/numbers`)).data.feedback;
+      check(n.week.yes === 1 && n.lines[0]?.line === 'Found my size fast.', `j70 one Yes on the site is one Yes on the Numbers tab (${JSON.stringify(n.week)})`);
+      if (shots) { await p.goto(`http://${label}.apps.localhost:${t2.port}/?again`); await p.ev('localStorage.clear(); location.reload()'); await sleep(2000); await p.shot(`${shots}/r2-j70-button.jpg`); }
+      const errs = p.errors.filter((e) => !/favicon\.ico/.test(e));  // the test site has no icon of its own
+      check(!errs.length, `j70 no page errors ${errs.slice(0, 2).join(' | ')}`);
+    } finally { await t2.close(); }
+  }
 } finally {
   b.close(); await t.close();
 }
