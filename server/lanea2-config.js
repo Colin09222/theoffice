@@ -15,5 +15,7 @@ export function laneA2Settings(env = process.env) {
     resultBeats: on(env.RESULT_BEATS),
     // r2-j41: the meeting room's whiteboard lists the current plan's jobs, up to 5, ticked as each is done (ROOM_WHITEBOARD=0: the old board).
     roomWhiteboard: on(env.ROOM_WHITEBOARD),
+    // r2-j42: paper piles (one sheet per queued job, max 5) and the trophy shelf (first launch, 100, 1,000, 10,000 real visits) (ROOM_PROPS=0: none).
+    roomProps: on(env.ROOM_PROPS),
   };
 }

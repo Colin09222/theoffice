@@ -53,12 +53,26 @@ export function roomWhiteboard(db, f, viewer, { now = Date.now() } = {}) {
   return { source: 'plan', goal, jobs: tasks.map(row) };
 }
 
+/**
+ * r2-j42: the floor's real counts for its milestones: how many public launches it has made and the real visits to them, all time. Visits are the
+ * launch cards' own count (app_visits.uniques: unique visitors a day, bots left out). A demo floor's made-up work earns nothing.
+ */
+export function roomMilestones(db, f) {
+  if (f.filler) return { launches: 0, visits: 0 };
+  const launches = get(db, 'SELECT COUNT(*) n FROM projects WHERE floor_id=? AND published_at IS NOT NULL AND private=0', f.id).n;
+  const visits = get(db, `SELECT COALESCE(SUM(v.uniques), 0) n FROM app_visits v JOIN projects p ON p.floor_id = v.floor_id AND p.slug = v.project
+    WHERE v.floor_id=? AND p.published_at IS NOT NULL AND p.private=0`, f.id).n;
+  return { launches, visits };
+}
+
 /** The room's part of a floor's snapshot. Later jobs add their pieces here. */
 export function roomView(db, cfg, f, viewer) {
   return {
     idleLife: cfg.idleLife !== false,
     frames: cfg.roomFrames === false ? null : roomFrames(db, f),
     whiteboard: cfg.roomWhiteboard === false ? null : roomWhiteboard(db, f, viewer),
+    milestones: cfg.roomProps === false ? null : roomMilestones(db, f),
+    props: cfg.roomProps !== false,
   };
 }
 

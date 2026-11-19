@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows } from '../public/js/room-rules.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX } from '../public/js/room-rules.js';
 import { weekOf } from '../server/weekplan.js';
 import { get, all, run as sql } from '../server/db.js';
 import { REAL_JPEG, publish } from './r2-fixtures.js';
@@ -312,5 +312,47 @@ describe('r2-j41 whiteboard plan', () => {
     t.cfg.roomWhiteboard = true;
     const fresh = await claim(t, 'Empty Board');
     assert.equal((await visitor.get(`/api/floors/${fresh.slug}`)).data.room.whiteboard, null, 'a floor with no plan has none');
+  });
+});
+
+/** Real visits, the way the visit counter keeps them: unique visitors a day, per path. */
+const visit = (db, floorId, project, day, uniques, path = '/') => sql(db, 'INSERT INTO app_visits (floor_id,project,day,path,views,uniques) VALUES (?,?,?,?,?,?)', floorId, project, day, path, uniques, uniques);
+
+describe('r2-j42 paper piles and trophies', () => {
+  test('one sheet per queued job, at most 5; an empty queue is an empty tray; phone low is one flat sheet or none', () => {
+    assert.deepEqual([0, 1, 3, 5, 9].map((n) => pileSheets(n)), [0, 1, 3, 5, PILE_MAX]);
+    assert.deepEqual([0, 1, 3, 9].map((n) => pileSheets(n, { low: true })), [0, 1, 1, 1]);
+    const tasks = [{ agentId: 4, status: 'todo' }, { agentId: 4, status: 'todo' }, { agent_id: 4, status: 'todo' }, { agentId: 4, status: 'doing' }, { agentId: 5, status: 'todo' }, { agentId: 4, status: 'done' }];
+    assert.equal(queuedFor(tasks, 4), 3, 'only their own jobs waiting to start');
+    assert.equal(pileSheets(queuedFor(tasks, 4)), 3, 'DONE MEANS (rules): a bean with 3 queued jobs has 3 sheets');
+    assert.equal(queuedFor(tasks, 9), 0);
+  });
+  test('trophies: first launch, 100, 1,000, 10,000 real visits; never more than 4; none for nothing', () => {
+    assert.deepEqual(trophiesFor({ launches: 0, visits: 0 }), []);
+    assert.deepEqual(trophiesFor({ launches: 1, visits: 99 }).map((x) => x.id), ['first-launch']);
+    assert.deepEqual(trophiesFor({ launches: 3, visits: 2241 }).map((x) => x.id), ['first-launch', 'visits-100', 'visits-1000']);
+    assert.equal(trophiesFor({ launches: 9, visits: 99999 }).length, 4);
+    assert.deepEqual(trophiesFor(null), []);
+  });
+
+  let t, six, visitor;
+  before(async () => { t = await boot(); six = await claim(t, 'TheTireRx', { floor: 6 }); visitor = new Client(t, { origin: null }); });
+  after(async () => { await t.close(); });
+  test('DONE MEANS: floor 6 shows the 1,000-visit trophy, from the launch cards\' own visit counts', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', six.slug);
+    publish(t.db, f.id, 'thetirerx', 'TheTireRx', Date.now() - 30 * 86400000);
+    publish(t.db, f.id, 'gallery', 'Gallery', Date.now() - 20 * 86400000);
+    publish(t.db, f.id, 'secret', 'Secret', Date.now(), { priv: 1 });
+    visit(t.db, f.id, 'thetirerx', '2026-10-01', 900); visit(t.db, f.id, 'thetirerx', '2026-11-01', 700, '/menu'); visit(t.db, f.id, 'gallery', '2026-11-10', 641);
+    visit(t.db, f.id, 'secret', '2026-11-10', 50000);
+    visit(t.db, f.id, 'never-launched', '2026-11-10', 50000);
+    const m = (await visitor.get(`/api/floors/${six.slug}`)).data.room.milestones;
+    assert.deepEqual(m, { launches: 2, visits: 2241 }, 'private work and unlaunched pages count for nothing');
+    assert.ok(trophiesFor(m).some((x) => x.id === 'visits-1000'));
+    assert.ok(!trophiesFor(m).some((x) => x.id === 'visits-10000'));
+    t.cfg.roomProps = false;
+    const off = (await visitor.get(`/api/floors/${six.slug}`)).data.room;
+    assert.equal(off.milestones, null); assert.equal(off.props, false);
+    t.cfg.roomProps = true;
   });
 });

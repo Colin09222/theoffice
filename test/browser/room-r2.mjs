@@ -132,6 +132,29 @@ try {
     }
     check(!p.errors.length, `j41 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
   }
+  if (want('j42')) {
+    // r2-j42: a bean with 3 queued jobs has 3 sheets; floor 6 shows the 1,000-visit trophy.
+    const six = await claim(t, 'Tyre Trophies', { floor: 7 });
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', six.slug);
+    const builder = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='builder'", f.id);
+    for (const x of ['One', 'Two', 'Three']) run(t.db, "INSERT INTO tasks (floor_id,title,brief,agent_id,status,created_at,updated_at) VALUES (?,?,?,?,'todo',?,?)", f.id, x, x, builder.id, Date.now(), Date.now());
+    publish(t.db, f.id, 'tyres', 'Tyres', Date.now() - 86400000);
+    run(t.db, "INSERT INTO app_visits (floor_id,project,day,path,views,uniques) VALUES (?,'tyres','2026-11-01','/',2241,2241)", f.id);
+    const p = await openRoom(six.slug);
+    const r = await p.ev(`(() => { const v = window.__office.view; const b = v.actors.get(${builder.id}); const others = [...v.actors.values()].filter((a) => a !== b && !a.isBoss && !a.extra).map((a) => a.pileCount); return { sheets: b.pileCount, shown: b.pile.children.filter((m, i) => i && m.visible).length, others, low: v.low, trophies: v.trophies, cups: v.trophyCups }; })()`);
+    check(r.sheets === (r.low ? 1 : 3) && r.shown === r.sheets && r.others.every((n) => n === 0), `j42 the Builder with 3 queued jobs has ${r.shown} sheet${r.shown === 1 ? '' : 's'}${r.low ? ' (phone low: one flat sheet)' : ''}; empty trays elsewhere (${r.others.join(',')})`);
+    check(r.trophies.includes('visits-1000') && !r.trophies.includes('visits-10000') && r.cups === 3, `j42 the shelf has the 1,000-visit trophy (${r.trophies.join(', ')})`);
+    // With the room at mid detail, the same desk shows all 3 sheets.
+    const mid = await p.ev(`(() => { const v = window.__office.view; const d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(v), 'low'); Object.defineProperty(v, 'low', { value: false, configurable: true }); const b = v.actors.get(${builder.id}); b.showPile(3); const n = b.pile.children.filter((m, i) => i && m.visible).length; delete v.low; return n; })()`);
+    check(mid === 3, `j42 at full detail the same desk shows 3 sheets (${mid})`);
+    if (shots) {
+      await p.ev(`(() => { const v = window.__office.view; const b = v.actors.get(${builder.id}); v.targetYaw = v.yaw = 0.6; v.targetZoom = v.zoom = 3.6; v.targetPan.set(b.pile.position.x, b.pile.position.z); v.pan.copy(v.targetPan); })()`);
+      await sleep(2500); await p.shot(`${shots}/r2-j42-pile.jpg`);
+      await p.ev('(() => { const v = window.__office.view; v.targetYaw = v.yaw = 1.35; v.targetZoom = v.zoom = 3.6; const g = v.trophyGroup.position; v.targetPan.set(g.x + 3, g.z); v.pan.copy(v.targetPan); })()');
+      await sleep(2500); await p.shot(`${shots}/r2-j42-trophies.jpg`);
+    }
+    check(!p.errors.length, `j42 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+  }
 } finally {
   b.close(); await t.close();
 }

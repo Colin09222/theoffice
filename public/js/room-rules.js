@@ -144,3 +144,27 @@ export function whiteboardRows(board, tasks = []) {
   });
   return { title: board.goal || 'The plan', rows, done: rows.filter((r) => r.tick).length, total: rows.length };
 }
+
+// ---- r2-j42: paper piles and trophies (Q5c, Q5d) ----
+/** One sheet per queued job, at most 5; an empty queue is an empty tray. On phone low: one flat sheet, or none. */
+export const PILE_MAX = 5;
+export function pileSheets(queued, { low = false } = {}) {
+  const n = Math.max(0, Math.floor(queued || 0));
+  return low ? Math.min(n, 1) : Math.min(n, PILE_MAX);
+}
+/** A bean's queue: their own tasks waiting to start ('todo'), from the tasks the page already has. */
+export function queuedFor(tasks, id) {
+  const me = String(id);
+  return (tasks || []).filter((t) => t.status === 'todo' && String(t.agentId ?? t.agent_id) === me).length;
+}
+/** The four milestones, in order: a first launch, then 100, 1,000 and 10,000 real visits. Never more than these four on the shelf. */
+export const MILESTONES = [
+  { id: 'first-launch', label: 'First launch', test: (m) => m.launches >= 1 },
+  { id: 'visits-100', label: '100 visits', test: (m) => m.visits >= 100 },
+  { id: 'visits-1000', label: '1,000 visits', test: (m) => m.visits >= 1000 },
+  { id: 'visits-10000', label: '10,000 visits', test: (m) => m.visits >= 10000 },
+];
+export function trophiesFor(milestones) {
+  if (!milestones) return [];
+  return MILESTONES.filter((m) => m.test(milestones)).map(({ id, label }) => ({ id, label })).slice(0, 4);
+}

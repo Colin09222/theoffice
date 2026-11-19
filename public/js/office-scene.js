@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows } from './room-rules.js';
+import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows, pileSheets, queuedFor, trophiesFor } from './room-rules.js';
 import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
@@ -470,7 +470,7 @@ export class Actor {
     if (rest.length) { const r = document.createElement('span'); r.className = 'char-rest'; r.textContent = ` ${rest.join(' ')}`; this.nameEl.append(r); }
     this.nameW = 0; this.nameH = 0;
   }
-  destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); if (this.papers) { this.papers.removeFromParent(); for (const m of this.papers.children) { m.geometry.dispose(); m.material.dispose(); } } }
+  destroy() { this.dead = true; this.char.dispose(); this.shadow.removeFromParent(); this.tag.remove(); for (const g of [this.papers, this.pile]) if (g) { g.removeFromParent(); for (const m of g.children) { m.geometry.dispose(); m.material.dispose(); } } }
   sitDown() {
     this.seated = true; this.char.inChair = true; this.char.bigDesk = !!this.seat.big;
     // Hips land on the seat cushion; the legs hang in front of the chair, toward the desk. The height eases in with the
@@ -568,6 +568,26 @@ export class Actor {
     this.showProp(pose?.prop || null);
     if (!this.seated) return;
     this.char.setAnim(pose ? pose.anim : s === 'typing' || s === 'browsing' ? 'type' : s === 'thinking' || s === 'queued' ? 'think' : s === 'talking' ? 'talk' : 'sit');
+  }
+  /** r2-j42: the in-tray on the desk, one sheet per queued job (max 5; one flat sheet on phone low). An empty queue is an empty tray. */
+  showPile(queued) {
+    if (!this.seat.at || this.isBoss) return;
+    const n = this.view.roomCfg?.props === false ? 0 : pileSheets(queued, { low: this.view.low });
+    this.pileCount = n;
+    if (!this.pile) {
+      const g = this.pile = new THREE.Group(); g.name = 'pile';
+      const f = this.seatFace(), [sx, sz] = this.seat.at, side = -0.78;
+      g.position.set(sx + Math.sin(f) * 0.85 + Math.cos(f) * side, 0.99, sz + Math.cos(f) * 0.85 - Math.sin(f) * side); g.rotation.y = f;
+      const tray = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.4), new THREE.MeshLambertMaterial({ color: '#5b4636' })); tray.position.y = 0.02; g.add(tray);
+      this.view.root.add(g);
+    }
+    const sheets = this.pile.children.slice(1);
+    while (sheets.length < n) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.018, 0.32), new THREE.MeshLambertMaterial({ color: sheets.length % 2 ? '#f4ecd8' : '#fffdf4' }));
+      m.position.set((Math.random() - 0.5) * 0.04, 0.055 + sheets.length * 0.022, (Math.random() - 0.5) * 0.04); m.rotation.y = (Math.random() - 0.5) * 0.15;
+      this.pile.add(m); sheets.push(m);
+    }
+    sheets.forEach((m, i) => { m.visible = i < n; });
   }
   /** The desk prop for the work: papers spread beside the keyboard for research, a clipboard in hand for testing. Only while seated. */
   showProp(prop) {
@@ -938,7 +958,7 @@ export class OfficeView {
     // Art on the side wall, in the style the boss picked. The company's own logo goes in the first frame when it has one.
     if (d.art) this.hangArt(room, wallX);
     // The floor's real launches, framed over the art spots (r2-j32).
-    this.frameWall = { room, wallX }; this.setFrames(this.roomCfg.frames);
+    this.frameWall = { room, wallX }; this.setFrames(this.roomCfg.frames); this.setTrophies(this.roomCfg.milestones);
     // Bookshelf.
     const shelf = new THREE.Group(); shelf.position.set(L.shelf[0], 0, L.shelf[1]); legacy.add(shelf);
     piece(shelf, '#6f5136', 0.6, 3.1, 2.6, 0, 0, 0);
@@ -1204,7 +1224,35 @@ export class OfficeView {
   /** Phone "low" (spec Q9): fewer, smaller props. */
   get low() { return (stage.q?.density ?? 1) < 0.6; }
   /** The room's own data from the snapshot (server/room.js): frames now, more props later. */
-  setRoom(room) { if (!room) return; this.roomCfg = room; this.setFrames(room.frames); this.boardKey = null; this.updateBoard(this.tasks); }
+  setRoom(room) { if (!room) return; this.roomCfg = room; this.setFrames(room.frames); this.setTrophies(room.milestones); this.boardKey = null; this.updateBoard(this.tasks); }
+  /**
+   * r2-j42: the trophy shelf on the reception wall, under the sign: one cup per milestone reached (a first launch, then 100, 1,000 and 10,000 real visits), at most
+   * 4, each bigger than the last. Real counts only (server/room.js roomMilestones); a floor with none has a bare shelf.
+   */
+  setTrophies(milestones) {
+    if (!this.frameWall || this.roomCfg?.props === false) return;
+    const list = trophiesFor(milestones);
+    const key = list.map((x) => x.id).join();
+    if (key === this.trophyKey) return;
+    this.trophyKey = key;
+    if (this.trophyGroup) { this.disposeTree(this.trophyGroup); this.trophyGroup.removeFromParent(); }
+    const g = this.trophyGroup = new THREE.Group(); g.name = 'trophies';
+    const L = this.plan; g.position.set(this.frameWall.wallX + 0.2, 1.55, L.console ?? L.signZ ?? -0.4);
+    this.frameWall.room.add(g);
+    if (list.length) { const plank = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.06, 2.7), new THREE.MeshLambertMaterial({ color: '#6f5136' })); plank.position.set(0, -0.03, 0); plank.userData.keep = true; g.add(plank); }
+    const gold = new THREE.MeshStandardMaterial({ color: '#e2b23a', metalness: 0.6, roughness: 0.35 }), base = new THREE.MeshLambertMaterial({ color: '#3b2c22' });
+    list.forEach((t, i) => {
+      const k = 0.8 + i * 0.14, z = -0.9 + i * 0.6;
+      const cup = new THREE.Group(); cup.position.set(0.02, 0, z); cup.scale.setScalar(k); cup.userData.trophy = t.id; g.add(cup);
+      const add = (geo, mat, y) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.userData.keep = true; cup.add(m); return m; };
+      add(new THREE.BoxGeometry(0.3, 0.1, 0.3), base, 0.05);
+      add(new THREE.CylinderGeometry(0.035, 0.05, 0.16, 10), gold, 0.18);
+      add(new THREE.CylinderGeometry(0.15, 0.06, 0.24, 14), gold, 0.38);
+      if (i === 0) add(new THREE.OctahedronGeometry(0.07), gold, 0.56);  // the first launch's cup carries a star
+    });
+    this.trophies = list.map((x) => x.id);  // read by the tests
+    this.trophyCups = g.children.filter((c) => c.userData.trophy).length;
+  }
   /**
    * r2-j32: one frame per real launch, newest first, over the side wall's picture spots: big when there are one or two, a 2 by 2 cluster per spot
    * past that, at most 8 (3 small on phone low) and then a "+N" tag. Each frame is the launch's real photo; a launch with no photo yet hangs a
@@ -1615,6 +1663,8 @@ export class OfficeView {
     for (const a of this.actors.values()) if (a.state !== 'idle') a.renderBubble();
     // A task starting or stopping changes what the desk shows, even before the person's own state does (r2-j39).
     for (const a of this.actors.values()) { const r = a.running; if (r !== a.wasRunning) { a.wasRunning = r; if (!a.isBoss) a.applyStatePose(); } }
+    // r2-j42: each desk's in-tray holds one sheet per job waiting for its owner.
+    for (const a of this.actors.values()) if (!a.isBoss && !a.extra) a.showPile(queuedFor(tasks, a.id));
     // r2-j41: the current plan's jobs from the server (this week's, or the newest plan's), ticked from the live tasks.
     const plan = whiteboardRows(this.roomCfg?.whiteboard, tasks);
     this.whiteboard = plan;  // read by the tests
