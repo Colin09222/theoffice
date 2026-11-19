@@ -1,7 +1,7 @@
 // Round 2, lane A, in a real browser: the floor room (docs/redesign/OFFICE-ANSWERS-2.md). Each check names its job. npm run e2e:room2
 // ROOM2_ONLY=j31,j32 runs some of them; ROOM2_SHOTS=dir saves a picture of each.
 import { launch, sleep } from './cdp.mjs';
-import { boot, claim, waitDone } from '../helpers.js';
+import { boot, claim, waitDone, adminClient } from '../helpers.js';
 import { get, run } from '../../server/db.js';
 import { weekOf } from '../../server/weekplan.js';
 import { storeShot } from '../../server/shots.js';
@@ -333,6 +333,27 @@ try {
     check(!/\blevel\b|\blvl\b|\brank\b/i.test(card.all + plaque), 'j67 no level on the card or the plaque');
     if (shots) await p.shot(`${shots}/r2-j67-idcard.jpg`);
     check(!p.errors.length, `j67 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+  }
+  if (want('j69')) {
+    // r2-j69: Colon approves a waiting library entry with one tap in admin.
+    const boss = await claim(t, 'Library Floor');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    const { toolsForRole } = await import('../../server/tools.js');
+    const m = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", f.id);
+    await t.app.engine.tools.exec(t.app.engine.toolCtx(f, m, null, toolsForRole('manager')), 'propose_library_entry', JSON.stringify({ title: 'Prices on the first screen', lane: 'website', lesson: 'Write to sales@library.example for the old list. Put prices where a phone sees them first.' }));
+    const id = get(t.db, 'SELECT id FROM library_entries WHERE floor_id=?', f.id).id;
+    const admin = await adminClient(t);
+    const p = await b.newPage({});
+    for (const [name, value] of Object.entries(admin.cookies)) await p.send('Network.setCookie', { name, value, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice' });
+    await p.goto(`${base}/admin`);
+    await p.until(`!!document.querySelector('[data-approve="${id}"]')`, 'the waiting entry', 30000);
+    const shown = await p.ev(`document.querySelector('[data-library="${id}"]').textContent`);
+    check(!shown.includes('@') && /\[removed\]/.test(shown) && /private detail/.test(shown), 'j69 the admin sees the entry scrubbed, with how much was taken out');
+    if (shots) await p.shot(`${shots}/r2-j69-admin.jpg`);
+    await p.click(`[data-approve="${id}"]`);
+    await p.until(`!document.querySelector('[data-approve="${id}"]')`, 'the tap', 15000);
+    check(get(t.db, 'SELECT status FROM library_entries WHERE id=?', id).status === 'approved', 'j69 one tap approves it');
+    check(!p.errors.length, `j69 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
   }
 } finally {
   b.close(); await t.close();

@@ -40,5 +40,9 @@ export function laneA2Settings(env = process.env) {
     upkeep: on(env.UPKEEP),
     // r2-j67: real counts on each bean's ID card (jobs finished, launches worked on) and the floor plaque (launches, visits) (REAL_COUNTS=0: none).
     realCounts: on(env.REAL_COUNTS),
+    // r2-j69: the building library: managers propose (2 a week, scrubbed by code), Colon approves each in admin, bots read approved entries fenced
+    // (LIBRARY=0: closed). LIBRARY_SEED_FLOORS: Colon's own floor numbers whose launches seed it, as waiting entries (e.g. "6").
+    library: on(env.LIBRARY),
+    librarySeedFloors: env.LIBRARY_SEED_FLOORS || '',
   };
 }

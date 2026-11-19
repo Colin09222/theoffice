@@ -331,6 +331,11 @@ CREATE TABLE IF NOT EXISTS share_cards (floor_id INTEGER PRIMARY KEY, image BLOB
 CREATE TABLE IF NOT EXISTS upkeep_runs (floor_id INTEGER NOT NULL, week TEXT NOT NULL, ran_at INTEGER NOT NULL, report TEXT NOT NULL DEFAULT '{}', PRIMARY KEY (floor_id, week));
 CREATE TABLE IF NOT EXISTS upkeep_fixes (id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, week TEXT NOT NULL, task_id INTEGER NOT NULL, created_at INTEGER NOT NULL, checked_at INTEGER, fixed INTEGER);
 CREATE TABLE IF NOT EXISTS upkeep_notices (floor_id INTEGER NOT NULL, key TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (floor_id, key));
+CREATE TABLE IF NOT EXISTS library_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER, week TEXT NOT NULL, title TEXT NOT NULL, lane TEXT NOT NULL, lesson TEXT NOT NULL, code TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL, removed INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, decided_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS library_entries_floor ON library_entries(floor_id, week);
 CREATE TABLE IF NOT EXISTS launch_checklists (floor_id INTEGER NOT NULL, project TEXT NOT NULL, result TEXT NOT NULL, checked_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project));
 `;
 
