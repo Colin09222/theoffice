@@ -26,5 +26,7 @@ export function laneBSettings(env = process.env) {
     nightFreezeFrom: /^\d{2}:\d{2}$/.test(env.NIGHT_FREEZE_FROM || '') ? env.NIGHT_FREEZE_FROM : '23:00',
     nightFreezeTo: /^\d{2}:\d{2}$/.test(env.NIGHT_FREEZE_TO || '') ? env.NIGHT_FREEZE_TO : '08:00',
     nightFreezeTz: env.NIGHT_FREEZE_TZ || 'America/New_York',
+    // j07, the hard cap (TASK_MAX_USD, default 5, in config.js): a task that reaches it is ended and ships or closes. HARD_CAP_ENDS=0 goes back to the old stop.
+    hardCapEnds: on(env.HARD_CAP_ENDS),
   };
 }

@@ -197,7 +197,7 @@ export class Computer {
    */
   room(floorId, task, st) {
     const { cfg } = this.engine; const e = this.engine;
-    const perTask = cfg.taskMaxUsd - task.cost_usd;
+    const perTask = e.taskCap(task) - task.cost_usd;
     const perDay = Math.min(cfg.floorDailyUsd - e.spentToday(floorId) - (e.reserved.get(floorId) || 0), cfg.globalDailyUsd - e.spentGlobal() - e.reservedTotal) + st.hold;
     // Over the session's whole life: going back in line for the next slice can't start its limit again.
     const own = Math.min(cfg.sessionMaxUsd - st.charged, perTask);

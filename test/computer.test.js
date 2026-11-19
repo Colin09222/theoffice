@@ -360,7 +360,7 @@ describe('limits and caps', () => {
   test('no session starts when nothing is left of the task cap or the day', async () => {
     const h = await start({}, { taskMaxUsd: 0.05 });
     const row = await h.settle((await go(h)).id);
-    assert.equal(row.status, 'failed'); assert.match(row.result, /Stopped by the building/); assert.doesNotMatch(row.result, /\$|spen[dt]|\blimit\b/i);
+    assert.equal(row.status, 'failed'); assert.match(row.result, /Ended by the building, with nothing usable saved, so it is closed/);  // the hard cap ends it (redesign job 7) assert.doesNotMatch(row.result, /\$|spen[dt]|\blimit\b/i);
     assert.equal(h.sessions.calls.sessions.length, 0);
     const h2 = await start({}, { floorDailyUsd: 0.05 });
     const task2 = (await go(h2)).id;

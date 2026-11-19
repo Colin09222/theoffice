@@ -453,6 +453,22 @@ describe('form-entry emails to the boss', () => {
     assert.ok(!kept.includes('Wedding') && !kept.includes('ana@example.com'));
   });
 
+  test('a boss email set by the building manager (floor 7 had none) makes a form entry send one alert (redesign job 8)', async () => {
+    const { t, f, post, toBoss } = await site();
+    const { setBossEmail } = await import('../server/mail.js');
+    assert.equal((await post('booking', { email: 'a@example.com', message: 'before' })).status, 200);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(toBoss().length, 0, 'no boss email: nothing goes out');
+    assert.equal(setBossEmail(t.db, f.id, 'Boss@Home.example', { mailDomain: t.cfg.mailDomain }), 'boss@home.example');
+    assert.throws(() => setBossEmail(t.db, f.id, 'not an address'), /does not look right/);
+    assert.throws(() => setBossEmail(t.db, f.id, `x@${t.cfg.mailDomain}`, { mailDomain: t.cfg.mailDomain }), /not one in the building/);
+    assert.equal((await post('booking', { email: 'a@example.com', message: 'after' })).status, 200);
+    const sent = await until(() => toBoss()[0], { what: 'the form alert' });
+    assert.match(sent.text, /message: after/);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(toBoss().length, 1, 'one alert');
+  });
+
   test('no boss email, switched off, paused or over the hourly cap: nothing goes out and the form still saves', async () => {
     const { t, c, f, post, toBoss } = await site({ mailFormAlertsHourly: 2 });
     assert.equal((await post('contact', { email: 'a@example.com', message: 'one' })).status, 200);
@@ -543,6 +559,12 @@ describe('the scripts', () => {
     assert.notEqual((await admin('pause', '--floor', '9')).code, 0);
     assert.match((await admin('form-alerts', '--floor', '3')).out, /floor 3 Kiln Co: on\. Boss email: not set/);
     assert.match((await admin('form-alerts', '--floor', '3', 'off')).out, /floor 3 Kiln Co: off/);
+    const withStdin = (input, ...a) => new Promise((resolve) => { const p = execFile(process.execPath, ['scripts/admin.mjs', 'mail', ...a], { env: { PATH: process.env.PATH, DATA_DIR: dir } }, (err, stdout, stderr) => resolve({ code: err ? err.code : 0, out: stdout + stderr })); p.stdin.end(input); });
+    const set = await withStdin('boss@home.example\n', 'boss-email', '--floor', '3');
+    assert.equal(set.code, 0, set.out); assert.match(set.out, /Boss email for floor 3 Kiln Co: b\*\*\*@home\.example\./); assert.ok(!set.out.includes('boss@home.example'), 'shown masked');
+    assert.match((await admin('form-alerts', '--floor', '3')).out, /Boss email: b\*\*\*@home\.example/);
+    assert.notEqual((await withStdin('nonsense', 'boss-email', '--floor', '3')).code, 0);
+    assert.match((await withStdin('', 'boss-email', '--floor', '3', '--clear')).out, /cleared/);
     const db2 = openDb(dir);
     assert.ok(get(db2, "SELECT 1 x FROM mail_suppressed WHERE address='spam@trap.example'"));
     db2.close();

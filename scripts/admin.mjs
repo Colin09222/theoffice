@@ -22,7 +22,8 @@ import { ensureAdSpend, resumeAds } from '../server/business.js';
 import { scrub } from '../server/llm.js';
 import { createRunnerClient, runnerConfigured } from '../server/runner.js';
 import { ensureServerSchema } from '../server/servers.js';
-import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, setFormAlerts, maskAddress, MailError } from '../server/mail.js';
+import { mailStatus, mailStatusText, ensureMailSchema, setFloorPause, setBuildingPause, suppressAddress, setFormAlerts, maskAddress, MailError, setBossEmail } from '../server/mail.js';
+import { deniedListing, deniedListingText } from '../server/denied.js';
 import { dailyStatus, dailyStatusText, requestDailyRun, setDailyPaused, ensureDailySchema } from '../server/daily.js';
 import { chatAdminCommand } from '../server/cloud/chat.js';
 import { setContractor, contractorListing, contractorListingText, completeJob, ContractorError, SUMMARY_MAX } from '../server/contractor.js';
@@ -42,6 +43,8 @@ const usage = () => {
     '  node scripts/admin.mjs mail status [--json]   email: sending and receiving, today\'s counts, each floor\'s address, pauses and alerts. No message text',
     '  node scripts/admin.mjs mail pause|resume [--floor N]   stop or restart sending for one floor, or for the whole building. Receiving carries on',
     '  node scripts/admin.mjs mail form-alerts --floor N [on|off]   email the boss each new site-form entry (on by default); shows the boss address masked',
+    '  node scripts/admin.mjs mail boss-email --floor N [--clear]   set the boss\'s own address for floor N (form alerts and reports go there), read from stdin so it stays out of the shell history; shown masked',
+    '  node scripts/admin.mjs denied [--since 24h|7d|90m] [--json]   every "not allowed" (403) or "closed" (423) a signed-in boss or the admin got: who, which floor, what they tried, when',
     '  node scripts/admin.mjs mail suppress <address>   never send to this address again, from any floor',
     '  node scripts/admin.mjs login --floor N [--minutes M]   a short boss login to check floor N by hand (default 60 minutes, at most 240): the office_s cookie value, to this terminal only',
     '  node scripts/admin.mjs login revoke           end such a login now: give its cookie value on stdin',
@@ -460,6 +463,9 @@ if (cmd === 'code' && rest[0] === 'hold') {
     const listing = spendListing(db, { last: i >= 0 ? Number(rest[i + 1]) || 12 : 12 });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : spendListingText(listing));
   }
+} else if (cmd === 'denied') {
+  const rows = deniedListing(db, { since: sinceArg('7d') });
+  console.log(rest.includes('--json') ? JSON.stringify(rows, null, 2) : deniedListingText(rows));
 } else if (cmd === 'alerts') {
   const list = alertLog(db, { since: sinceArg('7d') });
   console.log(rest.includes('--json') ? JSON.stringify(list, null, 2) : list.length ? list.map((a) => `${a.at}  [${a.kind}, ${a.status}]\n${a.text}\n`).join('\n') : 'Nothing reached the owner.');
@@ -546,6 +552,11 @@ if (cmd === 'code' && rest[0] === 'hold') {
     if (want) setFormAlerts(db, f.id, want === 'on');
     const m = get(db, 'SELECT boss_email, form_alerts FROM mail_floor WHERE floor_id=?', f.id) || { boss_email: '', form_alerts: 1 };
     console.log(`Form-entry emails for floor ${f.number} ${f.name}: ${m.form_alerts ? 'on' : 'off'}. Boss email: ${m.boss_email ? maskAddress(m.boss_email) : 'not set, so none go out'}.`);
+  } else if (sub === 'boss-email') {
+    const f = floorRow();
+    let raw = '';
+    if (!rest.includes('--clear')) { try { raw = readFileSync(0, 'utf8').trim(); } catch { raw = ''; } if (!raw) die('Give the address on stdin, or --clear.'); }
+    try { const kept = setBossEmail(db, f.id, raw, { mailDomain: cfg.mailDomain }); console.log(`Boss email for floor ${f.number} ${f.name}: ${kept ? maskAddress(kept) : 'cleared'}.`); } catch (e) { if (e instanceof MailError) die(e.message); throw e; }
   } else if (sub === 'suppress') {
     try { console.log(`${suppressAddress(db, rest[1], 'building manager')} will get no more email from the building.`); } catch (e) { if (e instanceof MailError) die(e.message); throw e; }
   } else usage();

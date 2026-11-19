@@ -662,7 +662,7 @@ export class Engine {
         if (n === maxSteps - 3) messages.push({ role: 'user', content: 'Save your work now: write what you have so far into the project. You have 3 steps left, so then end your turn with an honest report: what is done, and what is still missing.' });
         this.checkpoint(floorId, signal);
         task = get(this.db, 'SELECT * FROM tasks WHERE id=?', taskId);
-        if (task.cost_usd >= this.cfg.taskMaxUsd) { this.stopAtCeiling(floor, agent, task.id, this.savedSoFar(floor.id, task)); return; }
+        if (task.cost_usd >= this.taskCap(task)) { this.stopAtCeiling(floor, agent, task.id, this.savedSoFar(floor.id, task)); return; }
         this.setAgent(agent.id, { state: 'thinking', activity: task.title, project: task.project, task_id: task.id });
         const res = await this.callLLM(call, { messages: compact(messages), tools: defs, meta: { kind: 'staff', role: agent.role, floorId, floorSlug: floor.slug, step, task, allBoss, answers: answers(), files: this.taskFiles(task).map((f) => f.path) } });
         step++;
@@ -834,14 +834,40 @@ export class Engine {
     }
   }
 
+  /** The most one task may cost: its own cap if it has one (Tier 3's $6), else the building's TASK_MAX_USD ($5). */
+  taskCap(task) { return task?.cap_usd > 0 ? task.cap_usd : this.cfg.taskMaxUsd; }
   /**
-   * The safety net on one task's money. A job only gets here by being stuck, and no bot is told it exists, before or after: the manager hears the job was stopped and why that matters, and the boss hears it plainly, without a figure.
-   * Whatever was saved stays on the drive, and the job starts again only if the boss says so.
+   * The hard stop on one task (docs/redesign, job 7). The task is ended, not just flagged: if it saved something usable, it ships as it stands, marked
+   * Work in progress, with a "Not done yet" list of what is missing; otherwise it closes. The manager tells the boss one plain line, without a figure,
+   * and the owner gets one alert. No bot is told the cap exists, before or after. HARD_CAP_ENDS=0 goes back to the old stop (failed, and the boss told).
    */
   stopAtCeiling(floor, agent, taskId, soFar = '', saved = true) {
-    const title = get(this.db, 'SELECT title FROM tasks WHERE id=?', taskId)?.title || 'that job';
+    const task = get(this.db, 'SELECT * FROM tasks WHERE id=?', taskId);
+    const title = task?.title || 'that job';
+    if (task && this.cfg.hardCapEnds) return this.endAtCap(floor, agent, task, soFar, saved);
     this.finishTask(floor, agent, taskId, 'failed', `Stopped by the building: this job had gone on far longer than any job should, so it was probably stuck.${soFar} Tell the boss plainly what got done and what didn't. Don't start it again unless the boss says to.`);
     this.bossNotice(floor.id, `Boss, I stopped "${title}": it had gone on far longer than any job should, which usually means someone was stuck. ${saved ? 'Everything it saved is on the drive.' : 'I couldn\'t bring back its last save, so the newest work may be missing.'} Tell me if you want it picked up again.`);
+  }
+
+  endAtCap(floor, agent, task, soFar, saved) {
+    const oneTitle = (t) => String(t.title || 'that job').split('\n')[0].slice(0, 120);
+    if (task.status === 'cancelled' || task.capped_at) return;
+    const files = task.project && saved ? listFiles(this.db, floor.id, `projects/${task.project}/`).length : 0;
+    // What is missing: each "Done means" check not ticked PASS in its own self-check, or the brief as a whole when it had none.
+    const checks = readChecks(task);
+    let marks = []; try { marks = JSON.parse(task.selfcheck || '[]'); } catch { /* none */ }
+    const passed = new Set(marks.filter((m) => m.verdict === 'pass').map((m) => m.n));
+    const missing = checks.length ? checks.filter((_, i) => !passed.has(i + 1)) : ['Whatever the brief asked for that is not in the saved work yet.'];
+    run(this.db, 'UPDATE tasks SET capped_at=?, wip=?, not_done=? WHERE id=?', this.now(), files ? 1 : 0, JSON.stringify(missing), task.id);
+    const list = missing.map((m) => `- ${m}`).join('\n');
+    if (files) {
+      this.finishTask(floor, agent, task.id, 'done', `Ended by the building and shipped as it stands, marked Work in progress. ${files} files are saved under projects/${task.project}/.${soFar}\n\nNot done yet:\n${list}\n\nPublish what is saved as it stands if it isn't live yet, and don't start this job again unless the boss says to.`);
+      this.managerSays(floor.id, `Boss, I stopped "${oneTitle(task)}" where it was: it ships as it stands, marked Work in progress. Not done yet: ${missing.map((m) => m.replace(/[.\s]+$/, '')).join('; ')}. Tell me if you want the rest done.`);
+    } else {
+      this.finishTask(floor, agent, task.id, 'failed', `Ended by the building, with nothing usable saved, so it is closed.${soFar} Don't start it again unless the boss says to.`);
+      this.managerSays(floor.id, `Boss, I stopped "${oneTitle(task)}": it was going nowhere and nothing usable was saved, so I closed it. Tell me if you want another go at it.`);
+    }
+    this.ownerAlerts.taskCapped({ floorId: floor.id, taskId: task.id, title: task.title, usd: get(this.db, 'SELECT cost_usd c FROM tasks WHERE id=?', task.id).c, capUsd: this.taskCap(task) });
   }
 
   /** A line in the chat as the work moves along, so a long job isn't silence between two manager messages. It costs no model call, and the manager's own report still ends the job. */
