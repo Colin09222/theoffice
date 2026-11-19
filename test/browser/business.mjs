@@ -23,6 +23,7 @@ const enter = async (p, c, slug) => {
   await p.goto(base);
   if (c) await p.send('Network.setCookie', { name: 'office_s', value: c.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
   await p.goto(`${base}/floor/${slug || c.slug}?q=low`);
+  await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
 };
 // Before every picture: no bare "null" or "undefined" left on the page by a missing piece of the UI (one sat under the floor's controls).
@@ -56,7 +57,8 @@ try {
     const steps = await p.ev('[...document.querySelectorAll(".journey-slot .journey-steps li")].map((li) => li.className + ":" + li.textContent).join(" ")');
     if (steps !== 'now:1Idea next:2Build next:3Customers next:4Launch') throw new Error(steps);
     if (!await p.ev(inView('.journey-slot .journey'))) throw new Error('the header is off screen');
-    if (await p.ev('document.querySelector(".tab.on")?.dataset.tab') !== 'business') throw new Error('not on the Business tab');
+    // The journey is the Business tab's first section for the boss (docs/redesign, job 22).
+    if (await p.ev('document.querySelector(".tab.on")?.dataset.tab + "/" + window.__office.tab') !== 'biz/business') throw new Error('not on the Business tab\'s journey');
     if (!await p.ev('!document.querySelector("[data-start-business]")')) throw new Error('start button still there');
   });
 
@@ -81,7 +83,7 @@ try {
   });
 
   await step('desktop: picking a card starts the build: four track lamps with counts, and the live preview of the page as it is saved', async () => {
-    await p.click('[data-tab="business"]');
+    await p.tab('business');  // the boss's journey is the first section of the Business tab (job 22)
     await p.until('!!document.querySelector("[data-pick=\'0\']")', 'the pick button');
     // Mock builds are quick, so the preview is watched for as it comes rather than looked for once.
     await p.ev('window.__sawPreview = false; new MutationObserver(() => { if (document.querySelector(".biz-frame")?.getAttribute("src")) window.__sawPreview = true; }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] }); true');

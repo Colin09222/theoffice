@@ -61,7 +61,7 @@ for (const size of SIZES) {
     await p.until('document.documentElement.classList.contains("ready") && document.body.dataset.page === "lobby"', 'the lobby', 45000);
     await sleep(800);
     await see('lobby');
-    await see('Open an office dialog', async () => { await p.click('.open-pill'); await p.until('!!document.querySelector(".modal .code-input")', 'dialog'); });
+    await see('Open an office dialog', async () => { await p.click('.open-office'); await p.until('!!document.querySelector(".modal .code-input")', 'dialog'); });
     await see('Sign in dialog', async () => { await p.ev('[...document.querySelectorAll(".modal button")].find((b) => /Sign in/.test(b.textContent))?.click(); true'); await p.until('!!document.querySelector(".modal input[name=code], .modal input")', 'sign in', 5000); });
     await p.ev('document.querySelector(".modal .icon-btn")?.click(); true');
     p.close();
@@ -73,7 +73,7 @@ for (const size of SIZES) {
     await p.goto(`${base}?q=low`);
     await p.until('document.documentElement.classList.contains("ready") && document.body.dataset.page === "lobby"', 'the lobby', 45000);
     await step(`${tag} setup: opens a new office`, async () => {
-      await p.click('.open-pill');
+      await p.click('.open-office');
       await p.until('!!document.querySelector(".modal .code-input")', 'dialog');
       await p.type('.code-input', t.code());
       await p.click('.modal button[type=submit]');
@@ -100,6 +100,10 @@ for (const size of SIZES) {
     await p.goto(`${base}?q=low`);
     await cookie(p, fresh);
     await p.goto(`${base}/floor/${fresh.slug}?q=low`);
+    // A phone opens the floor without its room (docs/redesign, job 16): that page is audited too, then Watch the room.
+    await p.until('document.body.dataset.page === "floor-lite" || document.body.dataset.page === "floor"', 'a floor page', 45000);
+    if (await p.ev('document.body.dataset.page === "floor-lite"')) await see('floor without its room', async () => { await p.until('!!document.querySelector(".status-card") && !!document.querySelector("[data-watch-room]")', 'the card and Watch the room', 15000); });
+    await p.room();
     await onFloor(p);
     await p.until('document.querySelectorAll("[data-launcher] .launch-type").length === 4', 'the launcher', 15000);
     await sleep(600);
@@ -124,6 +128,10 @@ for (const size of SIZES) {
     await p.goto(`${base}?q=low`);
     await cookie(p, c);
     await p.goto(`${base}/floor/${c.slug}?q=low`);
+    // A phone opens the floor without its room (docs/redesign, job 16): that page is audited too, then Watch the room.
+    await p.until('document.body.dataset.page === "floor-lite" || document.body.dataset.page === "floor"', 'a floor page', 45000);
+    if (await p.ev('document.body.dataset.page === "floor-lite"')) await see('floor without its room', async () => { await p.until('!!document.querySelector(".status-card") && !!document.querySelector("[data-watch-room]")', 'the card and Watch the room', 15000); });
+    await p.room();
     await onFloor(p);
     await sleep(1600);
     await settled(p);
@@ -132,7 +140,7 @@ for (const size of SIZES) {
       await step(`${tag} boss: the chat gets at least 55% of the visible height`, async () => {
         for (const tab of ['chat', 'talk']) {
           await p.click(`[data-tab=${tab}]`); await settled(p); await sleep(200);
-          const r = await p.ev(`(() => { const l = document.querySelector('.chat-list, .talk-list').getBoundingClientRect(); return { h: l.height, vh: visualViewport.height, sheet: document.body.dataset.sheet, list: l.height / visualViewport.height }; })()`);
+          const r = await p.ev(`(() => { const l = document.querySelector('.chat-list, .talk-list, .timeline').getBoundingClientRect(); return { h: l.height, vh: visualViewport.height, sheet: document.body.dataset.sheet, list: l.height / visualViewport.height }; })()`);
           if (r.list < 0.55) throw new Error(`${tab}: ${JSON.stringify(r)}`);
           if (r.sheet !== 'full') throw new Error(`${tab} opened ${r.sheet}`);
         }
@@ -235,6 +243,8 @@ for (const size of SIZES) {
     }
     const tabs = await p.ev('[...document.querySelectorAll("[data-tab]")].map((x) => x.dataset.tab)');
     for (const tab of tabs) await see(`tab ${tab}`, async () => { await p.click(`[data-tab=${tab}]`); await sleep(260); if (phoneLayout) await settled(p); });
+    // The Business tab's sections were tabs of their own before the redesign (job 22): each is audited the same way.
+    if (tabs.includes('biz')) for (const sec of ['numbers', 'orders', 'pay', 'inbox', 'launch']) await see(`Business: ${sec}`, async () => { await p.tab(sec); await sleep(260); if (phoneLayout) await settled(p); });
     await see('a staff file', async () => { if (phoneLayout) { await p.click('[data-tab=work]'); await sleep(200); await p.click('.staff-chip[data-agent]'); } else await p.ev('window.__office.openAgent(window.__office.state.agents[0]); true'); await p.until('!!document.querySelector(".modal [data-profile]")', 'the file', 5000); await sleep(200); });
     await see('staff editor', async () => { await p.click('[data-profile-edit]'); await p.until('!!document.querySelector(".modal .staff-pick")', 'the editor', 5000); await sleep(300); });
     await p.ev('document.querySelector(".modal .icon-btn")?.click(); true');
@@ -258,6 +268,10 @@ for (const size of SIZES) {
     const p = await newPage(); const see = screen(p, `${tag} visitor`, opts);
     await p.send('Network.clearBrowserCookies');
     await p.goto(`${base}/floor/${c.slug}?q=low`);
+    // A phone opens the floor without its room (docs/redesign, job 16): that page is audited too, then Watch the room.
+    await p.until('document.body.dataset.page === "floor-lite" || document.body.dataset.page === "floor"', 'a floor page', 45000);
+    if (await p.ev('document.body.dataset.page === "floor-lite"')) await see('floor without its room', async () => { await p.until('!!document.querySelector(".status-card") && !!document.querySelector("[data-watch-room]")', 'the card and Watch the room', 15000); });
+    await p.room();
     await onFloor(p);
     await sleep(1400);
     await see('floor on arrival');

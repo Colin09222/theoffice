@@ -54,9 +54,9 @@ try {
     const p = await b.newPage(opts); lastPage = p;
     await step(`${label}: a boss with a code lands in Setup, not the chat, and gets the keys`, async () => {
       await p.goto(`${base}/?q=low`);
-      await p.until('!!document.querySelector(".open-pill")', 'the Open an office button', 20000);
-      await p.until('(() => { const r = document.querySelector(".open-pill")?.getBoundingClientRect(); if (!r) return false; const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!t && !!t.closest(".open-pill"); })()', 'the pill on top', 20000);
-      await p.click('.open-pill');
+      await p.until('!!document.querySelector(".open-office")', 'the Open an office button', 20000);
+      await p.until('(() => { document.querySelector(".open-office")?.scrollIntoView({ block: "center" }); const r = document.querySelector(".open-office")?.getBoundingClientRect(); if (!r) return false; const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!t && !!t.closest(".open-office"); })()', 'the pill on top', 20000);
+      await p.click('.open-office');
       await p.until('document.activeElement && document.activeElement.classList.contains("code-input")', 'the code field', 8000);
       await p.ev(`(() => { const i = document.querySelector(".code-input"); i.value = ${q(t.code())}; i.dispatchEvent(new ClipboardEvent("paste", { bubbles: true })); })()`);
       await p.until('document.body.dataset.page === "floor" && !!window.__office', 'straight to the floor', 15000);
@@ -144,6 +144,7 @@ try {
     await step(`${label}: leaving the floor mid-setup and coming back keeps the place, own words and Surprise me reach Ready`, async () => {
       const made = await claimHere(p2);
       await p2.goto(`${base}/floor/${made.slug}?q=low`);
+      await p2.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
       await p2.until(setupOpen('what'), 'Setup, no keys pending', 15000);
       await p2.click('[data-type="website"]');
       await p2.until('document.querySelectorAll(".setup [data-idea]").length === 3', 'ideas');
@@ -199,6 +200,7 @@ try {
     await step(`${label}: "I'd rather just tell the manager" goes to the chat and doesn't come back`, async () => {
       const made = await claimHere(p3);
       await p3.goto(`${base}/floor/${made.slug}?q=low`);
+      await p3.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
       await p3.until(setupOpen('what'), 'Setup', 15000);
       await p3.click('[data-setup-out]');
       await p3.until('!document.querySelector(".setup") && window.__office.tab === "chat" && !!document.querySelector(".chat-input textarea")', 'the chat', 8000);
@@ -219,6 +221,7 @@ try {
       const b2 = await launch();
       const v = await b2.newPage(opts);
       await v.goto(`${base}/floor/${made.slug}?q=low`);
+      await v.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
       await v.until('!!window.__office', 'visitor floor', 20000);
       await sleep(600);
       check(`${label}: a visitor never gets Setup`, !(await v.ev('!!document.querySelector(".setup")')) && !(await v.ev('!!window.__office.state.viewer.owner')));
@@ -230,6 +233,7 @@ try {
     await step(`${label}: a floor that already has a name isn't interrupted`, async () => {
       const made = await claimHere(p4, `Named ${label}`);
       await p4.goto(`${base}/floor/${made.slug}?q=low`);
+      await p4.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
       await p4.until('!!window.__office && !!document.querySelector(".chat-input textarea")', 'the floor', 15000);
       await sleep(800);
       check(`${label}: no Setup on a named floor`, !(await p4.ev('!!document.querySelector(".setup")')));

@@ -34,6 +34,7 @@ for (const [w, h] of SIZES) {
       // LOOK_VIA=lobby arrives the way a visitor does, flown in from the tower, where the room was built as part of the building.
       if (process.env.LOOK_VIA === 'lobby') { await p.goto(`${base}/${Q}`); await p.until('document.body.dataset.page === "lobby" && !document.querySelector("#boot")', 'lobby', 60000); await sleep(4000); await p.ev(`window.officeGo('/floor/${slug}'); true`); }
       else await p.goto(`${base}/floor/${slug}${Q}`);
+      await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
       await p.until('document.body.dataset.page === "floor" && !!window.__office?.state && !document.querySelector("#boot")', 'floor', 60000);
       await sleep(Number(process.env.LOOK_WAIT || 9000));
       // A software renderer draws so slowly that the fly-in may not be over yet; the picture wanted is the one after it.

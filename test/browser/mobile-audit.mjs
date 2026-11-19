@@ -13,12 +13,12 @@ export const AUDIT = (name, { portrait }) => `(() => {
   for (const el of all) {
     const r = el.getBoundingClientRect();
     if (r.right > vw + 1 || r.left < -1) {
-      const s = el.closest('.controls, .ticker-rail, .ticker, .staff-strip');
+      const s = el.closest('.controls, .ticker-rail, .ticker, .staff-strip, .hero-strip, .biz-sections');  // rows meant to be swiped: the home hero (Q3), the Business sections
       if (!s) bad.push('past the edge: ' + say(el) + ' ' + Math.round(r.left) + '..' + Math.round(r.right));
     }
   }
   // Sideways scrolling inside the page: a list that wants a finger dragged sideways.
-  for (const el of all) { const s = getComputedStyle(el); if ((s.overflowX === 'auto' || s.overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 1 && !el.matches('.controls, pre, .table-wrap, .ticker-rail')) bad.push('sideways scroller: ' + say(el) + ' ' + el.scrollWidth + '>' + el.clientWidth); }
+  for (const el of all) { const s = getComputedStyle(el); if ((s.overflowX === 'auto' || s.overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 1 && !el.matches('.controls, pre, .table-wrap, .ticker-rail, .hero-strip, .biz-sections')) bad.push('sideways scroller: ' + say(el) + ' ' + el.scrollWidth + '>' + el.clientWidth); }
   // Text cut off inside a control.
   for (const el of all) {
     if (!el.matches('button, .btn, .chip, .tab, a.btn, input[type=submit]')) continue;
@@ -33,7 +33,7 @@ export const AUDIT = (name, { portrait }) => `(() => {
     if (${portrait ? 'true' : 'false'} && Math.min(r.width, r.height) < 43.5) bad.push('tap target ' + Math.round(r.width) + 'x' + Math.round(r.height) + ': ' + say(el));
   }
   const sheetScroll = [...document.querySelectorAll('.floor-panel')].map((e) => e.scrollTop).join();
-  const scrollers = [...document.querySelectorAll('.chat-list, .talk-list, .feed, .board, .gallery, .requests, .orders, .modal-body')].map((e) => [e, e.scrollTop]);
+  const scrollers = [...document.querySelectorAll('.chat-list, .talk-list, .timeline, .feed, .board, .gallery, .requests, .orders, .modal-body')].map((e) => [e, e.scrollTop]);
   for (const el of primary) {
     el.scrollIntoView({ block: 'center', inline: 'center' });
     const r = el.getBoundingClientRect();

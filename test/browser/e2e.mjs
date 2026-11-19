@@ -1,5 +1,7 @@
 // Real-browser end-to-end at 1440x900 and 390x844, against the real server in mock mode: lobby, claim, customise, chat,
 // watching agents work, opening a published site, visitor view and admin. Every step is asserted, and screenshots go to media/.
+// The redesign (docs/redesign): a home page that draws before the 3D tower, a phone's floor without its room until Watch the room, the
+// Timeline instead of Talk, the four states, the Business tab and the Launched pages. The same paths a person takes, through the new screens.
 import { mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,41 +28,43 @@ async function run(label, opts, t, adminCode) {
   const tag = (s) => `${label}: ${s}`;
   const phone = !!opts.mobile;
 
-  await step(tag('lobby renders the 3D tower, directory and pill'), async () => {
+  await step(tag('the home page draws its content first; on a desktop the small 3D tower comes after it, on a phone not at all'), async () => {
     await p.goto(base);
     await p.until('document.documentElement.classList.contains("ready")', 'app ready');
-    await sleep(3500);
-    if (!await p.ev('document.body.dataset.page === "lobby" && !!document.querySelector(".directory") && !!document.querySelector(".open-pill")')) throw new Error('lobby UI missing');
-    const canvasOk = await p.ev('!document.body.classList.contains("no-webgl")');
-    if (!canvasOk) throw new Error('WebGL failed');
-    await shot('01-lobby');
-    console.log(`  ${label} lobby draw calls ${await p.ev('__stage.renderer.info.render.calls')}, triangles ${await p.ev('__stage.renderer.info.render.triangles')}`);
-  });
-  await step(tag('search filters the directory'), async () => {
-    if (phone) { await p.click('.sheet-grip'); await sleep(450); }
-    await p.type('.dir-search input', 'hat');
-    await p.until('document.querySelectorAll(".dir-row").length === 1 && document.querySelector(".dir-row b").textContent === "Hat Museum"', 'search filter');
-    await p.type('.dir-search input', 'zzzz');
-    await p.until('document.querySelector(".dir-empty") !== null', 'empty state');
-    await p.type('.dir-search input', '');
-    await p.ev('(() => { const i = document.querySelector(".dir-search input"); i.value = ""; i.dispatchEvent(new Event("input")); })()');
-    await p.until('document.querySelectorAll(".lift-btn").length === 10', 'lift buttons');
-    if (phone) { await shot('02-directory'); await p.click('.sheet-grip'); await sleep(450); }
-  });
-  await step(tag('dragging turns the tower, and scrolling leaves it where it is'), async () => {
-    const before = await p.ev('window.__lobbyDebug?.camera.position.y');
-    if (phone) await p.drag(70, 420, 310, 480, true);
-    else {
-      await p.drag(150, 700, 60, 690, false);
-      await p.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 150, y: 700, deltaX: 0, deltaY: -200 });
+    await p.until('document.body.dataset.page === "lobby" && document.querySelectorAll(".home-dir .dir-row").length === 2 && !!document.querySelector(".open-office")', 'home content');
+    if (!phone) {
+      await p.until('!!document.querySelector(".home-tower.ready")', 'the tower', 40000);
+      if (await p.ev('document.body.classList.contains("no-webgl")')) throw new Error('WebGL failed');
+      await sleep(1500);
+      console.log(`  ${label} home tower draw calls ${await p.ev('__stage.renderer.info.render.calls')}, triangles ${await p.ev('__stage.renderer.info.render.triangles')}`);
+    } else {
+      await sleep(1500);
+      if (await p.ev('!!window.__stage || performance.getEntriesByType("resource").some((e) => /three\\.module|lobby-scene|stage\\.js/.test(e.name))')) throw new Error('3D code loaded on a phone home');
     }
+    await shot('01-lobby');
+  });
+  await step(tag('the directory lists the open floors with their state, and the lift is the open floors plus how many are to let'), async () => {
+    const d = await p.ev(`({ rows: [...document.querySelectorAll(".home-dir .dir-row")].map((r) => [r.querySelector("b").textContent, r.querySelector(".badge")?.dataset.state]), lifts: [...document.querySelectorAll(".home-dir .lift-btn")].map((b) => b.dataset.lift), toLet: document.querySelector(".to-let").textContent })`);
+    const names = d.rows.map((r) => r[0]).sort().join();
+    if (names !== 'Hat Museum,Soup Finder') throw new Error(`rows ${names}`);
+    if (!d.rows.every((r) => ['working', 'waiting', 'idle', 'paused'].includes(r[1]))) throw new Error(`states ${JSON.stringify(d.rows)}`);
+    if (d.lifts.length !== 2) throw new Error(`lift buttons ${d.lifts}`);
+    if (!/^\d+ floors? to let$/.test(d.toLet)) throw new Error(`to let: ${d.toLet}`);
+    if (/Closed|gone home|Open \d/.test(await p.ev('document.querySelector(".home").textContent'))) throw new Error('hours or "closed" on the home page');
+    if (phone) await shot('02-directory');
+  });
+  if (!phone) await step(tag('dragging turns the tower in its frame, and scrolling leaves it where it is'), async () => {
+    const f = await p.ev('(() => { const r = document.querySelector(".home-tower").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.7 }; })()');
+    const before = await p.ev('window.__lobbyDebug?.camera.position.y');
+    await p.drag(f.x + 60, f.y, f.x - 40, f.y - 10, false);
+    await p.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: f.x, y: f.y, deltaX: 0, deltaY: -200 });
     await sleep(700);
     const moved = await p.ev('(() => { const c = window.__lobbyDebug; return c ? { t: Math.abs(c.targetTheta - c.startTheta), y: c.camera.position.y } : null; })()');
     if (!moved || moved.t < 0.1) throw new Error('drag did not turn the tower');
     if (Math.abs(moved.y - before) > 0.05) throw new Error(`scrolling moved the camera from ${before} to ${moved.y}`);
   });
   await step(tag('a bad code is refused kindly'), async () => {
-    await p.click('.open-pill');
+    await p.click('.open-office');
     await p.until('document.querySelector(".code-input") !== null', 'code dialog');
     await p.type('.code-input', 'OFFICE-NOPE-NOPE');
     await p.click('.modal button[type=submit]');
@@ -71,7 +75,7 @@ async function run(label, opts, t, adminCode) {
     await p.type('.code-input', code);
     await p.click('.modal button[type=submit]');
     // Straight up to the floor: the recovery code waits on a card there, until the boss says it's saved.
-    await p.until('document.body.dataset.page === "floor" && !!window.__office', 'floor page');
+    await p.until('document.body.dataset.page === "floor" && !!window.__office', 'floor page', 120000);  // a first floor load: slow on a software renderer
     await p.until('document.querySelector("[data-setup-keys] [data-recovery]") !== null', 'recovery code in Setup');
     const rec = await p.ev('document.querySelector("[data-setup-keys] [data-recovery]").textContent');
     if (!/^RECOVER-/.test(rec)) throw new Error('no recovery code');
@@ -242,11 +246,31 @@ async function run(label, opts, t, adminCode) {
     await p.until('window.__office.state.projects.find((x) => x.kind === "doc").private === true', 'private set');
   });
   let docUrl = '';
+  // Happening now holds the 5 newest lines of work, so the launch is looked for while it is still among them: the steps after this one
+  // (redirect, stop, standing orders) give the floor more news than that (job 29). A tab of its own leaves the boss on the floor.
+  await step(tag('Happening now shows this floor\'s launch, with a link to the site'), async () => {
+    const h = await b.newPage(opts);
+    try {
+      await h.goto(base);
+      await h.until('!!document.querySelector(".home-now:not([hidden]) .now-line")', 'Happening now');
+      await h.until(`[...document.querySelectorAll(".now-line.launch")].some((i) => i.textContent.includes(${q(companyName)}) && /launched/.test(i.textContent))`, 'the launch in Happening now', 60000);
+      const pub = await h.ev(`(() => { const a = [...document.querySelectorAll(".home-now .now-line.launch")].find((i) => i.textContent.includes(${q(companyName)}))?.querySelector("a.now-text"); return { href: a?.getAttribute("href"), rel: a?.getAttribute("rel"), target: a?.getAttribute("target") }; })()`);
+      if (!/\/theoffice\/f\/.+\/$/.test(pub.href || '') || pub.rel !== 'noopener noreferrer' || pub.target !== '_blank') throw new Error(`launch link ${pub.href} ${pub.rel} ${pub.target}`);
+    } finally { h.close(); await p.front(); }
+  });
   await step(tag('visitor: another person watches read-only, with no chat and no private work'), async () => {
     docUrl = await p.ev('window.__office.state.projects.find((x) => x.kind === "doc").url');
     const b2 = await launch();
     const v = await b2.newPage(opts);
     await v.goto(`${base}/floor/${slug}`);
+    if (phone) {
+      // A phone: the floor's card and timeline first, with no room, no 3D, nothing of the boss's, then the room on a tap.
+      await v.until('document.body.dataset.page === "floor-lite" && !!document.querySelector(".status-card")', 'the floor without its room');
+      const lite = await v.ev('({ msg: !!document.querySelector(".stc-message, .stc-question"), three: performance.getEntriesByType("resource").some((e) => /three\\.module|office-scene/.test(e.name)) })');
+      if (lite.msg) throw new Error('a visitor has the boss\'s message box');
+      if (lite.three) throw new Error('3D code before Watch the room');
+      await v.room();
+    }
     await v.until('document.body.dataset.page === "floor" && !!window.__office', 'visitor floor');
     await sleep(2200);
     await v.shot(join(OUT, `${label}-15-visitor.jpg`));
@@ -266,11 +290,11 @@ async function run(label, opts, t, adminCode) {
     v.close(); b2.close();
     await p.front();
   });
-  await step(tag('owner: pause, resume, redirect and stop controls work from the UI'), async () => {
+  const ownerControls = async () => {
     await p.click('[data-tab=chat]');
     await p.type('.chat-input textarea', 'go build long job [slow]');
     await p.click('.send');
-    await p.until('window.__office.state.tasks.some((x) => x.status === "doing")', 'long job running', 20000);
+    await p.until('window.__office.state.tasks.some((x) => x.status === "doing")', 'long job running', 180000);
     await p.click('.controls .btn:nth-of-type(1)');
     await p.until('window.__office.state.floor.paused === true && /Paused/.test(document.querySelector(".status-pill").textContent)', 'paused');
     await sleep(300); await shot('16-paused');
@@ -280,16 +304,22 @@ async function run(label, opts, t, adminCode) {
     await p.until('document.querySelector(".modal textarea") !== null', 'redirect dialog');
     await p.type('.modal textarea', 'Actually go build something else');
     await p.click('.modal button[type=submit]');
-    await p.until('window.__office.state.tasks.some((x) => x.status === "cancelled")', 'old tasks cancelled');
-    await p.until('window.__office.state.tasks.some((x) => x.status === "doing")', 'new tasks running', 20000);
+    await p.until('window.__office.state.tasks.some((x) => x.status === "cancelled")', 'old tasks cancelled', 60000);
+    await p.until('window.__office.state.tasks.some((x) => x.status === "doing")', 'new tasks running', 180000);
     await p.click('.controls .btn:nth-of-type(2)');
     await p.until('document.querySelector(".modal .btn.danger") !== null', 'stop dialog');
     await p.click('.modal .btn.danger');
     await p.until('window.__office.state.tasks.every((x) => ["done", "cancelled", "failed"].includes(x.status))', 'all stopped', 15000);
     await p.until('[...document.querySelectorAll(".msg.notice")].some((m) => /stopped/.test(m.textContent))', 'stop notice');
+  };
+  await step(tag('owner: pause, resume, redirect and stop controls work from the UI'), async () => {
+    // The job must still be running when Redirect lands. A software-rendered browser takes longer over the clicks than the mock's [slow] job
+    // takes over its work (it already did before the redesign), so the mock is held slower for this step only.
+    const was = t.cfg.mockDelayMs; t.cfg.mockDelayMs = Math.max(was, 8000);  // a [slow] model call is four times this
+    try { await ownerControls(); } finally { t.cfg.mockDelayMs = was; }
   });
   await step(tag('standing orders: set one in the UI, see its schedule, run it now, read the report, pause and delete'), async () => {
-    await p.click('[data-tab=orders]');
+    await p.tab('orders');
     await p.until('document.querySelector("[data-orders-form]") !== null', 'orders tab');
     await p.type('[data-orders-form] textarea', 'Every morning, check the bakery site still loads and write a one-line note');
     await p.ev('(() => { const at = document.querySelector("[data-orders-form] input[name=at]"); at.value = "07:30"; at.dispatchEvent(new Event("input")); })()');
@@ -306,7 +336,7 @@ async function run(label, opts, t, adminCode) {
     if (!r.report || /Cost|\$/.test(r.report) || 'costUsd' in r || 'estUsd' in r) throw new Error(`run record: ${run.slice(0, 200)}`);
     await p.click('[data-tab=chat]');
     await p.until('document.querySelector(".msg.report") !== null', 'report in the chat');
-    await p.click('[data-tab=orders]');
+    await p.tab('orders');
     await p.until('document.querySelector("article.order .order-history") !== null', 'history shown');
     await sleep(200); await p.shot(join(OUT, `plus-orders-report-${label}.jpg`));
     await p.click('article.order [data-pause]');
@@ -322,6 +352,13 @@ async function run(label, opts, t, adminCode) {
       const found = await moneyOnPage(p);
       if (found) throw new Error(`${name} tab: ${found}`);
     }
+    // The Business tab's sections were tabs of their own before job 22: each is looked at too.
+    for (const name of ['numbers', 'orders', 'pay', 'inbox', 'launch']) {
+      await p.tab(name);
+      await sleep(120);
+      const found = await moneyOnPage(p);
+      if (found) throw new Error(`Business ${name}: ${found}`);
+    }
     const key = await p.ev('JSON.stringify(window.__office.state).match(/"(?:spend|costUsd|estUsd|estimateUsd|limitUsd|spentUsd|remainingUsd)"/)?.[0] ?? null');
     if (key) throw new Error(`the floor state has ${key}`);
     await p.click('[data-tab=chat]');
@@ -331,73 +368,73 @@ async function run(label, opts, t, adminCode) {
     await p.until('document.body.dataset.page === "lobby"', 'lobby');
     await sleep(800);
     await p.goto(`${base}/floor/${slug}`);
+    await p.room();
     await p.until('!!window.__office', 'floor again');
+    await p.click('[data-tab=chat]');
     await p.until('document.querySelectorAll(".msg").length > 3', 'chat restored');
     const ids = await p.ev('[...document.querySelectorAll(".msg")].map((m) => m.dataset.id)');
     if (new Set(ids).size !== ids.length) throw new Error('duplicate messages');
   });
   const siteSlug = siteUrl.split('/').filter(Boolean).at(-1);
-  await step(tag('lobby ticker shows this floor\'s launch, live, with no private work'), async () => {
+  await step(tag('Happening now: at most five lines, with no private work and no demo floor, on screen and clear of the rest'), async () => {
     await p.goto(base);
     await p.until('document.documentElement.classList.contains("ready")', 'ready');
-    await p.until('document.querySelector(".ticker[data-ticker=live]") !== null', 'ticker live');
-    await p.until(`[...document.querySelectorAll(".ticker-item.published")].some((i) => i.textContent.includes(${q(companyName)}) && /launched/.test(i.textContent))`, 'launch in the ticker');
+    await p.until('!!document.querySelector(".home-now:not([hidden]) .now-line")', 'Happening now');
     const info = await p.ev(`(() => {
-      const items = [...document.querySelectorAll(".ticker-item")];
-      const pub = items.find((i) => i.classList.contains("published") && i.textContent.includes(${q(companyName)}));
-      const r = document.querySelector(".ticker").getBoundingClientRect();
-      const hit = (a, b) => !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
-      const over = [".hero h1", ".open-pill", ".sheet-grip", ".directory", ".hints", ".topbar .btn"].filter((s) => { const e = document.querySelector(s); if (!e) return false; const b = e.getBoundingClientRect(); return b.width > 0 && getComputedStyle(e).opacity !== "0" && hit(r, b); });
-      return { n: items.length, href: pub?.getAttribute("href"), rel: pub?.getAttribute("rel"), target: pub?.getAttribute("target"), text: items.map((i) => i.textContent).join(" | "), onScreen: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight, over, anim: getComputedStyle(document.querySelector(".ticker-rail")).animationName };
+      const items = [...document.querySelectorAll(".home-now .now-line")];
+      const pub = items.find((i) => i.classList.contains("launch") && i.textContent.includes(${q(companyName)}))?.querySelector("a.now-text");
+      const rect = (s) => document.querySelector(s)?.getBoundingClientRect();
+      const hit = (a, b) => !!a && !!b && !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+      const now = rect(".home-now");
+      const over = [".hero-strip", ".home-dir", ".home-top", ".home-tower"].filter((s) => { const e = document.querySelector(s); return e && !e.hidden && getComputedStyle(e).display !== "none" && hit(now, e.getBoundingClientRect()); });
+      return { n: items.length, href: pub?.getAttribute("href"), rel: pub?.getAttribute("rel"), target: pub?.getAttribute("target"), text: items.map((i) => i.textContent).join(" | "), inside: now.left >= 0 && now.right <= innerWidth, over };
     })()`);
-    if (!info.n || info.n > 20) throw new Error(`${info.n} ticker items`);
-    if (!/\/theoffice\/f\/.+\/$/.test(info.href || '') || info.rel !== 'noopener noreferrer' || info.target !== '_blank') throw new Error(`launch link ${info.href} ${info.rel} ${info.target}`);
-    if (/working on something private|Private task/i.test(info.text)) throw new Error('private text in the ticker');
-    if (info.text.includes(`${siteSlug}: launch brief`) || info.text.includes(`${siteSlug}-brief`)) throw new Error('the doc that was made private is in the ticker');
-    if (!info.onScreen) throw new Error('ticker off screen');
-    if (info.over.length) throw new Error(`ticker overlaps ${info.over.join(', ')}`);
-    if (info.anim !== 'ticker-roll') throw new Error(`ticker not rolling: ${info.anim}`);
+    if (!info.n || info.n > 5) throw new Error(`${info.n} lines (5 at most)`);
+    if (/working on something private|Private task/i.test(info.text)) throw new Error('private text in Happening now');
+    if (info.text.includes(`${siteSlug}: launch brief`) || info.text.includes(`${siteSlug}-brief`)) throw new Error('the doc that was made private is in Happening now');
+    if (!info.inside) throw new Error('Happening now is off the sides');
+    if (info.over.length) throw new Error(`Happening now overlaps ${info.over.join(', ')}`);
     await sleep(600);
     await p.shot(join(OUT, `plus-lobby-ticker-${label}.jpg`));
   });
-  await step(tag('the launched wall lists the floor\'s public site with a thumbnail, and opens it'), async () => {
-    if (phone) { await p.click('.sheet-grip'); await p.until('document.querySelector(".directory").classList.contains("open")', 'sheet open'); await sleep(600); }
-    // A headless phone under a 3D scene can still be mid-slide when the tap lands, so the toggle is tapped until it takes.
-    for (let i = 0; ; i++) {
-      await p.click('[data-wall=toggle]');
-      try { await p.until('document.querySelector("[data-wall=toggle]").getAttribute("aria-pressed") === "true"', 'wall toggled on', 2500); break; } catch (e) { if (i >= 3) throw e; await sleep(400); }
-    }
-    await p.until('document.querySelector("[data-wall=grid]:not([hidden]) .wall-card") !== null', `wall cards (${await p.ev('document.querySelector("[data-wall=grid]")?.textContent.slice(0, 120)')})`);
-    await p.until(`[...document.querySelectorAll(".wall-card")].some((c) => c.textContent.includes(${q(companyName)}) && c.dataset.project === ${q(siteSlug)})`, 'our card');
-    await p.until(`(() => { const img = document.querySelector('.wall-card[data-project=${q(siteSlug)}] img'); return img && img.complete && img.naturalWidth > 0; })()`, 'thumbnail loaded');
+  await step(tag('All launches lists the floor\'s public site with a thumbnail, and opens it'), async () => {
+    await p.click('[data-all-launches]');
+    await p.until('document.body.dataset.page === "launched"', 'the Launched page');
+    await p.until(`!!document.querySelector('.launched-page .lcard[data-project=${q(siteSlug)}]')`, 'our card');
+    await p.until(`(() => { const img = document.querySelector('.lcard[data-project=${q(siteSlug)}] img'); return img && img.complete && img.naturalWidth > 0; })()`, 'thumbnail loaded');
     const wall = await p.ev(`(() => {
-      const cards = [...document.querySelectorAll(".wall-card")];
+      const cards = [...document.querySelectorAll(".launched-page .lcard")];
       const ours = cards.find((c) => c.dataset.project === ${q(siteSlug)});
-      const open = ours.querySelector("a.btn");
-      const visit = [...ours.querySelectorAll("button")].find((b) => /Visit floor/.test(b.textContent));
+      const open = ours.querySelector("a.lcard-go");
+      const made = ours.querySelector("button.lcard-made");
       const vw = innerWidth; const bad = cards.filter((c) => { const r = c.getBoundingClientRect(); return r.left < -1 || r.right > vw + 1; }).length;
-      return { n: cards.length, slugs: cards.map((c) => c.dataset.project), text: cards.map((c) => c.textContent).join(" | "), href: open?.getAttribute("href"), rel: open?.getAttribute("rel"), target: open?.getAttribute("target"), visit: !!visit, bad, dirRows: document.querySelectorAll(".dir-list:not([hidden]) .dir-row").length, thumb: ours.querySelector("img").getAttribute("src") };
+      return { slugs: cards.map((c) => c.dataset.project), text: cards.map((c) => c.textContent).join(" | "), href: open?.getAttribute("href"), rel: open?.getAttribute("rel"), target: open?.getAttribute("target"), made: made?.textContent, bad, thumb: ours.querySelector("img").getAttribute("src") };
     })()`);
     if (!wall.href || wall.rel !== 'noopener noreferrer' || wall.target !== '_blank') throw new Error(`open link ${wall.href} ${wall.rel}`);
-    if (!wall.visit) throw new Error('no Visit floor button');
+    if (!/^Made by floor \d+ in \d+ days?$/.test(wall.made || '')) throw new Error(`no way to the floor: ${wall.made}`);
     if (wall.text.includes(`${siteSlug}: launch brief`) || wall.slugs.includes(`${siteSlug}-brief`)) throw new Error('private doc on the wall');
     if (wall.bad) throw new Error(`${wall.bad} cards off the sides`);
-    if (wall.dirRows) throw new Error('directory rows still showing under the wall');
-    if (!/\/api\/building\/thumb\//.test(wall.thumb)) throw new Error(`thumb ${wall.thumb}`);
+    if (!/\/api\/building\/(thumb|shot)\//.test(wall.thumb)) throw new Error(`thumb ${wall.thumb}`);
+    if (/signups?|sales|\$\d/i.test(wall.text)) throw new Error('money or sign-ups on a public card');
     await sleep(400);
     await p.shot(join(OUT, `plus-launched-wall-${label}.jpg`));
-    await p.click('[data-wall=toggle]');
-    await p.until('document.querySelectorAll(".dir-row").length > 0 && document.querySelector("[data-wall=grid]").hidden', 'directory back');
-    if (phone) { await p.click('.sheet-grip'); await sleep(450); }
+    // The floor's own share page, and back home.
+    await p.click(`.lcard[data-project=${q(siteSlug)}] .lcard-made`);
+    await p.until(`document.body.dataset.page === "floor" || document.body.dataset.page === "floor-lite"`, 'its floor', 150000);  // a floor load on a software renderer
+    await p.goto(`${base}/launched/${slug}`);
+    await p.until(`!!document.querySelector('.floor-header:not([hidden])') && !!document.querySelector('.launched-page .lcard[data-project=${q(siteSlug)}]')`, 'the floor\'s portfolio');
+    await p.click('.launched-page .btn.back');
+    await p.until('document.body.dataset.page === "lobby" && document.querySelectorAll(".home-dir .dir-row").length > 0', 'home again');
   });
   await step(tag('a lift button rides up and walks into a floor'), async () => {
     await p.goto(base);
     await p.until('document.documentElement.classList.contains("ready")', 'ready');
     await sleep(1500);
-    if (phone) await p.click('.sheet-grip'), await sleep(450);
     const n = await p.ev('[...document.querySelectorAll(".lift-btn.lit")].at(-1).dataset.lift');
     await p.click(`.lift-btn[data-lift="${n}"]`);
-    await p.until('document.body.dataset.page === "floor" && !!window.__office', 'flew in', 8000);
+    // A desktop flies in to the room; a phone opens the floor's page without it, and the room is a tap away.
+    if (phone) { await p.until('document.body.dataset.page === "floor-lite" && !!document.querySelector(".status-card")', 'the floor, without its room', 8000); await p.room(); }
+    else await p.until('document.body.dataset.page === "floor" && !!window.__office', 'flew in', 150000);  // a lift ride is a floor load; slow on a software renderer
   });
   // A floor of its own, in a browser of its own: a real tap, a short conversation, then the help line as the boss and a visitor see it.
   const b3 = await launch(); const n = await b3.newPage(opts);
@@ -408,6 +445,7 @@ async function run(label, opts, t, adminCode) {
     const made = await n.ev(`fetch('/theoffice/api/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:${q(await adminCode())},name:${q(`Lanes ${label}`)},bossName:'Sam'})}).then(r=>r.json())`);
     laneSlug = made.slug;
     await n.goto(`${base}/floor/${laneSlug}`);
+    await n.room();
     await n.until('document.querySelectorAll("[data-launcher] .launch-type").length === 4', 'the launcher');
     await n.type('.chat-input textarea', "Let's do a small business. Help me work it out.");
     await n.click('.send');
@@ -420,6 +458,7 @@ async function run(label, opts, t, adminCode) {
     await shotN('business-reply');
     // Typing is still there, and a reload doesn't bring the buttons back.
     await n.goto(`${base}/floor/${laneSlug}`);
+    await n.room();
     await n.until('!!window.__office && !!document.querySelector(".chat-input textarea")', 'floor again');
     if (await n.ev('document.querySelector("[data-launcher]") !== null')) throw new Error('the launcher came back');
   });
@@ -440,6 +479,7 @@ async function run(label, opts, t, adminCode) {
     await shotN('help-board');
     const b4 = await launch(); const v = await b4.newPage(opts);
     await v.goto(`${base}/floor/${laneSlug}`);
+    await v.room();
     await v.until('!!window.__office', 'visitor floor');
     const seen = await v.ev('JSON.stringify(window.__office.state)');
     if (seen.includes('The checker keeps failing')) throw new Error('a visitor can read the question');

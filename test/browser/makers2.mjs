@@ -26,13 +26,13 @@ try {
     const p = await b.newPage(opts); lastPage = p;
     await step(`${label}: lobby to launcher`, async () => {
       await p.goto(`${base}/?q=low`);
-      await p.until('!!document.querySelector(".open-pill")', 'the Open an office button', 20000);
+      await p.until('!!document.querySelector(".open-office")', 'the Open an office button', 20000);
       const legal = await p.ev('[...document.querySelectorAll(".dir-legal a")].map((x) => x.getAttribute("href"))');
       check(`${label}: the lobby links About and Privacy`, legal.some((x) => x.endsWith('/about')) && legal.some((x) => x.endsWith('/privacy')), legal.join(','));
       // A wrong code is refused exactly as before, and leaves the dialog open.
       // The loading veil over the lobby lifts first.
-      await p.until('(() => { const r = document.querySelector(".open-pill")?.getBoundingClientRect(); if (!r) return false; const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!t && !!t.closest(".open-pill"); })()', 'the pill on top', 20000);
-      await p.click('.open-pill');
+      await p.until('(() => { document.querySelector(".open-office")?.scrollIntoView({ block: "center" }); const r = document.querySelector(".open-office")?.getBoundingClientRect(); if (!r) return false; const t = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!t && !!t.closest(".open-office"); })()', 'the pill on top', 20000);
+      await p.click('.open-office');
       await p.until('document.activeElement && document.activeElement.classList.contains("code-input")', 'the code field focused', 8000);
       await p.ev('(() => { const i = document.querySelector(".code-input"); i.value = "OFFICE-NOPE-NOPE-NOPE-NOPE"; i.dispatchEvent(new ClipboardEvent("paste", { bubbles: true })); })()');
       await p.until('!document.querySelector(".form-error").hidden', 'the error for a bad code', 8000);
@@ -81,6 +81,7 @@ try {
       await p.goto(`${base}/robots.txt`);
       await p.send('Network.setCookie', { name: 'office_s', value: c.cookies.office_s, url: `${main}/theoffice/`, path: '/theoffice', httpOnly: true, secure: false, sameSite: 'Lax' });
       await p.goto(`${base}/floor/${c.slug}?q=low`);
+      await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
       await p.until('!!window.__office', 'the floor', 20000);
       await p.ev('window.__held = 0; window.__seen = []; new MutationObserver(() => { if (document.querySelector("[data-launch-held]")) window.__held++; const m = document.querySelector("[data-maker]"); if (m) window.__seen.push(m.textContent); }).observe(document.body, { subtree: true, childList: true, characterData: true }); true');
       const r = await c.post(`/api/floors/${c.slug}/makers/start`, { type: 'game', name: 'Cheat Hive', pitch: 'Bees and a cheat [cheat]' });
@@ -117,6 +118,7 @@ try {
       const r = await c.post(`/api/floors/${c.slug}/makers/start`, { type: 'website', name: 'Full Site', pitch: 'A complete site [full]' });
       if (r.status !== 200) throw new Error(`start ${r.status}`);
       await p.goto(`${base}/floor/${c.slug}?q=low`);
+      await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
       await p.until('!!window.__office', 'the floor', 20000);
       await p.ev('window.__office.tab = "chat"; window.__office.panelOpen = true; window.__office.reload()');
       await p.until('!!document.querySelector("[data-launch]")', 'Launch once it is ready', 30000);

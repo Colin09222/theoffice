@@ -114,6 +114,18 @@ async function openPage(port, { mobile = false, width = 1440, height = 900, phon
     },
     async press(key) { await send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode: key === 'Enter' ? 13 : 0, text: key === 'Enter' ? '\r' : undefined }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key }); },
     async cookies() { return (await send('Network.getAllCookies')).result.cookies; },
+    /** The floor's room. A phone opens a floor without it (docs/redesign, job 16): tap Watch the room, as a person would. Elsewhere it only waits. */
+    async room(timeout = 120000) {
+      await page.until('document.body.dataset.page === "floor" || document.body.dataset.page === "floor-lite"', 'a floor page', timeout);
+      if (await ev('document.body.dataset.page === "floor-lite"')) await page.click('[data-watch-room]');
+      await page.until('document.body.dataset.page === "floor" && !!window.__office', 'the room', timeout);
+    },
+    /** A tab of the floor's panel, or a section of the boss's Business tab (job 22): Numbers, Orders, Payments, Inbox, Launch, the journey. */
+    async tab(id) {
+      if (await ev(`!!document.querySelector('.tabs [data-tab="${id}"]')`)) return page.click(`.tabs [data-tab="${id}"]`);
+      if (!await ev(`!!document.querySelector('.biz-sections [data-biz="${id}"]')`)) { await page.click('.tabs [data-tab="biz"]'); await page.until(`!!document.querySelector('.biz-sections [data-biz="${id}"]')`, `the ${id} section`, 10000); }
+      return page.click(`.biz-sections [data-biz="${id}"]`);
+    },
     close() { closing = true; ws.close(); fetch(`http://127.0.0.1:${port}/json/close/${made.id}`).catch(() => {}); },
   };
   return page;

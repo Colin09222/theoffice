@@ -19,6 +19,7 @@ const enter = async (p, c, q) => {
   await p.goto(base);
   await p.send('Network.setCookie', { name: 'office_s', value: c.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
   await p.goto(`${base}/floor/${c.slug}?q=${q}`);
+  await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
 };
 const openPanel = async (p) => { await p.click('.controls .btn:nth-of-type(4)'); await p.until('document.querySelector(".modal.customise") !== null', 'panel'); await sleep(350); };
@@ -209,6 +210,7 @@ for (const [label, opts, q] of [['desktop', { width: 1440, height: 900 }, 'low']
   await step(tag('a visitor sees the room and the titles, with no panel and nothing private'), async () => {
     const b2 = await launch(); const v = await b2.newPage(opts);
     await v.goto(`${base}/floor/${c.slug}?q=low`);
+    await v.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await v.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'visitor floor');
     const st = await v.ev(`({ layout: window.__office.view.decor.layout, customise: [...document.querySelectorAll('.controls button')].some((b) => /Customise/.test(b.textContent)), titles: [...document.querySelectorAll('.staff-chip')].map((e) => e.textContent).join('|'), body: document.body.textContent, state: JSON.stringify(window.__office.state) })`);
     if (st.layout !== 'lounge' || st.customise) throw new Error(`layout ${st.layout}, panel ${st.customise}`);

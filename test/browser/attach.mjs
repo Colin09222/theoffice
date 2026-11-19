@@ -42,6 +42,7 @@ try {
     if (!made?.slug) throw new Error(`claim: ${JSON.stringify(made).slice(0, 120)}`);
     slug = made.slug;
     await p.goto(`${base}/floor/${slug}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.click('[data-tab=chat]');
     await p.until('!!document.querySelector(".chat-input [data-attach]")', 'the paperclip');
   });
@@ -63,6 +64,7 @@ try {
   });
   await step('the thumbnail comes back from the history after a reload', async () => {
     await p.goto(`${base}/floor/${slug}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.click('[data-tab=chat]');
     await p.until(thumbShown, 'the thumbnail, from history');
   });
@@ -77,7 +79,8 @@ try {
     const { root } = (await p.send('DOM.getDocument', { depth: 1 })).result;
     const { nodeId } = (await p.send('DOM.querySelector', { nodeId: root.nodeId, selector: '.chat-input input[type=file]' })).result;
     await p.send('DOM.setFileInputFiles', { nodeId, files: [path] });
-    for (const end = Date.now() + 20000; get(t.db, 'SELECT COUNT(*) n FROM attachments').n === before;) {
+    // Resizing in the browser took over 20 seconds on a loaded CI box; a late upload then landed in the next step (job 29).
+    for (const end = Date.now() + 120000; get(t.db, 'SELECT COUNT(*) n FROM attachments').n === before;) {
       if (Date.now() > end) throw new Error(`${name} never arrived`);
       await new Promise((r) => setTimeout(r, 100));
     }

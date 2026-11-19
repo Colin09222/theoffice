@@ -44,12 +44,14 @@ try {
     await p.goto(t.base);
     await p.send('Network.setCookie', { name: 'office_s', value: who.cookies.office_s, url: `${main}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
     await p.goto(`${t.base}/floor/${who.slug}?q=low`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'floor');
   };
   const boss = await b.newPage({ width: 1280, height: 800 });
   await enter(boss, c);
-  await boss.until('!!document.querySelector(\'[data-tab="pay"]\')', 'the Payments tab');
-  await boss.click('[data-tab="pay"]');
+  // Payments is a section of the boss's Business tab since the redesign (job 22).
+  await boss.until('!!document.querySelector(\'[data-tab="biz"]\')', 'the Business tab');
+  await boss.tab('pay');
   await boss.until('!!document.querySelector(\'[data-pay-state="none"]\')', 'the connect card');
   check('the boss is told plainly they are the seller and the money is theirs', /seller/.test(await boss.ev('document.querySelector("[data-pay-panel]").innerText')) && /no cut/.test(await boss.ev('document.querySelector("[data-pay-panel]").innerText')));
   check('test mode is marked', await boss.ev('!!document.querySelector("[data-pay-test]")'));
@@ -150,8 +152,9 @@ try {
   const anon = await b.newPage({ width: 1000, height: 700 });
   await anon.send('Network.clearBrowserCookies');  // the same browser as the boss, so the boss's cookie goes first
   await anon.goto(`${t.base}/floor/${c.slug}?q=low`);
+  await anon.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await anon.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'the floor as a visitor');
-  check('a visitor has no Payments tab', await anon.ev('!document.querySelector(\'[data-tab="pay"]\')'));
+  check('a visitor has no Payments tab', await anon.ev('!document.querySelector(\'[data-tab="pay"], [data-tab="biz"], [data-biz]\')'));
   const leaked = await anon.ev('JSON.stringify(window.__office.state)');
   check('and no sales in what the page holds', !/grossCents|office_order|activeSubs/.test(leaked));
 } finally { await b.close?.(); }
@@ -176,6 +179,7 @@ try {
     await bossNoKey.goto(t2.base);
     await bossNoKey.send('Network.setCookie', { name: 'office_s', value: c2.cookies.office_s, url: `${t2.cfg.publicOrigin}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
     await bossNoKey.goto(`${t2.base}/floor/${c2.slug}?q=low`);
+    await bossNoKey.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await bossNoKey.until('document.body.dataset.page === "floor" && !!window.__office?.view', 'the floor');
     await bossNoKey.ev('window.__office.setTab("pay")');
     await bossNoKey.until('!!document.querySelector(\'[data-pay-state="not-ready"]\')', 'the set-up notice');

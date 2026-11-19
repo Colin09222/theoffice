@@ -25,8 +25,11 @@ async function shareFloor(p) {
 }
 
 export async function showFloorLite(root, slug, { onRoom }) {
-  document.body.dataset.page = 'floor-lite';
   const state = await api(`/floors/${slug}`);
+  // The boss of a floor that is still being set up needs Setup, which lives on the full page: they go straight there (found by
+  // test/browser/e2e.mjs, job 29: a new boss on a phone landed here with no way to name the company or pick a lane).
+  if (state.viewer?.owner && state.floor?.setup) { roomWanted.add(slug); return 'room'; }
+  document.body.dataset.page = 'floor-lite';
   const p = page = {
     slug, state, owner: !!state.viewer?.owner, dead: false,
     get manager() { return state.agents.find((a) => a.role === 'manager'); },

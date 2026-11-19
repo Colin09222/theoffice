@@ -1,5 +1,6 @@
 // The boss's Servers tab in real Chrome, desktop and phone, against a stand-in runner: a slot request answered, a server restarted and stopped, its logs and jobs,
 // settings that never come back, a full building, and the slot freed. OS-assigned ports, its own Chrome profile, no real AI.
+import { mkdirSync } from 'node:fs';
 import { launch, sleep } from './cdp.mjs';
 import { get } from '../../server/db.js';
 import { writeFile } from '../../server/workspace.js';
@@ -46,6 +47,7 @@ async function scenario(kind, opts, boss) {
     const p = await b.newPage(opts);
     await p.send('Network.setCookie', { name: 'office_s', value: f.boss.cookies.office_s, url: `${main}/theoffice/`, path: '/theoffice', httpOnly: true, sameSite: 'Lax' });
     await p.goto(`${main}/theoffice/floor/${f.boss.slug}`);
+    await p.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
     await p.until('!!window.__office && !!document.querySelector("[data-tab=requests]")', 'the floor to open');
     const noWider = () => p.ev('document.documentElement.scrollWidth <= window.innerWidth + 1');
 
@@ -98,6 +100,7 @@ async function scenario(kind, opts, boss) {
     check(`${kind}: the runner really got it`, fake.apps[labelOf(f, 'shop')].secrets.MY_API_KEY === 'super-secret-value-123');
     check(`${kind}: the open panel stays open across a refresh`, await p.ev(`document.querySelector("${shopCard} details[data-open-key^=env]").open`));
     check(`${kind}: settings fit the screen`, await noWider());
+    mkdirSync('/tmp/runner2-scratch', { recursive: true });  // a fresh machine has no such folder (job 29)
     const full = `/tmp/runner2-scratch/server-panel-${kind}.jpg`;
     await p.shot(full);
 

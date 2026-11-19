@@ -27,6 +27,9 @@ async function route() {
   // Stepping out of an office goes through the lift doors, the same ones that opened it.
   const fade = $('#fade');
   const leavingFloor = document.body.dataset.page === 'floor' && !path.startsWith('/floor/');
+  // Someone in a room who takes the lift to another floor stays in the rooms (found by test/browser/tower.mjs, job 29: on a phone the lift
+  // dropped them on the next floor's page without its room).
+  const fromRoom = document.body.dataset.page === 'floor';
   const doors = leavingFloor;
   if (doors) { fade.dataset.title = 'The Office'; fade.classList.add('in'); await new Promise((r) => setTimeout(r, 240)); }
   current?.({ next: path });
@@ -39,7 +42,8 @@ async function route() {
     if (floorMatch) {
       // A phone gets the floor without its room first: no 3D code until Watch the room (docs/redesign, job 16).
       const lite = await import('./floor-lite.js');
-      if (lite.liteFloor(floorMatch[1])) { current = lite.hideFloorLite; await lite.showFloorLite(ui, floorMatch[1], { onRoom: () => route() }); return; }
+      if (fromRoom) lite.roomWanted.add(floorMatch[1]);
+      if (lite.liteFloor(floorMatch[1])) { current = lite.hideFloorLite; if (await lite.showFloorLite(ui, floorMatch[1], { onRoom: () => route() }) !== 'room') return; current = null; }
       // The doors shut straight away, so a slow line never holds up on a frozen close-up of the glass. The floor opens them when its room is ready.
       (await import('./stage-start.js')).startStage();
       const { showFloor, hideFloor } = await import('./floor-ui.js'); current = hideFloor; await showFloor(ui, floorMatch[1]);

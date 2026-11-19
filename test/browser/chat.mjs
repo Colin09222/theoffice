@@ -1,5 +1,6 @@
 // The website chat in real Chrome: the bubble on a launched site on desktop and phone, asking a question, getting an answer, handing off to the boss,
 // the boss replying from the floor, and a game with no bubble. OS-assigned ports, its own Chrome profile, a stand-in model.
+import { mkdirSync } from 'node:fs';
 import { launch, sleep } from './cdp.mjs';
 import { get } from '../../server/db.js';
 import { writeFile, publishSnapshot } from '../../server/workspace.js';
@@ -8,6 +9,7 @@ import { createMockClient } from '../../server/mock.js';
 import { boot, claim } from '../helpers.js';
 
 const results = []; let failures = 0;
+mkdirSync('/tmp/chatwork', { recursive: true });  // where the pictures go; a fresh machine has no such folder (job 29)
 const check = (name, ok, detail = '') => { results.push(ok); if (!ok) failures++; console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${String(detail).slice(0, 240)})` : ''}`); };
 
 const mock = createMockClient({ mockDelayMs: 2 });
@@ -114,8 +116,10 @@ try {
   await floorPage.goto(t.base);
   await floorPage.send('Network.setCookie', { name: 'office_s', value: boss.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, sameSite: 'Lax' });
   await floorPage.goto(`${t.base}/floor/${boss.slug}?q=low`);
-  await floorPage.until('!!document.querySelector(\'[data-tab="inbox"]\')', 'the inbox tab', 40000);
-  await floorPage.click('[data-tab="inbox"]');
+  await floorPage.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
+  // The Inbox is a section of the boss's Business tab since the redesign (job 22).
+  await floorPage.until('!!document.querySelector(\'[data-tab="biz"]\')', 'the Business tab', 40000);
+  await floorPage.tab('inbox');
   await floorPage.until('!!document.querySelector("[data-chat-box]")', 'the website chat block', 15000);
   await floorPage.ev("(() => { const b = document.querySelector('[data-chat-box]'); if (b.dataset.open !== 'yes') b.querySelector('[data-chat-head]').click(); })()");
   await floorPage.until('!!document.querySelector("[data-chat-question]")', 'the question on the floor', 15000);

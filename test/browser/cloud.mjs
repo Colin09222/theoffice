@@ -96,6 +96,7 @@ try {
   const o = await b.newPage({ width: 1440, height: 900 });
   await o.send('Network.setCookie', { name: 'office_s', value: a.cookies.office_s, url: `${main}/theoffice/`, path: '/theoffice', httpOnly: true, sameSite: 'Lax' });
   await o.goto(`${main}/theoffice/floor/${a.slug}`);
+  await o.room();  // a phone opens the floor without its room until Watch the room (docs/redesign, job 16)
   await o.until('window.__office && window.__office.state', 'the floor page', 20000);
   await o.ev('window.__office.setTab("projects")');
   await o.until('!!document.querySelector(\'[data-cloud="stars"]\')', 'the Backend button', 15000);
