@@ -6,6 +6,7 @@ import { mergeMeshes } from './batch.js';
 import { stage } from './stage.js';
 import { lightClock } from './nylight.js';
 import { makeBillboard, W as BOARD_W, H as BOARD_H } from './billboard.js';
+import { flyPose, FLYIN_MS } from './flyin.js';
 
 export const FLOOR_H = 1.0, TOWER_W = 8.6, GROUND = 3.6;
 // A low sun off to one side: long shadows down the streets, one lit face and one shaded face on every block.
@@ -1112,6 +1113,9 @@ export class LobbyView {
     if (signs?.instanceColor) signs.instanceColor.needsUpdate = true;
     this.liveState = { floors: (floors || []).map((f) => ({ number: f.number, work: st[(f.number - 1) * 3 + 1] >= 1 ? 1 : 0, visits: f.visits })) };
   }
+  /** r2-j38: the first-visit fly-in, 2.5 s. skipFlyIn() ends it at once (any input). */
+  flyIn() { this.flyin = { start: performance.now() }; this.flyinPlayed = (this.flyinPlayed || 0) + 1; }
+  skipFlyIn() { if (this.flyin) { this.flyin = null; this.flyinSkipped = true; } }
   /** r2-j37: the crown billboard's pictures: the hero list's (or, on a Friday, the featured floor's). Not shown on "low" (Q9). */
   async setBillboard(urls) {
     const bb = this.tower.billboard; if (!bb) return 0;
@@ -1185,7 +1189,14 @@ export class LobbyView {
     this.theta += (this.targetTheta - this.theta) * k;
     this.dist += (this.targetDist - this.dist) * k;
     // A raised, slightly oblique view: high enough to read the streets, low enough to look a floor in the eye.
-    this.camera.position.set(Math.sin(this.theta) * this.dist, this.lookY + this.dist * 0.2, Math.cos(this.theta) * this.dist);
+    // r2-j38: during the fly-in the same view, from further, higher and turned away, easing in over 2.5 s (wall-clock time).
+    let th = this.theta, di = this.dist, up = 0.2;
+    if (this.flyin) {
+      const p = flyPose((performance.now() - this.flyin.start) / FLYIN_MS);
+      th += p.turn; di *= p.dist; up *= p.lift;
+      if (p.done) { this.flyin = null; this.flyinDone = true; }
+    }
+    this.camera.position.set(Math.sin(th) * di, this.lookY + di * up, Math.cos(th) * di);
     this.camera.lookAt(0, this.lookY, 0);
   }
 }

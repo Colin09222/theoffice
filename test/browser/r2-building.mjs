@@ -64,10 +64,11 @@ try {
   await p.until('!!window.__lobbyDebug?.boardOn', 'the billboard', 90000).catch(() => null);
   const board = await p.ev('(() => { const v = window.__lobbyDebug; return v?.board ? { n: v.board.count, w: v.board.canvas.width, h: v.board.canvas.height, on: v.boardOn } : null; })()');
   check(board?.on && board.n === 3 && board.w === 512 && board.h === 320, `r2-j37: the crown billboard has the 3 hero pictures at 512 x 320 (${JSON.stringify(board)})`);
-  const i0 = await p.ev('window.__lobbyDebug.board.frame(performance.now()).index');
-  await sleep(6100);
-  const i1 = await p.ev('window.__lobbyDebug.board.frame(performance.now()).index');
-  check(i1 === (i0 + 1) % 3, `r2-j37: 6 s later it shows the next one (${i0} then ${i1})`);
+  // Sampled inside the page every 100 ms (a busy machine can be late by a few samples), so a slow line to the browser can't blur the timing: when does the picture change, and how far apart?
+  const changes = await p.ev(`new Promise((r) => { const v = window.__lobbyDebug, out = []; let last = v.board.frame(performance.now()).index; const t0 = performance.now();
+    const iv = setInterval(() => { const i = v.board.frame(performance.now()).index; if (i !== last) { out.push({ i, at: Math.round(performance.now() - t0) }); last = i; } if (performance.now() - t0 > 13000) { clearInterval(iv); r(out); } }, 100); })`);
+  const gaps = changes.slice(1).map((c, k) => c.at - changes[k].at);
+  check(changes.length >= 2 && gaps.every((g) => Math.abs(g - 6000) < 800) && changes.every((c, k) => k === 0 || c.i === (changes[k - 1].i + 1) % 3), `r2-j37: it moves to the next picture every 6 s (${JSON.stringify(changes)})`);
   p.close();
   p = await page({ width: 1440, height: 900 }, { clock: nyAt(12, 0) });
   await p.until('!!window.__lobbyDebug?.lightState', 'the tower', 90000);
@@ -79,6 +80,41 @@ try {
   const pulse = await p.until('(() => { const b = document.querySelector(".dir-row .badge[data-state=working]"); return b ? getComputedStyle(b, "::before").animationName : null; })()', 'a Working badge', 20000).catch(() => null);
   check(pulse === 'r2-pulse', `r2-j33: on a phone a Working floor's badge pulses (${pulse})`);
   p.close();
+  // r2-j38: a fresh browser (a first-time visitor): the fly-in plays once on the desktop, never on the second visit, never under reduce motion,
+  // and a click skips it.
+  const b2 = await launch({});
+  try {
+    const first = await b2.newPage({ width: 1440, height: 900 });
+    await first.goto(`${base}/`);
+    await first.until('!!window.__lobbyDebug?.flyinPlayed', 'the fly-in', 90000).catch(() => null);
+    check(await first.ev('window.__lobbyDebug?.flyinPlayed === 1'), 'r2-j38: the first visit on a desktop plays the fly-in');
+    await first.until('window.__lobbyDebug.flyinDone === true', 'the fly-in to end', 15000).catch(() => null);
+    check(await first.ev('window.__lobbyDebug.flyinDone === true && !window.__lobbyDebug.flyin'), 'r2-j38: it ends on the normal view');
+    first.close();
+    const second = await b2.newPage({ width: 1440, height: 900 });
+    await second.goto(`${base}/`);
+    await second.until('!!window.__lobbyDebug?.liveState', 'the tower', 90000);
+    await sleep(1500);
+    check(await second.ev('!window.__lobbyDebug.flyinPlayed'), 'r2-j38: never a second time');
+    second.close();
+  } finally { b2.close(); }
+  const b3 = await launch({});
+  try {
+    const reduce = await b3.newPage({ width: 1440, height: 900 });
+    await reduce.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await reduce.goto(`${base}/`);
+    await reduce.until('!!window.__lobbyDebug?.liveState', 'the tower', 90000);
+    await sleep(1500);
+    check(await reduce.ev('!window.__lobbyDebug.flyinPlayed'), 'r2-j38: never under reduce motion');
+    reduce.close();
+    // The reduce-motion visit set no mark, so this is still a first visit: a click skips the fly-in at once.
+    const skip = await b3.newPage({ width: 1440, height: 900 });
+    await skip.goto(`${base}/`);
+    // The click lands inside the page the moment the fly-in starts.
+    const skipped = await skip.ev(`new Promise((r) => { const t0 = performance.now(); const f = () => { const v = window.__lobbyDebug; if (v?.flyin) { window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); r(v.flyinSkipped === true && !v.flyin); } else if (performance.now() - t0 > 90000) r('never started'); else requestAnimationFrame(f); }; f(); })`);
+    check(skipped === true, `r2-j38: any input skips it (${skipped})`);
+    skip.close();
+  } finally { b3.close(); }
 } finally {
   b.close(); await t.close();
 }

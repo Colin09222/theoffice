@@ -10,6 +10,7 @@ import { stateBadge, idleNote } from './badge.js';
 import { launchCard } from './launch-card.js';
 import { heroFrames, crossfade } from './hero-fade.js';
 import { billboardImages } from './billboard.js';
+import { shouldFlyIn, FLYIN_KEY, SKIP_EVENTS } from './flyin.js';
 
 // The claim wizard and its character builder are only fetched when someone opens them.
 const claimModule = () => import('./claim.js');
@@ -166,10 +167,23 @@ export async function showLobby(root) {
         if (!alive) return;
         tower = await m.showTower({ frame: towerFrame, floorCount: data.towerFloors, floors, toLet, onPick: (n) => { const c = floors.find((f) => f.number === n); if (c) enterFloor(c); else if (toLet.includes(n)) openClaim(); }, onHover: showTip });
         if (!tower) towerFrame.hidden = true;  // no 3D here: the floor list is the way round, and it is already on screen
-        else { if (live) tower.setLive(live.floors); tower.setBillboard(billboardImages(heroList)); }
+        else { if (live) tower.setLive(live.floors); tower.setBillboard(billboardImages(heroList)); flyInOnce(); }
       } catch (e) { console.warn('tower', e?.message); towerFrame.hidden = true; }
     }, 0)));
   }
+}
+
+/** Round 2, r2-j38: the fly-in, once ever, on the desktop, never under reduce motion. The mark is set as it starts, so it never plays twice;
+ *  any input (a tap, a click, a key, the wheel) skips it. The page content was already on screen before the tower began to load. */
+function flyInOnce() {
+  let seen = false;
+  try { seen = localStorage.getItem(FLYIN_KEY) === '1'; } catch { seen = true; /* no storage: we could not keep it to once, so not at all */ }
+  if (!shouldFlyIn({ phone: isPhone(), reduce: window.matchMedia('(prefers-reduced-motion: reduce)').matches, seen })) return;
+  try { localStorage.setItem(FLYIN_KEY, '1'); } catch { return; }
+  tower.flyIn();
+  const skip = () => { tower?.skipFlyIn?.(); for (const e of SKIP_EVENTS) window.removeEventListener(e, skip, true); };
+  for (const e of SKIP_EVENTS) window.addEventListener(e, skip, { capture: true, passive: true });
+  setTimeout(skip, 3000);
 }
 
 function showTip(n, x, y) {
