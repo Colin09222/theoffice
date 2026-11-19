@@ -45,6 +45,7 @@ import { installNumbers } from './numbers.js';
 import { installDaily } from './daily.js';
 import { installSpendCheck, spendListing, freshnessLine } from './spendcheck.js';
 import { alertLog, nightFrozen, setNightFreeze } from './owneralerts.js';
+import { logDenied, deniedListing } from './denied.js';
 import { absoluteMeta } from './metaabs.js';
 
 const BASE = '/theoffice';
@@ -737,6 +738,11 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
     start() { engine.ownerAlerts.digestTick(); timer = setInterval(() => engine.ownerAlerts.digestTick(), cfg.digestTickMs ?? 60000); timer.unref?.(); },
     stop() { clearInterval(timer); timer = null; },
   }; })());
+  GET('/api/admin/denied', async ({ req, res, url }) => {
+    requireAdmin(req);
+    const hours = Math.min(24 * 90, Math.max(1, Number(url.searchParams.get('hours')) || 24 * 7));
+    json(res, 200, { denied: deniedListing(db, { since: now() - hours * 3600000 }) });
+  });
   GET('/api/admin/alerts', async ({ req, res }) => {
     requireAdmin(req);
     const digest = get(db, 'SELECT day, text, created_at FROM owner_digests ORDER BY day DESC LIMIT 1');
@@ -1095,6 +1101,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
           if (r.method !== method) continue;
           const p = {};
           r.keys.forEach((k, i) => { try { p[k] = decodeURIComponent(m[i + 1]); } catch { throw new HttpError(400, 'bad_path'); } });
+          req.officeRoute = `${method} ${r.pattern}`;  // what a refusal is logged as (server/denied.js)
           const out = await r.handler({ req, res, p, ip, url });
           if (out !== 'stream') log('info', 'api', { m: method, r: r.pattern, s: res.statusCode, ms: Date.now() - started });
           return undefined;
@@ -1107,12 +1114,27 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (rest === '/' || /^\/admin\/?$/.test(rest) || /^\/floor\/[a-z0-9-]+\/?$/.test(rest)) return serveStatic(req, res, INDEX);
       return serveStatic(req, res, rest, url.searchParams.get('v'));
     } catch (e) {
+      if (e instanceof HttpError && (e.status === 403 || e.status === 423)) deniedSignedIn(req, e);
       if (e instanceof HttpError) { if (e.status >= 500) log('error', 'http', { code: e.code }); return json(res, e.status, { error: e.code, message: e.message }, e.status === 429 ? { 'retry-after': '30' } : {}); }
       if (e instanceof WorkspaceError) return json(res, 400, { error: 'bad_request', message: e.message });
       if (e?.code === 'ERR_STREAM_PREMATURE_CLOSE') return undefined;
       log('error', 'unhandled', { err: scrub(e?.message, cfg) });
       return json(res, 500, { error: 'server_error', message: 'Something broke in the building.' });
     }
+  }
+  /** A signed-in boss or the admin was refused: who, which floor, what, when (redesign job 8). Never throws. Visitors with no session aren't logged. */
+  function deniedSignedIn(req, e) {
+    try {
+      const s = sessionOf(req), a = adminOf(req);
+      if (!s && !a) return;
+      const mine = s ? get(db, 'SELECT number FROM floors WHERE id=?', s.floor_id) : null;
+      const user = s ? `boss of floor ${mine?.number ?? '?'} (session ${s.hash.slice(0, 8)})` : 'admin';
+      const slug = /^\/api\/floors\/([a-z0-9-]+)/.exec(String(req.url).split('?')[0].slice(BASE.length))?.[1];
+      const floor = slug ? floorRow(slug) : null;
+      const action = req.officeRoute || `${req.method} ${String(req.url).split('?')[0].slice(0, 120)}`;
+      logDenied(db, { user, floorId: floor?.id ?? s?.floor_id ?? null, action, status: e.status, code: e.code, at: now() });
+      log('warn', 'not allowed', { user, floor: floor?.number ?? null, action, status: e.status, code: e.code });
+    } catch { /* logging a refusal never fails the answer */ }
   }
   // Path segments from the raw URL. Decoded by serveSite itself, one segment at a time, so %2f can never add a level.
   const rawSegments = (u) => u.split('?')[0].slice(`${BASE}/f/`.length).split('/');

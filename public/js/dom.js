@@ -35,7 +35,7 @@ const session = { csrf: null, adminCsrf: null, floor: null, admin: false };
 export { session };
 
 export class ApiError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
-export async function api(path, { method = 'GET', body, admin = false } = {}) {
+export async function api(path, { method = 'GET', body, admin = false, retried = false } = {}) {
   const headers = {};
   if (method !== 'GET') {
     headers['content-type'] = 'application/json';
@@ -46,6 +46,9 @@ export async function api(path, { method = 'GET', body, admin = false } = {}) {
   try { res = await fetch(`${BASE}/api${path}`, { method, headers, credentials: 'same-origin', body: method === 'GET' ? undefined : JSON.stringify(body ?? {}) }); } catch { throw new ApiError(0, 'network', 'Can\'t reach the building. Check your connection.'); }
   let data = null;
   try { data = await res.json(); } catch { /* an empty or plain body */ }
+  // A tab left open while the boss signed in again (another tab, or the same code after a pause) still holds the old session's token: the cookie is the
+  // new session's, so every change came back 403 "That isn't yours to change". Fetch the current token once and try again (redesign job 8).
+  if (res.status === 403 && data?.error === 'bad_csrf' && !retried) { try { await refreshMe(); return await api(path, { method, body, admin, retried: true }); } catch { /* fall through to the error */ } }
   if (!res.ok) throw new ApiError(res.status, data?.error || 'error', data?.message && data.message !== data.error ? data.message : friendly(res.status));
   return data;
 }

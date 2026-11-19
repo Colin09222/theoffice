@@ -225,6 +225,11 @@ CREATE TABLE IF NOT EXISTS owner_alerts (key TEXT PRIMARY KEY, kind TEXT NOT NUL
 CREATE INDEX IF NOT EXISTS owner_alerts_created ON owner_alerts(created_at);
 CREATE TABLE IF NOT EXISTS owner_alert_state (scope TEXT PRIMARY KEY, state TEXT NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS owner_digests (day TEXT PRIMARY KEY, text TEXT NOT NULL, created_at INTEGER NOT NULL);
+-- j08: every "not allowed" a signed-in user gets: who, which floor, what they tried, when (server/denied.js).
+CREATE TABLE IF NOT EXISTS denied_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, floor_id INTEGER, action TEXT NOT NULL, status INTEGER NOT NULL, code TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS denied_requests_created ON denied_requests(created_at);
 `;
 Object.assign(ADDED.tasks, { contractor_route: 'INTEGER NOT NULL DEFAULT 0', handed_back_at: 'INTEGER', tester_fails: 'INTEGER NOT NULL DEFAULT 0', fix_of: 'INTEGER' });
 // j07: a task's own cap when it isn't the building's (Tier 3 is $6), when it was ended at its cap, whether what it saved shipped as Work in progress, and what is not done yet.

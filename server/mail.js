@@ -66,6 +66,19 @@ export function ensureMailSchema(db) {
 export function setFormAlerts(db, floorId, on, t = Date.now()) {
   run(db, 'INSERT INTO mail_floor (floor_id,form_alerts,updated_at) VALUES (?,?,?) ON CONFLICT(floor_id) DO UPDATE SET form_alerts=excluded.form_alerts, updated_at=excluded.updated_at', floorId, on ? 1 : 0, t);
 }
+/**
+ * The boss's own address, set by the building manager (admin.mjs mail boss-email). Floor 7 had none, so its form alerts went nowhere (redesign job 8).
+ * The boss can still change it from their own settings. Returns the address kept, or '' when cleared. Refuses one in the building's own mail domain.
+ */
+export function setBossEmail(db, floorId, raw, { mailDomain = '' } = {}, t = Date.now()) {
+  ensureMailSchema(db);
+  const text = String(raw ?? '').trim();
+  const a = text ? parseAddress(text) : { address: '' };
+  if (!a) throw new MailError('That email address does not look right.');
+  if (a.address && mailDomain && a.address.split('@')[1] === String(mailDomain).toLowerCase()) throw new MailError('Use the boss\'s own address, not one in the building.');
+  run(db, 'INSERT INTO mail_floor (floor_id,boss_email,updated_at) VALUES (?,?,?) ON CONFLICT(floor_id) DO UPDATE SET boss_email=excluded.boss_email, updated_at=excluded.updated_at', floorId, a.address, t);
+  return a.address;
+}
 export const FORM_ALERTS_HOURLY = 30;
 /** a***@gmail.com: enough to tell which address it is, not enough to copy. */
 export const maskAddress = (a) => { const [l, d] = String(a || '').split('@'); return d ? `${l[0] || ''}***@${d}` : ''; };
