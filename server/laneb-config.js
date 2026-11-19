@@ -80,5 +80,9 @@ export function laneBSettings(env = process.env) {
     // Round 1 rest, j21: each job's estimate, shown to the boss only as "This will cost about $X." (server/estimate.js). Information only: nothing
     // waits on it and nothing stops at any multiple of it. JOB_ESTIMATES=0 hides the line.
     jobEstimates: on(env.JOB_ESTIMATES),
+    // Round 1 rest, j20: the Monday plan (server/weekplan.js). WEEKLY_PLAN=0 stops the Monday draft building-wide; a draft nobody approves starts by
+    // itself after WEEKLY_PLAN_AUTOSTART_HOURS (24). No plan ever holds a floor idle or stops its spending.
+    weeklyPlan: on(env.WEEKLY_PLAN),
+    weeklyPlanAutostartHours: Number.isFinite(Number(env.WEEKLY_PLAN_AUTOSTART_HOURS)) && String(env.WEEKLY_PLAN_AUTOSTART_HOURS ?? '').trim() !== '' ? Math.max(0, Number(env.WEEKLY_PLAN_AUTOSTART_HOURS)) : 24,
   };
 }

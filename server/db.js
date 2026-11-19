@@ -240,6 +240,13 @@ CREATE TABLE IF NOT EXISTS smoke_checks (
 );
 CREATE INDEX IF NOT EXISTS smoke_checks_task ON smoke_checks(task_id);
 CREATE INDEX IF NOT EXISTS smoke_checks_project ON smoke_checks(floor_id, project, id);
+-- Round 1 rest, j20: one weekly plan a floor a week (drafted Monday 08:05 New York), and the floors kept out of weekly plans.
+CREATE TABLE IF NOT EXISTS weekly_plans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, week TEXT NOT NULL, status TEXT NOT NULL, goal TEXT NOT NULL DEFAULT '', jobs TEXT NOT NULL DEFAULT '[]',
+  created_at INTEGER NOT NULL, autostart_at INTEGER, approved_at INTEGER, edited_at INTEGER, started_at INTEGER, task_ids TEXT NOT NULL DEFAULT '[]'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS weekly_plans_week ON weekly_plans(floor_id, week);
+CREATE TABLE IF NOT EXISTS weekly_plan_floors (floor_id INTEGER PRIMARY KEY, off INTEGER NOT NULL DEFAULT 0, draft_asked INTEGER, updated_at INTEGER NOT NULL);
 `;
 Object.assign(ADDED.tasks, { contractor_route: 'INTEGER NOT NULL DEFAULT 0', handed_back_at: 'INTEGER', tester_fails: 'INTEGER NOT NULL DEFAULT 0', fix_of: 'INTEGER' });
 // j07: a task's own cap when it isn't the building's (Tier 3 is $6), when it was ended at its cap, whether what it saved shipped as Work in progress, and what is not done yet.

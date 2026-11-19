@@ -30,6 +30,7 @@ import { setContractor, contractorListing, contractorListingText, completeJob, C
 import { pingContractor } from '../server/contractorping.js';
 import { refusalListing, refusalListingText } from '../server/handback.js';
 import { sendOut, stuckListing, SendOutError } from '../server/sendout.js';
+import { setFloorPlans, askDraftNow, currentPlan, floorOff, planView } from '../server/weekplan.js';
 import { spendListing, spendListingText, writeSpendRecord } from '../server/spendcheck.js';
 import { alertLog, digestFacts, digestText, nightFrozen, setNightFreeze } from '../server/owneralerts.js';
 
@@ -45,6 +46,7 @@ const usage = () => {
     '  node scripts/admin.mjs mail pause|resume [--floor N]   stop or restart sending for one floor, or for the whole building. Receiving carries on',
     '  node scripts/admin.mjs mail form-alerts --floor N [on|off]   email the boss each new site-form entry (on by default); shows the boss address masked',
     '  node scripts/admin.mjs mail boss-email --floor N [--clear]   set the boss\'s own address for floor N (form alerts and reports go there), read from stdin so it stays out of the shell history; shown masked',
+    '  node scripts/admin.mjs plan --floor N [on|off] [--draft-now]   the floor\'s weekly plan: show it; keep the floor out of weekly plans (off: no draft and nothing starts) or back in; or have the server draft one on its next tick',
     '  node scripts/admin.mjs fable --task N on|off   let one named job use Fable (off for floors otherwise); it applies when the job next starts',
     '  node scripts/admin.mjs tiers [--floor N] [--since 7d]   tasks by model tier: how many, what they cost, and the Tier 3 jobs this week',
     '  node scripts/admin.mjs denied [--since 24h|7d|90m] [--json]   every "not allowed" (403) or "closed" (423) a signed-in boss or the admin got: who, which floor, what they tried, when',
@@ -475,6 +477,14 @@ if (cmd === 'code' && rest[0] === 'hold') {
     const listing = spendListing(db, { last: i >= 0 ? Number(rest[i + 1]) || 12 : 12 });
     console.log(rest.includes('--json') ? JSON.stringify(listing, null, 2) : spendListingText(listing));
   }
+} else if (cmd === 'plan') {
+  const f = get(db, 'SELECT id, number, name FROM floors WHERE number=?', floorArg());
+  if (!f) die('No floor with that number.');
+  const want = rest.find((x) => x === 'on' || x === 'off');
+  if (want) setFloorPlans(db, f.id, want === 'on');
+  if (rest.includes('--draft-now')) { if (floorOff(db, f.id)) die(`Floor ${f.number} is out of weekly plans; turn it on first.`); askDraftNow(db, f.id); }
+  const p = currentPlan(db, f.id);
+  console.log(JSON.stringify({ floor: f.number, weeklyPlans: floorOff(db, f.id) ? 'off' : 'on', draftAsked: rest.includes('--draft-now') || undefined, plan: p ? planView(db, p, { estimates: false }) : null }, null, 2));
 } else if (cmd === 'fable') {
   const i = rest.indexOf('--task'); const id = Number(i >= 0 ? rest[i + 1] : NaN);
   const want = rest.find((x) => x === 'on' || x === 'off');

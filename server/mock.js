@@ -454,6 +454,15 @@ export function createMockClient(cfg) {
         const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
         return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
       }
+      // The Monday plan (server/weekplan.js): a scripted manager drafts one goal and two jobs, each with its done-means lines.
+      if (meta?.kind === 'weekplan') {
+        await sleep(Math.min(cfg.mockDelayMs, 20), signal);
+        const content = JSON.stringify({ goal: 'Get the site ready for more visitors', jobs: [
+          { title: 'Tidy the home page', to: 'builder', brief: 'Make the home page clearer and publish it again.', checks: ['The home page loads', 'The heading says what the company does', 'It fits a phone'], size: 'small', lane: 'website', project: 'site' },
+          { title: 'Write a short about page', to: 'writer', brief: 'Write the about page from what the boss said.', checks: ['The page is saved', 'It says who the company is for', 'Nothing in it is made up'], size: 'standard', lane: 'website', project: 'site' }] });
+        const prompt = Math.ceil(JSON.stringify(messages).length / 4), completion = Math.ceil(content.length / 4);
+        return { content, toolCalls: [], finish: 'stop', usage: { prompt, completion, cost: (prompt * (pricing?.prompt || 0) + completion * (pricing?.completion || 0)) / 1e6, real: false } };
+      }
       if (meta?.kind === 'talk') {
         await sleep(cfg.mockDelayMs, signal);
         const content = talkStep(meta);

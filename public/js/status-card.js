@@ -2,7 +2,7 @@
 // the state badge (drawn by the page header), goal, now (step N of M), last shipped (thumbnail, name, how long ago), next, Visit website and
 // Share. The boss also gets the one open question with reply chips, and a message box. Every field comes from task data; no model is asked.
 // The weekly fuel gauge and Approve plan (jobs 20 and 21) are on hold: their places are marked and left empty.
-import { h, api, clear, put, toast, timeAgo, BASE } from './dom.js';
+import { h, api, clear, put, toast, timeAgo, modal, BASE } from './dom.js';
 import { icon } from './icons.js';
 import { emptyLine } from './timeline-ui.js';
 
@@ -38,11 +38,38 @@ export function renderStatusCard(page, el, { shareFloor }) {
       st.next ? row('Next', h('span.stc-next', {}, st.next)) : null),
     // Jobs 20 and 21, on hold: the weekly fuel gauge and Approve plan go here, for the boss only. Nothing is drawn until they are built.
     page.owner ? h('div.stc-slot', { 'data-slot': 'fuel-gauge', hidden: true }) : null,
-    page.owner ? h('div.stc-slot', { 'data-slot': 'approve-plan', hidden: true }) : null,
+    page.owner && s.weekPlan && ['draft', 'approved'].includes(s.weekPlan.status) ? weekPlanBox(page) : null,
     page.owner ? bossBits(page) : null,
     h('div.card-actions', {},
       site ? h('a.btn.primary', { href: site.appUrl || site.url, target: '_blank', rel: 'noopener noreferrer', 'data-visit': '' }, 'Visit website') : null,
       h('button.btn', { type: 'button', 'data-share': '', onclick: () => shareFloor(page) }, icon('share-fat'), 'Share')));
+}
+
+/**
+ * This week's plan (round 1 rest, j20), for the boss: the goal, the jobs with what each will cost as information, Approve and Edit. Nothing waits
+ * for money: a plan nobody approves starts by itself the next morning.
+ */
+function weekPlanBox(page) {
+  const p = page.state.weekPlan;
+  const done = (r) => { page.state.weekPlan = r.plan; page.cardSoon?.(); };
+  const approve = async () => { try { done(await api(`/floors/${page.slug}/weekplan/approve`, { method: 'POST', body: {} })); toast('Plan approved. The team is on it.'); } catch (e) { toast(e.message, 'bad'); } };
+  const editPlan = () => modal('This week\'s plan', (body, close) => {
+    const goal = h('input', { type: 'text', value: p.goal, maxlength: 200, 'aria-label': 'This week\'s goal', name: 'plan-goal' });
+    const rows = p.jobs.map((j, i) => ({ i, input: h('input', { type: 'text', value: j.title, maxlength: 160, 'aria-label': `Job ${i + 1}`, name: `plan-job-${i}` }), keep: h('input', { type: 'checkbox', checked: true, 'aria-label': `Keep job ${i + 1}` }) }));
+    const extra = h('input', { type: 'text', maxlength: 160, placeholder: 'Add a job (optional)', 'aria-label': 'Add a job', name: 'plan-add' });
+    body.append(h('form.stack', { onsubmit: async (e) => {
+      e.preventDefault();
+      const jobs = rows.filter((r) => r.keep.checked).map((r) => ({ keep: r.i, title: r.input.value.trim() }));
+      if (extra.value.trim()) jobs.push({ title: extra.value.trim() });
+      try { done(await api(`/floors/${page.slug}/weekplan/edit`, { method: 'POST', body: { goal: goal.value.trim(), jobs } })); close(); toast('Plan changed'); } catch (x) { toast(x.message, 'bad'); }
+    } }, h('label.field', {}, h('span', {}, 'Goal'), goal), ...rows.map((r) => h('label.field.wp-row', {}, r.keep, r.input)), extra, h('button.btn.primary.wide', { type: 'submit' }, 'Save the plan')));
+  });
+  return h('div.stc-plan', { 'data-slot': 'approve-plan', 'data-plan': p.id },
+    h('p.stc-plan-head', {}, h('b', {}, 'This week\'s plan'), p.status === 'approved' ? h('small', {}, ' Approved: starting as soon as the last job is done') : null),
+    h('p.stc-plan-goal', {}, p.goal),
+    h('ol.stc-plan-jobs', {}, ...p.jobs.map((j) => h('li', {}, h('span', {}, j.title), j.estimate?.line ? h('small.stc-est', {}, j.estimate.line) : null))),
+    p.status === 'draft' ? h('p.stc-plan-auto', {}, 'If you do nothing, the team starts on it by itself tomorrow morning.') : null,
+    p.status === 'draft' ? h('div.card-actions', {}, h('button.btn.primary', { type: 'button', 'data-approve-plan': '', onclick: approve }, 'Approve'), h('button.btn', { type: 'button', 'data-edit-plan': '', onclick: editPlan }, 'Edit')) : null);
 }
 
 /** The boss's part: the one open question with reply chips, and a message box to the manager. */
