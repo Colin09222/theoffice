@@ -452,7 +452,7 @@ describe('computers with no limits of their own', () => {
   test('more sessions run at once than the old limits allowed', async () => {
     let live = 0, peak = 0;
     const sessions = createMockSessions({}, { async onTurn(api) { live++; peak = Math.max(peak, live); await api.step(); while (peak < 6) await sleep(5); live--; finished(api); } });
-    const t = await boot({ computerEnabled: true, outputLagMs: 0 }, { sessions });
+    const t = await boot({ computerEnabled: true, outputLagMs: 0, testerComputerGamesShops: false }, { sessions });  // Testers on computers too, as before job 11
     open.push(t);
     t.app.engine.runManager = async () => {};
     const ids = [];
@@ -502,7 +502,7 @@ describe('computers with no limits of their own', () => {
     let uploading = 0, mostUp = 0;
     const realUpload = sessions.upload;
     sessions.upload = async (...a) => { uploading++; mostUp = Math.max(mostUp, uploading); await sleep(15); uploading--; return realUpload(...a); };
-    const t = await boot({ computerEnabled: true, outputLagMs: 0 }, { sessions });
+    const t = await boot({ computerEnabled: true, outputLagMs: 0, testerComputerGamesShops: false }, { sessions });  // Testers on computers too, as before job 11
     open.push(t);
     t.app.engine.runManager = async () => {};
     const ids = [];

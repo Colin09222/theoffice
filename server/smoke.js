@@ -2,7 +2,7 @@
 // page: it must load, with no console errors, and a 16:10 screenshot is saved to the job (on the floor's drive, and in smoke_checks for the timeline).
 // With Playwright's Chromium on this machine it is a real browser; without it, the page and its own scripts and styles are fetched and every classic
 // own script and style is fetched, so a page that won't load or a missing file still fails, and there is simply no screenshot.
-// An edit then ships on this check alone, with no Tester (except one that touches checkout, forms or sign-in). Nothing here calls a model.
+// An edit then ships on this check alone, with no Tester (except one that touches paying, forms or sign-in). Nothing here calls a model.
 import { createRequire } from 'node:module';
 import { get, all, run } from './db.js';
 import { writeBinaryFile } from './workspace.js';
@@ -80,7 +80,7 @@ export async function smokeProject(engine, floor, slug, task, { now = Date.now()
 export const lastSmoke = (db, taskId) => get(db, 'SELECT * FROM smoke_checks WHERE task_id=? ORDER BY id DESC LIMIT 1', taskId);
 export const smokeFor = (db, floorId, project) => all(db, 'SELECT * FROM smoke_checks WHERE floor_id=? AND project=? ORDER BY id DESC LIMIT 20', floorId, project);
 
-/** Whether an edit touches something a Tester must still look at once: checkout, a form, or signing in. */
+/** Whether an edit touches something a Tester must still look at once: paying, a form, or signing in. */
 export const SENSITIVE = /\b(check-?out|basket|cart|payments?|pay|price|form|forms|booking|book|sign[- ]?in|log[- ]?in|sign[- ]?up|account|password)\b/i;
 export const touchesSensitive = (t) => SENSITIVE.test(`${t?.title || ''} ${t?.brief || ''} ${t?.intent || ''}`);
 /** The Tester gets a computer only for games and shops. */

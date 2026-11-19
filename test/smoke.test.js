@@ -61,7 +61,7 @@ describe('the smoke check', () => {
 
   test('in a real browser it catches a console error and saves a 16:10 screenshot to the job', async (t) => {
     if (!(await loadPlaywright())) { t.skip('no Playwright on this machine'); return; }
-    const h = await floor(scripted(PAGE('Broken', '<script>window.notAThing.go()</script>')));
+    const h = await floor(scripted(PAGE('Broken', '<script>window.notAThing.go()</script>')), { smokeBrowser: true });
     const id = idOf(await h.tool('assign_task', { to: 'builder', title: 'Swap the photo', brief: 'Swap the hero photo and publish it again.', plan: 'Photo', project: 'site', size: 'small', checks: LINES, intent: 'new photo' }));
     await until(() => get(h.db, 'SELECT 1 x FROM smoke_checks WHERE task_id=?', id), { what: 'the smoke check', timeout: 60000 });
     const s = get(h.db, 'SELECT * FROM smoke_checks WHERE task_id=?', id);
