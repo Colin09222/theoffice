@@ -227,6 +227,8 @@ CREATE TABLE IF NOT EXISTS owner_alert_state (scope TEXT PRIMARY KEY, state TEXT
 CREATE TABLE IF NOT EXISTS owner_digests (day TEXT PRIMARY KEY, text TEXT NOT NULL, created_at INTEGER NOT NULL);
 `;
 Object.assign(ADDED.tasks, { contractor_route: 'INTEGER NOT NULL DEFAULT 0', handed_back_at: 'INTEGER', tester_fails: 'INTEGER NOT NULL DEFAULT 0', fix_of: 'INTEGER' });
+// j07: a task's own cap when it isn't the building's (Tier 3 is $6), when it was ended at its cap, whether what it saved shipped as Work in progress, and what is not done yet.
+Object.assign(ADDED.tasks, { cap_usd: 'REAL NOT NULL DEFAULT 0', capped_at: 'INTEGER', wip: 'INTEGER NOT NULL DEFAULT 0', not_done: "TEXT NOT NULL DEFAULT ''" });
 /** Lane B's one-time fills, each guarded by a settings row so it runs once. */
 function laneBFills(db) {
   // A database from long before these columns (one with no agent_id on its tasks, say) has nothing to fill, and is never kept from booting by it.
