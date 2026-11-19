@@ -2,10 +2,10 @@
 // stand-ins for the people, and the room's data comes from the server's snapshot.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { boot, claim, Client } from './helpers.js';
+import { boot, claim, Client, waitDone } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY, CameraFollow, driftYaw, CAMERA } from '../public/js/room-rules.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows, pileSheets, queuedFor, trophiesFor, PILE_MAX, PHONE_BUDGET, shedPlan, skipFrame, phoneDpr, levelFor, QualityWatch, QUALITY, CameraFollow, driftYaw, CAMERA, replayTimeline, replayLabel, REPLAY } from '../public/js/room-rules.js';
 import { weekOf } from '../server/weekplan.js';
 import { get, all, run as sql } from '../server/db.js';
 import { REAL_JPEG, publish } from './r2-fixtures.js';
@@ -446,5 +446,104 @@ describe('r2-j46 camera follow and drift', () => {
     let max = 0; for (let s = 8; s < 200; s += 0.05) max = Math.max(max, Math.abs(deg(s)));
     assert.ok(max <= 15 + 1e-9);
     assert.equal(driftYaw(100, { allowed: false }), 0);
+  });
+});
+
+describe('r2-j47 job event log', () => {
+  let t, c;
+  before(async () => { t = await boot(); c = await claim(t, 'Event Log'); });
+  after(async () => { await t.close(); });
+  test('DONE MEANS: every job stores its events with times: card, tasks, handoffs, talk beats and the launch', async () => {
+    await c.post(`/api/floors/${c.slug}/chat`, { text: 'go build soup finder' });
+    await waitDone(c);
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const cards = all(t.db, 'SELECT id, title FROM job_cards WHERE floor_id=?', f.id);
+    assert.ok(cards.length >= 1);
+    const evs = all(t.db, 'SELECT * FROM job_events WHERE floor_id=? ORDER BY id', f.id);
+    const kinds = new Set(evs.map((e) => e.kind));
+    for (const k of ['card', 'task', 'handoff', 'talk', 'launch']) assert.ok(kinds.has(k), `has ${k} events (${[...kinds].join(', ')})`);
+    assert.ok(evs.every((e) => cards.some((x) => x.id === e.card_id)), 'every event belongs to a job');
+    assert.ok(evs.every((e, i) => !i || e.created_at >= evs[i - 1].created_at), 'in time order, each with its time');
+    assert.ok(evs.filter((e) => e.kind === 'task').every((e) => e.task_id), 'task events name their task');
+    const statuses = evs.filter((e) => e.kind === 'task').map((e) => JSON.parse(e.data).status);
+    assert.ok(statuses.includes('doing') && statuses.some((s) => s === 'done' || s === 'review'), statuses.join(','));
+  });
+  test('kept for at least 30 days: JOB_EVENTS_DAYS defaults to 35 and never goes under 30; older ones go', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const day = 86400000, now = Date.now();
+    for (const age of [29, 31, 34, 36, 60]) sql(t.db, "INSERT INTO job_events (floor_id, card_id, kind, data, created_at) VALUES (?, 999, 'task', '{}', ?)", f.id, now - age * day);
+    const { installEventLog, keepDays } = await import('../server/eventlog.js');
+    assert.equal(keepDays({}), 35); assert.equal(keepDays({ jobEventsDays: 10 }), 30); assert.equal(keepDays({ jobEventsDays: 90 }), 90);
+    const ext = { db: t.db, cfg: { jobEventsDays: 35 }, engine: { emit() {} }, now: () => now, GET() {} };
+    installEventLog(ext).prune();
+    const left = all(t.db, 'SELECT created_at FROM job_events WHERE card_id=999').map((r) => Math.round((now - r.created_at) / day)).sort((a, b) => a - b);
+    assert.deepEqual(left, [29, 31, 34], 'a month-old job is still there to replay');
+  });
+  test('JOB_EVENTS=0 records nothing', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const n = () => get(t.db, 'SELECT COUNT(*) n FROM job_events WHERE floor_id=?', f.id).n;
+    const before = n(); t.cfg.jobEvents = false;
+    const task = get(t.db, 'SELECT id FROM tasks WHERE floor_id=? ORDER BY id LIMIT 1', f.id);
+    t.app.engine.emitTask(task.id);
+    assert.equal(n(), before);
+    t.cfg.jobEvents = true;
+    t.app.engine.emitTask(task.id);
+    assert.ok(n() > before);
+  });
+});
+
+describe('r2-j48 replay', () => {
+  test('a replay lasts 30 to 60 s whatever the job took, in the real order, long waits squeezed', () => {
+    const mk = (gaps) => { let t = 1.7e12; return gaps.map((g, i) => ({ id: i, t: (t += g) })); };
+    for (const gaps of [[0, 1000, 2000], [0, ...Array(10).fill(60000)], [0, ...Array(80).fill(5000)], [0, 3600000 * 5, 1000, 1000]]) {
+      const r = replayTimeline(mk(gaps));
+      assert.ok(r.length >= REPLAY.MIN && r.length <= REPLAY.MAX, `length ${r.length}`);
+      assert.ok(r.steps.every((x, i) => !i || x.at >= r.steps[i - 1].at), 'real order');
+      assert.ok(r.steps.at(-1).at < r.length && r.steps[0].at >= 0);
+    }
+    const r = replayTimeline(mk([0, 1000, 3600000 * 5, 1000]));
+    assert.ok(r.steps[2].at - r.steps[1].at < r.length / 2, 'five hours of waiting is a pause, not most of the replay');
+    assert.deepEqual(replayTimeline([]), { steps: [], length: 0 });
+  });
+  test('the label: "Replay · <weekday> <HH:MM>", New York time', () => {
+    assert.equal(replayLabel(Date.UTC(2026, 10, 17, 19, 10)), 'Replay · Tuesday 14:10');
+    assert.equal(replayLabel(Date.UTC(2026, 10, 20, 4, 5)), 'Replay · Thursday 23:05');
+  });
+
+  let t, c, visitor;
+  before(async () => { t = await boot(); c = await claim(t, 'Replay Floor'); visitor = new Client(t, { origin: null }); });
+  after(async () => { await t.close(); });
+  test('DONE MEANS (server): an idle floor with a finished job offers its replay; the replay is that job\'s real events, in order', async () => {
+    await c.post(`/api/floors/${c.slug}/chat`, { text: 'go build tyre finder' });
+    await waitDone(c);
+    const s = (await visitor.get(`/api/floors/${c.slug}`)).data;
+    assert.equal(s.floor.state, 'idle');
+    assert.ok(s.room.replay && s.room.replay.steps >= 3, 'offered');
+    const r = (await visitor.get(`/api/floors/${c.slug}/replay`)).data.replay;
+    assert.equal(r.card.id, s.room.replay.card);
+    const kinds = new Set(r.items.map((x) => x.kind));
+    for (const k of ['card', 'task', 'talk']) assert.ok(kinds.has(k), k);
+    assert.ok(r.items.every((x, i) => !i || x.t >= r.items[i - 1].t));
+    assert.ok(r.items.every((x) => x.id != null), 'every step is a real record');
+    assert.ok(replayTimeline(r.items).length <= 60);
+  });
+  test('a visitor never replays private work or a hushed line; the boss can; REPLAY=0 offers nothing', async () => {
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug);
+    const r0 = (await visitor.get(`/api/floors/${c.slug}/replay`)).data.replay;
+    sql(t.db, "INSERT INTO job_events (floor_id, card_id, kind, data, created_at) VALUES (?,?,'talk',?,?)", f.id, r0.card.id, JSON.stringify({ beat: 'review', from: 1, text: 'secret words', hush: true }), Date.now());
+    const again = (await visitor.get(`/api/floors/${c.slug}/replay`)).data.replay;
+    assert.ok(!JSON.stringify(again).includes('secret words'), 'hushed for a visitor');
+    assert.ok(JSON.stringify((await c.get(`/api/floors/${c.slug}/replay`)).data.replay).includes('secret words'), 'the boss hears their own floor');
+    if (r0.card.project) {
+      sql(t.db, 'UPDATE projects SET private=1 WHERE floor_id=? AND slug=?', f.id, r0.card.project);
+      const priv = (await visitor.get(`/api/floors/${c.slug}/replay`)).data.replay;
+      assert.ok(!priv || priv.card.id !== r0.card.id, 'a private job is never replayed to a visitor');
+      assert.equal((await c.get(`/api/floors/${c.slug}/replay`)).data.replay.card.id, r0.card.id);
+      sql(t.db, 'UPDATE projects SET private=0 WHERE floor_id=? AND slug=?', f.id, r0.card.project);
+    }
+    t.cfg.replay = false;
+    assert.equal((await visitor.get(`/api/floors/${c.slug}`)).data.room.replay, undefined);
+    assert.equal((await visitor.get(`/api/floors/${c.slug}/replay`)).data.replay, null);
+    t.cfg.replay = true;
   });
 });

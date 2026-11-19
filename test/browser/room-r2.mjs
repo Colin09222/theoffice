@@ -1,7 +1,7 @@
 // Round 2, lane A, in a real browser: the floor room (docs/redesign/OFFICE-ANSWERS-2.md). Each check names its job. npm run e2e:room2
 // ROOM2_ONLY=j31,j32 runs some of them; ROOM2_SHOTS=dir saves a picture of each.
 import { launch, sleep } from './cdp.mjs';
-import { boot, claim } from '../helpers.js';
+import { boot, claim, waitDone } from '../helpers.js';
 import { get, run } from '../../server/db.js';
 import { weekOf } from '../../server/weekplan.js';
 import { storeShot } from '../../server/shots.js';
@@ -18,9 +18,9 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
 
 /** Room time, stepped by hand through the room's own update(): software rendering here runs the room clock at a few percent of real time. */
 const step = (p, secs, each = '') => p.ev(`(() => { const v = window.__office.view; for (let i = 0; i < ${secs} * 10; i++) { v.update(0.1); ${each} } })()`);
-async function openRoom(slug, opts = {}) {
+async function openRoom(slug, opts = {}, query = '') {
   const p = await b.newPage(opts);
-  await p.goto(`${base}/floor/${slug}`);
+  await p.goto(`${base}/floor/${slug}${query}`);
   await p.until('document.body.dataset.page === "floor" && !!window.__office?.view?.manager', 'room', 120000);
   return p;
 }
@@ -237,6 +237,43 @@ try {
     await ph.until('!!window.__office?.view?.manager', 'the phone room', 120000);
     const d = await ph.ev(`(() => { const v = window.__office.view; v.lastInputAt = v.time; const yaws = []; for (let i = 0; i < 160; i++) { v.update(0.1); yaws.push(Math.atan2(v.camera.position.x - v.pan.x, v.camera.position.z - v.pan.y)); } return { follow: v.follow.allowed, drift: v.driftOn, early: Math.abs(yaws[70] - yaws[0]), late: Math.abs(yaws[159] - yaws[90]) * 180 / Math.PI }; })()`);
     check(!d.follow && d.drift && d.early < 0.01 && d.late > 5, `j46 a phone never follows; left alone 8 s it drifts (${d.late.toFixed(1)} degrees in the next 7 s)`);
+  }
+  if (want('j48')) {
+    // r2-j48: an idle floor offers "Replay" and plays its last real job in under 60 s with a visible Replay label.
+    const boss = await claim(t, 'Replay Room');
+    await boss.post(`/api/floors/${boss.slug}/chat`, { text: 'go build tyre finder' });
+    await waitDone(boss);
+    await sleep(500);
+    const p = await openRoom(boss.slug, {}, '?q=mid');
+    await p.until('!!document.querySelector(".replay-offer")', 'the offer', 20000);
+    const offer = await p.ev('document.querySelector(".replay-offer").textContent');
+    const t0 = Date.now();
+    await p.click('.replay-offer');
+    await p.until('!!document.querySelector(".replay .replay-label")', 'the replay', 10000);
+    const seen = [];
+    while (Date.now() - t0 < 70000) {
+      const r = await p.ev('({ label: document.querySelector(".replay .replay-label")?.textContent || null, visible: (() => { const el = document.querySelector(".replay-label"); if (!el) return false; const b = el.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(el).visibility !== "hidden"; })(), done: document.querySelector(".replay")?.dataset.done === "true" || !window.__office.replay, played: window.__office.replay?.played?.length ?? null, mode: document.querySelector(".replay")?.dataset.mode })');
+      seen.push(r);
+      if (r.done) break;
+      if (seen.length === 6 && shots) await p.shot(`${shots}/r2-j48-replay.jpg`);
+      await sleep(1000);
+    }
+    await p.until('!!window.__office.lastReplay', 'the end of the replay', 30000);
+    const lr = await p.ev('window.__office.lastReplay');
+    const secs = (Date.now() - t0) / 1000;
+    check(offer.includes('Watch how this was made'), `j48 the idle floor offers "${offer}"`);
+    check(lr.finished && lr.played === lr.steps && lr.took < 60 && lr.length >= 30, `j48 the replay of the last real job played all ${lr.steps} real steps and finished in ${lr.took.toFixed(1)} s by its own clock (planned ${lr.length.toFixed(1)} s; ${secs.toFixed(0)} s by this slow test machine's)`);
+    check(seen.some((x) => x.mode === 'room') && seen.filter((x) => !x.done).every((x) => x.visible && /^Replay · [A-Z][a-z]+day \d\d:\d\d$/.test(x.label)), `j48 the label "${seen[0].label}" was visible at every check (${seen.length})`);
+    check(!p.errors.length, `j48 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+    // Phone low: the cards and the photos only, no room.
+    const ph = await b.newPage({ phone: { width: 390, height: 844 } });
+    await ph.goto(`${base}/floor/${boss.slug}?q=low`); await ph.room();
+    await ph.until('!!document.querySelector(".replay-offer")', 'the phone offer', 60000);
+    await ph.click('.replay-offer');
+    await ph.until('!!document.querySelector(".replay")', 'the phone replay', 10000);
+    const mode = await ph.ev('document.querySelector(".replay").dataset.mode');
+    check(mode === 'cards', `j48 on phone low it is cards and photos only (${mode})`);
+    if (shots) await ph.shot(`${shots}/r2-j48-phone-low.jpg`);
   }
 } finally {
   b.close(); await t.close();

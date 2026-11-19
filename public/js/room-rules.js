@@ -271,3 +271,30 @@ export function driftYaw(idle, { allowed = true } = {}) {
   const d = p < w ? p : p < 3 * w ? 2 * w - p : p - 4 * w;
   return (d * Math.PI) / 180;
 }
+
+// ---- r2-j48: Replay (Q24 idea 1) ----
+/** A replay lasts 30 to 60 s (planned at most 55), whatever the real job took. */
+export const REPLAY = { MIN: 30, MAX: 55, PER_STEP: 1.6, END_HOLD: 2.5 };  // 55, not 60: a slow device's late timers still finish inside a minute
+
+/**
+ * The real events of one job, and its step photos, laid out on a 30 to 60 s replay: real order kept, real gaps squeezed (a long wait reads as a
+ * longer pause, never an hour). Returns [{ at (s into the replay), ...item }] and the length. Items are { t (real ms), ... }.
+ */
+export function replayTimeline(items) {
+  const list = [...(items || [])].filter((x) => Number.isFinite(x?.t)).sort((a, b) => a.t - b.t);
+  if (!list.length) return { steps: [], length: 0 };
+  const w = list.map((x, i) => (i ? 1 + Math.min(1.5, Math.log1p(Math.max(0, x.t - list[i - 1].t) / 1000) / 4) : 0));
+  const total = w.reduce((n, x) => n + x, 0);
+  const length = Math.min(REPLAY.MAX, Math.max(REPLAY.MIN, list.length * REPLAY.PER_STEP + REPLAY.END_HOLD));
+  const span = length - REPLAY.END_HOLD - 1;
+  let acc = 0;
+  const steps = list.map((x, i) => { acc += w[i]; return { ...x, at: 1 + (total ? (acc / total) * span : 0) }; });
+  return { steps, length };
+}
+/** "Replay · Tuesday 14:10": when the job happened, New York time, like the building's clock. */
+export function replayLabel(ms, tz = 'America/New_York') {
+  const d = new Date(ms);
+  const day = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: tz }).format(d);
+  const hm = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz }).format(d);
+  return `Replay · ${day} ${hm}`;
+}

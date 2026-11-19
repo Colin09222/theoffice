@@ -24,6 +24,7 @@ import { onChatEvent } from './chat-ui.js';
 import { launchFlow, makerCard } from './launch-ui.js';
 import { setupOnArrival } from './setup-ui.js';
 import { recoveryBox } from './dom.js';
+import { Replay } from './replay.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -378,11 +379,16 @@ class FloorPage {
     this.hoursEl.firstChild.textContent = w.label; this.hoursEl.lastChild.textContent = w.days || (w.mode === 'nonstop' ? 'Every day' : 'When the boss calls');
     this.view?.setClosed?.(this.closedNow);
     this.view?.setFloorState?.(f.state || 'idle');
+    // Real work starts: a replay stops at once, so live and replayed never mix (r2-j48).
+    if (this.replay && state !== 'idle') this.replay.stop();
   }
   renderControls() {
     clear(this.controlsEl);
     const f = this.state.floor;
     // r2-j46: following the work, on a desktop. Off after a drag; this turns it back on.
+    // r2-j48: an Idle floor with a real past job offers to play it back. Never while work is going on, never twice at once.
+    const idleNow = (f.state || 'idle') === 'idle' && !this.state.agents.some((a) => a.state !== 'idle');
+    const replay = this.state.room?.replay && idleNow && !this.replay ? h('button.btn.chrome.replay-offer', { type: 'button', title: `A replay of "${this.state.room.replay.title}", in under a minute`, onclick: () => this.startReplay() }, icon('play'), 'Watch how this was made') : null;
     const follow = this.view?.follow?.allowed ? h('button.btn.chrome.follow-switch', { type: 'button', 'aria-pressed': String(!!this.view.follow.on), title: 'The camera goes to real handoffs and comes back', onclick: () => this.view.setFollow(!this.view.follow.on) }, icon('sparkle'), this.view.follow.on ? 'Following the work' : 'Follow the work') : null;
     if (this.owner) {
       const pause = f.paused
@@ -391,12 +397,20 @@ class FloorPage {
       this.controlsEl.append(pause,
         h('button.btn.chrome', { type: 'button', onclick: () => this.confirmStop() }, icon('stop'), 'Stop all'),
         h('button.btn.chrome', { type: 'button', onclick: () => this.openRedirect() }, icon('arrow-bend-up-right'), 'Redirect'),
-        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'), startButton(this) || '', follow || '');
+        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'), startButton(this) || '', follow || '', replay || '');
     } else {
       put(this.controlsEl,
         h('span.visitor-note', {}, f.filler ? 'Demo company: scripted and fictional' : 'You\'re visiting. Watch all you like.'),
-        session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'), follow);
+        session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'), replay, follow);
     }
+  }
+  /** r2-j48: fetch the floor's last real job and play it back. The room acts it out unless this is phone low, where it is cards and photos only. */
+  async startReplay() {
+    let r;
+    try { r = (await api(`/floors/${this.slug}/replay`)).replay; } catch (e) { toast(e.message, 'bad'); return; }
+    if (!r || this.dead || this.replay) { if (!r) toast('Nothing to replay yet'); return; }
+    this.replay = new Replay(this, r, { room: !!this.view && !this.view.low }).start();
+    this.renderControls();
   }
   async control(action, text) {
     try {
@@ -1391,6 +1405,7 @@ class FloorPage {
     if (this.onResize) window.removeEventListener('resize', this.onResize);
     window.removeEventListener('office:agent-tap', this.tapAgent);
     if (this.onFollow) window.removeEventListener('office:follow', this.onFollow);
+    this.replay?.stop();
     this.unwireTaps?.();
     this.unwireLift?.();
     delete document.body.dataset.sheet;
