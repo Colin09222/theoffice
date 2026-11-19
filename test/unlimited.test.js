@@ -55,7 +55,7 @@ describe('the settings', () => {
     assert.equal(c.sessionWrapUp, undefined, 'nothing can tell a job to stop polishing any more');
     assert.equal(c.taskMaxUsd, 5, 'the hard stop per task is the one money limit left on by default ($5 since the redesign, job 7)');
     // Since 11-10, a staff job's steps and a project's rounds are capped unless set to off (test/rounds.test.js).
-    assert.deepEqual([c.maxStaffSteps, c.loopMaxRetests, c.loopMaxReplans], [40, 2, 3]);
+    assert.deepEqual([c.maxStaffSteps, c.loopMaxRetests, c.loopMaxReplans], [40, 1, 1], 'one re-test and one re-plan since the redesign (job 10)');
   });
   test('what was kept on purpose is still on', () => {
     const c = loadConfig({});
