@@ -28,7 +28,7 @@ test('nothing plays while muted or while the tab is hidden, and a hidden tab sus
   assert.equal(mayPlay({ muted: false, hidden: true }), false);
   assert.equal(mayPlay({ muted: false, hidden: false }), true);
   assert.match(sfx, /if \(!mayPlay\(\{ muted, hidden: document\.hidden \}\) \|\| !ctx/);
-  assert.match(sfx, /visibilitychange', \(\) => \{ if \(!ctx\) return; if \(document\.hidden\) ctx\.suspend\?\.\(\); else if \(!muted\) ctx\.resume\?\.\(\); \}/);
+  assert.match(sfx, /visibilitychange', \(\) => \{ syncTone\(\); if \(!ctx\) return; if \(document\.hidden\) ctx\.suspend\?\.\(\); else if \(!muted\) ctx\.resume\?\.\(\); \}/);
   // Every sound in the page goes through sfx(): no other file makes its own.
   const { readdirSync } = fs;
   for (const f of readdirSync(new URL('../public/js/', import.meta.url))) {

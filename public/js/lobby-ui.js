@@ -5,7 +5,7 @@
 // round. A phone gets no 3D on the home page at all.
 import { h, api, session, isPhone, clear, put, timeAgo, BASE } from './dom.js';
 import { icon } from './icons.js';
-import { muteButton, sfx } from './sfx.js';
+import { muteButton, sfx, eventSound } from './sfx.js';
 import { stateBadge, idleNote } from './badge.js';
 import { launchCard } from './launch-card.js';
 import { heroFrames, crossfade } from './hero-fade.js';
@@ -23,6 +23,8 @@ let floors = [], toLet = [], poll = null, nowPoll = null, tower = null, tip = nu
 // floor within 10 s. The tower draws them; on a phone (and wherever there is no tower) the floor list's dot pulses for a floor at work.
 const LIVE_MS = 5000;
 let live = null, livePoll = null;
+// Round 2, r2-j43: a launch somewhere in the building rings the bell once (if sound is on). The first reading only learns what is already there.
+const launchSeen = new Map(); let liveRead = false;
 // Round 2, r2-j37: the crown billboard shows the same 3 launches as the hero, from the same list.
 let heroList = [];
 const liveWork = (n) => !!live?.floors?.find((f) => f.number === n)?.work;
@@ -147,6 +149,13 @@ export async function showLobby(root) {
   const readLive = async () => {
     try { live = await api('/building/live'); } catch { return; }
     if (!alive) return;
+    let rang = false;
+    for (const f of live.floors || []) {
+      if (!f.launchAt) continue;
+      if (liveRead && f.launchAt > (launchSeen.get(f.number) || 0) && !rang) rang = eventSound('launch') || true;
+      launchSeen.set(f.number, Math.max(launchSeen.get(f.number) || 0, f.launchAt));
+    }
+    liveRead = true;
     for (const row of list.querySelectorAll('.dir-row')) { if (liveWork(Number(row.dataset.floor))) row.dataset.live = 'work'; else delete row.dataset.live; }
     tower?.setLive?.(live.floors);
   };
