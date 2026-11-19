@@ -4,7 +4,7 @@
 import * as THREE from '../vendor/three/three.module.min.js';
 import { mergeMeshes } from './batch.js';
 import { stage } from './stage.js';
-import { lightClock } from './nylight.js';
+import { lightClock, isDecember } from './nylight.js';
 import { makeBillboard, W as BOARD_W, H as BOARD_H } from './billboard.js';
 import { flyPose, FLYIN_MS } from './flyin.js';
 
@@ -836,11 +836,38 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   const gmat = new THREE.SpriteMaterial({ map: radial('#ffd27a'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.85 });
   for (let a = 0; a < 8; a++) { const g = new THREE.Sprite(gmat); const ang = (a * Math.PI) / 4; g.scale.setScalar(3.2); g.position.set(Math.sin(ang) * (TOWER_W / 2 - 0.6), H + 1.6, Math.cos(ang) * (TOWER_W / 2 - 0.6)); crownGlow.add(g); }
   group.add(crownGlow);
+  // r2-j72: the December set. Snow on the roof (white caps on the crown's steps and terraces: the roof colour, on every tier), a tree in the lobby
+  // and a little falling snow (not on "low", Q9). Hidden outside 1 to 31 December.
+  const december = makeDecember(H, steps); group.add(december.group);
   // r2-j36: a small sign light on each floor's front face: real visits in the last 24 hours, in 4 levels. It stays on at night (Q2).
   const visitSigns = new THREE.InstancedMesh(new THREE.BoxGeometry(0.34, 0.12, 0.06), new THREE.MeshBasicMaterial({ color: '#ffffff', toneMapped: false }), Math.max(1, floorCount));
   for (let i = 0; i < floorCount; i++) { m.makeTranslation(half - 0.55, GROUND + i * FLOOR_H + FLOOR_H * 0.8, half + 0.03); visitSigns.setMatrixAt(i, m); visitSigns.setColorAt(i, VISIT_COLORS[0]); }
   visitSigns.count = floorCount; visitSigns.frustumCulled = false; group.add(visitSigns);
-  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt, street, visitSigns, billboard: { mat: boardMat, meshes: boards3d }, crownGlow };
+  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt, street, visitSigns, billboard: { mat: boardMat, meshes: boards3d }, crownGlow, december };
+}
+
+/** r2-j72: snow caps on the roof, a tree in the lobby, and falling snow. All hidden until setSeason turns December on. */
+function makeDecember(H, steps) {
+  const group = new THREE.Group(); group.name = 'december'; group.visible = false;
+  const snow = new THREE.MeshStandardMaterial({ color: '#f7f9fc', roughness: 0.95 });
+  const roof = new THREE.Group(); roof.name = 'snow-roof'; group.add(roof);
+  let y = H + 0.3;
+  const cap = (w, yy) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w + 0.1, 0.09, w + 0.1), snow); m.position.y = yy + 0.045; roof.add(m); };
+  cap(TOWER_W + 0.6, H + 0.3 - 0.01);
+  for (const [w, hh] of steps) { cap(w + 0.24, y + hh + 0.1); y += hh + 0.1; }
+  // The tree, in the glass lobby by the door: three cones, a trunk and a star.
+  const tree = new THREE.Group(); tree.name = 'lobby-tree'; tree.position.set(2.2, 0.52, TOWER_W / 2 - 1.2); group.add(tree);
+  const green = new THREE.MeshStandardMaterial({ color: '#2f6b3f', roughness: 0.8 });
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.3, 6), new THREE.MeshStandardMaterial({ color: '#5a3b26' })); trunk.position.y = 0.15; tree.add(trunk);
+  [[0.75, 0.9, 0.75], [0.6, 0.75, 1.25], [0.42, 0.6, 1.7]].forEach(([r, h, yy]) => { const c = new THREE.Mesh(new THREE.ConeGeometry(r, h, 10), green); c.position.y = yy; tree.add(c); });
+  const star = new THREE.Mesh(new THREE.OctahedronGeometry(0.12), new THREE.MeshBasicMaterial({ color: '#ffd27a' })); star.position.y = 2.1; tree.add(star);
+  // Falling snow: a few hundred flakes round the tower, drifting down and round again.
+  const n = 500, pos = new Float32Array(n * 3), r = rng(1212);
+  for (let i = 0; i < n; i++) { pos[i * 3] = (r() - 0.5) * 60; pos[i * 3 + 1] = r() * (H + 20); pos[i * 3 + 2] = (r() - 0.5) * 60; }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const fall = new THREE.Points(geo, new THREE.PointsMaterial({ color: '#ffffff', size: 0.18, transparent: true, opacity: 0.85, depthWrite: false }));
+  fall.name = 'snowfall'; fall.frustumCulled = false; group.add(fall);
+  return { group, roof, tree, fall, top: H + 20 };
 }
 
 /** r2-j36: the visit sign light's 4 levels: off, then warmer and brighter: 1 to 50, 51 to 200, over 200 visits in 24 hours. */
@@ -1005,6 +1032,7 @@ export class LobbyView {
     if (st) { st.glowMat.opacity = low ? 0 : look.street * 0.85; for (const g of st.glows) g.visible = !low && look.street > 0.02; }
     this.exposure = look.exposure;
     if (this.active && stage.renderer) stage.renderer.toneMappingExposure = look.exposure;
+    this.setSeason(isDecember(window.__officeNow?.() ?? Date.now()));
     this.lightState = { phase: l.phase, weights: l.weights, lightsOn: l.lightsOn, crownLit: true, streetOn: !low, rise: l.rise, set: l.set };
   }
   setTier(q) {
@@ -1013,6 +1041,7 @@ export class LobbyView {
     if (sh > 0) { this.sun.shadow.mapSize.set(sh, sh); this.sun.shadow.map?.dispose(); this.sun.shadow.map = null; }
     this.world.setDetail(q.density >= 0.6);
     if (this.board) this.showBoard();
+    if (this.season) this.setSeason(this.season.december);
     if (this.active) { const r = stage.renderer; r.shadowMap.enabled = sh > 0; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = sh > 0; }
   }
   bind() {
@@ -1132,6 +1161,13 @@ export class LobbyView {
     this.showBoard();
     return n;
   }
+  /** r2-j72: the December set on or off. Low tier (Q9): the roof's colour only, no tree and no falling snow. */
+  setSeason(dec) {
+    const d = this.tower.december; if (!d) return;
+    const low = stage.tier === 'low';
+    d.group.visible = dec; d.tree.visible = dec && !low; d.fall.visible = dec && !low;
+    this.season = { december: dec, roofSnow: dec, tree: dec && !low, snowfall: dec && !low };
+  }
   /** r2-j68: Friday evening's featured floor: the lit crown, and its launches on the billboard. Null puts the week back: the hero list. */
   setFriday(f) { this.friday = f || null; if (this.tower.crownGlow) this.tower.crownGlow.visible = !!f; }
   showBoard() { const on = !!this.board?.count && stage.tier !== 'low'; for (const m of this.tower.billboard?.meshes || []) m.visible = on; this.boardOn = on; }
@@ -1168,6 +1204,11 @@ export class LobbyView {
     this.time += dt;
     this.light.tick();
     if (this.boardOn && this.board.draw(performance.now())) this.boardTex.needsUpdate = true;  // r2-j37: only while a picture changes
+    if (this.season?.snowfall) {  // r2-j72: the flakes drift down and start again at the top
+      const d = this.tower.december, p = d.fall.geometry.attributes.position, a = p.array;
+      for (let i = 1; i < a.length; i += 3) { a[i] -= dt * 1.2; if (a[i] < 0) a[i] += d.top; }
+      p.needsUpdate = true;
+    }
     if (this.flashes?.size) {  // r2-j36: one 0.8 s flash per launch, on top of the work light
       const st = this.tower.state;
       for (const [n, left] of this.flashes) {

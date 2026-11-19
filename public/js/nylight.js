@@ -92,6 +92,9 @@ export function mixLook(weights) {
   return out;
 }
 
+/** Round 2, r2-j72: the December set runs from 1 to 31 December, New York time. */
+export const isDecember = (ms) => nyParts(ms).month === 12;
+
 /** A clock that reads the light once a minute (and at once the first time). `now` is passed in so a test can move it. */
 export function lightClock({ now = () => Date.now(), apply }) {
   let last = -Infinity, cur = null;

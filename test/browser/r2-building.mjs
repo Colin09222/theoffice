@@ -45,14 +45,27 @@ try {
   // r2-j33: Loopling's hero card has 3 real screenshots and fades to the next within about 4 s.
   const frames = await p.until('document.querySelector(".lcard-hero[data-project=loopling]")?.dataset.frames || null', 'hero frames', 20000).catch(() => null);
   check(frames === '3', `r2-j33: the Loopling hero card has 3 screenshots to fade between (${frames})`);
-  await sleep(4900);
-  check(await p.ev('getComputedStyle(document.querySelector(".lcard-hero[data-project=loopling] .lcard-fade")).opacity === "1"'), 'r2-j33: after 4 s the next screenshot has faded in');
+  // How late the page's own timers run (software WebGL drawing the tower can hold them up): the timing checks allow for it and say so.
+  const timerLag = async (pg) => pg.ev('(async () => { let worst = 0; for (let i = 0; i < 5; i++) { const t0 = performance.now(); await new Promise((r) => setTimeout(r, 50)); worst = Math.max(worst, performance.now() - t0 - 50); } return Math.round(worst); })()');
+  const fadeT0 = Date.now();
+  const faded = await p.until('getComputedStyle(document.querySelector(".lcard-hero[data-project=loopling] .lcard-fade")).opacity === "1"', 'the fade', 20000).then(() => Date.now() - fadeT0).catch(() => null);
+  const lag33 = await timerLag(p);
+  check(faded !== null && faded <= 4600 + Math.max(500, lag33 * 2), `r2-j33: the next screenshot fades in after the 4 s hold (${faded} ms; page timer lag ${lag33} ms)`);
   // r2-j35: at 23:30 New York every room light is off and the crown sign is lit.
   await p.until('!!document.querySelector(".home-tower.ready") && !!window.__lobbyDebug?.lightState', 'the tower', 90000);
   const light = await p.ev('window.__lobbyDebug.lightState');
   check(light.lightsOn === false && light.crownLit === true && light.phase === 'night', `r2-j35: 23:30 New York: room lights off, crown sign lit, night (${JSON.stringify(light)})`);
   check(!p.errors.length, `desktop: no console errors ${p.errors.slice(0, 2).join(' | ')}`);
   p.close();
+  // r2-j72: on 1 December the roof has snow and the lobby a tree; on 1 January both are gone.
+  for (const [label, clock, want] of [['1 December', Date.UTC(2026, 11, 1, 17, 0), true], ['1 January', Date.UTC(2027, 0, 1, 17, 0), false]]) {
+    p = await b.newPage({ width: 1440, height: 900 });
+    await p.send('Page.addScriptToEvaluateOnNewDocument', { source: `window.__officeNow = () => ${clock} + (performance.now() | 0);` });
+    await p.goto(`${base}/?q=mid`);
+    const season = await p.until('window.__lobbyDebug?.season || null', 'the tower', 90000).catch(() => null);
+    check(season && season.roofSnow === want && season.tree === want, `r2-j72: ${label}: snow on the roof and a tree in the lobby ${want ? 'are there' : 'are gone'} (${JSON.stringify(season)})`);
+    p.close();
+  }
   // ---- desktop, noon ----
   // r2-j36: a test job started on a hidden floor brightens that floor's windows within 10 s.
   p = await page({ width: 1440, height: 900 }, { clock: nyAt(12, 0) });
@@ -75,7 +88,8 @@ try {
   const changes = await p.ev(`new Promise((r) => { const v = window.__lobbyDebug, out = []; let last = v.board.frame(performance.now()).index; const t0 = performance.now();
     const iv = setInterval(() => { const i = v.board.frame(performance.now()).index; if (i !== last) { out.push({ i, at: Math.round(performance.now() - t0) }); last = i; } if (performance.now() - t0 > 13000) { clearInterval(iv); r(out); } }, 100); })`);
   const gaps = changes.slice(1).map((c, k) => c.at - changes[k].at);
-  check(changes.length >= 2 && gaps.every((g) => Math.abs(g - 6000) < 1200) && changes.every((c, k) => k === 0 || c.i === (changes[k - 1].i + 1) % 3), `r2-j37: it moves to the next picture every 6 s (${JSON.stringify(changes)})`);
+  const lag37 = await timerLag(p);
+  check(changes.length >= 2 && gaps.every((g) => Math.abs(g - 6000) < Math.max(1200, lag37 * 2 + 300)) && changes.every((c, k) => k === 0 || c.i === (changes[k - 1].i + 1) % 3), `r2-j37: it moves to the next picture every 6 s (${JSON.stringify(changes)}; page timer lag ${lag37} ms)`);
   p.close();
   p = await page({ width: 1440, height: 900 }, { clock: nyAt(12, 0) });
   await p.until('!!window.__lobbyDebug?.lightState', 'the tower', 90000);
