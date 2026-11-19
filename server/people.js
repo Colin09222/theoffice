@@ -281,6 +281,8 @@ Reply with JSON only: {"people":[{"name":"exact name given","persona":"how they 
   function meeting(floorId, trigger, tasks) {
     const f = floorRow(floorId);
     if (!speakable(f) || !tasks.length) return null;
+    // The planning huddle was a status line in the model's words. The job card says who is doing what now, built by code (docs/redesign, job 12).
+    if (cfg.statusFromCode) return null;
     const project = tasks[0].project || '';
     const same = tasks.filter((t) => (t.project || '') === project);
     const t0 = engine.now();
