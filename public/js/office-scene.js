@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { frameLayout, poseFor, glancing, BeatGate } from './room-rules.js';
+import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows } from './room-rules.js';
 import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
@@ -1204,7 +1204,7 @@ export class OfficeView {
   /** Phone "low" (spec Q9): fewer, smaller props. */
   get low() { return (stage.q?.density ?? 1) < 0.6; }
   /** The room's own data from the snapshot (server/room.js): frames now, more props later. */
-  setRoom(room) { if (!room) return; this.roomCfg = room; this.setFrames(room.frames); }
+  setRoom(room) { if (!room) return; this.roomCfg = room; this.setFrames(room.frames); this.boardKey = null; this.updateBoard(this.tasks); }
   /**
    * r2-j32: one frame per real launch, newest first, over the side wall's picture spots: big when there are one or two, a 2 by 2 cluster per spot
    * past that, at most 8 (3 small on phone low) and then a "+N" tag. Each frame is the launch's real photo; a launch with no photo yet hangs a
@@ -1578,6 +1578,28 @@ export class OfficeView {
       marker('#c8455a'); x.lineWidth = 3; x.beginPath(); x.arc(632, 262, 10, 0, 7); x.stroke();
     });
   }
+  /** r2-j41: the plan on the whiteboard: its goal, up to 5 jobs with a tick box each, ticked when done, and how many are done. */
+  planTexture(plan) {
+    const { primary, accent } = this.colors;
+    return canvasTex(704, 340, (x, w, h) => {
+      const g = x.createLinearGradient(0, 0, w, h); g.addColorStop(0, '#fdfcf8'); g.addColorStop(1, '#eeebe2'); x.fillStyle = g; x.fillRect(0, 0, w, h);
+      x.fillStyle = 'rgba(0,0,0,.05)'; x.fillRect(0, 0, w, 6); x.fillRect(0, 0, 6, h);
+      x.font = '600 32px Fraunces, Georgia, serif'; x.fillStyle = primary;
+      const title = String(plan.title); x.fillText(title.length > 34 ? `${title.slice(0, 33)}…` : title, 30, 48);
+      x.font = '700 21px ui-sans-serif, system-ui, sans-serif'; x.fillStyle = '#5d6472'; x.textAlign = 'right'; x.fillText(`${plan.done} of ${plan.total} done`, w - 30, 46); x.textAlign = 'left';
+      plan.rows.forEach((r, i) => {
+        const y = 102 + i * 48;
+        x.lineCap = 'round'; x.lineJoin = 'round';
+        x.strokeStyle = r.tick ? '#3d8a55' : '#2f3340'; x.lineWidth = 3; x.strokeRect(32, y - 22, 28, 28);
+        if (r.tick) { x.lineWidth = 5; x.beginPath(); x.moveTo(36, y - 9); x.lineTo(46, y + 1); x.lineTo(66, y - 27); x.stroke(); }
+        else if (r.now) { x.fillStyle = accent; x.fillRect(38, y - 16, 16, 16); }
+        x.font = `${r.now ? 700 : 600} 25px ui-sans-serif, system-ui, sans-serif`; x.fillStyle = r.tick ? '#8a8e99' : '#1f2330';
+        const label = r.title.length > 40 ? `${r.title.slice(0, 39)}…` : r.title;
+        x.fillText(label, 78, y);
+        if (r.tick) { x.lineWidth = 2; x.strokeStyle = '#8a8e99'; x.beginPath(); x.moveTo(78, y - 8); x.lineTo(78 + x.measureText(label).width, y - 8); x.stroke(); }
+      });
+    });
+  }
   /** Whoever just finished a job does a little jump for joy, the moment the board says so. */
   celebrateFinished(tasks) {
     const was = (this.taskWas ||= new Map());
@@ -1593,14 +1615,18 @@ export class OfficeView {
     for (const a of this.actors.values()) if (a.state !== 'idle') a.renderBubble();
     // A task starting or stopping changes what the desk shows, even before the person's own state does (r2-j39).
     for (const a of this.actors.values()) { const r = a.running; if (r !== a.wasRunning) { a.wasRunning = r; if (!a.isBoss) a.applyStatePose(); } }
+    // r2-j41: the current plan's jobs from the server (this week's, or the newest plan's), ticked from the live tasks.
+    const plan = whiteboardRows(this.roomCfg?.whiteboard, tasks);
+    this.whiteboard = plan;  // read by the tests
     const shown = tasks.filter((t) => ['todo', 'doing', 'review', 'blocked', 'done'].includes(t.status));
     const open = shown.some((t) => t.status !== 'done');
     const list = open ? shown : [];
-    const key = JSON.stringify([list.map((t) => [t.title, t.status, t.agent_id ?? null]), [...this.actors.values()].map((a) => a.taskId ?? null)]);
+    const key = JSON.stringify([plan, list.map((t) => [t.title, t.status, t.agent_id ?? null]), [...this.actors.values()].map((a) => a.taskId ?? null)]);
     if (key === this.boardKey) return;
     this.boardKey = key;
+    if (!this.boardMat) return;
     this.boardMat.map?.dispose();
-    this.boardMat.map = this.boardTexture(list);
+    this.boardMat.map = plan ? this.planTexture(plan) : this.boardTexture(list);
     this.boardMat.needsUpdate = true;
   }
   /** The floor's state word from the server, on every snapshot: an Idle floor gets its idle rounds (r2-j31). */

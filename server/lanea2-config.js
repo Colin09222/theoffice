@@ -13,5 +13,7 @@ export function laneA2Settings(env = process.env) {
     roomFrames: on(env.ROOM_FRAMES),
     // r2-j40: a Tester's finished check sends the room a 'beat' event (high five or slump) (RESULT_BEATS=0: none sent).
     resultBeats: on(env.RESULT_BEATS),
+    // r2-j41: the meeting room's whiteboard lists the current plan's jobs, up to 5, ticked as each is done (ROOM_WHITEBOARD=0: the old board).
+    roomWhiteboard: on(env.ROOM_WHITEBOARD),
   };
 }

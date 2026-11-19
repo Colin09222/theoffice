@@ -129,3 +129,18 @@ export class BeatGate {
     return { ...beat, record: { type: r.type, id: r.id } };
   }
 }
+
+// ---- r2-j41: the whiteboard plan (Q5b) ----
+/**
+ * The meeting room's whiteboard: the current plan's jobs, up to 5, one tick per job done. `board` is the snapshot's room.whiteboard; `tasks` are the
+ * live tasks the page keeps, so a job ticks the moment its task is done, before the next snapshot. Null when there is no plan to show.
+ */
+export function whiteboardRows(board, tasks = []) {
+  if (!board?.jobs?.length) return null;
+  const live = new Map(tasks.map((t) => [t.id, t]));
+  const rows = board.jobs.slice(0, 5).map((j) => {
+    const status = live.get(j.id)?.status || j.status;
+    return { id: j.id, title: j.title, status, tick: status === 'done', now: status === 'doing' };
+  });
+  return { title: board.goal || 'The plan', rows, done: rows.filter((r) => r.tick).length, total: rows.length };
+}

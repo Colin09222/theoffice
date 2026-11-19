@@ -2,7 +2,8 @@
 // ROOM2_ONLY=j31,j32 runs some of them; ROOM2_SHOTS=dir saves a picture of each.
 import { launch, sleep } from './cdp.mjs';
 import { boot, claim } from '../helpers.js';
-import { get } from '../../server/db.js';
+import { get, run } from '../../server/db.js';
+import { weekOf } from '../../server/weekplan.js';
 import { storeShot } from '../../server/shots.js';
 import { REAL_JPEG, publish } from '../r2-fixtures.js';
 
@@ -109,6 +110,27 @@ try {
     check(slumps.length === 1 && slumps[0][1] === 'task' && slumps[0][2] === 4242 && slumps[0][3] === 1, `j40 one slump for the failed check, by the one bean, with its record (${JSON.stringify(slumps)})`);
     check(r.bad === null && r.refused >= 1, 'j40 a beat with no record is refused');
     check(!p.errors.length, `j40 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+  }
+  if (want('j41')) {
+    // r2-j41: the whiteboard lists the current plan's jobs and ticks one when it is done.
+    const boss = await claim(t, 'Plan Board');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    const ids = ['Sketch the page', 'Build the page', 'Write the words'].map((x, i) => Number(run(t.db, 'INSERT INTO tasks (floor_id,title,brief,plan,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)', f.id, x, x, 'This week: A tyre page', i ? 'todo' : 'doing', Date.now(), Date.now()).lastInsertRowid));
+    run(t.db, "INSERT INTO weekly_plans (floor_id,week,status,goal,jobs,created_at,started_at,task_ids) VALUES (?,?,'started','A tyre page','[]',?,?,?)", f.id, weekOf(Date.now()), Date.now(), Date.now(), JSON.stringify(ids));
+    const p = await openRoom(boss.slug);
+    const before = await p.ev('JSON.stringify(window.__office.view.whiteboard)');
+    run(t.db, "UPDATE tasks SET status='done', updated_at=? WHERE id=?", Date.now(), ids[0]);
+    t.app.engine.emitTask(ids[0]);
+    await p.until(`window.__office.view.whiteboard?.done === 1`, 'the tick', 20000);
+    const after = await p.ev('({ wb: window.__office.view.whiteboard, map: !!window.__office.view.boardMat.map?.image })');
+    const b = JSON.parse(before);
+    check(b?.title === 'A tyre page' && b.rows.length === 3 && b.done === 0, `j41 the board lists the plan's 3 jobs (${b?.rows.map((r) => r.title).join(', ')})`);
+    check(after.wb.rows[0].tick && !after.wb.rows[1].tick && after.map, `j41 the first job ticks the moment its task is done (${after.wb.done} of ${after.wb.total})`);
+    if (shots) {
+      await p.ev('(() => { const v = window.__office.view; v.targetYaw = v.yaw = 0.2; v.targetZoom = v.zoom = 3.4; v.targetPan.set(v.plan.board, v.plan.boardZ + 4); v.pan.copy(v.targetPan); })()');
+      await sleep(2500); await p.shot(`${shots}/r2-j41-whiteboard.jpg`);
+    }
+    check(!p.errors.length, `j41 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
   }
 } finally {
   b.close(); await t.close();

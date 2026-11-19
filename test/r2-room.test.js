@@ -5,7 +5,8 @@ import assert from 'node:assert/strict';
 import { boot, claim, Client } from './helpers.js';
 import { FloorLife } from '../public/js/life.js';
 import { PLANS, makeNav } from '../public/js/layouts.js';
-import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS } from '../public/js/room-rules.js';
+import { IDLE, IdleRounds, floorIsIdle, frameLayout, FRAMES, poseFor, glancing, GLANCE, BeatGate, BEATS, whiteboardRows } from '../public/js/room-rules.js';
+import { weekOf } from '../server/weekplan.js';
 import { get, all, run as sql } from '../server/db.js';
 import { REAL_JPEG, publish } from './r2-fixtures.js';
 import { storeShot } from '../server/shots.js';
@@ -269,5 +270,47 @@ describe('r2-j40 result beats', () => {
     const e = task('Check again'); t.app.engine.finishTask(f, tester, e, 'review', 'PASS');
     assert.equal(beats().length, 2);
     t.cfg.resultBeats = true;
+  });
+});
+
+describe('r2-j41 whiteboard plan', () => {
+  let t, c, f, visitor;
+  const task = (title, plan, status, project = '') => Number(sql(t.db, 'INSERT INTO tasks (floor_id,title,brief,plan,status,project,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)', f.id, title, title, plan, status, project, Date.now(), Date.now()).lastInsertRowid);
+  before(async () => { t = await boot(); c = await claim(t, 'Board Room'); f = get(t.db, 'SELECT * FROM floors WHERE slug=?', c.slug); visitor = new Client(t, { origin: null }); });
+  after(async () => { await t.close(); });
+
+  test('DONE MEANS: the whiteboard lists the current plan\'s jobs and ticks one when it is done', async () => {
+    const ids = ['Sketch the page', 'Build the page', 'Write the words', 'Test the form', 'Launch it', 'A sixth job'].map((x, i) => task(x, 'This week: A tyre shop page', i === 0 ? 'doing' : 'todo'));
+    sql(t.db, "INSERT INTO weekly_plans (floor_id,week,status,goal,jobs,created_at,started_at,task_ids) VALUES (?,?,'started','A tyre shop page','[]',?,?,?)", f.id, weekOf(Date.now()), Date.now(), Date.now(), JSON.stringify(ids));
+    const wb = (await visitor.get(`/api/floors/${c.slug}`)).data.room.whiteboard;
+    assert.equal(wb.source, 'week'); assert.equal(wb.goal, 'A tyre shop page');
+    assert.deepEqual(wb.jobs.map((j) => j.title), ['Sketch the page', 'Build the page', 'Write the words', 'Test the form', 'Launch it'], 'up to 5');
+    let rows = whiteboardRows(wb, []);
+    assert.equal(rows.done, 0); assert.equal(rows.total, 5); assert.equal(rows.rows[0].now, true);
+    sql(t.db, "UPDATE tasks SET status='done' WHERE id=?", ids[0]);
+    const after = (await visitor.get(`/api/floors/${c.slug}`)).data.room.whiteboard;
+    rows = whiteboardRows(after, []);
+    assert.deepEqual(rows.rows.map((r) => r.tick), [true, false, false, false, false], 'one tick for the one job done');
+    assert.equal(rows.done, 1);
+    // Live: the page's own task list ticks the next one before any reload.
+    rows = whiteboardRows(after, [{ id: ids[1], status: 'done' }]);
+    assert.equal(rows.done, 2); assert.equal(rows.rows[1].tick, true);
+    assert.equal(whiteboardRows(after, [{ id: ids[1], status: 'review' }]).rows[1].tick, false, 'a job waiting for review is not done yet');
+  });
+  test('with no started week plan: the newest open plan; a visitor never sees a private job; nothing to show is null; ROOM_WHITEBOARD=0', async () => {
+    sql(t.db, "UPDATE weekly_plans SET status='draft' WHERE floor_id=?", f.id);
+    sql(t.db, "INSERT INTO projects (floor_id,slug,title,private,created_at) VALUES (?,'hush','Hush',1,?)", f.id, Date.now());
+    task('Plan the menu', 'Open the cafe', 'done'); task('Hush hush', 'Open the cafe', 'doing', 'hush'); task('Print the menu', 'Open the cafe', 'todo');
+    const wb = (await visitor.get(`/api/floors/${c.slug}`)).data.room.whiteboard;
+    assert.equal(wb.source, 'plan'); assert.equal(wb.goal, 'Open the cafe');
+    assert.deepEqual(wb.jobs.map((j) => [j.title, j.done]), [['Plan the menu', true], ['Private task', false], ['Print the menu', false]]);
+    assert.ok(!JSON.stringify(wb).includes('Hush'));
+    assert.equal((await c.get(`/api/floors/${c.slug}`)).data.room.whiteboard.jobs[1].title, 'Hush hush', 'the boss sees their own');
+    assert.equal(whiteboardRows(null), null); assert.equal(whiteboardRows({ goal: 'x', jobs: [] }), null);
+    t.cfg.roomWhiteboard = false;
+    assert.equal((await visitor.get(`/api/floors/${c.slug}`)).data.room.whiteboard, null);
+    t.cfg.roomWhiteboard = true;
+    const fresh = await claim(t, 'Empty Board');
+    assert.equal((await visitor.get(`/api/floors/${fresh.slug}`)).data.room.whiteboard, null, 'a floor with no plan has none');
   });
 });
