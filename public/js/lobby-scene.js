@@ -4,6 +4,7 @@
 import * as THREE from '../vendor/three/three.module.min.js';
 import { mergeMeshes } from './batch.js';
 import { stage } from './stage.js';
+import { lightClock } from './nylight.js';
 
 export const FLOOR_H = 1.0, TOWER_W = 8.6, GROUND = 3.6;
 // A low sun off to one side: long shadows down the streets, one lit face and one shaded face on every block.
@@ -70,6 +71,7 @@ const GLSL_COMMON = `
   }`;
 // The sky as a function, for the dome and for anything that reflects it: haze at the horizon, apricot just above it, powder blue higher up.
 const SKY_GLSL = `
+  uniform vec3 uTint;
   vec3 skyColor(vec3 d) {
     float y = max(d.y, 0.0);
     vec3 c = mix(skyHaze(d), s2l(vec3(1.0, 0.88, 0.74)), smoothstep(0.0, 0.05, y));
@@ -77,8 +79,12 @@ const SKY_GLSL = `
     c = mix(c, s2l(vec3(0.38, 0.58, 0.86)), smoothstep(0.16, 0.72, y));
     float s = max(dot(d, ${SUN_GLSL}), 0.0);
     c += vec3(1.0, 0.66, 0.36) * (pow(s, 5.0) * 0.36 + pow(s, 36.0) * 0.6);
-    return c;
+    return c * uTint;
   }`;
+// Round 2, r2-j35: the real New York light tints the sky, and everything that reflects it, through this one shared uniform (nylight.js).
+export const SKY_TINT = { value: new THREE.Color(1, 1, 1) };
+// r2-j35: room lights in the tower's windows, 1 = on, 0 = off (23:00 to 08:00 New York time). Shared by every tower.
+export const ROOM_LIGHTS = { value: 1 };
 const SKY_HAZE = HAZE_GLSL.replace('hazeTint', 'skyHaze');
 
 /** Adds world position, object-space normal and instance size varyings to a built-in material, then lets a callback patch the shaders. */
@@ -110,14 +116,14 @@ let patchCount = 0;
 
 function makeSky() {
   const mat = new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false, fog: false, uniforms: { uTime: { value: 0 } },
+    side: THREE.BackSide, depthWrite: false, fog: false, uniforms: { uTime: { value: 0 }, uTint: SKY_TINT },
     vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * mat4(mat3(viewMatrix)) * vec4(position, 1.0); gl_Position = p.xyww; }',
     fragmentShader: `varying vec3 vDir; uniform float uTime; ${GLSL_COMMON} ${SKY_HAZE} ${SKY_GLSL}
       void main(){
         vec3 d = normalize(vDir); float y = clamp(d.y, -0.02, 1.0);
         vec3 c = skyColor(d);
         float s = max(dot(d, ${SUN_GLSL}), 0.0);
-        c += vec3(2.6, 2.1, 1.5) * smoothstep(0.9988, 0.9994, s);
+        c += vec3(2.6, 2.1, 1.5) * smoothstep(0.9988, 0.9994, s) * uTint;
         // Long thin bands low down and soft cumulus above them, both lit from below by the sun, drifting very slowly.
         vec2 uv = d.xz / (d.y + 0.07);
         float bands = vnoise(vec2(uv.x * 0.5, uv.y * 2.6) + vec2(uTime * 0.004, 0.0)) * 0.65 + vnoise(vec2(uv.x * 1.4, uv.y * 7.0) - uTime * 0.006) * 0.35;
@@ -176,7 +182,7 @@ function makeWater() {
         float sd = max(dot(r, ${SUN_GLSL}), 0.0);
         float near = 1.0 - smoothstep(0.1, 0.5, fw);
         float glitter = smoothstep(0.42, 0.9, vnoise(p * 2.4 + vec2(uTime * 0.7, -uTime * 0.5)) * 0.6 + vnoise(p * 6.1 - uTime * 0.9) * 0.4);
-        c += vec3(1.0, 0.72, 0.42) * (pow(sd, 60.0) * mix(1.0, 0.25 + glitter * 2.6, near) + pow(sd, 500.0) * 2.4);
+        c += vec3(1.0, 0.72, 0.42) * (pow(sd, 60.0) * mix(1.0, 0.25 + glitter * 2.6, near) + pow(sd, 500.0) * 2.4) * uTint;
         // A line of foam along the quay.
         float foam = smoothstep(1.9, 0.1, off + (vnoise(p * 0.9 + uTime * 0.25) - 0.5) * 1.6);
         c = mix(c, vec3(0.86, 0.80, 0.70), foam * 0.42 * (1.0 - far));
@@ -186,6 +192,7 @@ function makeWater() {
         #include <colorspace_fragment>
       }`,
   });
+  mat.uniforms.uTint = SKY_TINT;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(2200, 2200), mat);
   m.rotation.x = -Math.PI / 2; m.position.y = -0.9;
   return m;
@@ -603,12 +610,12 @@ function towerGlass() {
   const mat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.28, metalness: 0.2, envMapIntensity: 1.1 });
   const bays = 6;
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = { value: 0 };
+    shader.uniforms.uTime = { value: 0 }; shader.uniforms.uTint = SKY_TINT; shader.uniforms.uLights = ROOM_LIGHTS;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nattribute vec3 aState; varying vec3 vState; varying vec3 vLocal; varying vec3 vNrm; varying float vY; varying vec3 vWorldP;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvState = aState; vLocal = position; vNrm = normal; vec4 _ip = instanceMatrix * vec4(position, 1.0); vY = _ip.y; vWorldP = (modelMatrix * _ip).xyz;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\nuniform float uTime; varying vec3 vState; varying vec3 vLocal; varying vec3 vNrm; varying float vY; varying vec3 vWorldP; ${GLSL_COMMON} ${SKY_HAZE} ${SKY_GLSL}`)
+      .replace('#include <common>', `#include <common>\nuniform float uTime; uniform float uLights; varying vec3 vState; varying vec3 vLocal; varying vec3 vNrm; varying float vY; varying vec3 vWorldP; ${GLSL_COMMON} ${SKY_HAZE} ${SKY_GLSL}`)
       .replace('#include <color_fragment>', `
         float roughnessFactor; float metalnessFactor;
         vec3 _nn = normalize(vNrm);
@@ -625,7 +632,9 @@ function towerGlass() {
         float faceId = sideX ? 40.0 + sign(_nn.x) * 7.0 : sign(_nn.z) * 7.0;
         float rnd = hash(vec2(floor(along) + faceId, floor(vY)));
         float busy = vState.y * (0.5 + 0.5 * sin(uTime * 0.9 + floor(vY) * 1.7));
-        float on = clamp(vState.x, 0.0, 1.0);
+        // r2-j35: from 23:00 to 08:00 the room lights are off; an open floor's glass then reads like an empty one's (the floor's colour stays on its spandrel).
+        float taken = clamp(vState.x, 0.0, 1.0);
+        float on = taken * uLights;
         // Depth: every pane looks into a real little room. The ray from the camera is traced into a box behind the glass and shaded by the wall it hits.
         vec3 V = normalize(vWorldP - cameraPosition);
         vec3 T = sideX ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
@@ -658,7 +667,7 @@ function towerGlass() {
         float F = (0.5 + 0.45 * pow(clamp(1.0 + dot(V, _nn), 0.0, 1.0), 2.5)) * (1.0 - on * 0.62);
         vec3 glassLight = mix(room, refl, F);
         // The strip under the glass: bronze on an empty floor, the company's own colour on a taken one, so taken floors read as ribbons round the shaft.
-        vec3 spandrel = mix(s2l(vec3(0.34, 0.30, 0.27)), brand, on);
+        vec3 spandrel = mix(s2l(vec3(0.34, 0.30, 0.27)), brand, taken);
         vec3 mullion = s2l(vec3(0.44, 0.40, 0.36));
         vec3 c = mix(spandrel, vec3(0.012), band);
         c = mix(mullion, c, frame);
@@ -674,7 +683,7 @@ function towerGlass() {
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += _emis;');
     mat.userData.shader = shader;
   };
-  mat.customProgramCacheKey = () => 'towerglass3';
+  mat.customProgramCacheKey = () => 'towerglass4';
   return mat;
 }
 
@@ -806,7 +815,25 @@ export function makeTower(floorCount, { stub = false, env = null } = {}) {
   const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: radial('#ff7a5a'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.6 }));
   glow.scale.setScalar(2.4); glow.position.copy(beacon.position); group.add(glow);
   mergeMeshes(group, (o) => o === beacon);
-  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt };
+  const street = streetLights(); group.add(street.group);
+  return { group, floors, state, beacon, glow, glass, height: y + mastH + 0.6, signTex, boards, boardAt, street };
+}
+
+/** r2-j35: street lights round the plaza. They stay on all night (Q2); their glow follows the dark (nylight.js PALETTE.street). Not on "low" (Q9: no lamp lights). */
+function streetLights() {
+  const group = new THREE.Group(); group.name = 'street-lights';
+  const spots = [];
+  const r = TOWER_W / 2 + 4.0;
+  for (const o of [-r, -r / 3, r / 3, r]) spots.push([o, r], [o, -r], [r, o], [-r, o]);
+  const uniq = [...new Map(spots.map((p) => [p.join(','), p])).values()];
+  const post = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.05, 0.07, 1.7, 6), new THREE.MeshStandardMaterial({ color: '#2f3340', roughness: 0.6, metalness: 0.4 }), uniq.length);
+  const head = new THREE.InstancedMesh(new THREE.SphereGeometry(0.16, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffe2a8' }), uniq.length);
+  const m = new THREE.Matrix4();
+  uniq.forEach(([x, z], i) => { m.makeTranslation(x, 0.52 + 0.85, z); post.setMatrixAt(i, m); m.makeTranslation(x, 0.52 + 1.75, z); head.setMatrixAt(i, m); });
+  const glowMat = new THREE.SpriteMaterial({ map: radial('#ffd28a'), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0 });
+  const glows = uniq.map(([x, z]) => { const g = new THREE.Sprite(glowMat); g.scale.setScalar(1.5); g.position.set(x, 0.52 + 1.75, z); group.add(g); return g; });
+  group.add(post, head);
+  return { group, glowMat, glows, head, count: uniq.length };
 }
 
 function toLetTexture() {
@@ -923,7 +950,7 @@ export class LobbyView {
     Object.assign(sun.shadow.camera, { left: -140, right: 140, top: 120, bottom: -110, near: 30, far: 520 });
     sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.08; sun.shadow.camera.updateProjectionMatrix();
     this.sun = sun; this.scene.add(sun, sun.target);
-    const fill = new THREE.DirectionalLight('#8f94d8', 0.5); fill.position.set(-SUN.x * 120, 50, -SUN.z * 120); this.scene.add(fill);
+    const fill = new THREE.DirectionalLight('#8f94d8', 0.5); fill.position.set(-SUN.x * 120, 50, -SUN.z * 120); this.scene.add(fill); this.fill = fill;
     this.world = getWorld(); this.scene.add(this.world.group); this.stats = this.world.stats;
     const env = this.world.environment();
     this.scene.environment = env; this.scene.environmentIntensity = 0.42;
@@ -934,6 +961,25 @@ export class LobbyView {
     this.floorData = new Map();
     this.setTier(stage.q || { shadow: 2048, density: 1 });
     this.bind();
+    // r2-j35: the real New York light, read once a minute (nylight.js). window.__officeNow lets a browser test set the clock.
+    this.light = lightClock({ now: () => window.__officeNow?.() ?? Date.now(), apply: (l, look) => this.applyLight(l, look) });
+    this.light.tick(true);
+  }
+  /** r2-j35: one look of the day on the whole scene. Low tier: colour change only (no street lamp glow). The crown sign is unlit by any of this. */
+  applyLight(l, look) {
+    const c = (col, rgb) => col.setRGB(rgb[0], rgb[1], rgb[2], THREE.SRGBColorSpace);
+    c(this.sun.color, look.sun); this.sun.intensity = look.sunI;
+    c(this.hemi.color, look.hemiSky); c(this.hemi.groundColor, look.hemiGround); this.hemi.intensity = look.hemiI;
+    this.fill.intensity = look.fillI;
+    SKY_TINT.value.setRGB(look.sky[0], look.sky[1], look.sky[2]);
+    this.scene.fog.color.setRGB(look.sky[0], look.sky[1], look.sky[2]);
+    ROOM_LIGHTS.value = l.lightsOn ? 1 : 0;
+    const low = stage.tier === 'low';
+    const st = this.tower.street;
+    if (st) { st.glowMat.opacity = low ? 0 : look.street * 0.85; for (const g of st.glows) g.visible = !low && look.street > 0.02; }
+    this.exposure = look.exposure;
+    if (this.active && stage.renderer) stage.renderer.toneMappingExposure = look.exposure;
+    this.lightState = { phase: l.phase, weights: l.weights, lightsOn: l.lightsOn, crownLit: true, streetOn: !low, rise: l.rise, set: l.set };
   }
   setTier(q) {
     const sh = q.shadow || 0;
@@ -986,7 +1032,8 @@ export class LobbyView {
     this.active = true; this.flying = null; this.camera.clearViewOffset();
     this.scene.add(this.world.group); this.world.group.position.set(0, 0, 0); this.world.group.scale.setScalar(1);
     const r = stage.renderer; r.shadowMap.enabled = this.sun.castShadow; r.shadowMap.autoUpdate = false; r.shadowMap.needsUpdate = true;  // the stage redraws it every other frame
-    r.toneMappingExposure = 0.92;
+    r.toneMappingExposure = this.exposure ?? 0.92;
+    this.light?.tick(true);
   }
   leave() { this.active = false; this.setHover(-1); }
   resize(w, h) {
@@ -1052,6 +1099,7 @@ export class LobbyView {
   }
   update(dt) {
     this.time += dt;
+    this.light.tick();
     this.world.update(dt, this.time);
     if (this.tower.glass.userData.shader) this.tower.glass.userData.shader.uniforms.uTime.value = this.time;
     this.tower.beacon.visible = this.tower.glow.visible = (this.time % 2.4) < 1.3;
