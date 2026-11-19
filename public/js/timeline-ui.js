@@ -19,6 +19,8 @@ function jobItem(F, card) {
     h('div.tl-body', {},
       h('div.tl-top', {}, h('b.tl-title', {}, card.title), h('span.tl-state', { 'data-state': card.state }, STATE_WORD[card.state] || '')),
       h('p.tl-line', {}, card.line),
+      // The boss's own copy carries the job's estimate (round 1 rest, j21): information only, never a question.
+      card.estimate?.line ? h('p.tl-est', {}, card.estimate.line) : null,
       h('time.tl-time', { datetime: new Date(card.updatedAt || Date.now()).toISOString() }, timeAgo(card.updatedAt || Date.now()))),
     card.thumb ? h('a.tl-thumb', { href: card.thumb, target: '_blank', rel: 'noopener', 'aria-label': `A picture of ${card.title}` }, h('img', { src: card.thumb, alt: '', loading: 'lazy', width: '160', height: '100' })) : null);
 }

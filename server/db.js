@@ -253,6 +253,8 @@ Object.assign(ADDED.tasks, { smoke_id: 'INTEGER' });
 Object.assign(ADDED.ledger, { task_id: 'INTEGER', computer: 'INTEGER NOT NULL DEFAULT 0' });
 // j19: when the owner pressed Send out on a task (the only way to the contractor now).
 Object.assign(ADDED.tasks, { sent_out_at: 'INTEGER' });
+// Round 1 rest, j21: the estimate of the job a task belongs to, shown to the boss as information only, and what it was based on.
+Object.assign(ADDED.tasks, { job_est_usd: 'REAL', job_est_kind: "TEXT NOT NULL DEFAULT ''", job_est_basis: "TEXT NOT NULL DEFAULT ''" });
 Object.assign(ADDED.tasks, { tier: 'INTEGER', tier_why: "TEXT NOT NULL DEFAULT ''", tier_at: 'INTEGER', hard: 'INTEGER NOT NULL DEFAULT 0', fable_ok: 'INTEGER NOT NULL DEFAULT 0' });
 /** Lane B's one-time fills, each guarded by a settings row so it runs once. */
 function laneBFills(db) {

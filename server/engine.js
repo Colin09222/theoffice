@@ -29,6 +29,7 @@ import { testerFailed, testedBy, refuseHold, firstPing } from './handback.js';
 import { createOwnerAlerts, nightFrozen } from './owneralerts.js';
 import { TESTER_LINES, readTestReport, testReportText, keepLater, linesProblem } from './donemeans.js';
 import { smokeProject, testerNeedsComputer } from './smoke.js';
+import { recordJobEstimate } from './estimate.js';
 import { weekStart } from './spendcheck.js';
 import { briefWithChecks, briefWithoutChecks, checksInBrief, readChecks, selfCheckAsk, selfCheckNudge, selfChecked, readSelfCheck, selfCheckWords, estimateUsd, SELF_CHECK_MARK } from './brain.js';
 import { markQuiet } from './jobcards.js';
@@ -1096,7 +1097,9 @@ export class Engine {
     const id = Number(r.lastInsertRowid);
     // Rule 1: whether the contractor takes this task is decided here, once, and never on a status change.
     if (!noHold && !this.cfg.contractorManual && CONTRACTOR_ROLES.has(target.role) && contractorOn(this.db, floor.id)) run(this.db, 'UPDATE tasks SET contractor_route=1 WHERE id=?', id);
-    if (hard) run(this.db, 'UPDATE tasks SET hard=1 WHERE id=?', id);  // tagged a hard build: Tier 3 when it starts (job 17)
+    if (hard) run(this.db, 'UPDATE tasks SET hard=1 WHERE id=?', id);
+    // The job's estimate, for the boss to read (round 1 rest, j21). Information only, kept off everything a bot reads.
+    try { recordJobEstimate(this.db, id); } catch (e) { this.log('warn', 'job estimate', { err: String(e?.message || e).slice(0, 120) }); }  // tagged a hard build: Tier 3 when it starts (job 17)
     this.emitTask(id);
     this.feed(floor.id, mgr, `gave ${target.name} a task: "${title}"`, project);
     this.talk(floor.id, mgr, target, brief || title, { kind: 'assign', project });

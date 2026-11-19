@@ -14,7 +14,7 @@ const NOW_HORIZON_MS = 24 * 3600e3;
 /** The job on show under Now: the newest open card the page holds (it is live) from the last day, else what the snapshot said. */
 function nowOf(s) {
   const live = (s.jobs || []).filter((c) => OPEN.has(c.state) && (c.updatedAt || 0) >= Date.now() - NOW_HORIZON_MS).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
-  return live ? { line: live.line, state: live.state } : s.status?.now || null;
+  return live ? { line: live.line, state: live.state, estimate: live.estimate || null } : s.status?.now || null;
 }
 const row = (label, ...kids) => h('div.stc-row', {}, h('dt', {}, label), h('dd', {}, ...kids));
 
@@ -30,7 +30,9 @@ export function renderStatusCard(page, el, { shareFloor }) {
     h('p.stc-who', {}, 'Run by ', h('b', {}, s.floor.boss?.name || 'the boss'), st.lane ? h('span.stc-lane', { 'data-lane': st.lane.toLowerCase() }, st.lane) : null),
     nothingYet ? h('p.stc-empty', {}, emptyLine(st)) : h('dl.stc-fields', {},
       st.goal ? row('Goal', h('span.stc-goal', {}, st.goal)) : null,
-      row('Now', now ? h('span.stc-now', { 'data-state': now.state }, now.line) : h('span.stc-quiet', {}, 'Nothing under way')),
+      row('Now', now ? h('span.stc-now', { 'data-state': now.state }, now.line) : h('span.stc-quiet', {}, 'Nothing under way'),
+        // The boss's copy only: what the job is expected to cost, as information (round 1 rest, j21). A visitor's snapshot never has it.
+        page.owner && now?.estimate?.line ? h('small.stc-est', { 'data-estimate': '' }, now.estimate.line) : null),
       shipped ? row('Last shipped', h('a.stc-all', { href: `${BASE}/launched/${page.slug}`, 'data-portfolio': '', onclick: (e) => { e.preventDefault(); window.officeGo(`/launched/${page.slug}`); } }, 'All launches'), h('a.stc-shipped', { href: shipped.url || '#', target: '_blank', rel: 'noopener noreferrer', 'data-shipped': shipped.slug },
         h('img', { src: shipped.thumb, alt: '', width: '64', height: '40', loading: 'lazy' }), h('span', {}, h('b', {}, shipped.title), h('small', {}, timeAgo(shipped.publishedAt))))) : null,
       st.next ? row('Next', h('span.stc-next', {}, st.next)) : null),

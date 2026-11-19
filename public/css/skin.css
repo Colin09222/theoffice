@@ -290,6 +290,7 @@ body[data-page="admin"] { background: var(--c-paper); }
 .tl-state[data-state="done"] { color: var(--c-teal); }
 .tl-state[data-state="failed"], .tl-state[data-state="waiting"] { color: var(--c-red); }
 .tl-line { margin: 0; font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
+.tl-est, .stc-est { margin: 0; display: block; font-size: 13px; font-weight: 500; color: var(--c-slate); font-variant-numeric: tabular-nums; }  /* the boss's estimate (round 1 rest, j21) */
 .tl-time { font: 500 12px var(--f-body); color: var(--c-slate); }
 .tl-thumb { display: block; width: 96px; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; border: 1px solid var(--c-line); background: var(--c-paper); }
 .tl-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center; }

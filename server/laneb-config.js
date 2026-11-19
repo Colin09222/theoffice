@@ -77,5 +77,8 @@ export function laneBSettings(env = process.env) {
     bizDevBean: /^\s*(1|true|yes|on)\s*$/i.test(String(env.BIZ_DEV_BEAN ?? '')),
     videoAdsOnRequest: on(env.VIDEO_ADS_ON_REQUEST),
     contractorSendOutPerWeek: Math.max(0, Number.isFinite(Number(env.CONTRACTOR_SENDOUT_PER_WEEK)) && String(env.CONTRACTOR_SENDOUT_PER_WEEK ?? '').trim() !== '' ? Number(env.CONTRACTOR_SENDOUT_PER_WEEK) : 2),
+    // Round 1 rest, j21: each job's estimate, shown to the boss only as "This will cost about $X." (server/estimate.js). Information only: nothing
+    // waits on it and nothing stops at any multiple of it. JOB_ESTIMATES=0 hides the line.
+    jobEstimates: on(env.JOB_ESTIMATES),
   };
 }
