@@ -26,7 +26,8 @@ for (const [kind, w, h] of sizes) {
     const p = await b.newPage(kind === 'phone' ? { phone: { width: w, height: h } } : { width: w, height: h });
     if (who === 'boss') await p.send('Network.setCookie', { name: 'office_s', value: boss.cookies.office_s, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice', httpOnly: true, secure: true, sameSite: 'Lax' });
     const snap = async (name) => {
-      const r = await p.send('Page.captureScreenshot', { format: 'jpeg', quality: 62 });
+      // The phone renders at 2x; the picture is kept at 1x, so a set of shots stays small.
+      const r = await p.send('Page.captureScreenshot', { format: 'jpeg', quality: 60, ...(kind === 'phone' ? { clip: { x: 0, y: 0, width: w, height: h, scale: 0.5 } } : {}) });
       const file = join(OUT, `${name}-${who}-${kind}.jpg`);
       writeFileSync(file, Buffer.from(r.result.data, 'base64'));
       report.push(file);
