@@ -20,8 +20,9 @@ export function laneBSettings(env = process.env) {
     ownerDigest: on(env.OWNER_DIGEST),
     digestAt: /^\d{2}:\d{2}$/.test(env.DIGEST_AT || '') ? env.DIGEST_AT : '08:05',
     // The night freeze: no new floor work starts from NIGHT_FREEZE_FROM to NIGHT_FREEZE_TO in NIGHT_FREEZE_TZ. NIGHT_FREEZE=0 turns it off;
-    // admin.mjs freeze on|off|auto overrides it from the database without a restart.
-    nightFreeze: on(env.NIGHT_FREEZE),
+    // admin.mjs freeze on|off|auto overrides it from the database without a restart. A mock building (AI_MODE=mock) spends nothing, so there it is off
+    // unless NIGHT_FREEZE says otherwise: a test or a local run at night would otherwise sit still.
+    nightFreeze: env.NIGHT_FREEZE === undefined || env.NIGHT_FREEZE === '' ? env.AI_MODE !== 'mock' : on(env.NIGHT_FREEZE),
     nightFreezeFrom: /^\d{2}:\d{2}$/.test(env.NIGHT_FREEZE_FROM || '') ? env.NIGHT_FREEZE_FROM : '23:00',
     nightFreezeTo: /^\d{2}:\d{2}$/.test(env.NIGHT_FREEZE_TO || '') ? env.NIGHT_FREEZE_TO : '08:00',
     nightFreezeTz: env.NIGHT_FREEZE_TZ || 'America/New_York',

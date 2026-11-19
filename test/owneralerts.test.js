@@ -169,6 +169,8 @@ describe('the night freeze', () => {
     const db = openDb(':memory:');
     const cfg = loadConfig({});
     assert.equal(cfg.nightFreeze, true, 'on by default');
+    assert.equal(loadConfig({ AI_MODE: 'mock' }).nightFreeze, false, 'off in a mock building unless asked for');
+    assert.equal(loadConfig({ AI_MODE: 'mock', NIGHT_FREEZE: '1' }).nightFreeze, true);
     for (const [s, want] of [['2026-11-18T22:59:00', false], ['2026-11-18T23:00:00', true], ['2026-11-19T03:00:00', true], ['2026-11-19T07:59:00', true], ['2026-11-19T08:00:00', false]]) assert.equal(nightFrozen(db, cfg, ET(s)), want, s);
     setNightFreeze(db, 'off'); assert.equal(nightFrozen(db, cfg, ET('2026-11-19T03:00:00')), false);
     setNightFreeze(db, 'auto'); assert.equal(nightFrozen(db, loadConfig({ NIGHT_FREEZE: '0' }), ET('2026-11-19T03:00:00')), false);
