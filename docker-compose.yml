@@ -11,6 +11,10 @@ services:
       HOST: 0.0.0.0
       PORT: "8083"
       DATA_DIR: /data
+      # The shared headless browser below (redesign job 28): smoke checks and screenshots open pages there. It reaches the Office's own /theoffice/...
+      # pages by this service's name on the compose network; published sites on their own origins load over the internet.
+      SHOTS_CDP_URL: http://shots:9222
+      SHOTS_ORIGIN: http://theoffice:8083
     ports:
       - "127.0.0.1:8083:8083"
     read_only: true
@@ -28,6 +32,48 @@ services:
     mem_limit: 700m
     cpus: 1.0
     pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  # The building's headless browser (redesign job 28): Chromium's headless shell from the runner's browser base image (already on the server; nothing is
+  # built here), with the DevTools protocol on 9222. No published port and no host network: only containers on this compose network (the Office)
+  # reach it. Each check gets a fresh browser context that is thrown away after. It runs as the image's unprivileged user with every capability
+  # dropped, so Chromium's own sandbox can't start and --no-sandbox is used; the container is the sandbox (read-only, tmpfs, no new privileges).
+  shots:
+    image: office-runner/browser:pw1.65.0
+    container_name: theoffice-shots
+    restart: unless-stopped
+    user: "10001:10001"
+    environment:
+      HOME: /tmp
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        B=$$(find /ms-playwright -type f \( -name chrome-headless-shell -o -name headless_shell \) | head -n 1);
+        [ -n "$$B" ] || { echo 'no headless shell in /ms-playwright' >&2; exit 1; };
+        exec "$$B" --no-sandbox --disable-gpu --disable-dev-shm-usage --no-first-run --no-default-browser-check
+        --disable-background-networking --disable-extensions --mute-audio --hide-scrollbars
+        --remote-debugging-address=0.0.0.0 --remote-debugging-port=9222 --user-data-dir=/tmp/profile about:blank
+    expose:
+      - "9222"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9222/json/version').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 600m
+    cpus: 1.0
+    pids_limit: 256
     logging:
       driver: json-file
       options:

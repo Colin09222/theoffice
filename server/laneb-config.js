@@ -46,6 +46,10 @@ export function laneBSettings(env = process.env) {
     // Tester pass (EDIT_SKIPS_TESTER=0 lifts the rule). The Tester gets a computer only for games and shops (TESTER_COMPUTER_GAMES_SHOPS=0: always, as before).
     smokeCheck: on(env.SMOKE_CHECK),
     smokeBrowser: on(env.SMOKE_BROWSER),
+    // j28: the building's shared headless browser (the `shots` service in docker-compose.yml), spoken to over the DevTools protocol (server/cdp.js), and the
+    // origin it opens the Office's own pages at. Unset, checks use a local Playwright if there is one, else plain HTTP.
+    shotsCdpUrl: String(env.SHOTS_CDP_URL || '').trim().replace(/\/+$/, ''),
+    shotsOrigin: String(env.SHOTS_ORIGIN || '').trim().replace(/\/+$/, ''),
     editSkipsTester: on(env.EDIT_SKIPS_TESTER),
     testerComputerGamesShops: on(env.TESTER_COMPUTER_GAMES_SHOPS),
     // j17, model tiers (config/models.json "tiers"): each task records its tier (1 Haiku, 2 Sonnet medium, 3 Opus); at most TIER3_PER_FLOOR_WEEK (2) Tier 3

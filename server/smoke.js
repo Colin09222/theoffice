@@ -6,6 +6,7 @@
 import { createRequire } from 'node:module';
 import { get, all, run } from './db.js';
 import { writeBinaryFile } from './workspace.js';
+import { cdpPage } from './cdp.js';
 
 const TIMEOUT_MS = 15000, ASSETS_MAX = 12, ERRORS_KEPT = 8;
 export const SHOT = { width: 1280, height: 800 };  // 16:10, like the launch cards
@@ -53,9 +54,13 @@ async function browserCheck(pw, url) {
   } finally { await browser.close().catch(() => {}); }
 }
 
-/** One check. how: 'browser' when Playwright is here (and SMOKE_BROWSER isn't 0), else 'http'. Never throws. */
-export async function smokeCheck(url, { useBrowser = true, httpFetch, playwright } = {}) {
+/**
+ * One check. how: 'cdp' in the building's shared browser when SHOTS_CDP_URL is set (job 28), else 'browser' when Playwright is on this machine, else
+ * 'http'. Each falls back to the next when it can't run (SMOKE_BROWSER=0 goes straight to 'http'). Never throws.
+ */
+export async function smokeCheck(url, { useBrowser = true, httpFetch, playwright, cdpUrl = '', browserUrl = '', cdpFetch, cdpResolve } = {}) {
   try {
+    if (useBrowser && cdpUrl) { try { return { how: 'cdp', ...(await cdpPage(cdpUrl, browserUrl || url, { width: SHOT.width, height: SHOT.height, ...(cdpFetch ? { httpFetch: cdpFetch } : {}), ...(cdpResolve ? { resolve: cdpResolve } : {}) })) }; } catch { /* the shared browser is down: fall back */ } }
     const pw = useBrowser ? (playwright === undefined ? await loadPlaywright() : playwright) : null;
     if (pw) { try { return { how: 'browser', ...(await browserCheck(pw, url)) }; } catch { /* a browser that won't start: fall back */ } }
     return { how: 'http', shot: null, ...(await httpCheck(url, { httpFetch })) };
@@ -65,9 +70,11 @@ export async function smokeCheck(url, { useBrowser = true, httpFetch, playwright
 /** Runs the check on a project that was just published by `task`, keeps the result and the screenshot where the job and the timeline find them. */
 export async function smokeProject(engine, floor, slug, task, { now = Date.now() } = {}) {
   const { db, cfg } = engine;
-  let url = engine.liveUrl(floor, slug);
-  if (url.startsWith('/')) url = `${engine.selfOrigin?.() || `http://127.0.0.1:${cfg.port}`}${url}`;
-  const r = await smokeCheck(url, { useBrowser: cfg.smokeBrowser !== false, httpFetch: engine.smokeFetch, playwright: engine.smokePlaywright });
+  const path = engine.liveUrl(floor, slug);
+  const url = path.startsWith('/') ? `${engine.selfOrigin?.() || `http://127.0.0.1:${cfg.port}`}${path}` : path;
+  // The shared browser runs in its own container, so the Office's own paths are opened at SHOTS_ORIGIN (http://theoffice:8083 on the compose network).
+  const browserUrl = path.startsWith('/') && cfg.shotsOrigin ? `${cfg.shotsOrigin}${path}` : url;
+  const r = await smokeCheck(url, { useBrowser: cfg.smokeBrowser !== false, httpFetch: engine.smokeFetch, playwright: engine.smokePlaywright, cdpUrl: cfg.shotsCdpUrl, browserUrl, cdpFetch: engine.cdpFetch, cdpResolve: engine.cdpResolve });
   let shotPath = '';
   if (r.shot) {
     shotPath = `projects/${slug}/notes/shots/smoke-${task?.id ?? 'publish'}.jpg`;
