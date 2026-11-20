@@ -25,6 +25,9 @@ services:
       # office-runner, Phase 2. Directories, so a runner restart's new socket shows up here. Not there yet? Docker makes them empty and server slots stay off.
       - /run/office-runner/api:/run/office-runner/api:ro
       - /opt/office-runner/shared:/opt/office-runner/shared:ro
+      # Round 2, r2-j53: the Mac's heartbeat (a LaunchAgent on the Mac already pushes one line here every 5 minutes). Read-only; the mailroom reads
+      # only its recv_ts. Not there? Docker makes an empty directory, and buddehbot shows as Away.
+      - /var/lib/macbeat:/run/macbeat:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:
