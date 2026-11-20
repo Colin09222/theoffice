@@ -128,14 +128,14 @@ try {
   const room = await p.ev('(() => { const v = window.__mailroomDebug; if (!v) return null; return { atDesk: v.robot.group.position.distanceTo(v.deskSpot) < 1e-6, tris: v.robot.triangles, plate: v.robot.plate.userData.text, holes: v.holeCount }; })()');
   check(room?.atDesk && room.tris < 1500 && room.plate === 'buddehbot' && room.holes >= 2, `r2-j50: B opens the mailroom with buddehbot at its desk (${JSON.stringify(room)})`);
   await sleep(1500);
-  await p.shot?.('/tmp/claude-0/-home-user-theoffice/ba670692-e452-55d2-8e03-8f74c9fdfb92/scratchpad/mailroom-desktop.jpg');
+  await p.shot?.(join(tmpdir(), 'mailroom-desktop.jpg'));
   check(!p.errors.length, `r2-j50: no console errors in the mailroom ${p.errors.slice(0, 2).join(' | ')}`);
   p.close();
   p = await page({ phone: { width: 390, height: 844 } });
   await p.click('.lift-btn.lift-b');
   await p.until('document.body.dataset.page === "mailroom" && !!document.querySelector(".dom-room .robot-svg")', 'the plain mailroom', 20000).catch(() => null);
   check(await p.ev('!!document.querySelector(".dom-room .robot-svg") && !window.__mailroomDebug && !performance.getEntriesByType("resource").some((e) => ["three.module", "mailroom-scene", "/js/stage.js"].some((k) => e.name.includes(k)))'),'r2-j50: on a phone, the plain mailroom with the robot and no 3D code');
-  await p.shot?.('/tmp/claude-0/-home-user-theoffice/ba670692-e452-55d2-8e03-8f74c9fdfb92/scratchpad/mailroom-phone.jpg');
+  await p.shot?.(join(tmpdir(), 'mailroom-phone.jpg'));
   p.close();
   // r2-j51: a test purchase request: a folder in a bean's hand within 10 s on the floor, and in the mailroom it comes down the tube and the tray rises by one.
   const bossFloor = t.db.prepare('SELECT * FROM floors WHERE slug=?').get(boss.slug);
