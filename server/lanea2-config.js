@@ -27,5 +27,27 @@ export function laneA2Settings(env = process.env) {
     jobEventsDays: Math.max(30, Number(env.JOB_EVENTS_DAYS) || 35),
     // r2-j48: an Idle floor offers "Watch how this was made", a 30 to 60 s replay of its last real job (REPLAY=0: no offer, no route data).
     replay: on(env.REPLAY),
+    // r2-j57: the launch checklist, 8 checks by code; no HTTPS, a broken form or a broken link on the main page holds the boss's Launch tap
+    // (LAUNCH_CHECKLIST=0: the checks still run and show, nothing is held).
+    launchChecklist: on(env.LAUNCH_CHECKLIST),
+    // r2-j59: after a Launch, one fresh-eyes look on the review model (desktop and phone pictures, done-means lines), score 1 to 5 for the boss only,
+    // under 3 makes one fix job (FRESH_EYES=0: no look).
+    freshEyes: on(env.FRESH_EYES),
+    // r2-j60: share cards, 1,200 by 630 under 200 KB, remade on each launch and weekly, the floor link's preview picture (SHARE_CARDS=0: none).
+    shareCards: on(env.SHARE_CARDS),
+    // r2-j63: Tuesday upkeep from 09:00 New York, code checks on every live site, a small fix job only when one fails (at most 3 a site a week),
+    // a domain renewal told to the boss 30 days ahead (UPKEEP=0: none).
+    upkeep: on(env.UPKEEP),
+    // r2-j67: real counts on each bean's ID card (jobs finished, launches worked on) and the floor plaque (launches, visits) (REAL_COUNTS=0: none).
+    realCounts: on(env.REAL_COUNTS),
+    // r2-j69: the building library: managers propose (2 a week, scrubbed by code), Colon approves each in admin, bots read approved entries fenced
+    // (LIBRARY=0: closed). LIBRARY_SEED_FLOORS: Colon's own floor numbers whose launches seed it, as waiting entries (e.g. "6").
+    library: on(env.LIBRARY),
+    librarySeedFloors: env.LIBRARY_SEED_FLOORS || '',
+    // r2-j70: the "Was this useful?" button on launched sites and games. It changes what the public sees on real customer sites, so it ships OFF:
+    // only FEEDBACK_BUTTON=1 turns it on (docs/redesign/ROUND2.md).
+    feedbackButton: env.FEEDBACK_BUTTON === '1',
+    // r2-j71: the room's Photo button, a 1,920 by 1,080 PNG with the floor's name and date, not on phone low (ROOM_PHOTO=0: no button).
+    roomPhoto: on(env.ROOM_PHOTO),
   };
 }

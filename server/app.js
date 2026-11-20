@@ -60,6 +60,12 @@ import { absoluteMeta } from './metaabs.js';
 import { createTaps, injectTaps, TAP_JS } from './taps.js';
 import { installRoom } from './room.js';
 import { installEventLog } from './eventlog.js';
+import { installChecklist } from './checklist.js';
+import { installFreshEyes } from './fresheyes.js';
+import { installShareCards } from './sharecards.js';
+import { installUpkeep } from './upkeep.js';
+import { installLibrary } from './library.js';
+import { createFeedback, injectFeedback, FEEDBACK_JS } from './feedback.js';
 
 const BASE = '/theoffice';
 // Exact policy from the security brief. Published content runs on an opaque origin, with no access to any main-site cookie, page or API.
@@ -114,6 +120,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const adminHash = cfg.adminPassword ? A.hashSecret(cfg.adminPassword) : '';
   // Tapped calls on published pages (redesign job 33): the counter, and the devices bosses and the admin use, so their own taps don't count.
   const taps = createTaps({ db, now });
+  const feedback = createFeedback({ db, now });  // r2-j70: the feedback button's answers
 
   // ---- request helpers ----
   const ipOf = (req) => {
@@ -752,7 +759,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
   const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext), installShots(ext), installJobCards(ext), installEstimates(ext), installWeekPlans(ext), installOnboarding(ext), installOwnSpend(ext), installRanked(ext)].filter(Boolean);  // estimates after job cards: they add to the boss's cards
   // Round 2, lane A: the floor room's own data (server/room.js).
-  extensions.push(...[installRoom(ext), installEventLog(ext)].filter(Boolean));
+  extensions.push(...[installRoom(ext), installEventLog(ext), installChecklist(ext), installFreshEyes(ext), installShareCards(ext), installUpkeep(ext), installLibrary(ext)].filter(Boolean));
   extensions.push(...installR2B(ext));  // round 2, lane B (server/r2b.js)
   // The budget check, inside the server: a spend record every two hours (server/spendcheck.js, redesign job 5).
   const spendCheck = installSpendCheck({ db, cfg, log, now });
@@ -939,6 +946,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (name === 'chat.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_JS, cache: 'public, max-age=3600' };
     if (name === 'chat-panel.js') return { type: 'text/javascript; charset=utf-8', body: CHAT_PANEL_JS, cache: 'public, max-age=3600' };
     if (name === 'taps.js') return { type: 'text/javascript; charset=utf-8', body: TAP_JS, cache: 'public, max-age=3600' };
+    if (name === 'feedback.js') return { type: 'text/javascript; charset=utf-8', body: FEEDBACK_JS, cache: 'public, max-age=3600' };
     if (name === 'three.module.min.js') return { type: 'text/javascript; charset=utf-8', body: threeLib?.body };
     if (name === 'phaser.min.js') return { type: 'text/javascript; charset=utf-8', body: phaserLib?.body };
     return null;
@@ -995,6 +1003,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (segs[0] === '_data') return serveData(req, res, f, pr, label, rawUrl, HEAD);
     if (segs[0] === '_office' && segs[1] === 'cloud') return cloud.serve(req, res, { f, pr, label, segs: segs.slice(2), rawUrl, HEAD });
     if (segs[0] === '_office' && segs[1] === 'tap' && segs.length === 2 && req.method === 'POST') return serveTap(req, res, f, pr, HEAD);
+    if (segs[0] === '_office' && segs[1] === 'feedback' && segs.length === 2 && req.method === 'POST') return serveFeedback(req, res, f, pr, HEAD);
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, { ...HEAD, allow: 'GET, HEAD' }); return res.end(); }
     limit('publicSite', ipOf(req));
     if (segs[0] === '_office' && segs[1] === 'pay' && segs.length === 2) return servePay(res, pr, HEAD);
@@ -1015,10 +1024,11 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
     if (!hit) return miss();
     if (/^text\/html/.test(hit.type) && req.method === 'GET' && !pr.private) visit(req, f, pr, segs.join('/'));
     const tapping = cfg.tapCount !== false && !pr.private;
-    const etag = `W/"${pr.published_at}${tapping ? '-t' : ''}${cloud.chat.tag(f, pr)}"`;
+    const asking = cfg.feedbackButton === true && !pr.private;  // r2-j70: off unless FEEDBACK_BUTTON=1
+    const etag = `W/"${pr.published_at}${tapping ? '-t' : ''}${asking ? '-f' : ''}${cloud.chat.tag(f, pr)}"`;
     if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ...HEAD, etag }); return res.end(); }
     res.writeHead(200, { ...HEAD, etag, 'content-type': hit.type });
-    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(tapping ? injectTaps(cloud.chat.decorate(f, pr, hit.body, segs)) : cloud.chat.decorate(f, pr, hit.body, segs), `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
+    res.end(req.method === 'HEAD' ? undefined : /^text\/html/.test(hit.type) ? absoluteMeta(((x) => (asking ? injectFeedback(x) : x))(tapping ? injectTaps(cloud.chat.decorate(f, pr, hit.body, segs)) : cloud.chat.decorate(f, pr, hit.body, segs)), `${cfg.appsScheme}://${ownHost}${base}`) : hit.body);
   }
   // One tapped call (job 33). Only the page's own origin may send it; a public project only; 204 whatever happens, so a page never waits on it.
   async function serveTap(req, res, f, pr, HEAD) {
@@ -1035,6 +1045,23 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (!b || typeof b !== 'object') return done();
       taps.record({ floorId: f.id, project: pr.slug, path: String(b.path || '/'), number: String(b.number || ''), ip: ipOf(req), ua: String(req.headers['user-agent'] || '') });
     } catch (e) { if (!(e instanceof HttpError)) log('warn', 'tap not recorded', { err: String(e?.message || e).slice(0, 120) }); }
+    return done();
+  }
+  // One feedback answer (r2-j70). Only the page's own origin, a public project, and only while FEEDBACK_BUTTON=1; 204 whatever happens.
+  async function serveFeedback(req, res, f, pr, HEAD) {
+    const done = () => { res.writeHead(204, { ...HEAD, 'cache-control': 'no-store' }); res.end(); };
+    try {
+      if (cfg.feedbackButton !== true || pr.private) return done();
+      const own = `${cfg.appsScheme}://${String(req.headers.host).toLowerCase().replace(/\.$/, '')}`;
+      const site = req.headers['sec-fetch-site'];
+      if ((req.headers.origin && req.headers.origin !== own) || (site && site !== 'same-origin')) return done();
+      limit('publicSite', ipOf(req));
+      const chunks = []; let size = 0;
+      for await (const c of req) { size += c.length; if (size > 1024) return done(); chunks.push(c); }
+      let b; try { b = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return done(); }
+      if (!b || typeof b !== 'object') return done();
+      feedback.record({ floorId: f.id, project: pr.slug, path: String(b.path || '/'), answer: String(b.answer || ''), line: String(b.line || ''), ip: ipOf(req), ua: String(req.headers['user-agent'] || '') });
+    } catch (e) { if (!(e instanceof HttpError)) log('warn', 'feedback not recorded', { err: String(e?.message || e).slice(0, 120) }); }
     return done();
   }
   async function serveData(req, res, f, pr, label, rawUrl, HEAD) {
@@ -1089,10 +1116,10 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   }
 
   // The page shell with its own link preview: the same file as every app page, plus og: tags from ext.shareMeta (server/building.js).
-  function serveSharePage(req, res, floorSlug) {
+  function serveSharePage(req, res, floorSlug, metaOf = ext.shareMeta) {
     const file = statics.get(INDEX);
     if (!file) return send(res, 404, 'Not found', { 'content-type': 'text/plain; charset=utf-8' });
-    const meta = ext.shareMeta?.(floorSlug, req);
+    const meta = metaOf?.(floorSlug, req);
     if (!meta) return serveStatic(req, res, INDEX);
     const html = file.body.toString('utf8').replace(/<title>[^<]*<\/title>/, `<title>${esc(meta.title)}</title>`).replace('</head>', `${meta.tags}\n</head>`);
     send(res, 200, req.method === 'HEAD' ? undefined : html, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
@@ -1177,7 +1204,10 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed', { allow: 'GET, HEAD' });
       limit('read', ip);
       // App pages are all the one shell. Anything else must be an exact known asset.
-      if (rest === '/' || /^\/admin\/?$/.test(rest) || /^\/floor\/[a-z0-9-]+\/?$/.test(rest)) return serveStatic(req, res, INDEX);
+      // Round 2 lane A (r2-j60): a floor's own link carries its share card, so a chat app shows a picture of that floor.
+      const floorLink = rest.match(/^\/floor\/([a-z0-9-]+)\/?$/);
+      if (floorLink) return serveSharePage(req, res, floorLink[1], ext.floorShareMeta);
+      if (rest === '/' || /^\/admin\/?$/.test(rest)) return serveStatic(req, res, INDEX);
       // redesign lane A (job 24): the Launched page and each floor's portfolio, with a link preview (title, screenshot) a chat app can read.
       const shareMatch = rest.match(/^\/launched(?:\/([a-z0-9-]+))?\/?$/);
       if (shareMatch) return serveSharePage(req, res, shareMatch[1] || null);
@@ -1232,7 +1262,7 @@ h1,h2,h3{line-height:1.15}h1{font-size:2.4rem}a{color:var(--a)}pre{background:#f
   engine.selfOrigin = () => { const a = server.address(); return cfg.publicOrigin ? new URL(cfg.publicOrigin).origin : `http://127.0.0.1:${a?.port ?? cfg.port}`; };
   server.requestTimeout = Math.max(cfg.requestTimeoutMs, cfg.uploadTimeoutMs); server.headersTimeout = 15000; server.keepAliveTimeout = 5000; server.maxConnections = 1200;
   return {
-    server, engine, bus, rates, cloud,
+    server, engine, bus, rates, cloud, ext,  // ext: read by the tests (round 2 lane A hooks hang off it)
     /** Brotli every asset ahead of the first visitor. Called by the real entry point only, so tests don't pay for it. */
     warmStatics: () => warmBrotli(statics),
     async close() {

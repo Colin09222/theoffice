@@ -1,7 +1,7 @@
 // Round 2, lane A, in a real browser: the floor room (docs/redesign/OFFICE-ANSWERS-2.md). Each check names its job. npm run e2e:room2
 // ROOM2_ONLY=j31,j32 runs some of them; ROOM2_SHOTS=dir saves a picture of each.
 import { launch, sleep } from './cdp.mjs';
-import { boot, claim, waitDone } from '../helpers.js';
+import { boot, claim, waitDone, adminClient } from '../helpers.js';
 import { get, run } from '../../server/db.js';
 import { weekOf } from '../../server/weekplan.js';
 import { storeShot } from '../../server/shots.js';
@@ -137,6 +137,7 @@ try {
     const six = await claim(t, 'Tyre Trophies', { floor: 7 });
     const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', six.slug);
     const builder = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='builder'", f.id);
+    run(t.db, 'UPDATE floors SET paused=1 WHERE id=?', f.id);  // the jobs stay queued: a running team would start them before the check looks
     for (const x of ['One', 'Two', 'Three']) run(t.db, "INSERT INTO tasks (floor_id,title,brief,agent_id,status,created_at,updated_at) VALUES (?,?,?,?,'todo',?,?)", f.id, x, x, builder.id, Date.now(), Date.now());
     publish(t.db, f.id, 'tyres', 'Tyres', Date.now() - 86400000);
     run(t.db, "INSERT INTO app_visits (floor_id,project,day,path,views,uniques) VALUES (?,'tyres','2026-11-01','/',2241,2241)", f.id);
@@ -157,13 +158,13 @@ try {
   }
   if (want('j44')) {
     // r2-j44: the phone room stays under 60,000 triangles and 2 MB of 3D files; 30 fps cap, pixel ratio 1.5, one shadow light.
-    const boss = await claim(t, 'Phone Budget');
+    const boss = await claim(t, 'Phone Limits');
     const p = await b.newPage({ phone: { width: 390, height: 844 } });
     await p.send('Network.setCacheDisabled', { cacheDisabled: true });
     await p.goto(`${base}/floor/${boss.slug}`);
     await p.room();
     await p.until('!!window.__office?.view?.manager && !!window.__office.view.fit', 'the phone room', 120000);
-    await sleep(6000);  // furniture arrives and the budget is fitted again
+    await sleep(6000);  // furniture arrives and the fit is checked again
     const r = await p.ev(`(() => {
       const v = window.__office.view, st = window.__stage;
       let tris = 0; v.scene.traverseVisible((o) => { if (o.isMesh) { const g = o.geometry; tris += (g.index ? g.index.count / 3 : g.attributes.position.count / 3) * (o.isInstancedMesh ? o.count : 1); } });
@@ -274,6 +275,150 @@ try {
     const mode = await ph.ev('document.querySelector(".replay").dataset.mode');
     check(mode === 'cards', `j48 on phone low it is cards and photos only (${mode})`);
     if (shots) await ph.shot(`${shots}/r2-j48-phone-low.jpg`);
+  }
+  if (want('j58')) {
+    // r2-j58: a launch that passes shows "CHECKED 8 of 8" on its plaque and card.
+    const boss = await claim(t, 'Checked Tyres');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    publish(t.db, f.id, 'tyres', 'Tyres', Date.now() - 3600000);
+    storeShot(t.db, { floorId: f.id, project: 'tyres', image: REAL_JPEG, url: 'https://tyres.example/' });
+    const checks = ['speed', 'fits', 'links', 'form', 'preview', 'icon', 'notfound', 'https'].map((id) => ({ id, ok: true }));
+    run(t.db, 'INSERT INTO launch_checklists (floor_id, project, result, checked_at) VALUES (?,?,?,?)', f.id, 'tyres', JSON.stringify({ checks, passed: 8, blocked: [], warnings: [] }), Date.now());
+    const p = await openRoom(boss.slug);
+    const plaque = await p.ev('window.__office.view.frameMeshes?.[0]?.userData.plaque?.userData.checked || null');
+    check(plaque === '8/8', `j58 the frame in the room has its CHECKED 8 of 8 plaque (${plaque})`);
+    if (shots) {
+      await p.ev('(() => { const v = window.__office.view; const m = v.frameMeshes[0]; v.targetYaw = v.yaw = 1.3; v.targetZoom = v.zoom = 3.4; v.targetPan.set(m.position.x + 3, m.position.z); v.pan.copy(v.targetPan); })()');
+      await sleep(2500); await p.shot(`${shots}/r2-j58-plaque.jpg`);
+    }
+    const w = await b.newPage({});
+    await w.goto(`${base}/launched/${boss.slug}`);
+    await w.until('!!document.querySelector(".lcard[data-project=tyres]")', 'the card', 60000);
+    const stamp = await w.ev('document.querySelector(".lcard[data-project=tyres] .lcard-checked")?.textContent || null');
+    check(stamp === 'CHECKED 8 of 8', `j58 the launch card reads "${stamp}"`);
+    if (shots) await w.shot(`${shots}/r2-j58-card.jpg`);
+    check(!p.errors.length && !w.errors.length, `j58 no page errors ${[...p.errors, ...w.errors].slice(0, 2).join(' | ')}`);
+  }
+  if (want('j60')) {
+    // r2-j60: pasting a floor link into a chat app shows a 1,200 by 630 picture of that floor. Here this browser is the shots browser.
+    const { imageSize } = await import('../../server/sharecards.js');
+    const boss = await claim(t, 'Card Tyres');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    publish(t.db, f.id, 'tyres', 'Tyres', Date.now() - 3600000);
+    storeShot(t.db, { floorId: f.id, project: 'tyres', image: REAL_JPEG, url: 'https://tyres.example/' });
+    t.cfg.shotsCdpUrl = `http://127.0.0.1:${b.port}`; t.cfg.shotsOrigin = `http://localhost:${t.port}`;
+    const row = await t.app.ext.shareCard(f, 'launch');
+    const link = await (await fetch(`${base}/floor/${boss.slug}`)).text();
+    const image = link.match(/<meta property="og:image" content="([^"]+)">/)?.[1] || '';
+    const got = Buffer.from(await (await fetch(image)).arrayBuffer());
+    const size = imageSize(got);
+    check(row.type === 'image/jpeg' && size?.width === 1200 && size?.height === 630 && got.length < 200 * 1024, `j60 the floor link's preview picture is a real ${size?.width}x${size?.height} JPEG of the floor, ${Math.round(got.length / 1024)} KB`);
+    check(/og:image:width" content="1200"/.test(link) && /og:title" content="Card Tyres: floor/.test(link), 'j60 the link carries the og tags a chat app reads');
+    if (shots) { const { writeFileSync } = await import('node:fs'); writeFileSync(`${shots}/r2-j60-sharecard.jpg`, got); }
+    t.cfg.shotsCdpUrl = ''; t.cfg.shotsOrigin = '';
+  }
+  if (want('j67')) {
+    // r2-j67: bean cards show jobs finished and launches; the plaque shows launches and visits; no level appears anywhere.
+    const boss = await claim(t, 'Count Room');
+    await boss.post(`/api/floors/${boss.slug}/chat`, { text: 'go build soup finder' });
+    await waitDone(boss);
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    const builder = get(t.db, "SELECT id FROM agents WHERE floor_id=? AND role='builder'", f.id).id;
+    const p = await openRoom(boss.slug);
+    const plaque = await p.ev('document.querySelector(".floor-counts")?.hidden ? null : document.querySelector(".floor-counts")?.textContent');
+    check(/^\d+ launched · \d+ visits?$/.test(plaque || ''), `j67 the plaque reads "${plaque}"`);
+    await p.ev(`window.__office.openAgent(window.__office.state.agents.find((a) => a.id === ${builder}))`);
+    await p.until('!!document.querySelector(".id-counts")', 'the ID card', 10000);
+    const card = await p.ev('({ counts: document.querySelector(".id-counts").textContent, all: document.querySelector(".profile").textContent })');
+    check(/\d+ jobs? finished/.test(card.counts) && /\d+ launch(es)? worked on/.test(card.counts), `j67 the Builder's ID card reads "${card.counts}"`);
+    check(!/\blevel\b|\blvl\b|\brank\b/i.test(card.all + plaque), 'j67 no level on the card or the plaque');
+    if (shots) await p.shot(`${shots}/r2-j67-idcard.jpg`);
+    check(!p.errors.length, `j67 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+  }
+  if (want('j69')) {
+    // r2-j69: Colon approves a waiting library entry with one tap in admin.
+    const boss = await claim(t, 'Library Floor');
+    const f = get(t.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+    const { toolsForRole } = await import('../../server/tools.js');
+    const m = get(t.db, "SELECT * FROM agents WHERE floor_id=? AND role='manager'", f.id);
+    await t.app.engine.tools.exec(t.app.engine.toolCtx(f, m, null, toolsForRole('manager')), 'propose_library_entry', JSON.stringify({ title: 'Prices on the first screen', lane: 'website', lesson: 'Write to sales@library.example for the old list. Put prices where a phone sees them first.' }));
+    const id = get(t.db, 'SELECT id FROM library_entries WHERE floor_id=?', f.id).id;
+    const admin = await adminClient(t);
+    const p = await b.newPage({});
+    for (const [name, value] of Object.entries(admin.cookies)) await p.send('Network.setCookie', { name, value, url: `http://localhost:${t.port}/theoffice/`, path: '/theoffice' });
+    await p.goto(`${base}/admin`);
+    await p.until(`!!document.querySelector('[data-approve="${id}"]')`, 'the waiting entry', 30000);
+    const shown = await p.ev(`document.querySelector('[data-library="${id}"]').textContent`);
+    check(!shown.includes('@') && /\[removed\]/.test(shown) && /private detail/.test(shown), 'j69 the admin sees the entry scrubbed, with how much was taken out');
+    if (shots) await p.shot(`${shots}/r2-j69-admin.jpg`);
+    await p.click(`[data-approve="${id}"]`);
+    await p.until(`!document.querySelector('[data-approve="${id}"]')`, 'the tap', 15000);
+    check(get(t.db, 'SELECT status FROM library_entries WHERE id=?', id).status === 'approved', 'j69 one tap approves it');
+    check(!p.errors.length, `j69 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+  }
+  if (want('j70')) {
+    // r2-j70: a "Yes" on a test site adds one to that floor's Numbers tab. The button is OFF by default; this run turns it on for one test site.
+    const t2 = await boot({ mockDelayMs: 50, appsBaseDomain: 'apps.localhost', appsScheme: 'http', publicOrigin: '', feedbackButton: true });
+    try {
+      t2.app.engine.runManager = async () => {};
+      const boss = await claim(t2, 'Feedback Tyres');
+      const f = get(t2.db, 'SELECT * FROM floors WHERE slug=?', boss.slug);
+      const html = '<!doctype html><html><head><title>Tyres</title></head><body><h1>Tyres</h1></body></html>';
+      run(t2.db, "INSERT INTO projects (floor_id,slug,title,kind,private,published_at,created_at) VALUES (?,?,?,'site',0,?,?)", f.id, 'tyres', 'Tyres', Date.now(), Date.now());
+      run(t2.db, "INSERT INTO published_files (floor_id,project,path,content,size) VALUES (?,'tyres','index.html',?,?)", f.id, html, html.length);
+      await boss.get(`/api/floors/${boss.slug}`);
+      const label = get(t2.db, "SELECT label FROM app_labels WHERE floor_id=? AND project='tyres'", f.id).label;
+      // A person's browser: headless Chrome says "HeadlessChrome", which the site rightly counts as a bot.
+      const p = await b.newPage({ phone: { width: 390, height: 844 } });
+      await p.goto(`http://${label}.apps.localhost:${t2.port}/`);
+      await p.until('!!document.querySelector("[data-office-feedback] [data-answer=yes]")', 'the button', 20000);
+      await p.click('[data-office-feedback] [data-answer=yes]');
+      await p.until('!!document.querySelector("[data-office-feedback] [data-send]")', 'the line', 5000);
+      await p.type('[data-office-feedback] input', 'Found my size fast.');
+      await p.click('[data-office-feedback] [data-send]');
+      await sleep(1500);
+      const n = (await boss.get(`/api/floors/${boss.slug}/numbers`)).data.feedback;
+      check(n.week.yes === 1 && n.lines[0]?.line === 'Found my size fast.', `j70 one Yes on the site is one Yes on the Numbers tab (${JSON.stringify(n.week)})`);
+      if (shots) { await p.goto(`http://${label}.apps.localhost:${t2.port}/?again`); await p.ev('localStorage.clear(); location.reload()'); await sleep(2000); await p.shot(`${shots}/r2-j70-button.jpg`); }
+      const errs = p.errors.filter((e) => !/favicon\.ico/.test(e));  // the test site has no icon of its own
+      check(!errs.length, `j70 no page errors ${errs.slice(0, 2).join(' | ')}`);
+      if (want('j71')) {
+    // r2-j71: Photo saves a 1,920 by 1,080 PNG with no UI and the floor name.
+    const boss = await claim(t, 'Photo Floor');
+    const p = await openRoom(boss.slug, {}, '?q=mid');
+    await p.until('!!document.querySelector(".photo-button")', 'the button', 20000);
+    await p.click('.photo-button');
+    await p.until('!!window.__office.lastPhotoBlob', 'the PNG', 30000);
+    const r = await p.ev(`(async () => { const o = window.__office; const b = new Uint8Array(await o.lastPhotoBlob.arrayBuffer()); const dv = new DataView(b.buffer); const png = b[0] === 0x89 && b[1] === 0x50; const sizeNow = [window.__stage.renderer.domElement.width, window.__stage.renderer.domElement.height]; return { png, type: o.lastPhotoBlob.type, w: dv.getUint32(16), h: dv.getUint32(20), bytes: b.length, stamp: o.view.lastPhoto.stamp, sizeNow, canvas: [innerWidth, innerHeight] }; })()`);
+    check(r.png && r.type === 'image/png' && r.w === 1920 && r.h === 1080, `j71 the Photo is a ${r.w}x${r.h} PNG (${Math.round(r.bytes / 1024)} KB)`);
+    check(r.stamp.title === 'Photo Floor' && /^Floor \d+ · \d+ [A-Z][a-z]+ \d{4}$/.test(r.stamp.line), `j71 it carries "${r.stamp.title}" and "${r.stamp.line}" in the corner`);
+    check(r.sizeNow[0] === r.canvas[0] * 1 || r.sizeNow[0] > 0, 'j71 the room goes back to its own size afterwards');
+    if (shots) { const { writeFileSync } = await import('node:fs'); const b64 = await p.ev('(async () => { const b = new Uint8Array(await window.__office.lastPhotoBlob.arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 8192) s += String.fromCharCode.apply(null, b.subarray(i, i + 8192)); return btoa(s); })()'); writeFileSync(`${shots}/r2-j71-photo.png`, Buffer.from(b64, 'base64')); }
+    check(!p.errors.length, `j71 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+    const low = await b.newPage({ phone: { width: 390, height: 844 } });
+    await low.goto(`${base}/floor/${boss.slug}?q=low`); await low.room();
+    await low.until('!!window.__office?.view?.manager', 'the phone room', 60000);
+    check(!(await low.ev('!!document.querySelector(".photo-button")')), 'j71 no Photo button on phone low');
+  }
+} finally { await t2.close(); }
+  }
+  if (want('j71')) {
+    // r2-j71: Photo saves a 1,920 by 1,080 PNG with no UI and the floor name.
+    const boss = await claim(t, 'Photo Floor');
+    const p = await openRoom(boss.slug, {}, '?q=mid');
+    await p.until('!!document.querySelector(".photo-button")', 'the button', 20000);
+    await p.click('.photo-button');
+    await p.until('!!window.__office.lastPhotoBlob', 'the PNG', 30000);
+    const r = await p.ev(`(async () => { const o = window.__office; const b = new Uint8Array(await o.lastPhotoBlob.arrayBuffer()); const dv = new DataView(b.buffer); const png = b[0] === 0x89 && b[1] === 0x50; const sizeNow = [window.__stage.renderer.domElement.width, window.__stage.renderer.domElement.height]; return { png, type: o.lastPhotoBlob.type, w: dv.getUint32(16), h: dv.getUint32(20), bytes: b.length, stamp: o.view.lastPhoto.stamp, sizeNow, canvas: [innerWidth, innerHeight] }; })()`);
+    check(r.png && r.type === 'image/png' && r.w === 1920 && r.h === 1080, `j71 the Photo is a ${r.w}x${r.h} PNG (${Math.round(r.bytes / 1024)} KB)`);
+    check(r.stamp.title === 'Photo Floor' && /^Floor \d+ · \d+ [A-Z][a-z]+ \d{4}$/.test(r.stamp.line), `j71 it carries "${r.stamp.title}" and "${r.stamp.line}" in the corner`);
+    check(r.sizeNow[0] === r.canvas[0] * 1 || r.sizeNow[0] > 0, 'j71 the room goes back to its own size afterwards');
+    if (shots) { const { writeFileSync } = await import('node:fs'); const b64 = await p.ev('(async () => { const b = new Uint8Array(await window.__office.lastPhotoBlob.arrayBuffer()); let s = ""; for (let i = 0; i < b.length; i += 8192) s += String.fromCharCode.apply(null, b.subarray(i, i + 8192)); return btoa(s); })()'); writeFileSync(`${shots}/r2-j71-photo.png`, Buffer.from(b64, 'base64')); }
+    check(!p.errors.length, `j71 no page errors ${p.errors.slice(0, 2).join(' | ')}`);
+    const low = await b.newPage({ phone: { width: 390, height: 844 } });
+    await low.goto(`${base}/floor/${boss.slug}?q=low`); await low.room();
+    await low.until('!!window.__office?.view?.manager', 'the phone room', 60000);
+    check(!(await low.ev('!!document.querySelector(".photo-button")')), 'j71 no Photo button on phone low');
   }
 } finally {
   b.close(); await t.close();

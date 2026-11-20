@@ -382,7 +382,10 @@ describe('every route, swept from the source', () => {
   const OPEN_POST = new Set(['/api/claim/check', '/api/claim', '/api/login', '/api/logout', '/api/admin/login']);
   const OPEN_GET = new Set(['/api/me', '/api/floors', '/api/floors/:slug', '/api/floors/:slug/stream', '/api/building/ticker', '/api/building/now', '/api/building/staff', '/api/building/launched', '/api/building/hero', '/api/building/live', '/api/mailroom', '/api/floors/:slug/replay', '/api/building/shot/:floor/:project', '/api/floors/:slug/jobshot/:id', '/api/building/thumb/:floor/:project', '/api/building/party', '/api/building/leaderboard',
     // A Business mode ad: the boss's at any time, and everyone's once the floor has launched it (test/business.test.js checks both sides).
-    '/api/floors/:slug/business/file/:name']);
+    '/api/floors/:slug/business/file/:name',
+    // Round 2 lane A, public on purpose: the Replay of a floor's last real job (r2-j48; a visitor never gets private work, test/r2-room.test.js) and
+    // the floor's share card and the page it is photographed from (r2-j60; public facts only, test/r2-launch.test.js).
+    '/api/floors/:slug/replay', '/api/floors/:slug/sharecard', '/api/floors/:slug/sharecard.html']);
   test('nobody but the floor\'s boss or the admin gets past a route that needs one', async () => {
     assert.ok(patterns.length > 40, `only found ${patterns.length}`);
     const t = await start();

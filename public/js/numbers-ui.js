@@ -73,6 +73,9 @@ function paint(page, box, v) {
   if (v.sales.wholeCompany && sold) box.append(h('p.num-note', {}, 'Sales are for the whole company, not this one project.'));
   // Tapped calls on the company's pages (job 33): real people tapping a phone number, this week (Monday on).
   if (v.calls?.show) box.append(h('p.num-note.num-calls', { 'data-calls': '' }, `Calls tapped: ${count(v.calls.week)} this week`));
+  // r2-j70: the feedback button's answers, once there are any. Visitors wrote the lines: text only.
+  const fb = v.feedback;
+  if (fb && fb.ever.yes + fb.ever.no > 0) box.append(h('div.num-note.num-feedback', { 'data-feedback': '' }, h('p', {}, `Was it useful? This week ${count(fb.week.yes)} yes, ${count(fb.week.no)} no`), ...fb.lines.slice(0, 5).map((l) => h('p.num-line', {}, `${l.answer === 'yes' ? 'Yes' : 'No'}: ${l.line}`))));
   if (v.usage.accounts || v.signupsTotal) box.append(h('p.num-note', {}, `So far: ${count(v.usage.accounts)} account${v.usage.accounts === 1 ? '' : 's'} and ${count(v.signupsTotal)} sign-up${v.signupsTotal === 1 ? '' : 's'}.`));
 
   // Today has no bars of its own, so it shows the last 7 days with today picked out.

@@ -25,6 +25,7 @@ import { launchFlow, makerCard } from './launch-ui.js';
 import { setupOnArrival } from './setup-ui.js';
 import { recoveryBox } from './dom.js';
 import { Replay } from './replay.js';
+import { photoAllowed, photoFile } from './room-rules.js';
 import * as THREE from '../vendor/three/three.module.min.js';
 
 /** When set hours open next, in the reader's own clock: "at 9:00 AM" later today, otherwise the day as well. */
@@ -201,7 +202,7 @@ class FloorPage {
       h('header.floor-top', {},
         h('div.plaque-top', {}, h('button.btn.chrome.back', { type: 'button', 'aria-label': 'Back to building', onclick: () => window.officeGo('/') }, icon('elevator'), h('span', {}, 'Back to building')), muteButton()),
         h('div.floor-title', {}, h('span.floor-num', {}, `Floor ${s.floor.number}`), this.logoEl, this.titleEl, this.tagEl),
-        h('div.floor-meta', {}, this.statusEl, this.hoursEl = h('div.hours-sign', { 'data-hours': '' }, h('b'), h('small'))),
+        h('div.floor-meta', {}, this.statusEl, this.hoursEl = h('div.hours-sign', { 'data-hours': '' }, h('b'), h('small')), this.countsEl = h('span.floor-counts', { 'data-counts': '', hidden: true })),
         this.cardEl),
       this.controlsEl,
       this.journeyEl,
@@ -379,6 +380,9 @@ class FloorPage {
     this.hoursEl.firstChild.textContent = w.label; this.hoursEl.lastChild.textContent = w.days || (w.mode === 'nonstop' ? 'Every day' : 'When the boss calls');
     this.view?.setClosed?.(this.closedNow);
     this.view?.setFloorState?.(f.state || 'idle');
+    // r2-j67: the plaque's real counts: launches and total real visits. Facts, not a level; nothing until the first launch.
+    const m = s.room?.milestones; const showCounts = s.room?.people && m && m.launches > 0;
+    if (this.countsEl) { this.countsEl.hidden = !showCounts; this.countsEl.textContent = showCounts ? `${m.launches.toLocaleString('en-US')} launched · ${m.visits.toLocaleString('en-US')} ${m.visits === 1 ? 'visit' : 'visits'}` : ''; }
     // Real work starts: a replay stops at once, so live and replayed never mix (r2-j48).
     if (this.replay && state !== 'idle') this.replay.stop();
   }
@@ -389,6 +393,8 @@ class FloorPage {
     // r2-j48: an Idle floor with a real past job offers to play it back. Never while work is going on, never twice at once.
     const idleNow = (f.state || 'idle') === 'idle' && !this.state.agents.some((a) => a.state !== 'idle');
     const replay = this.state.room?.replay && idleNow && !this.replay ? h('button.btn.chrome.replay-offer', { type: 'button', title: `A replay of "${this.state.room.replay.title}", in under a minute`, onclick: () => this.startReplay() }, icon('play'), 'Watch how this was made') : null;
+    // r2-j71: a photo of the room, 1,920 by 1,080, with the floor's name and the date. Not on phone low.
+    const photo = this.view && this.state.room?.photo !== false && photoAllowed({ mobile: !!stage.mobile, low: !!this.view.low }) ? h('button.btn.chrome.photo-button', { type: 'button', title: 'Save a picture of the room', onclick: () => this.savePhoto() }, icon('sparkle'), 'Photo') : null;
     const follow = this.view?.follow?.allowed ? h('button.btn.chrome.follow-switch', { type: 'button', 'aria-pressed': String(!!this.view.follow.on), title: 'The camera goes to real handoffs and comes back', onclick: () => this.view.setFollow(!this.view.follow.on) }, icon('sparkle'), this.view.follow.on ? 'Following the work' : 'Follow the work') : null;
     if (this.owner) {
       const pause = f.paused
@@ -397,12 +403,24 @@ class FloorPage {
       this.controlsEl.append(pause,
         h('button.btn.chrome', { type: 'button', onclick: () => this.confirmStop() }, icon('stop'), 'Stop all'),
         h('button.btn.chrome', { type: 'button', onclick: () => this.openRedirect() }, icon('arrow-bend-up-right'), 'Redirect'),
-        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'), startButton(this) || '', follow || '', replay || '');
+        h('button.btn.chrome', { type: 'button', onclick: () => this.openCustomise() }, icon('paint-roller'), 'Customise'), startButton(this) || '', follow || '', replay || '', photo || '');
     } else {
       put(this.controlsEl,
         h('span.visitor-note', {}, f.filler ? 'Demo company: scripted and fictional' : 'You\'re visiting. Watch all you like.'),
-        session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'), replay, follow);
+        session.floor || f.filler ? null : h('button.btn.chrome', { type: 'button', onclick: () => openLogin(this.slug) }, 'This is my floor'), replay, follow, photo);
     }
+  }
+  /** r2-j71: the room as a PNG, saved to the device. */
+  savePhoto() {
+    if (!this.view?.photo) return;
+    const at = Date.now();
+    const canvas = this.view.photo({ name: this.state.floor.name, number: this.state.floor.number, at });
+    canvas.toBlob((blob) => {
+      if (!blob) { toast('The photo could not be made on this device', 'bad'); return; }
+      this.lastPhotoBlob = blob;  // read by the tests
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = photoFile(this.slug, at);
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, 'image/png');
   }
   /** r2-j48: fetch the floor's last real job and play it back. The room acts it out unless this is phone low, where it is cards and photos only. */
   async startReplay() {
@@ -466,6 +484,10 @@ class FloorPage {
           h('div.id-band', { css: { '--brand': f.colors?.primary || 'var(--teal)' } }, `${f.name || 'The Office'} · Floor ${f.number}`),
           this.face(a), h('div.id-title', {}, a.title), h('div.id-name', {}, a.name),
           h(`div.id-state${busy ? '.busy' : ''}`, {}, busy ? (STATE_LABEL[a.state] || a.state) : 'At desk'),
+          // r2-j67: two real counts, not a level: jobs finished and launches worked on.
+          this.state.room?.people?.[a.id] ? h('div.id-counts', { 'data-counts': '' },
+            h('span', {}, h('b', {}, String(this.state.room.people[a.id].jobs)), this.state.room.people[a.id].jobs === 1 ? ' job finished' : ' jobs finished'),
+            h('span', {}, h('b', {}, String(this.state.room.people[a.id].launches)), this.state.room.people[a.id].launches === 1 ? ' launch worked on' : ' launches worked on')) : null,
           h('div.id-bars', { 'aria-hidden': 'true' })),
         h('div.file-rows', {},
           bio ? row('identification-badge', 'About', h('p', {}, bio)) : h('section.file-row.dim', {}, h('p', {}, `${a.name} hasn't filled in the staff form yet.`)),
@@ -1260,6 +1282,7 @@ class FloorPage {
     on('work_mode', () => this.reload());
     on('work_plan', () => { if (this.owner) this.reload(); });
     on('business', () => this.reload());
+    on('fresh_eyes', () => { if (this.owner) this.reload(); });  // r2-j59: the boss's fresh-eyes score arrived
     on('ad_spend', () => { if (this.owner) this.reload(); });
     on('help_state', (d) => {
       this.state.helpWaiting = d.waiting;

@@ -119,12 +119,15 @@ export function makerCard(page) {
       anyway || (job.asking.canLaunch && !job.launched ? h('button.btn.primary', { type: 'button', onclick: () => launch?.click() }, 'Launch what works') : null),
       h('button.btn.ghost', { type: 'button', onclick: () => decide('stop') }, 'Stop')) : null;
     // Once this one is out in the world, the same three taps start the next thing. Back returns to this card.
+    // r2-j59: the fresh-eyes score, for the boss only (the snapshot carries it only for them). A score under 3 has already made one fix job.
+    const fe = job.launched ? (page.state.freshEyes || []).find((x) => x.project === job.project) : null;
+    const fresh = fe ? h('div.maker-fresh', { 'data-fresh-eyes': fe.score ?? '' }, h('b', {}, fe.score ? `Fresh look: ${fe.score} of 5` : 'Fresh look'), fe.notes ? h('p', {}, fe.notes) : null, fe.fixTask ? h('small', {}, 'The team has a fix job for it.') : null) : null;
     const another = job.stage === 'ready' && job.launched ? h('button.link.maker-new', { type: 'button', 'data-make-new': '', onclick: () => page.startNew?.() }, 'Make something new') : null;
     box.replaceChildren(...[
       h('div.maker-head', {}, h('b', {}, job.title), h('span', {}, building ? (job.launched ? 'Live, and getting better' : 'Team is building') : job.stage === 'ready' ? (job.launched ? 'Live' : 'Ready to launch') : job.stage === 'asking' ? 'Needs you' : '')),
       steps, job.report ? h('p.maker-report', {}, `Last test: ${job.report.verdict === 'pass' ? 'passed' : 'not yet'}${job.report.summary ? `, ${job.report.summary}` : ''}`) : null,
       job.liveCheck ? h('p.maker-report', { 'data-live-check': job.liveCheck.ok ? 'ok' : 'failed' }, job.liveCheck.ok ? (job.type === 'website' ? 'Checked on the live link.' : 'Saves and leaderboard checked on the live link.') : `The live link check found a problem: ${job.liveCheck.problem}`) : null,
-      asking, held, launch, job.launchedWith?.length ? h('p.maker-warn', { 'data-launched-with': '' }, `Live with a known serious bug: ${job.launchedWith[0]}`) : null, link, another].filter(Boolean));
+      asking, held, launch, job.launchedWith?.length ? h('p.maker-warn', { 'data-launched-with': '' }, `Live with a known serious bug: ${job.launchedWith[0]}`) : null, link, fresh, another].filter(Boolean));
     if (Date.now() < (page.landUntil || 0)) requestAnimationFrame(() => page.scrollChat?.());
   };
   async function decide(choice) { try { const r = await api(`/floors/${page.slug}/makers/decide`, { method: 'POST', body: { choice } }); render(r.makers.job); } catch (e) { toast(e.message, 'bad'); } }

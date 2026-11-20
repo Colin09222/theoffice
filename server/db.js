@@ -323,6 +323,24 @@ CREATE TABLE IF NOT EXISTS job_events (
 );
 CREATE INDEX IF NOT EXISTS job_events_card ON job_events(card_id, created_at);
 CREATE INDEX IF NOT EXISTS job_events_floor ON job_events(floor_id, created_at);
+CREATE TABLE IF NOT EXISTS fresh_eyes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, launch_key TEXT NOT NULL, score INTEGER, notes TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '', fix_task_id INTEGER, created_at INTEGER NOT NULL, UNIQUE (floor_id, project, launch_key)
+);
+CREATE TABLE IF NOT EXISTS share_cards (floor_id INTEGER PRIMARY KEY, image BLOB NOT NULL, type TEXT NOT NULL, bytes INTEGER NOT NULL, made_at INTEGER NOT NULL, why TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS upkeep_runs (floor_id INTEGER NOT NULL, week TEXT NOT NULL, ran_at INTEGER NOT NULL, report TEXT NOT NULL DEFAULT '{}', PRIMARY KEY (floor_id, week));
+CREATE TABLE IF NOT EXISTS upkeep_fixes (id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, week TEXT NOT NULL, task_id INTEGER NOT NULL, created_at INTEGER NOT NULL, checked_at INTEGER, fixed INTEGER);
+CREATE TABLE IF NOT EXISTS upkeep_notices (floor_id INTEGER NOT NULL, key TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (floor_id, key));
+CREATE TABLE IF NOT EXISTS library_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER, week TEXT NOT NULL, title TEXT NOT NULL, lane TEXT NOT NULL, lesson TEXT NOT NULL, code TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL, removed INTEGER NOT NULL DEFAULT 0, seed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, decided_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS library_entries_floor ON library_entries(floor_id, week);
+CREATE TABLE IF NOT EXISTS app_feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, project TEXT NOT NULL, path TEXT NOT NULL, answer TEXT NOT NULL, line TEXT NOT NULL DEFAULT '',
+  hash TEXT NOT NULL, created_at INTEGER NOT NULL, UNIQUE (floor_id, project, hash)
+);
+CREATE TABLE IF NOT EXISTS launch_checklists (floor_id INTEGER NOT NULL, project TEXT NOT NULL, result TEXT NOT NULL, checked_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project));
 `;
 
 export function openDb(dataDir) {

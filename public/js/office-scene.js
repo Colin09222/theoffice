@@ -2,7 +2,7 @@
 // The whole static room bakes into a handful of vertex-coloured draw calls (see batch.js), the floor carries baked contact
 // shadows and window light, and each person is seven or so calls, so a busy floor still runs well on a phone.
 import * as THREE from '../vendor/three/three.module.min.js';
-import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows, pileSheets, queuedFor, trophiesFor, PHONE_BUDGET, shedPlan, trianglesOf, CameraFollow, driftYaw } from './room-rules.js';
+import { frameLayout, poseFor, glancing, BeatGate, whiteboardRows, pileSheets, queuedFor, trophiesFor, PHONE_BUDGET, shedPlan, trianglesOf, CameraFollow, driftYaw, PHOTO, photoStamp } from './room-rules.js';
 import { Character, HEAD_TOP, rememberJob } from './character.js';
 import { stage } from './stage.js';
 import { mergeColored } from './batch.js';
@@ -1271,7 +1271,7 @@ export class OfficeView {
   setFrames(frames) {
     if (!this.frameWall) return;
     const list = frames?.list || [];
-    const key = JSON.stringify([list.map((f) => [f.slug, f.shot]), frames?.total ?? 0, this.low]);
+    const key = JSON.stringify([list.map((f) => [f.slug, f.shot, !!f.checked]), frames?.total ?? 0, this.low]);
     if (key === this.framesKey) return;
     this.framesKey = key;
     if (this.framesGroup) { this.disposeTree(this.framesGroup); this.framesGroup.removeFromParent(); }
@@ -1299,6 +1299,13 @@ export class OfficeView {
       const m = plane(f.w, f.h, mat, wallX + 0.125, y + f.dy, z + f.dz);
       m.userData.launch = f.launch.slug; this.frameMeshes.push(m);
       if (f.launch.shot) this.framePhoto(m, f.launch.shot);
+      // r2-j58: the launch checklist's stamp on a small plaque under the frame, when all eight checks passed.
+      if (f.launch.checked) {
+        const tag = canvasTex(256, 64, (x, w, h) => { x.fillStyle = '#f7f1e4'; x.fillRect(0, 0, w, h); x.strokeStyle = '#2f7a4a'; x.lineWidth = 6; x.strokeRect(8, 8, w - 16, h - 16); x.fillStyle = '#2f7a4a'; x.font = '700 28px Inter, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(`CHECKED ${f.launch.checked.passed} of ${f.launch.checked.of}`, w / 2, h / 2 + 1); });
+        const pw = Math.min(f.w * 0.8, 0.9);
+        const plaque = plane(pw, pw / 4, new THREE.MeshBasicMaterial({ map: tag, toneMapped: false }), wallX + 0.13, y + f.dy - f.h / 2 - pw / 8 - 0.06, z + f.dz);
+        plaque.userData.checked = `${f.launch.checked.passed}/${f.launch.checked.of}`; m.userData.plaque = plaque;
+      }
     }
     if (hidden && spots.length) {
       const [z, y] = spots[Math.min(spots.length - 1, lay.frames.at(-1)?.spot ?? 0)];
@@ -1873,7 +1880,7 @@ export class OfficeView {
     if (old) { old.removeFromParent(); old.traverse((m) => { if (m.userData?.merged) m.geometry.dispose(); }); }
     this.officeLegacy?.removeFromParent();
     for (const a of this.actors.values()) if (a.seated) a.sitDown();
-    if (stage.view === this) this.fitPhone();  // the furniture counts toward a phone's budget too (r2-j44)
+    if (stage.view === this) this.fitPhone();  // the furniture counts toward a phone's fit too (r2-j44)
   }
   /** A name plate over every office door, all on one texture: the owner's name and what they do, so you can find anyone at a glance. */
   drawSigns() {
@@ -1979,6 +1986,34 @@ export class OfficeView {
     const to = this.actors.get(toId);
     if (to && id != null && this.follow?.ask(this.time, { record: { type: 'handoff', id }, at: [to.group.position.x, to.group.position.z] })) this.followed = [...(this.followed || []).slice(-10), { id, at: this.time }];
   }
+  /**
+   * r2-j71: a photo of the room, 1,920 by 1,080: the room drawn once more at that size through the same picture pipeline, with no page controls or
+   * labels (those are page elements, never in the 3D picture), and the floor's name and the date stamped in the corner. Returns a canvas.
+   */
+  photo({ name, number, at = Date.now() } = {}) {
+    const st = stage, r = st.renderer, { width: W, height: H } = PHOTO;
+    const prev = { dpr: r.getPixelRatio(), w: st.w, h: st.h };
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const x = c.getContext('2d');
+    try {
+      r.setPixelRatio(1); r.setSize(W, H, false); st.post?.setSize(W, H, 1);
+      this.camera.aspect = W / H; this.camera.clearViewOffset(); this.camera.updateProjectionMatrix();
+      if (st.post && st.post.level && this.post !== false) st.post.render(0, st.time); else r.render(this.scene, this.camera);
+      x.drawImage(r.domElement, 0, 0, W, H);  // in the same task as the draw, so the picture is still there to copy
+    } finally {
+      r.setPixelRatio(prev.dpr); r.setSize(prev.w, prev.h, false); st.post?.setSize(prev.w, prev.h, st.dpr);
+      this.applyInsets();
+    }
+    const s = photoStamp(name || this.floorName || this.companyName, number ?? this.floorNumber, at);
+    x.save();
+    const g = x.createLinearGradient(0, H - 190, 0, H); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,.55)'); x.fillStyle = g; x.fillRect(0, H - 190, W, 190);
+    x.fillStyle = '#fff8e8'; x.shadowColor = 'rgba(0,0,0,.5)'; x.shadowBlur = 8; x.textBaseline = 'alphabetic';
+    x.font = '600 58px Fraunces, Georgia, serif'; x.fillText(s.title, 56, H - 92);
+    x.font = '500 30px Inter, system-ui, sans-serif'; x.fillText(s.line, 58, H - 46);
+    x.restore();
+    this.lastPhoto = { width: c.width, height: c.height, stamp: s };  // read by the tests
+    return c;
+  }
   /** The "Follow the work" switch (r2-j46). */
   setFollow(on) { this.follow?.set(on); window.dispatchEvent(new CustomEvent('office:follow', { detail: { on: !!this.follow?.on } })); }
   cheer() {
@@ -2080,7 +2115,7 @@ export class OfficeView {
   /**
    * r2-j44: on a phone the room stays under 60,000 triangles (spec Q9). Everything sheddable is put back first, then shed a part at a time until
    * the room fits. The people and the room never go.
-   * Run on entering and again whenever furniture arrives. this.fit says what it found and what it shed (read by the tests).
+   * Run on entering and again whenever furniture arrives. `this.fit` says what it found and what it shed (read by the tests).
    */
   fitPhone() {
     if (this.host || !stage.mobile || this.roomCfg?.phoneFit === false) { this.fit = null; return; }

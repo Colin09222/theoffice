@@ -6,6 +6,7 @@ import { get, all } from './db.js';
 import { ensureAdSpend } from './business.js';
 import { slugPattern } from './workspace.js';
 import { weekStart } from './spendcheck.js';
+import { feedbackFigures, feedbackForBots } from './feedback.js';
 
 const DAY = 86400000, SERIES_DAYS = 30, TOP = 8;
 export const WINDOWS = { today: 1, week: 7, month: 30 };
@@ -89,6 +90,8 @@ export function companyNumbers(db, floor, { now = Date.now(), project = '', sale
     at: now, timezone: 'UTC', project, projects, windows, series: list,
     sales: { state: salesFailed ? 'error' : sales && (sales.orders || sales.grossCents || sales.activeSubs) ? 'ok' : 'none', currency, activeSubs: sales?.activeSubs || 0, refundsCents: sales?.refundsCents || 0, wholeCompany: !!project },
     ads: adsView, usage, signupsTotal, calls: { week: callsWeek, ever: callsEver, show: hasTel || callsEver > 0 },
+    // Visitor feedback (round 2 lane A, r2-j70): "Was this useful?" yes and no, and the lines people wrote. Shown once there is any.
+    feedback: feedbackFigures(db, floorId, project, weekStart(now)),
   };
 }
 
@@ -97,7 +100,7 @@ export function factsFrom(view) {
   const week = (rows) => ({ visitors: sum(rows, 'visitors'), views: sum(rows, 'views'), signups: sum(rows, 'signups'), accounts: sum(rows, 'accounts'), orders: sum(rows, 'orders'), grossCents: sum(rows, 'grossCents') });
   const last7 = week(view.series.slice(-7)), prev7 = week(view.series.slice(-14, -7));
   const any = (w) => w.visitors + w.views + w.signups + w.accounts + w.orders + w.grossCents > 0;
-  return { last7, prev7, today: week(view.series.slice(-1)), hasData: any(last7) || !!view.sales.activeSubs, hasPrev: any(prev7), sales: view.sales, ads: view.ads, accountsTotal: view.usage.accounts, pages: view.windows.week.pages, sources: view.windows.week.sources };
+  return { last7, prev7, today: week(view.series.slice(-1)), hasData: any(last7) || !!view.sales.activeSubs, hasPrev: any(prev7), sales: view.sales, ads: view.ads, accountsTotal: view.usage.accounts, pages: view.windows.week.pages, sources: view.windows.week.sources, feedback: view.feedback };
 }
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 /** One line of counts, real figures only, leaving out what isn't there yet. */
@@ -117,6 +120,9 @@ export function managerFigures(f) {
     if (f.pages.length) parts.push(`Top pages: ${fence('page paths', f.pages.map((p) => `${p.path} (${p.views})`).join(', '))}.`);
     if (f.sources.length) parts.push(`Where visitors came from: ${fence('referrers', f.sources.map((s) => `${s.ref} (${s.n})`).join(', '))}.`);
   }
+  // r2-j70: what visitors said, the counts and their words fenced as untrusted data before the manager reads them.
+  const fb = feedbackForBots(f.feedback);
+  if (fb) parts.push(fb);
   return parts.join(' ');
 }
 /** "What the numbers did", for the boss. Real figures only, and it says so when there are too few to say anything. */

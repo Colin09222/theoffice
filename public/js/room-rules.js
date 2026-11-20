@@ -169,12 +169,12 @@ export function trophiesFor(milestones) {
   return MILESTONES.filter((m) => m.test(milestones)).map(({ id, label }) => ({ id, label })).slice(0, 4);
 }
 
-// ---- r2-j44: the phone's hard budget (Q9) ----
+// ---- r2-j44: the phone's hard limits (Q9) ----
 /** Once 3D loads on a phone: 30 fps cap, pixel ratio 1.5, one shadow light, 60,000 triangles, 2 MB of 3D files. */
 export const PHONE_BUDGET = { fps: 30, dpr: 1.5, shadowLights: 1, triangles: 60000, bytes: 2 * 1024 * 1024 };
 
 /**
- * What a phone room sheds to get under its triangle budget, in order, until it fits: `steps` are [name, triangles it saves] in the order they
+ * What a phone room sheds to get under its triangle limit, in order, until it fits: `steps` are [name, triangles it saves] in the order they
  * may go (the city around the floor first, the room's own people never). Returns { shed: [names], left: triangles after }.
  */
 export function shedPlan(total, steps, limit = PHONE_BUDGET.triangles) {
@@ -197,8 +197,8 @@ export function trianglesOf(root) {
 }
 /** The phone's frame cap: whether a frame at `now` (ms) comes too soon after the last one drawn. A 3 ms slack keeps a 60 Hz screen at an even 30. */
 export const skipFrame = (now, lastDraw, cap) => !!cap && now - (lastDraw ?? -1e9) < 1000 / cap - 3;
-/** The pixel ratio a phone may draw at, under the budget. */
-export const phoneDpr = (want, budget = true) => (budget ? Math.min(want, PHONE_BUDGET.dpr) : want);
+/** The pixel ratio a phone may draw at, under the limits. */
+export const phoneDpr = (want, limited = true) => (limited ? Math.min(want, PHONE_BUDGET.dpr) : want);
 
 // ---- r2-j45: auto quality (Q9) ----
 /** Frame test 2 s, uncapped: 50 fps or more = high, 30 to 49 = medium, under 30 = low. Drop one level, once, under 24 fps for 5 s. Low still under
@@ -297,4 +297,18 @@ export function replayLabel(ms, tz = 'America/New_York') {
   const day = new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: tz }).format(d);
   const hm = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz }).format(d);
   return `Replay · ${day} ${hm}`;
+}
+
+// ---- r2-j71: the photo button ----
+/** A 1,920 by 1,080 PNG of the room: no page controls, the floor's name and the date in the corner. Hidden on phone low. */
+export const PHOTO = { width: 1920, height: 1080 };
+export const photoAllowed = ({ mobile = false, low = false } = {}) => !(mobile && low);
+/** The words in the corner: the floor's name, then "Floor 6 · 19 November 2026" (New York's date, like the building's clock). */
+export function photoStamp(name, number, at, tz = 'America/New_York') {
+  const date = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: tz }).format(new Date(at));
+  return { title: String(name || `Floor ${number}`), line: `Floor ${number} · ${date}` };
+}
+export function photoFile(slug, at, tz = 'America/New_York') {
+  const d = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz }).format(new Date(at));
+  return `${String(slug || 'floor').replace(/[^a-z0-9-]/gi, '')}-${d}.png`;
 }

@@ -11,6 +11,7 @@ import { get, all, run } from './db.js';
 import { appOrigin, appLabel } from './apps.js';
 import { publicUrl } from './tools.js';
 import { makeShooter } from './shooter.js';
+import { checkedMark } from './checklist.js';
 
 export const REFRESH_MS = 7 * 86400000;
 const RETRY_MS = 6 * 3600000;       // a page that failed is tried again after this
@@ -38,13 +39,14 @@ export function launches(db, { now = Date.now(), floorId = null } = {}) {
       f.id fid, f.number, f.slug fslug, f.name fname, f.colors,
       COALESCE((SELECT SUM(v.uniques) FROM app_visits v WHERE v.floor_id = p.floor_id AND v.project = p.slug AND v.day >= ?), 0) visits,
       COALESCE((SELECT t.lane FROM tasks t WHERE t.floor_id = p.floor_id AND t.project = p.slug AND t.lane != '' ORDER BY t.id DESC LIMIT 1), '') lane,
-      s.taken_at shot_at, s.bytes shot_bytes
+      s.taken_at shot_at, s.bytes shot_bytes,
+      (SELECT lc.result FROM launch_checklists lc WHERE lc.floor_id = p.floor_id AND lc.project = p.slug) checklist
     FROM projects p JOIN floors f ON f.id = p.floor_id LEFT JOIN launch_shots s ON s.floor_id = p.floor_id AND s.project = p.slug AND s.image IS NOT NULL
     WHERE p.published_at IS NOT NULL AND p.private = 0 AND f.status = 'active' AND f.filler = 0 AND f.hidden = 0 ${floorId ? 'AND f.id = ?' : ''}
     ORDER BY p.published_at DESC, p.slug`, from, ...(floorId ? [floorId] : []));
   const wip = wipSet(db);
   // The lane (Game, Website, Business) is the one its work was done in; a project made before lanes takes it from its kind.
-  return rows.map((r) => ({ ...r, lane: ['game', 'website', 'business'].includes(r.lane) ? r.lane : ['game', 'simulation'].includes(r.kind) ? 'game' : 'website', wip: wip.has(`${r.floor_id}/${r.slug}`), madeDays: Math.max(1, Math.round((r.published_at - r.created_at) / DAY)) }));
+  return rows.map(({ checklist, ...r }) => ({ ...r, checked: checkedMark(checklist), lane: ['game', 'website', 'business'].includes(r.lane) ? r.lane : ['game', 'simulation'].includes(r.kind) ? 'game' : 'website', wip: wip.has(`${r.floor_id}/${r.slug}`), madeDays: Math.max(1, Math.round((r.published_at - r.created_at) / DAY)) }));
 }
 /** Projects still being worked on: a maker job not launched and not stopped, or a business journey under way and not launched. */
 function wipSet(db) {
