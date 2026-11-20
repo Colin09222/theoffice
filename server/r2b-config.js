@@ -22,5 +22,11 @@ export function r2bSettings(env = process.env) {
     weeklyReportEmail: onlyIf(env.WEEKLY_REPORT_EMAIL),
     // r2-j64: one proposal per active floor, Mondays 08:30 New York (one short model call per floor per week). PROPOSALS=0 turns it off.
     proposals: on(env.PROPOSALS),
+    // r2-j65: "Did it work?": a before-and-after line on a shipped job's timeline card 7 days later. DID_IT_WORK=0 turns it off.
+    didItWork: on(env.DID_IT_WORK),
+    // r2-j66: the "This week" page (/theoffice/thisweek). THIS_WEEK=0 turns it (and its link on the home page) off.
+    thisWeek: on(env.THIS_WEEK),
+    // r2-j68: the Friday feature (Fridays 16:00 to 23:00 New York, only if something shipped that week). FRIDAY=0 turns it off.
+    friday: on(env.FRIDAY),
   };
 }

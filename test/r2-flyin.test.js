@@ -31,7 +31,7 @@ test('any input skips it; it starts only once the tower is ready, which is after
   const ui = src('lobby-ui.js');
   assert.match(ui, /for \(const e of SKIP_EVENTS\) window\.addEventListener\(e, skip, \{ capture: true, passive: true \}\);/);
   // Called where the tower has just arrived; the tower itself waits for the hero and Happening now (job 14).
-  assert.match(ui, /tower\.setBillboard\(billboardImages\(heroList\)\); flyInOnce\(\); \}/);
+  assert.match(ui, /tower\.setBillboard\(boardImages\(\)\); flyInOnce\(\); \}/);
   assert.match(ui, /const contentIn = Promise\.race\(\[Promise\.allSettled\(\[hero\.ready, now\.ready\]\)/);
   assert.match(src('lobby-scene.js'), /skipFlyIn\(\) \{ if \(this\.flyin\) \{ this\.flyin = null; this\.flyinSkipped = true; \} \}/);
 });

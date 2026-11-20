@@ -85,5 +85,7 @@ export function mailroomFloor(view, { read = () => api('/mailroom'), now = () =>
   if (globalThis.document && globalThis.setInterval) {
     const timer = setInterval(() => { if (document.body?.dataset.page !== 'floor' || view.disposed) { clearInterval(timer); return; } hook.tick(); }, POLL_MS);
   }
+  // r2-j68: on a Friday evening, one cheer when someone opens the featured floor's room. Once per visit, and only if that floor is featured.
+  if (globalThis.document) Promise.resolve(api('/building/friday')).then((d) => { if (d?.on && d.floor?.number === number && !view.disposed) { view.cheer?.(); hook.fridayCheer = true; } }).catch(() => {});
   return hook;
 }

@@ -380,7 +380,7 @@ describe('every route, swept from the source', () => {
   const server = fileURLToPath(new URL('../server/', import.meta.url));
   const patterns = readdirSync(server).filter((n) => n.endsWith('.js')).flatMap((n) => [...readFileSync(join(server, n), 'utf8').matchAll(/\b(GET|POST)\('(\/api\/[^']+)'/g)].map((m) => ({ method: m[1], pattern: m[2] })));
   const OPEN_POST = new Set(['/api/claim/check', '/api/claim', '/api/login', '/api/logout', '/api/admin/login']);
-  const OPEN_GET = new Set(['/api/me', '/api/floors', '/api/floors/:slug', '/api/floors/:slug/stream', '/api/building/ticker', '/api/building/now', '/api/building/staff', '/api/building/launched', '/api/building/hero', '/api/building/live', '/api/mailroom', '/api/floors/:slug/replay', '/api/building/shot/:floor/:project', '/api/floors/:slug/jobshot/:id', '/api/building/thumb/:floor/:project', '/api/building/party', '/api/building/leaderboard',
+  const OPEN_GET = new Set(['/api/me', '/api/floors', '/api/floors/:slug', '/api/floors/:slug/stream', '/api/building/ticker', '/api/building/now', '/api/building/staff', '/api/building/launched', '/api/building/hero', '/api/building/live', '/api/mailroom', '/api/building/thisweek', '/api/building/friday', '/api/building/shot/:floor/:project', '/api/floors/:slug/jobshot/:id', '/api/building/thumb/:floor/:project', '/api/building/party', '/api/building/leaderboard',
     // A Business mode ad: the boss's at any time, and everyone's once the floor has launched it (test/business.test.js checks both sides).
     '/api/floors/:slug/business/file/:name',
     // Round 2 lane A, public on purpose: the Replay of a floor's last real job (r2-j48; a visitor never gets private work, test/r2-room.test.js) and
