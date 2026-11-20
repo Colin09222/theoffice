@@ -343,6 +343,21 @@ CREATE TABLE IF NOT EXISTS app_feedback (
 CREATE TABLE IF NOT EXISTS launch_checklists (floor_id INTEGER NOT NULL, project TEXT NOT NULL, result TEXT NOT NULL, checked_at INTEGER NOT NULL, PRIMARY KEY (floor_id, project));
 `;
 
+// redesign r2 lane B (docs/redesign/ROUND2.md): new tables only; each statement is safe to run on every start.
+const R2_LANE_B_SCHEMA = `
+-- r2-j61: what reached a boss by email, one row per event (question waiting, its 24 h reminder, launch ready, something shipped).
+CREATE TABLE IF NOT EXISTS boss_alerts (key TEXT PRIMARY KEY, floor_id INTEGER NOT NULL, kind TEXT NOT NULL, day TEXT NOT NULL, status TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS boss_alerts_floor_day ON boss_alerts(floor_id, day);
+-- r2-j62: the weekly floor report email, one per floor per week (week = that Monday's New York date).
+-- r2-j64: one numbers-led proposal per active floor per week: one change, one reason, the number behind it; Yes / No; dropped after 7 days.
+CREATE TABLE IF NOT EXISTS floor_proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, week TEXT NOT NULL, change TEXT NOT NULL, reason TEXT NOT NULL, number TEXT NOT NULL,
+  metric TEXT NOT NULL DEFAULT '', project TEXT NOT NULL DEFAULT '', baseline INTEGER, line TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, task_id INTEGER,
+  created_at INTEGER NOT NULL, decided_at INTEGER, UNIQUE (floor_id, week)
+);
+CREATE TABLE IF NOT EXISTS weekly_reports (floor_id INTEGER NOT NULL, week TEXT NOT NULL, status TEXT NOT NULL, subject TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, PRIMARY KEY (floor_id, week));
+`;
+
 export function openDb(dataDir) {
   let path = ':memory:';
   if (dataDir !== ':memory:') { mkdirSync(dataDir, { recursive: true }); path = join(dataDir, 'office.db'); }
@@ -360,6 +375,7 @@ export function openDb(dataDir) {
   db.exec('CREATE INDEX IF NOT EXISTS ledger_provider ON ledger(provider, cost_usd)');
   db.exec(LANE_B_SCHEMA);
   laneBFills(db);
+  db.exec(R2_LANE_B_SCHEMA);  // redesign r2 lane B
   // Rows from before the column existed. A bare claude- id went to the Claude API; an id with a slash is OpenRouter's naming, whoever made the model. Domains are paid from the registrar balance and count towards neither.
   if (db.prepare("SELECT 1 x FROM ledger WHERE provider='' AND kind!='domain' LIMIT 1").get()) {
     db.exec(`UPDATE ledger SET provider = CASE WHEN kind='search' THEN 'anthropic' WHEN kind IN ('image','review') THEN 'openrouter' WHEN model='managed-session' OR model LIKE 'claude-%' THEN 'anthropic' ELSE 'openrouter' END WHERE provider='' AND kind!='domain'`);
