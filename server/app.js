@@ -51,6 +51,7 @@ import { installMail } from './mail.js';
 import { installMakers } from './makers.js';
 import { installServers, CLOUD_PATH } from './servers.js';
 import { installNumbers } from './numbers.js';
+import { installTrackers } from './trackers.js';
 import { installDaily } from './daily.js';
 import { installSpendCheck, spendListing, freshnessLine } from './spendcheck.js';
 import { alertLog, nightFrozen, setNightFreeze } from './owneralerts.js';
@@ -194,7 +195,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   }
   const viewerFor = (req, floor) => {
     const s = sessionOf(req);
-    return { owner: !!s && s.floor_id === floor.id, sessionHash: s?.hash, publicChat: !!floor.public_chat, defaultPrivate: !!floor.default_private };
+    return { owner: !!s && s.floor_id === floor.id, admin: !!adminOf(req), sessionHash: s?.hash, publicChat: !!floor.public_chat, defaultPrivate: !!floor.default_private };
   };
 
   // ---- extension hooks (floors-plus) ----
@@ -757,7 +758,7 @@ export function createApp({ db, cfg, models, log = () => {}, now = Date.now, llm
   // ---- extensions (floors-plus) ----
   // Each module owns its own tables, routes and timers. Routes are matched in order, so these can add paths but never shadow the ones above.
   const ext = { db, cfg, engine, bus, log, now, hooks, GET, POST, route, json, send, readJson, limit, requireOwner, requireAdmin, floorBySlug, viewerFor, snapshot, projectView, floorCard, HttpError, clean, clean2, BASE, PRIVATE_TEXT, viewEvent, publicUrl, models, validLook, saveSettings, workspacePreviewUrl };
-  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installDaily(ext), installLook(ext), installShots(ext), installJobCards(ext), installEstimates(ext), installWeekPlans(ext), installOnboarding(ext), installOwnSpend(ext), installRanked(ext)].filter(Boolean);  // estimates after job cards: they add to the boss's cards
+  const extensions = [installOrders(ext), installFiller(ext), installBuilding(ext), installHelp(ext), installPurchases(ext), installCustomise(ext), installModes(ext), installLife(ext), installBusiness(ext), installMakers(ext), installServers(ext), installNumbers(ext), installTrackers(ext), installDaily(ext), installLook(ext), installShots(ext), installJobCards(ext), installEstimates(ext), installWeekPlans(ext), installOnboarding(ext), installOwnSpend(ext), installRanked(ext)].filter(Boolean);  // estimates after job cards: they add to the boss's cards
   // Round 2, lane A: the floor room's own data (server/room.js).
   extensions.push(...[installRoom(ext), installEventLog(ext), installChecklist(ext), installFreshEyes(ext), installShareCards(ext), installUpkeep(ext), installLibrary(ext)].filter(Boolean));
   extensions.push(...installR2B(ext));  // round 2, lane B (server/r2b.js)

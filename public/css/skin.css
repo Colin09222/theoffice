@@ -473,3 +473,31 @@ body[data-page="floor-lite"] #scene, body[data-page="floor-lite"] #labels { disp
 .spend-jobs { list-style: none; margin: 0; padding: 0; }
 .spend-jobs li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 8px 0; border-bottom: 1px solid var(--c-line); }
 .spend-jobs li small { grid-column: 1 / -1; color: var(--c-slate); }
+/* Sales and website traffic on the status card (server/trackers.js): the boss and the admin only */
+.trk { display: flex; flex-direction: column; gap: 10px; container: trk / inline-size; }
+.trk-card { padding: 12px; border: 1px solid var(--c-line); border-radius: 12px; background: var(--c-card); }
+.trk-title { margin: 0 0 8px; display: flex; align-items: center; gap: 8px; font: 700 15px var(--f-head); }
+.trk-test { padding: 0 7px; border-radius: 999px; border: 1px dashed var(--c-slate); font: 500 11px/1.5 var(--f-body); color: var(--c-slate); letter-spacing: .02em; cursor: help; }
+.trk-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.trk-tiles.trk-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.trk-tile { display: flex; flex-direction: column; min-width: 0; padding: 7px 8px; border-radius: 9px; background: var(--c-paper); }
+.trk-label { font: 500 12px var(--f-body); color: var(--c-slate); }
+.trk-big { font: 700 16px/1.25 var(--f-body); color: var(--c-ink); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trk-small { font: 500 12px var(--f-body); color: var(--c-slate); font-variant-numeric: tabular-nums; }
+.trk-recent { list-style: none; margin: 10px 0 0; padding: 0; }
+.trk-recent li { display: grid; grid-template-columns: auto 1fr auto; gap: 0 8px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--c-line); font-size: 13.5px; }
+.trk-when { color: var(--c-slate); font-size: 12.5px; white-space: nowrap; }
+.trk-amt { grid-column: 3; grid-row: 1; font-variant-numeric: tabular-nums; }
+.trk-note { grid-column: 1 / 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trk-src { grid-column: 3; grid-row: 2; justify-self: end; font: 500 11px var(--f-body); color: var(--c-slate); }
+.trk-empty, .trk-foot { margin: 8px 0 0; font-size: 12.5px; color: var(--c-slate); }
+.trk-spark-wrap { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.trk-spark { width: 100%; height: 34px; display: block; }
+.trk-spark-line { fill: none; stroke: var(--c-teal); stroke-width: 1.6; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.trk-spark-fill { fill: var(--c-teal); opacity: .1; stroke: none; }
+@container trk (max-width: 300px) {  /* the narrow desktop side panel: the three traffic windows as rows */
+  .trk-tiles.trk-3 { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .trk-3 .trk-tile { flex-direction: row; align-items: baseline; gap: 8px; padding: 5px 8px; }
+  .trk-3 .trk-label { flex: 0 0 50px; }
+  .trk-3 .trk-small { margin-left: auto; white-space: nowrap; }
+}

@@ -33,6 +33,7 @@ import { sendOut, stuckListing, SendOutError } from '../server/sendout.js';
 import { setFloorPlans, askDraftNow, currentPlan, floorOff, planView } from '../server/weekplan.js';
 import { spendListing, spendListingText, writeSpendRecord } from '../server/spendcheck.js';
 import { alertLog, digestFacts, digestText, nightFrozen, setNightFreeze } from '../server/owneralerts.js';
+import { ensureTrackerSchema, floorFor, addSale, undoSale, listSales, setTrafficDay, clearTrafficDay, setTrafficOffset, trafficOffset, trackersView, trackersText, TrackerError } from '../server/trackers.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -105,7 +106,14 @@ const usage = () => {
     '  node scripts/admin.mjs ads resume               lift the stop left by pause-all, the watchdog or the server\'s spend check, once you\'ve looked (paused campaigns stay paused)',
     '  node scripts/admin.mjs daily status [--json]    the daily run: which floors have it on, when they run next, and how the last run went. No figures from a floor',
     '  node scripts/admin.mjs daily run <floor>        force one run on that floor, to test it, on the server\'s next tick. The goal still comes first, and it counts as that day\'s run',
-    '  node scripts/admin.mjs daily pause|resume       stop or restart new daily runs across the building. A run under way finishes'].join('\n'));
+    '  node scripts/admin.mjs daily pause|resume       stop or restart new daily runs across the building. A run under way finishes',
+    '  node scripts/admin.mjs sales add --floor N|SLUG --amount USD [--qty N] [--note "..."] [--date YYYY-MM-DD]   log one sale by hand (amount is the sale\'s total; date is New York, earlier days only)',
+    '  node scripts/admin.mjs sales list --floor N|SLUG [--limit N] [--json]   the floor\'s sales totals and entries, undone ones marked',
+    '  node scripts/admin.mjs sales undo --id N [--floor N|SLUG]   take one sale back out of the totals (the row stays, marked undone)',
+    '  node scripts/admin.mjs traffic show --floor N|SLUG [--json]   website traffic as the card shows it: today, 7 and 30 days, with the real figures beside any test offset',
+    '  node scripts/admin.mjs traffic set --floor N|SLUG --date YYYY-MM-DD --visits N [--pageviews N] | --clear   a day\'s visits by hand, for a site the Office does not count (replaces that day\'s counted figure)',
+    '  node scripts/admin.mjs traffic offset --floor N|SLUG --per-day N --from YYYY-MM-DD | --off   a test offset added to every shown day from that date, kept apart from the real figures',
+    '  node scripts/admin.mjs trackers [--json]        every floor\'s sales and traffic totals'].join('\n'));
   process.exit(1);
 };
 if (!cmd) usage();
@@ -616,5 +624,45 @@ if (cmd === 'code' && rest[0] === 'hold') {
     setDailyPaused(db, sub === 'pause');
     console.log(sub === 'pause' ? 'Daily runs paused across the building. A run under way finishes.' : 'Daily runs back on.');
   } else usage();
+} else if (cmd === 'sales' || cmd === 'traffic' || cmd === 'trackers') {
+  // Sales and traffic trackers (server/trackers.js, docs/TRACKERS.md). Works on the database file; the floor page shows it on its next load.
+  ensureTrackerSchema(db);
+  const opt = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : undefined; };
+  const floorOpt = () => { const v = opt('--floor'); const f = floorFor(db, v); if (!f) die(v ? `No floor ${v}.` : 'Give --floor N or --floor SLUG.'); return f; };
+  const out = (obj, text) => console.log(rest.includes('--json') ? JSON.stringify(obj, null, 2) : text);
+  const sub = cmd === 'trackers' ? 'all' : rest[0];
+  try {
+    if (cmd === 'sales' && sub === 'add') {
+      const f = floorOpt();
+      const sale = addSale(db, f.id, { amountUsd: opt('--amount'), qty: opt('--qty') ?? 1, note: opt('--note') || '', date: opt('--date') || '' });
+      const v = trackersView(db, f.id);
+      out({ floor: f.number, sale, today: v.sales.today, all: v.sales.all }, `Logged sale #${sale.id} on floor ${f.number} (${f.slug}): $${(sale.amountCents / 100).toFixed(2)} x${sale.qty} on ${sale.day}${sale.note ? ` "${sale.note}"` : ''}.\nToday: ${v.sales.today.count} sold, $${(v.sales.today.cents / 100).toFixed(2)}. All time: ${v.sales.all.count} sold, $${(v.sales.all.cents / 100).toFixed(2)}.`);
+    } else if (cmd === 'sales' && sub === 'list') {
+      const f = floorOpt(); const lim = Number(opt('--limit')) || 20;
+      const entries = listSales(db, f.id, { limit: lim });
+      out({ floor: f.number, ...trackersView(db, f.id).sales, entries }, `${trackersText(f, trackersView(db, f.id), { traffic: false })}\n  entries (newest first, undone marked):\n${entries.map((r) => `    #${r.id} ${r.day} $${(r.amountCents / 100).toFixed(2)} x${r.qty} ${r.note}${r.undoneAt ? '  [undone]' : ''}`).join('\n') || '    none'}`);
+    } else if (cmd === 'sales' && sub === 'undo') {
+      const id = Number(opt('--id')); if (!Number.isInteger(id)) die('Give --id N (from sales list).');
+      const f = opt('--floor') ? floorOpt() : null;
+      const sale = undoSale(db, id, { floorId: f?.id || null });
+      out({ undone: sale }, `Undid sale #${sale.id} ($${(sale.amountCents / 100).toFixed(2)} on ${sale.day}). It no longer counts in the totals.`);
+    } else if (cmd === 'traffic' && sub === 'set') {
+      const f = floorOpt(); const date = opt('--date');
+      if (rest.includes('--clear')) { const n = clearTrafficDay(db, f.id, date); console.log(n ? `Cleared the hand-entered figure for ${date} on floor ${f.number}.` : `No hand-entered figure for ${date} on floor ${f.number}.`); }
+      else { const r = setTrafficDay(db, f.id, { date, visits: opt('--visits'), pageviews: opt('--pageviews') ?? null }); out({ floor: f.number, set: r }, `Floor ${f.number} ${r.day}: ${r.visits} visitors${r.pageviews === null ? '' : `, ${r.pageviews} pageviews`} (by hand).`); }
+    } else if (cmd === 'traffic' && sub === 'offset') {
+      const f = floorOpt();
+      if (rest.includes('--off')) { setTrafficOffset(db, f.id, { perDay: null }); console.log(`Test offset off for floor ${f.number}: the card shows the real numbers again.`); }
+      else if (opt('--per-day') !== undefined) { const o = setTrafficOffset(db, f.id, { perDay: opt('--per-day'), from: opt('--from') }); console.log(`Test offset on for floor ${f.number}: +${o.perDay} visitors (and pageviews) a day from ${o.from}. Real rows are untouched; --off removes it.`); }
+      else { const o = trafficOffset(db, f.id); console.log(o ? `Floor ${f.number}: +${o.perDay} a day from ${o.from}.` : `Floor ${f.number}: no test offset.`); }
+    } else if (cmd === 'traffic' && (sub === 'show' || !sub || sub.startsWith('--'))) {
+      const f = floorOpt(); const v = trackersView(db, f.id);
+      out({ floor: f.number, traffic: v.traffic }, trackersText(f, v, { sales: false }));
+    } else if (sub === 'all') {
+      const floors = all(db, "SELECT id, number, slug, name FROM floors WHERE status!='killed' ORDER BY number");
+      const list = floors.map((f) => ({ f, v: trackersView(db, f.id) }));
+      out(list.map(({ f, v }) => ({ floor: f.number, slug: f.slug, ...v })), list.map(({ f, v }) => trackersText(f, v)).join('\n\n'));
+    } else usage();
+  } catch (e) { if (e instanceof TrackerError) die(e.message); throw e; }
 } else usage();
 db.close();

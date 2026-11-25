@@ -5,6 +5,7 @@
 import { h, api, clear, put, toast, timeAgo, modal, BASE } from './dom.js';
 import { icon } from './icons.js';
 import { emptyLine } from './timeline-ui.js';
+import { trackersBox } from './trackers-ui.js';
 
 const QUICK = ['Yes', 'No', 'You decide'];
 const OPEN = new Set(['todo', 'working', 'review', 'waiting']);
@@ -44,7 +45,9 @@ export function renderStatusCard(page, el, { shareFloor }) {
     h('div.card-actions', {},
       site ? h('a.btn.primary', { href: site.appUrl || site.url, target: '_blank', rel: 'noopener noreferrer', 'data-visit': '' }, 'Visit website') : null,
       h('button.btn', { type: 'button', 'data-share': '', onclick: () => shareFloor(page) }, icon('share-fat'), 'Share'),
-      page.owner && st.figuresTap ? h('button.link.stc-spend', { type: 'button', 'data-spend': '', onclick: () => openSpend(page) }, 'Spend') : null));
+      page.owner && st.figuresTap ? h('button.link.stc-spend', { type: 'button', 'data-spend': '', onclick: () => openSpend(page) }, 'Spend') : null),
+    // Sales and website traffic (server/trackers.js): only in the boss's and the admin's snapshot.
+    trackersBox(s));
 }
 
 /**
