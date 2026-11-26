@@ -12,7 +12,7 @@ const when = (r) => (r.timed ? new Date(r.at).toLocaleString('en-US', { month: '
 
 const tile = (label, big, small, attrs = {}) => h('div.trk-tile', attrs, h('span.trk-label', {}, label), h('b.trk-big', {}, big), small ? h('small.trk-small', {}, small) : null);
 
-function salesCard(s) {
+function salesCard(s, ref) {
   const sold = (x) => `${n(x.count)} sold`;
   return h('section.trk-card', { 'data-tracker': 'sales' },
     h('h3.trk-title', {}, 'Sales'),
@@ -21,6 +21,7 @@ function salesCard(s) {
       tile('7 days', usd(s.week.cents), sold(s.week), { 'data-window': 'week' }),
       tile('This month', usd(s.month.cents), sold(s.month), { 'data-window': 'month' }),
       tile('All time', usd(s.all.cents), sold(s.all), { 'data-window': 'all' })),
+    ref ? h('p.trk-ref', { 'data-referrals': String(ref.ytd), title: `Referrals in ${ref.year} so far` }, 'Referrals: ', h('b', {}, n(ref.ytd)), ' YTD') : null,
     s.recent.length
       ? h('ul.trk-recent', {}, s.recent.slice(0, 5).map((r) => h('li', { 'data-sale': String(r.id) },
         h('span.trk-when', {}, when(r)), h('b.trk-amt', {}, usd(r.amountCents)), h('span.trk-note', {}, `${r.qty > 1 ? `${r.qty} × ` : ''}${r.note || 'Sale'}`), h('small.trk-src', {}, r.source))))
@@ -44,12 +45,12 @@ function trafficCard(t) {
     h('div.trk-traffic', {},
       h('div.trk-tiles.trk-3', {}, win('Today', t.today, 'today'), win('7 days', t.week, 'week'), win('30 days', t.month, 'month')),
       h('div.trk-spark-wrap', {}, sparkline(t.series), h('small.trk-small', {}, 'Visitors a day, 30 days'))),
-    h('p.trk-foot', {}, t.source === 'manual' ? 'Entered by hand.' : t.source === 'none' ? 'No visits counted yet.' : `Counted by the Office, bots left out${t.source === 'counted+manual' ? '; some days entered by hand' : ''}.`));
+    h('p.trk-foot', {}, 'Per tracking plugin.'));
 }
 
 /** Both cards, or null when the snapshot has none (a visitor, or TRACKERS=0). */
 export function trackersBox(state) {
   const tr = state?.trackers;
   if (!tr) return null;
-  return h('div.trk', { 'data-trackers': '' }, salesCard(tr.sales), tr.traffic?.shown ? trafficCard(tr.traffic) : null);
+  return h('div.trk', { 'data-trackers': '' }, salesCard(tr.sales, tr.referrals), tr.traffic?.shown ? trafficCard(tr.traffic) : null);
 }

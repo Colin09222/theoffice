@@ -490,6 +490,8 @@ body[data-page="floor-lite"] #scene, body[data-page="floor-lite"] #labels { disp
 .trk-amt { grid-column: 3; grid-row: 1; font-variant-numeric: tabular-nums; }
 .trk-note { grid-column: 1 / 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trk-src { grid-column: 3; grid-row: 2; justify-self: end; font: 500 11px var(--f-body); color: var(--c-slate); }
+.trk-ref { margin: 8px 0 0; font-size: 13.5px; color: var(--c-slate); }
+.trk-ref b { color: var(--c-ink); font-variant-numeric: tabular-nums; }
 .trk-empty, .trk-foot { margin: 8px 0 0; font-size: 12.5px; color: var(--c-slate); }
 .trk-spark-wrap { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
 .trk-spark { width: 100%; height: 34px; display: block; }

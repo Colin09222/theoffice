@@ -33,7 +33,7 @@ import { sendOut, stuckListing, SendOutError } from '../server/sendout.js';
 import { setFloorPlans, askDraftNow, currentPlan, floorOff, planView } from '../server/weekplan.js';
 import { spendListing, spendListingText, writeSpendRecord } from '../server/spendcheck.js';
 import { alertLog, digestFacts, digestText, nightFrozen, setNightFreeze } from '../server/owneralerts.js';
-import { ensureTrackerSchema, floorFor, addSale, undoSale, listSales, setTrafficDay, clearTrafficDay, setTrafficOffset, trafficOffset, trackersView, trackersText, TrackerError } from '../server/trackers.js';
+import { ensureTrackerSchema, floorFor, addSale, undoSale, listSales, setReferrals, addReferrals, listReferrals, referralsView, setTrafficDay, clearTrafficDay, setTrafficOffset, trafficOffset, trackersView, trackersText, TrackerError } from '../server/trackers.js';
 
 const [cmd, ...rest] = process.argv.slice(2);
 const cfg = loadConfig();
@@ -110,6 +110,9 @@ const usage = () => {
     '  node scripts/admin.mjs sales add --floor N|SLUG --amount USD [--qty N] [--note "..."] [--date YYYY-MM-DD]   log one sale by hand (amount is the sale\'s total; date is New York, earlier days only)',
     '  node scripts/admin.mjs sales list --floor N|SLUG [--limit N] [--json]   the floor\'s sales totals and entries, undone ones marked',
     '  node scripts/admin.mjs sales undo --id N [--floor N|SLUG]   take one sale back out of the totals (the row stays, marked undone)',
+    '  node scripts/admin.mjs referrals set --floor N|SLUG --count N [--note "..."]   set this year\'s referrals count (New York year); the change is kept in a ledger',
+    '  node scripts/admin.mjs referrals add --floor N|SLUG [--n 1] [--note "..."]   add referrals to this year\'s count (--n -1 takes one back)',
+    '  node scripts/admin.mjs referrals show --floor N|SLUG [--json]   this year\'s count and the recent ledger entries',
     '  node scripts/admin.mjs traffic show --floor N|SLUG [--json]   website traffic as the card shows it: today, 7 and 30 days, with the real figures beside any test offset',
     '  node scripts/admin.mjs traffic set --floor N|SLUG --date YYYY-MM-DD --visits N [--pageviews N] | --clear   a day\'s visits by hand, for a site the Office does not count (replaces that day\'s counted figure)',
     '  node scripts/admin.mjs traffic offset --floor N|SLUG --per-day N --from YYYY-MM-DD | --off   a test offset added to every shown day from that date, kept apart from the real figures',
@@ -624,7 +627,7 @@ if (cmd === 'code' && rest[0] === 'hold') {
     setDailyPaused(db, sub === 'pause');
     console.log(sub === 'pause' ? 'Daily runs paused across the building. A run under way finishes.' : 'Daily runs back on.');
   } else usage();
-} else if (cmd === 'sales' || cmd === 'traffic' || cmd === 'trackers') {
+} else if (cmd === 'sales' || cmd === 'referrals' || cmd === 'traffic' || cmd === 'trackers') {
   // Sales and traffic trackers (server/trackers.js, docs/TRACKERS.md). Works on the database file; the floor page shows it on its next load.
   ensureTrackerSchema(db);
   const opt = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : undefined; };
@@ -646,6 +649,13 @@ if (cmd === 'code' && rest[0] === 'hold') {
       const f = opt('--floor') ? floorOpt() : null;
       const sale = undoSale(db, id, { floorId: f?.id || null });
       out({ undone: sale }, `Undid sale #${sale.id} ($${(sale.amountCents / 100).toFixed(2)} on ${sale.day}). It no longer counts in the totals.`);
+    } else if (cmd === 'referrals' && (sub === 'set' || sub === 'add')) {
+      const f = floorOpt();
+      const e = sub === 'set' ? setReferrals(db, f.id, { count: opt('--count'), note: opt('--note') || '' }) : addReferrals(db, f.id, { n: opt('--n') ?? 1, note: opt('--note') || '' });
+      out({ floor: f.number, entry: e, referrals: referralsView(db, f.id) }, `Referrals on floor ${f.number} (${f.slug}): ${e.ytd} YTD (${e.year})${sub === 'add' ? `, ${e.delta > 0 ? '+' : ''}${e.delta}` : ` (set; ${e.delta >= 0 ? '+' : ''}${e.delta})`}. Ledger #${e.id}.`);
+    } else if (cmd === 'referrals' && (sub === 'show' || !sub || sub.startsWith('--'))) {
+      const f = floorOpt(); const v = referralsView(db, f.id); const entries = listReferrals(db, f.id, { limit: Number(opt('--limit')) || 20 });
+      out({ floor: f.number, referrals: v, entries }, `Floor ${f.number} (${f.slug}): Referrals ${v.ytd} YTD (${v.year})\n  ledger (newest first):\n${entries.map((r) => `    #${r.id} ${new Date(r.at).toISOString().slice(0, 10)} ${r.kind} ${r.delta >= 0 ? '+' : ''}${r.delta} -> ${r.ytd} (${r.year})${r.note ? `  ${r.note}` : ''}`).join('\n') || '    none'}`);
     } else if (cmd === 'traffic' && sub === 'set') {
       const f = floorOpt(); const date = opt('--date');
       if (rest.includes('--clear')) { const n = clearTrafficDay(db, f.id, date); console.log(n ? `Cleared the hand-entered figure for ${date} on floor ${f.number}.` : `No hand-entered figure for ${date} on floor ${f.number}.`); }

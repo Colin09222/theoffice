@@ -1,7 +1,7 @@
 # Sales and website traffic trackers
 
 Owner-approved 2026-11-25. Code: `server/trackers.js` (data, admin routes, snapshot hook), `public/js/trackers-ui.js` (the cards inside the
-status card), `scripts/admin.mjs sales|traffic|trackers`. Tests: `test/trackers.test.js`. `TRACKERS=0` hides the cards.
+status card), `scripts/admin.mjs sales|referrals|traffic|trackers`. Tests: `test/trackers.test.js`. `TRACKERS=0` hides the cards.
 
 ## Who sees them
 The floor's boss and the admin (owner session), on the floor page under the status card, desktop and phone. Visitors and other floors' bosses
@@ -13,7 +13,15 @@ get nothing: `trackers` is only added to their snapshot (`viewerFor` now carries
   `--date` puts a sale on an earlier day (no time shown). Undo marks the row `undone_at`; it leaves every total.
 - Card: today, last 7 days (today + 6 before), this calendar month, all time (sold count + $), and the 5 latest entries (date/time ET, amount, note, source).
 
+## Referrals (2026-11-26)
+- Manual only, like sales: `referrals set|add|show` in the admin CLI, or `POST /api/admin/trackers/:floor/referrals` with `{count}` (set) or
+  `{add}` (add; negative takes some back), admin + CSRF. No boss or public write path.
+- Table `floor_referrals`: a ledger, one row per change (kind set/add, delta, the new total, note, New York calendar year). The year-to-date
+  figure is the sum of that year's deltas, so it starts again at 0 on 1 January (New York). A `set` records the change from the old count.
+- Card: a line in the Sales card, "Referrals: N YTD".
+
 ## Traffic
+- Card caption (2026-11-26, owner): "Per tracking plugin." (was "Counted by the Office, bots left out..."). Data source unchanged.
 - Source: the Office serves every published site itself (fakebusiness.io/theoffice/..., *.middistance.com app labels and custom domains
   via Caddy on-demand TLS -> the Office). `launch.js recordVisit` counts each page view into `app_visits` (unique visitors a day by a salted,
   day-scoped hash; bots left out; UTC days). The card sums that floor's rows: today, 7 days, 30 days, plus a 30-day sparkline of visitors.
@@ -31,6 +39,9 @@ get nothing: `trackers` is only added to their snapshot (`viewerFor` now carries
     sales add --floor N|SLUG --amount USD [--qty N] [--note "..."] [--date YYYY-MM-DD]
     sales list --floor N|SLUG [--limit N] [--json]
     sales undo --id N [--floor N|SLUG]
+    referrals set --floor N|SLUG --count N [--note "..."]
+    referrals add --floor N|SLUG [--n 1] [--note "..."]      (--n -1 takes one back)
+    referrals show --floor N|SLUG [--json]
     traffic show --floor N|SLUG [--json]
     traffic set --floor N|SLUG --date YYYY-MM-DD --visits N [--pageviews N]   |   traffic set --floor N --date D --clear
     traffic offset --floor N|SLUG --per-day N --from YYYY-MM-DD   |   traffic offset --floor N --off   |   traffic offset --floor N

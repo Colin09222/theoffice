@@ -10,6 +10,10 @@
 // The test offset: a per-floor setting that adds N visitors (and N pageviews) to every shown day from a start date. It lives in its own row
 // and is never written into the visit rows, so turning it off brings the real numbers back. The card marks an offset floor "test".
 //
+// Referrals (owner-approved 2026-11-26): a per-floor count for the calendar year (New York), entered by hand the same way as sales
+// (admin.mjs referrals set/add/show, or the admin-only route). Kept as a ledger of changes, so a set or a correction stays on record; the
+// year-to-date figure is the sum of that year's changes.
+//
 // Who sees it: the floor's boss and the admin. Visitors get nothing (no money and no figures leave through the public snapshot).
 // TRACKERS=0 hides the cards.
 import { get, all, run } from './db.js';
@@ -24,6 +28,11 @@ CREATE TABLE IF NOT EXISTS floor_traffic_manual (
   floor_id INTEGER NOT NULL, day TEXT NOT NULL, visits INTEGER NOT NULL, pageviews INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY (floor_id, day)
 );
 CREATE TABLE IF NOT EXISTS floor_traffic_offset (floor_id INTEGER PRIMARY KEY, per_day INTEGER NOT NULL, from_day TEXT NOT NULL, set_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS floor_referrals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, floor_id INTEGER NOT NULL, year INTEGER NOT NULL, delta INTEGER NOT NULL, kind TEXT NOT NULL, total INTEGER NOT NULL,
+  note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS floor_referrals_floor ON floor_referrals(floor_id, year);
 `;
 export const ensureTrackerSchema = (db) => db.exec(TRACKER_SCHEMA);
 
@@ -90,6 +99,36 @@ export function salesView(db, floorId, now = Date.now()) {
   };
 }
 
+// ---- referrals ----
+
+const REF_MAX = 1e7;
+const etYear = (ms) => Number(etDay(ms).slice(0, 4));
+/** This year's referrals so far (New York calendar year). */
+export const referralsYtd = (db, floorId, now = Date.now()) => whole(get(db, 'SELECT COALESCE(SUM(delta),0) n FROM floor_referrals WHERE floor_id=? AND year=?', floorId, etYear(now)).n);
+
+function logReferrals(db, floorId, { kind, delta, total, note, now }) {
+  const text = String(note || '').replace(/\s+/g, ' ').trim().slice(0, NOTE_MAX);
+  const id = Number(run(db, 'INSERT INTO floor_referrals (floor_id,year,delta,kind,total,note,created_at) VALUES (?,?,?,?,?,?,?)', floorId, etYear(now), delta, kind, total, text, now).lastInsertRowid);
+  return { id, year: etYear(now), kind, delta, ytd: total, note: text };
+}
+/** Set this year's count outright (a correction, or the starting figure). The ledger records the change from the old count. */
+export function setReferrals(db, floorId, { count, note = '', now = Date.now() }) {
+  const n = Number(count);
+  if (!Number.isInteger(n) || n < 0 || n > REF_MAX) throw new TrackerError('--count must be a whole number, 0 or more.');
+  return logReferrals(db, floorId, { kind: 'set', delta: n - referralsYtd(db, floorId, now), total: n, note, now });
+}
+/** Add n referrals to this year's count (n may be negative to take some back, but the count never goes under 0). */
+export function addReferrals(db, floorId, { n = 1, note = '', now = Date.now() } = {}) {
+  const d = Number(n);
+  if (!Number.isInteger(d) || d === 0 || Math.abs(d) > REF_MAX) throw new TrackerError('--n must be a whole number other than 0, such as 1 or 3 (or -1 to take one back).');
+  const total = referralsYtd(db, floorId, now) + d;
+  if (total < 0) throw new TrackerError(`That would take the count under 0 (it is ${total - d}).`);
+  return logReferrals(db, floorId, { kind: 'add', delta: d, total, note, now });
+}
+export const listReferrals = (db, floorId, { limit = 20 } = {}) =>
+  all(db, 'SELECT * FROM floor_referrals WHERE floor_id=? ORDER BY created_at DESC, id DESC LIMIT ?', floorId, limit).map((r) => ({ id: r.id, year: r.year, kind: r.kind, delta: r.delta, ytd: r.total, note: r.note, at: r.created_at }));
+export const referralsView = (db, floorId, now = Date.now()) => ({ year: etYear(now), ytd: referralsYtd(db, floorId, now) });
+
 // ---- traffic ----
 
 export function setTrafficDay(db, floorId, { date, visits, pageviews = null, now = Date.now() }) {
@@ -147,7 +186,7 @@ export function trafficView(db, floorId, now = Date.now()) {
   };
 }
 
-export const trackersView = (db, floorId, now = Date.now()) => ({ sales: salesView(db, floorId, now), traffic: trafficView(db, floorId, now) });
+export const trackersView = (db, floorId, now = Date.now()) => ({ sales: salesView(db, floorId, now), referrals: referralsView(db, floorId, now), traffic: trafficView(db, floorId, now) });
 
 /** A floor by number or slug (old slugs too). */
 export function floorFor(db, which) {
@@ -166,6 +205,7 @@ export function trackersText(f, v, { sales = true, traffic = true } = {}) {
   const tw = (label, x) => `  ${label.padEnd(10)} ${String(x.visits).padStart(7)} visitors ${String(x.views).padStart(8)} pageviews${t.test ? `   (real ${x.real.visits} / ${x.real.views})` : ''}`;
   return [`Floor ${f.number} (${f.slug})`,
     ...(sales ? ['Sales (New York days)', line('today', s.today), line('7 days', s.week), line('this month', s.month), line('all time', s.all)] : []),
+    ...(sales && v.referrals ? [`Referrals: ${v.referrals.ytd} YTD (${v.referrals.year})`] : []),
     ...(sales && s.recent.length ? ['  recent:', ...s.recent.map((r) => `    #${r.id}  ${r.day}${r.timed ? ` ${new Date(r.at).toLocaleTimeString('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' })}` : ''}  ${usd(r.amountCents)}  x${r.qty}  ${r.note}`)] : []),
     ...(traffic ? [`Traffic (UTC days; source: ${t.source})${t.test ? `  TEST OFFSET +${t.test.perDay}/day from ${t.test.from}` : ''}`, tw('today', t.today), tw('7 days', t.week), tw('30 days', t.month)] : [])].join('\n');
 }
@@ -181,7 +221,7 @@ export function installTrackers(ext) {
   GET('/api/admin/trackers/:floor', async ({ req, res, p }) => {
     requireAdmin(req);
     const f = floorOr404(p.floor);
-    json(res, 200, { floor: f.number, slug: f.slug, ...trackersView(db, f.id, now()), sales: { ...salesView(db, f.id, now()), entries: listSales(db, f.id, { limit: 50 }) } });
+    json(res, 200, { floor: f.number, slug: f.slug, ...trackersView(db, f.id, now()), sales: { ...salesView(db, f.id, now()), entries: listSales(db, f.id, { limit: 50 }) }, referrals: { ...referralsView(db, f.id, now()), entries: listReferrals(db, f.id, { limit: 50 }) } });
   });
   POST('/api/admin/trackers/:floor/sales', async ({ req, res, p, ip }) => {
     requireAdmin(req); limit('mutate', ip);
@@ -189,6 +229,16 @@ export function installTrackers(ext) {
     const b = await readJson(req, 2048);
     let sale; try { sale = addSale(db, f.id, { amountUsd: b.amount, qty: b.qty ?? 1, note: b.note || '', date: b.date || '', now: now() }); } catch (e) { bad(e); }
     json(res, 201, { sale });
+  });
+  // {count} sets this year's referrals; {add} adds (or, negative, takes back) some.
+  POST('/api/admin/trackers/:floor/referrals', async ({ req, res, p, ip }) => {
+    requireAdmin(req); limit('mutate', ip);
+    const f = floorOr404(p.floor);
+    const b = await readJson(req, 2048);
+    let entry; try {
+      entry = b.count !== undefined ? setReferrals(db, f.id, { count: b.count, note: b.note || '', now: now() }) : addReferrals(db, f.id, { n: b.add ?? 1, note: b.note || '', now: now() });
+    } catch (e) { bad(e); }
+    json(res, 201, { entry, referrals: referralsView(db, f.id, now()) });
   });
   POST('/api/admin/trackers/:floor/sales/:id/undo', async ({ req, res, p, ip }) => {
     requireAdmin(req); limit('mutate', ip);

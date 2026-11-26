@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { boot, claim, adminClient, floorState, Client } from './helpers.js';
 import { openDb, get, run } from '../server/db.js';
-import { ensureTrackerSchema, addSale, undoSale, salesView, trafficView, setTrafficDay, setTrafficOffset, offsetFor, etDay, addDays, floorFor, TrackerError } from '../server/trackers.js';
+import { ensureTrackerSchema, setReferrals, addReferrals, referralsView, listReferrals, addSale, undoSale, salesView, trafficView, setTrafficDay, setTrafficOffset, offsetFor, etDay, addDays, floorFor, TrackerError } from '../server/trackers.js';
 
 // 2026-11-25 14:00 UTC = 09:00 in New York.
 const NOW = Date.parse('2026-11-25T14:00:00Z');
@@ -69,6 +69,27 @@ describe('sales totals', () => {
     for (const bad of [{ amountUsd: 0 }, { amountUsd: -5 }, { amountUsd: 'abc' }, { amountUsd: 5, qty: 0 }, { amountUsd: 5, qty: 1.5 }, { amountUsd: 5, date: '2026-13-01' }, { amountUsd: 5, date: '2026-11-26' }]) {
       assert.throws(() => addSale(db, f, { ...bad, now: NOW }), TrackerError, JSON.stringify(bad));
     }
+  });
+});
+
+describe('referrals', () => {
+  test('set, add and take back, by New York year, kept as a ledger; never under 0', () => {
+    const { db, f, g } = scratch();
+    assert.equal(referralsView(db, f, NOW).ytd, 0);
+    assert.equal(setReferrals(db, f, { count: 74, note: 'start', now: NOW }).ytd, 74);
+    assert.equal(addReferrals(db, f, { now: NOW + H }).ytd, 75);
+    assert.equal(addReferrals(db, f, { n: -2, now: NOW + 2 * H }).ytd, 73);
+    assert.equal(setReferrals(db, f, { count: 74, now: NOW + 3 * H }).delta, 1);
+    assert.deepEqual(referralsView(db, f, NOW + 4 * H), { year: 2026, ytd: 74 });
+    assert.equal(listReferrals(db, f).length, 4);
+    assert.equal(referralsView(db, g, NOW).ytd, 0);
+    // 2027-01-01 00:30 in New York is 05:30 UTC: a new year starts at 0; 04:30 UTC is still 2026 there.
+    assert.equal(referralsView(db, f, Date.parse('2027-01-01T04:30:00Z')).ytd, 74);
+    assert.equal(referralsView(db, f, Date.parse('2027-01-01T05:30:00Z')).ytd, 0);
+    assert.throws(() => addReferrals(db, f, { n: -75, now: NOW }), TrackerError);
+    assert.throws(() => setReferrals(db, f, { count: -1, now: NOW }), TrackerError);
+    assert.throws(() => setReferrals(db, f, { count: 'x', now: NOW }), TrackerError);
+    assert.throws(() => addReferrals(db, f, { n: 0, now: NOW }), TrackerError);
   });
 });
 
@@ -154,6 +175,9 @@ describe('who sees the cards, and the admin-only route', () => {
       assert.equal((await floorState(other, c.slug)).trackers, undefined);
       const admin = await adminClient(t);
       assert.equal((await floorState(admin, c.slug)).trackers.sales.all.cents, 1999);
+      setReferrals(t.db, f.id, { count: 74 });
+      assert.equal((await floorState(c)).trackers.referrals.ytd, 74);
+      assert.equal((await floorState(new Client(t), c.slug)).trackers, undefined);
       t.cfg.trackers = false;
       assert.equal((await floorState(c)).trackers, undefined);
     } finally { await t.close(); }
@@ -175,6 +199,13 @@ describe('who sees the cards, and the admin-only route', () => {
       assert.equal(u.status, 200);
       assert.equal((await admin.get(`/api/admin/trackers/${c.number}`)).data.sales.all.cents, 0);
       assert.equal((await admin.post(`/api/admin/trackers/${c.number}/sales/${r.data.sale.id}/undo`, {})).status, 400);
+      const rs = await admin.post(`/api/admin/trackers/${c.number}/referrals`, { count: 74 });
+      assert.equal(rs.status, 201); assert.equal(rs.data.referrals.ytd, 74);
+      assert.equal((await admin.post(`/api/admin/trackers/${c.slug}/referrals`, { add: 2 })).data.referrals.ytd, 76);
+      assert.equal((await admin.post(`/api/admin/trackers/${c.number}/referrals`, { count: -3 })).status, 400);
+      assert.equal((await c.post(`/api/admin/trackers/${c.number}/referrals`, { add: 1 })).status, 401);
+      assert.equal((await new Client(t).post(`/api/admin/trackers/${c.number}/referrals`, { add: 1 })).status, 401);
+      assert.equal((await admin.get(`/api/admin/trackers/${c.number}`)).data.referrals.entries.length, 2);
     } finally { await t.close(); }
   });
 });
@@ -202,6 +233,12 @@ describe('admin CLI', () => {
       assert.match(cli('traffic', 'offset', '--floor', '3', '--off'), /off/);
       assert.equal(JSON.parse(cli('traffic', 'show', '--floor', '3', '--json')).traffic.test, undefined);
       assert.throws(() => cli('sales', 'add', '--floor', '3', '--amount', 'x'));
+      assert.match(cli('referrals', 'set', '--floor', 'labstackr', '--count', '74', '--note', 'YTD from Colon'), /Referrals on floor 3 \(labstackr\): 74 YTD/);
+      assert.match(cli('referrals', 'add', '--floor', '3'), /75 YTD/);
+      assert.match(cli('referrals', 'add', '--floor', '3', '--n', '-1'), /74 YTD/);
+      const ref = JSON.parse(cli('referrals', 'show', '--floor', '3', '--json'));
+      assert.equal(ref.referrals.ytd, 74); assert.equal(ref.entries.length, 3);
+      assert.throws(() => cli('referrals', 'set', '--floor', '3', '--count', 'x'));
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
